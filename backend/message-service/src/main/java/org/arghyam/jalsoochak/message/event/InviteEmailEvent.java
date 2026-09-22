@@ -25,4 +25,11 @@ public class InviteEmailEvent {
 
     /** State name — populated only when role is STATE_ADMIN. Null-safe in routing logic. */
     private String stateName;
+
+    /**
+     * State code of the tenant the invitee belongs to (e.g. {@code "MP"}), set by user-service.
+     * Null for super-user invites and for events published before the field existed; such events
+     * are served by the system default provider.
+     */
+    private String tenantCode;
 }

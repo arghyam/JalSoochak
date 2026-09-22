@@ -1,18 +1,15 @@
 package org.arghyam.jalsoochak.message.controller;
 
 import org.arghyam.jalsoochak.message.dto.NotificationRequest;
-import org.arghyam.jalsoochak.message.dto.SampleDTO;
 import org.arghyam.jalsoochak.message.dto.TriggerWelcomeMessageRequest;
 import org.arghyam.jalsoochak.message.dto.TriggerWelcomeMessageResponse;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
-import org.arghyam.jalsoochak.message.service.BusinessService;
 import org.arghyam.jalsoochak.message.service.NotificationService;
 import org.arghyam.jalsoochak.message.service.WelcomeMessageTriggerService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,26 +17,15 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-import java.util.List;
-
 @RestController
 @RequestMapping("/api/v1/message")
 @RequiredArgsConstructor
 @Slf4j
 public class ApiController {
 
-    private final BusinessService businessService;
     private final NotificationService notificationService;
     private final KafkaProducer kafkaProducer;
     private final WelcomeMessageTriggerService welcomeMessageTriggerService;
-
-    // ── GET all notifications (hardcoded) ─────────────────────
-
-    @GetMapping("/notifications")
-    public ResponseEntity<List<SampleDTO>> getAllNotifications() {
-        log.info("GET /api/v1/message/notifications called");
-        return ResponseEntity.ok(businessService.getAllNotifications());
-    }
 
     // ── POST send a notification via the specified channel ────
 

@@ -149,6 +149,8 @@ public class StaffAuthServiceImpl implements StaffAuthService {
                 .otp(rawOtp)
                 .expiryMinutes(otpProperties.expiryMinutes())
                 .deliveryChannel(otpProperties.deliveryChannel())
+                .tenantId(tenantId)
+                .tenantCode(tenantCode)
                 .build();
 
         eventPublisher.publishLoginOtpAfterCommit(event, user.id(), tenantCode);

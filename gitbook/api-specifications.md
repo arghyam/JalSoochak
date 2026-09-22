@@ -103,7 +103,6 @@ The endpoints:
 
 ### 9.5 Messaging APIs
 
-* `GET /api/v1/message/notifications` — notification history *(State Admin)*
 * `POST /api/v1/message/notifications` — trigger a notification *(State Admin)*
 
 Nudge and escalation messages are normally produced by the tenant-service schedulers and delivered by the message service via Glific; these endpoints support manual/administrative use.

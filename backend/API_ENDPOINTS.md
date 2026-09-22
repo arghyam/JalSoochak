@@ -203,7 +203,6 @@ Set the following environment variables before running the Telemetry services:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/message/notifications` | List notifications |
 | POST | `/api/v1/message/notifications` | Send a notification (specify channel in body) |
 | POST | `/api/v1/message/events` | Dispatch a Kafka event |
 
@@ -336,6 +335,6 @@ recorded when the reading was first submitted.
 
 | Old | New | Notes |
 |-----|-----|-------|
-| `GET /api/notifications` | `GET /api/v1/message/notifications` | Added `/v1/message/` prefix |
+| `GET /api/notifications` | — | Removed; only ever returned placeholder data |
 | `POST /api/notifications/send` | `POST /api/v1/message/notifications` | Verb `/send` removed; use POST to collection |
 | `POST /api/publish` | `POST /api/v1/message/events` | Renamed to noun; added `/v1/message/` prefix |

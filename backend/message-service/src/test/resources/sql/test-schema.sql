@@ -28,8 +28,54 @@ CREATE TABLE common_schema.tenant_config_master_table (
     config_key  TEXT,
     config_value TEXT,
     created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
+    updated_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    -- V1 has these. TenantProviderConfigRepository filters deleted_at IS NULL, because
+    -- tenant-service soft-deletes a config row when a state admin turns a channel off; without
+    -- the column the query fails with BadSqlGrammar rather than returning the wrong answer.
+    deleted_at  TIMESTAMP,
+    deleted_by  INTEGER
 );
+
+-- ── Per-tenant messaging provider secret store (V44) ──────────────────────────
+-- Column-compatible with V44, minus the FKs, matching this file's convention.
+CREATE TABLE common_schema.tenant_secret_key (
+    id            SERIAL       PRIMARY KEY,
+    tenant_id     INTEGER      NOT NULL,
+    key_version   INTEGER      NOT NULL,
+    wrapped_key   TEXT         NOT NULL,
+    master_key_id VARCHAR(32)  NOT NULL,
+    status        VARCHAR(16)  NOT NULL DEFAULT 'ACTIVE',
+    created_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
+    created_by    INTEGER,
+    updated_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_by    INTEGER,
+    CONSTRAINT uq_tenant_secret_key UNIQUE (tenant_id, key_version)
+);
+
+CREATE UNIQUE INDEX uq_tenant_secret_key_active
+    ON common_schema.tenant_secret_key (tenant_id)
+    WHERE status = 'ACTIVE';
+
+CREATE TABLE common_schema.tenant_provider_secret (
+    id           SERIAL       PRIMARY KEY,
+    uuid         VARCHAR(36)  NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
+    tenant_id    INTEGER      NOT NULL,
+    channel      VARCHAR(16)  NOT NULL,
+    secret_name  VARCHAR(64)  NOT NULL,
+    ciphertext   TEXT         NOT NULL,
+    key_version  INTEGER      NOT NULL,
+    created_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
+    created_by   INTEGER,
+    updated_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_by   INTEGER,
+    deleted_at   TIMESTAMP,
+    deleted_by   INTEGER,
+    CONSTRAINT uq_tenant_provider_secret UNIQUE (tenant_id, channel, secret_name)
+);
+
+CREATE INDEX idx_tenant_provider_secret_tenant_channel
+    ON common_schema.tenant_provider_secret (tenant_id, channel)
+    WHERE deleted_at IS NULL;
 
 -- Seed reference data
 INSERT INTO common_schema.user_type_master_table (c_name)

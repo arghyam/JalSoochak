@@ -92,18 +92,44 @@ notification:
       from-address: ${MAIL_FROM_EMAIL:noreply@example.com}
       from-name: ${MAIL_FROM_NAME:Jalsoochak}
 
+  # ── Per-tenant email and SMS providers ─────────────────────────────────────
+  # One flag for both channels. OFF by default: every send then uses the system default
+  # provider built from notification.mail.*, spring.mail.* and smscountry.* below, which is
+  # today's behaviour exactly, so an existing deployment needs no config change and no tenant
+  # can be affected by provider settings a state admin has already written.
+  #
+  # Turning it ON requires the messaging master key (messaging.secret.* below) to be the SAME
+  # value tenant-service uses — the service refuses to start otherwise, because without it every
+  # configured tenant would silently fall back to the system default and a state would believe
+  # it was sending from its own account when it was not.
+  #
+  # Rollback is this flag plus a restart. A single tenant is rolled back instead by DELETEing its
+  # channel settings in tenant-service, which needs no restart.
+  per-tenant-providers:
+    enabled: ${NOTIFICATION_PER_TENANT_PROVIDERS_ENABLED:false}
+    # Backstop only: TENANT_CONFIG_UPDATED on tenant-service-topic evicts within seconds of a
+    # settings or secret write. This bounds how long a stale provider survives a missed event.
+    cache-ttl: ${NOTIFICATION_PER_TENANT_PROVIDERS_CACHE_TTL:10m}
+    cache-max-size: ${NOTIFICATION_PER_TENANT_PROVIDERS_CACHE_MAX_SIZE:500}
+
   # ── Transactional login OTP SMS ────────────────────────────────────────────
-  # Switch providers by changing 'provider'. No code changes required — add a new
-  # SmsSender implementation annotated with
-  # @ConditionalOnProperty(name = "notification.sms.provider", havingValue = "<name>").
-  # provider: smscountry → requires SMSCOUNTRY_* env vars (default)
+  # Selects the SYSTEM DEFAULT provider — what every send uses unless the tenant it belongs to
+  # has configured its own account under per-tenant-providers above.
+  # Switch providers by changing 'provider'. No code changes required — add an SmsSender adapter
+  # and register its SmsSenderFactory; the system default bean is built in SystemDefaultProviders.
+  # provider: smscountry → requires SMSCOUNTRY_* env vars below (default)
   sms:
     provider: ${SMS_PROVIDER:smscountry}
 
   # ── Transactional account emails (invite, reinvite, password-reset) ────────
-  # Switch providers by changing 'provider'. No code changes required.
+  # Selects the SYSTEM DEFAULT provider — what every send uses unless the tenant it belongs to
+  # has configured its own account under per-tenant-providers above.
+  # Switch providers by changing 'provider'. No code changes required — add an EmailSender adapter
+  # and register its EmailSenderFactory; the system default bean is built in SystemDefaultProviders.
   # provider: smtp    → requires spring.mail.* block to be uncommented
   # provider: sendgrid → requires SENDGRID_API_KEY env var (default)
+  # api-url, from-address, from-name and logo-image-url below are the platform's own; a tenant
+  # that leaves its fromName or logoImageUrl unset falls back to these two.
   mail:
     provider: ${MAIL_PROVIDER:sendgrid}
     from-address: ${MAIL_FROM_EMAIL:noreply@example.com}
@@ -404,6 +430,35 @@ glific:
       # "low balance": it fails every message in flight, so it is reported on its own line instead of
       # being counted as N officer failures, which would read as a mass recipient-data problem.
       account-level-error-codes: ${GLIFIC_STATUS_RECONCILE_ACCOUNT_LEVEL_ERROR_CODES:9999}
+
+# ──────────────────────────────────────────────────────────────
+# Per-tenant messaging provider secrets and endpoint policy
+#
+# Read-side twin of the same block in tenant-service. tenant-service WRAPS each tenant's data
+# key under the master key; this service UNWRAPS it. Both must therefore hold the identical
+# key, and no other service gets it.
+#
+#   MESSAGING_SECRET_MASTER_KEY_V1  base64, exactly 32 bytes. Never in the database, never in
+#                                   this repo, and never in the same backup or vault entry as
+#                                   the DB password — a stolen database alone must be useless.
+#   Staging and production use DIFFERENT keys, so a dump restored across environments fails to
+#   decrypt rather than silently using the wrong credentials.
+#
+# Required only when notification.per-tenant-providers.enabled=true (the service refuses to
+# start without it); a deployment that does not use the feature needs no new variable.
+# ──────────────────────────────────────────────────────────────
+
+messaging:
+  provider:
+    # Whether a tenant's SMTP host may resolve to a loopback/private address. Local development
+    # against a mail catcher only; must stay false in every deployed environment, and must match
+    # tenant-service's setting or a host accepted on write is refused here at send time.
+    allow-internal-hosts: ${MESSAGING_PROVIDER_ALLOW_INTERNAL_HOSTS:false}
+  secret:
+    active-master-key-id: ${MESSAGING_SECRET_ACTIVE_MASTER_KEY_ID:}
+    master-keys:
+      v1: ${MESSAGING_SECRET_MASTER_KEY_V1:}
+      # v2: ${MESSAGING_SECRET_MASTER_KEY_V2:}   # added during a rotation; both stay readable
 
 # ──────────────────────────────────────────────────────────────
 # SMSCountry REST API (SMS OTP delivery)

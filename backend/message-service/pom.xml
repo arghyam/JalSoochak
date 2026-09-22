@@ -154,6 +154,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
+        <!-- Caffeine — per-tenant provider cache (notification.per-tenant-providers.cache-ttl).
+             Version managed by spring-boot-starter-parent, so it is not pinned here. -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

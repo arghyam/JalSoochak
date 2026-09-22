@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.tenant.enums;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.DateFormatConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.EmailProviderConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.GlificMessagesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.MessageBrokerConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageListConfigDTO;
@@ -10,6 +11,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.SmsProviderConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.StateITSystemConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TimeSettingsConfigDTO;
@@ -281,7 +283,31 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * days (rounded half-up, minimum 1 day). Falls back to the national default, then the analytics env
      * default, when unset. Published to analytics via REGULARITY_THRESHOLD_UPDATED.
      */
-    REGULARITY_THRESHOLD_PERCENT(ConfigType.GENERIC, RegularityThresholdConfigDTO.class, false, false, false);
+    REGULARITY_THRESHOLD_PERCENT(ConfigType.GENERIC, RegularityThresholdConfigDTO.class, false, false, false),
+
+    /**
+     * The email account this tenant's own mail is sent through (SendGrid or SMTP), including the
+     * from address and the account's template ids. Credentials are NOT here — they live encrypted
+     * in {@code common_schema.tenant_provider_secret} and their location is derived by the server.
+     * <p>
+     * {@code managedValue = true}: written only through
+     * {@code PUT /api/v1/tenants/{tenantId}/messaging-providers}, which validates the provider's
+     * required fields and checks an SMTP host against MESSAGING_PROVIDER_ALLOWED_HOSTS. The generic
+     * config API cannot reach it, so a settings value can never skip those checks.
+     * <p>
+     * {@code mandatory = false}: a tenant with no settings uses the system default provider, which
+     * is today's behaviour, so this must not block the ONBOARDED → CONFIGURED transition.
+     */
+    EMAIL_PROVIDER_SETTINGS(ConfigType.GENERIC, EmailProviderConfigDTO.class, false, true, false),
+
+    /**
+     * The SMS account this tenant's own messages are sent through, including the sender id, the DLT
+     * registrations and the OTP text. Credentials are NOT here — see EMAIL_PROVIDER_SETTINGS.
+     * <p>
+     * A WHATSAPP_PROVIDER_SETTINGS key is deliberately absent: every tenant shares one Glific
+     * organisation today, so there is nothing per-tenant to store.
+     */
+    SMS_PROVIDER_SETTINGS(ConfigType.GENERIC, SmsProviderConfigDTO.class, false, true, false);
 
     private final ConfigType type;
     private final Class<? extends ConfigValueDTO> dtoClass;

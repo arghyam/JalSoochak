@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
-import org.arghyam.jalsoochak.message.channel.GlificAuthService;
-import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.glific.GlificAuthService;
+import org.arghyam.jalsoochak.message.channel.glific.GlificWhatsAppService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

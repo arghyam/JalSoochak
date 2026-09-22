@@ -23,14 +23,16 @@ import java.time.LocalDate;
 import java.sql.ResultSet;
 import java.util.List;
 
-import org.arghyam.jalsoochak.message.channel.DailyReportDeliveryMode;
-import org.arghyam.jalsoochak.message.channel.DailyReportSendOutcome;
-import org.arghyam.jalsoochak.message.channel.GlificSendResult;
-import org.arghyam.jalsoochak.message.channel.GlificSendStage;
-import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
-import org.arghyam.jalsoochak.message.channel.SmsSender;
+import org.arghyam.jalsoochak.message.channel.glific.DailyReportDeliveryMode;
+import org.arghyam.jalsoochak.message.channel.glific.DailyReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.glific.GlificSendResult;
+import org.arghyam.jalsoochak.message.channel.glific.GlificSendStage;
+import org.arghyam.jalsoochak.message.channel.glific.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.provider.SmsSender;
+import org.arghyam.jalsoochak.message.channel.provider.TenantChannelProviders;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
+import org.arghyam.jalsoochak.message.dto.TenantRef;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
@@ -89,10 +91,21 @@ class NotificationEventRouterTest {
     private JdbcTemplate jdbcTemplate;
 
     @Mock
+    private TenantChannelProviders channelProviders;
+
+    /**
+     * The sender {@code channelProviders} hands back. Every existing SMS assertion below is
+     * unchanged, which is the point: the router asks for a sender per event now instead of holding
+     * one, and does the same thing with it.
+     */
+    @Mock
     private SmsSender smsSender;
 
     @Mock
     private PiiEncryptionService piiEncryptionService;
+
+    @Mock
+    private TenantRefResolver tenantRefResolver;
 
     @InjectMocks
     private NotificationEventRouter router;
@@ -108,6 +121,11 @@ class NotificationEventRouterTest {
         ReflectionTestUtils.setField(router, "baseUrl", "https://example.com");
         lenient().when(piiEncryptionService.hmac(anyString()))
                 .thenAnswer(inv -> "hash_" + inv.getArgument(0, String.class));
+        // Default: pass the halves through unresolved. Tests that care stub a full resolution.
+        lenient().when(tenantRefResolver.resolve(any(), any()))
+                .thenAnswer(inv -> new TenantRef(inv.getArgument(0), inv.getArgument(1)));
+        // Default: one sender for every tenant, as it is while the flag is off.
+        lenient().when(channelProviders.smsFor(any())).thenReturn(smsSender);
     }
 
     /**
@@ -491,7 +509,7 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://app.jalsoochak.in/activate?token=abc","expiryHours":24}
                 """);
 
-        verify(accountEmailService).sendInviteEmail(
+        verify(accountEmailService).sendInviteEmail(TenantRef.NONE,
                 "op@tenant.in", "Mohan", "NEW_ROLE",
                 "https://app.jalsoochak.in/activate?token=abc", 24);
         verify(kafkaProducer, never()).publishJson(anyString(), any());
@@ -504,7 +522,7 @@ class NotificationEventRouterTest {
                  "role":"FIELD_OFFICER","inviteLink":"https://link","expiryHours":12}
                 """);
 
-        verify(accountEmailService).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
     }
 
     @Test
@@ -514,7 +532,7 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://link","expiryHours":24}
                 """);
 
-        verify(accountEmailService, never()).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("missing_to");
@@ -528,7 +546,7 @@ class NotificationEventRouterTest {
                  "role":"STATE_ADMIN","expiryHours":24}
                 """);
 
-        verify(accountEmailService, never()).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("missing_invite_link");
@@ -538,7 +556,7 @@ class NotificationEventRouterTest {
     @Test
     void route_routesToDlt_whenInviteEmailSmtpFails() {
         doThrow(new RuntimeException("SMTP down"))
-                .when(accountEmailService).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+                .when(accountEmailService).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
 
         router.route("""
                 {"eventType":"SEND_INVITE_EMAIL","to":"op@tenant.in","name":"Dev",
@@ -560,7 +578,7 @@ class NotificationEventRouterTest {
                  "name":"Sunita","inviteLink":"https://app.jalsoochak.in/activate?token=re","expiryHours":72}
                 """);
 
-        verify(accountEmailService).sendReinviteEmail(
+        verify(accountEmailService).sendReinviteEmail(TenantRef.NONE,
                 "op@tenant.in", "Sunita",
                 "https://app.jalsoochak.in/activate?token=re", 72);
         verify(kafkaProducer, never()).publishJson(anyString(), any());
@@ -573,7 +591,7 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://link","expiryHours":72}
                 """);
 
-        verify(accountEmailService, never()).sendReinviteEmail(anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendReinviteEmail(any(), anyString(), anyString(), anyString(), anyInt());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("missing_to");
@@ -587,7 +605,7 @@ class NotificationEventRouterTest {
                  "name":"Sunita","expiryHours":72}
                 """);
 
-        verify(accountEmailService, never()).sendReinviteEmail(anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendReinviteEmail(any(), anyString(), anyString(), anyString(), anyInt());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("missing_invite_link");
@@ -597,7 +615,7 @@ class NotificationEventRouterTest {
     @Test
     void route_routesToDlt_whenReinviteEmailSmtpFails() {
         doThrow(new RuntimeException("SMTP down"))
-                .when(accountEmailService).sendReinviteEmail(anyString(), anyString(), anyString(), anyInt());
+                .when(accountEmailService).sendReinviteEmail(any(), anyString(), anyString(), anyString(), anyInt());
 
         router.route("""
                 {"eventType":"SEND_REINVITE_EMAIL","to":"op@tenant.in","name":"Sunita",
@@ -619,7 +637,7 @@ class NotificationEventRouterTest {
                  "resetLink":"https://app.jalsoochak.in/reset?token=r1","expiryMinutes":30}
                 """);
 
-        verify(accountEmailService).sendPasswordResetEmail(
+        verify(accountEmailService).sendPasswordResetEmail(TenantRef.NONE,
                 "user@example.com", "https://app.jalsoochak.in/reset?token=r1", 30);
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
@@ -631,7 +649,7 @@ class NotificationEventRouterTest {
                  "resetLink":"https://link","expiryMinutes":15}
                 """);
 
-        verify(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+        verify(accountEmailService).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
     }
 
     @Test
@@ -641,7 +659,7 @@ class NotificationEventRouterTest {
                  "resetLink":"https://link","expiryMinutes":30}
                 """);
 
-        verify(accountEmailService, never()).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("missing_to");
@@ -654,7 +672,7 @@ class NotificationEventRouterTest {
                 {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"user@example.com","expiryMinutes":30}
                 """);
 
-        verify(accountEmailService, never()).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("missing_reset_link");
@@ -664,7 +682,7 @@ class NotificationEventRouterTest {
     @Test
     void route_routesToDlt_whenPasswordResetEmailSmtpFails() {
         doThrow(new RuntimeException("SMTP down"))
-                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+                .when(accountEmailService).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
 
         router.route("""
                 {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"user@example.com",
@@ -682,7 +700,7 @@ class NotificationEventRouterTest {
         // SMTP fails triggering DLT publish, but DLT publish itself also throws.
         // The handler must swallow the DLT failure and complete normally (no rethrow → no Kafka retry).
         doThrow(new RuntimeException("SMTP down"))
-                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+                .when(accountEmailService).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
         doThrow(new RuntimeException("Kafka unavailable"))
                 .when(kafkaProducer).publishJson(anyString(), any());
 
@@ -1083,10 +1101,10 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://app.jalsoochak.in/activate?token=sa1","expiryHours":24}
                 """);
 
-        verify(accountEmailService).sendStateAdminInviteEmail(
+        verify(accountEmailService).sendStateAdminInviteEmail(TenantRef.NONE,
                 "sa@mp.gov.in", "Priya Sharma", "Madhya Pradesh",
                 "https://app.jalsoochak.in/activate?token=sa1", 24);
-        verify(accountEmailService, never()).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
 
@@ -1094,7 +1112,7 @@ class NotificationEventRouterTest {
     void route_routesToDlt_whenStateAdminInviteEmailThrows() {
         doThrow(new IllegalArgumentException("stateName must not be null or blank"))
                 .when(accountEmailService)
-                .sendStateAdminInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+                .sendStateAdminInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
 
         router.route("""
                 {"eventType":"SEND_INVITE_EMAIL","to":"sa@mp.gov.in",
@@ -1116,7 +1134,7 @@ class NotificationEventRouterTest {
         // The exception is caught and routed to DLT.
         doThrow(new IllegalArgumentException("STATE_ADMIN invitations require a stateName"))
                 .when(accountEmailService)
-                .sendInviteEmail(anyString(), anyString(), eq("STATE_ADMIN"), anyString(), anyInt());
+                .sendInviteEmail(any(), anyString(), anyString(), eq("STATE_ADMIN"), anyString(), anyInt());
 
         router.route("""
                 {"eventType":"SEND_INVITE_EMAIL","to":"sa@mp.gov.in",
@@ -1124,7 +1142,7 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://link","expiryHours":24}
                 """);
 
-        verify(accountEmailService).sendInviteEmail(
+        verify(accountEmailService).sendInviteEmail(TenantRef.NONE,
                 "sa@mp.gov.in", "Priya Sharma", "STATE_ADMIN", "https://link", 24);
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
     }
@@ -1894,6 +1912,171 @@ class NotificationEventRouterTest {
                         .contains("reportDate=")
                         .doesNotContain("weekStart="));
         assertThat(lines).noneMatch(l -> l.startsWith("[Router/WEEKLY_REPORT]"));
+    }
+
+    // ──────────────────── Phase 0: tenant normalisation at the boundary ─────────
+
+    @Test
+    void route_normalisesInviteEmailTenant_fromTenantCode() {
+        when(tenantRefResolver.resolve(null, "MP")).thenReturn(new TenantRef(1, "MP"));
+
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","to":"sa@mp.gov.in","name":"Dev","role":"FIELD_OFFICER",
+                 "inviteLink":"https://link","expiryHours":24,"tenantCode":"MP"}
+                """);
+
+        verify(tenantRefResolver).resolve(null, "MP");
+        verify(accountEmailService).sendInviteEmail(eq(new TenantRef(1, "MP")),
+                anyString(), anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_normalisesInviteEmailTenant_toNone_whenEventCarriesNoTenant() {
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","to":"super@example.com","name":"Carol","role":"SUPER_USER",
+                 "inviteLink":"https://link","expiryHours":24}
+                """);
+
+        verify(tenantRefResolver).resolve(null, null);
+        verify(accountEmailService).sendInviteEmail(eq(TenantRef.NONE),
+                anyString(), anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_normalisesReinviteEmailTenant_fromTenantCode() {
+        when(tenantRefResolver.resolve(null, "MP")).thenReturn(new TenantRef(1, "MP"));
+
+        router.route("""
+                {"eventType":"SEND_REINVITE_EMAIL","to":"sa@mp.gov.in","name":"Sunita",
+                 "inviteLink":"https://link","expiryHours":24,"tenantCode":"MP"}
+                """);
+
+        verify(tenantRefResolver).resolve(null, "MP");
+        verify(accountEmailService).sendReinviteEmail(eq(new TenantRef(1, "MP")),
+                anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_normalisesReinviteEmailTenant_toNone_whenEventCarriesNoTenant() {
+        router.route("""
+                {"eventType":"SEND_REINVITE_EMAIL","to":"super@example.com","name":"Carol",
+                 "inviteLink":"https://link","expiryHours":24}
+                """);
+
+        verify(tenantRefResolver).resolve(null, null);
+        verify(accountEmailService).sendReinviteEmail(eq(TenantRef.NONE),
+                anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_normalisesPasswordResetTenant_fromBothHalves() {
+        when(tenantRefResolver.resolve(1, "MP")).thenReturn(new TenantRef(1, "MP"));
+
+        router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"sa@mp.gov.in",
+                 "resetLink":"https://link","expiryMinutes":30,"tenantId":1,"tenantCode":"MP"}
+                """);
+
+        verify(tenantRefResolver).resolve(1, "MP");
+        verify(accountEmailService).sendPasswordResetEmail(eq(new TenantRef(1, "MP")),
+                anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_normalisesPasswordResetTenant_toNone_whenEventCarriesNoTenant() {
+        router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"super@example.com",
+                 "resetLink":"https://link","expiryMinutes":30}
+                """);
+
+        verify(tenantRefResolver).resolve(null, null);
+        verify(accountEmailService).sendPasswordResetEmail(eq(TenantRef.NONE),
+                anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_loginOtpViaSms_sendsThroughTheSenderResolvedForTheEventsTenant() {
+        // PER-TENANT-PROVIDERS: the router holds no sender of its own; it asks for the one that
+        // belongs to the tenant the event carries (O2-1).
+        SmsSender tenantSender = mock(SmsSender.class);
+        TenantRef tenant = new TenantRef(7, "TR");
+        when(tenantRefResolver.resolve(7, "TR")).thenReturn(tenant);
+        when(channelProviders.smsFor(tenant)).thenReturn(tenantSender);
+        when(tenantSender.sendOtp("919876500033", "192837", 5)).thenReturn(Mono.just(true));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"192837","deliveryChannel":"SMS",
+                 "officerPhoneNumber":"919876500033","expiryMinutes":5,"tenantId":7,"tenantCode":"TR"}
+                """);
+
+        verify(channelProviders).smsFor(tenant);
+        verify(tenantSender).sendOtp("919876500033", "192837", 5);
+        verifyNoInteractions(smsSender);
+    }
+
+    @Test
+    void route_loginOtpViaSms_resolvesTheSenderPerEvent_soSettingsChangesNeedNoRestart() {
+        when(smsSender.sendOtp(anyString(), anyString(), anyInt())).thenReturn(Mono.just(true));
+
+        String event = """
+                {"eventType":"SEND_LOGIN_OTP","OTP":"111111","deliveryChannel":"SMS",
+                 "officerPhoneNumber":"919876500034","expiryMinutes":5,"tenantId":3,"tenantCode":"MP"}
+                """;
+        router.route(event);
+        router.route(event);
+
+        verify(channelProviders, times(2)).smsFor(new TenantRef(3, "MP"));
+    }
+
+    @Test
+    void route_normalisesLoginOtpTenant_fromBothHalves_onTheSmsBranch() {
+        when(smsSender.sendOtp("919876500030", "123456", 5)).thenReturn(Mono.just(true));
+        when(tenantRefResolver.resolve(1, "MP")).thenReturn(new TenantRef(1, "MP"));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456","deliveryChannel":"SMS",
+                 "officerPhoneNumber":"919876500030","expiryMinutes":5,"tenantId":1,"tenantCode":"MP"}
+                """);
+
+        verify(tenantRefResolver).resolve(1, "MP");
+        verify(smsSender).sendOtp("919876500030", "123456", 5);
+    }
+
+    @Test
+    void route_normalisesLoginOtpTenant_toNone_whenEventCarriesNoTenant() {
+        when(smsSender.sendOtp("919876500031", "654321", 5)).thenReturn(Mono.just(true));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"654321","deliveryChannel":"SMS",
+                 "officerPhoneNumber":"919876500031","expiryMinutes":5}
+                """);
+
+        verify(tenantRefResolver).resolve(null, null);
+        verify(smsSender).sendOtp("919876500031", "654321", 5);
+    }
+
+    @Test
+    void route_readsJsonNullTenantFieldsAsAbsent_neverAsTheTextNull() {
+        when(smsSender.sendOtp("919876500032", "777888", 5)).thenReturn(Mono.just(true));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"777888","deliveryChannel":"SMS",
+                 "officerPhoneNumber":"919876500032","expiryMinutes":5,
+                 "tenantId":null,"tenantCode":null}
+                """);
+
+        verify(tenantRefResolver).resolve(null, null);
+    }
+
+    @Test
+    void route_doesNotResolveTenant_whenTheEventIsDeadLetteredFirst() {
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","name":"Dev","inviteLink":"https://link",
+                 "expiryHours":24,"tenantCode":"MP"}
+                """);
+
+        verify(tenantRefResolver, never()).resolve(any(), any());
+        verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
     }
 
     private void stubWeeklySend(DailyReportSendOutcome outcome) throws Exception {

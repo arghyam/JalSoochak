@@ -6,6 +6,8 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 
+import org.arghyam.jalsoochak.tenant.dto.internal.EmailProviderConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.SmsProviderConfigDTO;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -94,6 +96,30 @@ class TenantConfigKeyEnumTest {
                     TenantConfigKeyEnum.AVERAGE_MEMBERS_PER_HOUSEHOLD,
                     TenantConfigKeyEnum.SUPPLY_OUTAGE_REASONS
             );
+        }
+
+        @Test
+        @DisplayName("Messaging provider settings keys are generic, private, managed and optional")
+        void messagingProviderSettingsKeys_haveExpectedFlags() {
+            for (TenantConfigKeyEnum key : List.of(
+                    TenantConfigKeyEnum.EMAIL_PROVIDER_SETTINGS,
+                    TenantConfigKeyEnum.SMS_PROVIDER_SETTINGS)) {
+                assertThat(key.getType()).isEqualTo(TenantConfigKeyEnum.ConfigType.GENERIC);
+                // Never public: the settings name a tenant's provider account and, for SMTP, the
+                // username on it.
+                assertThat(key.isPublic()).isFalse();
+                // Managed: the generic PUT /config must refuse them, so a settings value cannot be
+                // written without the provider, allowlist and TLS checks.
+                assertThat(key.isManagedValue()).isTrue();
+                // Not mandatory: a tenant with no settings uses the system default provider, so
+                // these must not block the ONBOARDED -> CONFIGURED transition.
+                assertThat(key.isMandatory()).isFalse();
+            }
+
+            assertThat(TenantConfigKeyEnum.EMAIL_PROVIDER_SETTINGS.getDtoClass())
+                    .isEqualTo(EmailProviderConfigDTO.class);
+            assertThat(TenantConfigKeyEnum.SMS_PROVIDER_SETTINGS.getDtoClass())
+                    .isEqualTo(SmsProviderConfigDTO.class);
         }
 
         @Test

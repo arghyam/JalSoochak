@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
 import lombok.RequiredArgsConstructor;
-import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.glific.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.dto.TriggerWelcomeMessageResponse;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
