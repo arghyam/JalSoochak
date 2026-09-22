@@ -38,7 +38,9 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -190,6 +192,42 @@ class BfmReadingServiceLocationMismatchTest {
         verify(locationAffinityService).recordMismatchIfAny(
                 anyString(), any(), any(), any(), any(), isNull(), isNull(),
                 eq(LocationAffinityService.Path.IMAGE_SUBMISSION));
+    }
+
+    @Test
+    @DisplayName("coordinates on the request are written onto the reading row")
+    void requestCoordinatesArePersisted() {
+        submit(LAT, LNG);
+
+        // The anomaly discloses a distance that has to stay recomputable from the stored reading, and
+        // the state-IT path is the only one whose coordinates arrive on the request rather than on a
+        // placeholder row /location already wrote.
+        verify(repo).updateReadingLocation(SCHEMA, READING_ID, LAT, LNG, OPERATOR_ID);
+    }
+
+    @Test
+    @DisplayName("no coordinates on the request leaves whatever the row already carries")
+    void absentCoordinatesLeaveTheRowAlone() {
+        submit(null, null);
+
+        // The WhatsApp path's coordinates are already on the reused placeholder row; blanking them
+        // here would destroy the only copy.
+        verify(repo, never()).updateReadingLocation(anyString(), anyLong(), any(), any(), anyLong());
+    }
+
+    @Test
+    @DisplayName("a failed coordinate write does not lose the reading")
+    void aFailedCoordinateWriteDoesNotLoseTheReading() {
+        // The row is already stored by this point and createReading is not transactional here, so the
+        // annotation is best-effort: an older tenant schema missing the column must not cost a reading.
+        doThrow(new IllegalStateException("Missing required column tenant_as.flow_reading_table.latitude"))
+                .when(repo).updateReadingLocation(anyString(), anyLong(), any(), any(), anyLong());
+
+        CreateReadingResponse response = submit(LAT, LNG);
+
+        assertThat(response.isSuccess()).isTrue();
+        verify(locationAffinityService).recordMismatchIfAny(
+                anyString(), any(), any(), any(), any(), eq(LAT), eq(LNG), any());
     }
 
     @Test

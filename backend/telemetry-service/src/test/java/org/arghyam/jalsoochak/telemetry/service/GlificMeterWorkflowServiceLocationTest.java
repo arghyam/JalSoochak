@@ -164,6 +164,45 @@ class GlificMeterWorkflowServiceLocationTest {
     }
 
     @Test
+    @DisplayName("a blank template wording falls through to the config row, not to the English floor")
+    void blankTemplateFallsThroughToTheConfigRow() {
+        // A screen whose JSON carries an empty string is not a configured wording. Treating it as one
+        // would hide the tenant's own fallback row behind whitespace nobody can see.
+        verdict(new LocationVerdict.Outside(1201.0d, 500.0d));
+        when(templatesService.resolveScreenMessage(TENANT, "LOCATION_BOUNDARY", "english"))
+                .thenReturn(Optional.of("   "));
+        when(tenantConfigRepository.findConfigValue(TENANT, "location_boundary_warning_english"))
+                .thenReturn(Optional.of("Outside the scheme boundary. Continue?"));
+
+        assertThat(post().getMessage()).isEqualTo("Outside the scheme boundary. Continue?");
+    }
+
+    @Test
+    @DisplayName("a blank per-language config row falls through to the generic one")
+    void blankLanguageRowFallsThroughToTheGenericRow() {
+        verdict(new LocationVerdict.Outside(1201.0d, 500.0d));
+        when(tenantConfigRepository.findConfigValue(TENANT, "location_boundary_warning_english"))
+                .thenReturn(Optional.of(""));
+        when(tenantConfigRepository.findConfigValue(TENANT, "location_boundary_warning"))
+                .thenReturn(Optional.of("Outside the scheme boundary. Continue?"));
+
+        assertThat(post().getMessage()).isEqualTo("Outside the scheme boundary. Continue?");
+    }
+
+    @Test
+    @DisplayName("blank everywhere still leaves the operator a usable sentence")
+    void blankEverywhereStillWarns() {
+        verdict(new LocationVerdict.Outside(1201.0d, 500.0d));
+        when(templatesService.resolveScreenMessage(TENANT, "LOCATION_BOUNDARY", "english"))
+                .thenReturn(Optional.of(" "));
+        when(tenantConfigRepository.findConfigValue(anyInt(), anyString())).thenReturn(Optional.of(" "));
+
+        assertThat(post().getMessage())
+                .isEqualTo("System detected that reading is being submitted outside the Scheme "
+                        + "boundary. Do you want to proceed?");
+    }
+
+    @Test
     @DisplayName("a submission inside the boundary is unchanged from before this feature")
     void withinIsUnchanged() {
         verdict(new LocationVerdict.Within(111.0d, 500.0d));

@@ -544,6 +544,26 @@ public class BfmReadingService {
                     schemaName, readingId, confirmedReadingSource, rolloverAuditJson);
         }
 
+        // LOCATION-AFFINITY: coordinates the request carried belong on the reading row, not only in
+        // the anomaly. Only the state-IT paths supply them here — the Glific paths write them onto the
+        // placeholder row from /location and leave the request null — and without this an
+        // API-submitted mismatch could not be re-measured from the stored reading alone, which is what
+        // the anomaly's own distance disclosure promises. Best-effort by design: createReading is not
+        // @Transactional at this point and the row is already stored, so failing to annotate it must
+        // not lose a recorded reading. Runs before the quarantine block below, which returns early.
+        if (request.getLatitude() != null && request.getLongitude() != null) {
+            try {
+                telemetryTenantRepository.updateReadingLocation(
+                        schemaName,
+                        readingId,
+                        request.getLatitude(),
+                        request.getLongitude(),
+                        operatorInRequest.id());
+            } catch (Exception e) {
+                log.warn("reading_location_persist_failed readingId={}: {}", readingId, e.getMessage());
+            }
+        }
+
         // LOCATION-AFFINITY: the row now exists, so this is the point at which "the anomaly is
         // captured against this submission" becomes possible. Deliberately *before* the quarantine
         // block below, which returns early: a reading can be both implausibly high and taken from

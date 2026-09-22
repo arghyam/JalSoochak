@@ -1657,11 +1657,16 @@ public class GlificMeterWorkflowService {
      * button labels inside a sentence, and would break the moment the flow's button wording changed.
      */
     private String resolveBoundaryWarning(Integer tenantId, String languageKey) {
+        // Each source is filtered on its own: a blank template string or an empty config row is not a
+        // configured wording, and filtering only the end of the chain would let one short-circuit the
+        // fallbacks behind it and drop the operator straight to the English floor.
         return templatesService.resolveScreenMessage(tenantId, LOCATION_BOUNDARY_SCREEN, languageKey)
-                .or(() -> tenantConfigRepository.findConfigValue(
-                        tenantId, LOCATION_BOUNDARY_CONFIG_KEY + "_" + languageKey))
-                .or(() -> tenantConfigRepository.findConfigValue(tenantId, LOCATION_BOUNDARY_CONFIG_KEY))
                 .filter(text -> !text.isBlank())
+                .or(() -> tenantConfigRepository.findConfigValue(
+                                tenantId, LOCATION_BOUNDARY_CONFIG_KEY + "_" + languageKey)
+                        .filter(text -> !text.isBlank()))
+                .or(() -> tenantConfigRepository.findConfigValue(tenantId, LOCATION_BOUNDARY_CONFIG_KEY)
+                        .filter(text -> !text.isBlank()))
                 .orElseGet(() -> localizationService.localizeMessage(
                         DEFAULT_LOCATION_BOUNDARY_WARNING, languageKey));
     }
