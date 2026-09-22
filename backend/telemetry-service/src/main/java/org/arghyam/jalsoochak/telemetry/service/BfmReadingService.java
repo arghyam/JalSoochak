@@ -53,6 +53,10 @@ public class BfmReadingService {
     private final ReadingChannelResolver readingChannelResolver;
     private final RolloverResolutionService rolloverResolutionService;
     private final SupplyPlausibilityGuard supplyPlausibilityGuard;
+    // Per-tenant OCR provider selection. Nullable so unit tests that construct BfmReadingService with only
+    // the collaborators they exercise (passing null here) fall back to the built-in FlowVision path.
+    private final OcrProviderResolver ocrProviderResolver;
+    private final OcrProviderRegistry ocrProviderRegistry;
 
     /**
      * Trailing-history window (days) fetched for the rollover consumption band. A few extra days over
@@ -112,7 +116,9 @@ public class BfmReadingService {
             }
 
             try {
-                ocrResult = extractReading(request.getReadingUrl(), flowVisionRetryMode);
+                OcrProviderSettings ocrSettings =
+                        ocrProviderResolver == null ? null : ocrProviderResolver.resolve(tenantId);
+                ocrResult = extractReading(request.getReadingUrl(), ocrSettings, flowVisionRetryMode);
                 log.info("readings_glific flowvision_result operatorId={} schemeId={} imageUrlHash={} result={}",
                         operatorInRequest.id(),
                         request.getSchemeId(),
@@ -139,7 +145,11 @@ public class BfmReadingService {
                             null,
                             null,
                             0,
-                            anomalyCorrelationId
+                            anomalyCorrelationId,
+                            // ANOMALY-SUBMISSION-LINK: the submission is rejected here, before any
+                            // flow_reading_table row is written, so there is nothing to point at.
+                            null,
+                            null
                     );
                     return CreateReadingResponse.builder()
                             .success(false)
@@ -193,7 +203,10 @@ public class BfmReadingService {
                         null,
                         null,
                         0,
-                        anomalyCorrelationId
+                        anomalyCorrelationId,
+                        // ANOMALY-SUBMISSION-LINK: rejected before any row is written — nothing to link.
+                        null,
+                        null
                 );
                 return CreateReadingResponse.builder()
                         .success(false)
@@ -362,7 +375,12 @@ public class BfmReadingService {
                     previousSnapshot.confirmedReading(),
                     previousSnapshot.createdAt(),
                     0,
-                    anomalyCorrelationId
+                    anomalyCorrelationId,
+                    // ANOMALY-SUBMISSION-LINK: the duplicate is refused before createFlowReading, so
+                    // this submission has no row. The *previous* reading it duplicates is not the
+                    // submission that caused the anomaly and must not be linked as if it were.
+                    null,
+                    null
             );
             return CreateReadingResponse.builder()
                     .success(false)
@@ -403,7 +421,14 @@ public class BfmReadingService {
         // are cumulative m3 indices, so the delta is meaningless on any other channel. There are no
         // early returns between the old position and this one, so the resolver runs in exactly the
         // cases it ran in before.
-        ReadingChannel resolvedChannel = readingChannelResolver.resolve(tenantId, contactId);
+        //
+        // A channel declared on the submission wins over the operator's stored preference: the
+        // submitting system knows the equipment behind this particular reading, whereas the
+        // preference is a default picked once in a WhatsApp conversation. Null means nothing was
+        // declared, which keeps the preference lookup — and so every existing caller — unchanged.
+        ReadingChannel resolvedChannel = request.getDeclaredChannel() != null
+                ? request.getDeclaredChannel()
+                : readingChannelResolver.resolve(tenantId, contactId);
         Integer channel = resolvedChannel.getCode();
 
         // A pre-V40 tenant is skipped entirely rather than checked: storing a quarantined row it has
@@ -542,7 +567,12 @@ public class BfmReadingService {
                             AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY,
                             operatorInRequest.id(),
                             request.getSchemeId(),
-                            LocalDate.from(readingAt)));
+                            LocalDate.from(readingAt)),
+                    // ANOMALY-SUBMISSION-LINK: the quarantined row IS the submission that caused
+                    // this. Both were already in hand here and were previously dropped, which is
+                    // what left the anomaly matched to its reading only by operator, scheme and day.
+                    readingId,
+                    storageCorrelationId);
             return CreateReadingResponse.builder()
                     .success(false)
                     // THRESHOLD-DISCLOSURE: names no ceiling, population or FHTC figure. Echoing
@@ -590,7 +620,10 @@ public class BfmReadingService {
                 channel,
                 LocalDate.from(readingAt),
                 1,
-                0
+                0,
+                // ANOMALY-SUBMISSION-LINK: the same value written to flow_reading_table.correlation_id
+                // above, so the warehouse row can be found from an anomaly that names it.
+                storageCorrelationId
         );
 
         // Surface the resolved value to the operator: the "please confirm" message text and the response
@@ -674,14 +707,24 @@ public class BfmReadingService {
                 isMeterReplaced));
     }
 
-    private FlowVisionResult extractReading(String readingUrl, FlowVisionRetryMode flowVisionRetryMode) {
+    /**
+     * Runs OCR for {@code readingUrl}. When {@code settings} is {@code null} the tenant has no per-tenant
+     * OCR override and the built-in FlowVision path is used unchanged; otherwise the resolved provider is
+     * dispatched via {@link OcrProviderRegistry}. Honours the resilient (retry/circuit-breaker) path.
+     */
+    private FlowVisionResult extractReading(String readingUrl, OcrProviderSettings settings, FlowVisionRetryMode flowVisionRetryMode) {
         if (flowVisionRetryMode == FlowVisionRetryMode.RESILIENT && flowVisionReadingsRetryService != null) {
-            return flowVisionReadingsRetryService.extractReading(readingUrl);
+            return settings == null
+                    ? flowVisionReadingsRetryService.extractReading(readingUrl)
+                    : flowVisionReadingsRetryService.extractReading(readingUrl, settings);
         }
         if (flowVisionRetryMode == FlowVisionRetryMode.RESILIENT) {
             log.warn("FlowVision readings retry service is not available; using direct OCR path");
         }
-        return flowVisionService.extractReading(readingUrl);
+        if (settings == null) {
+            return flowVisionService.extractReading(readingUrl);
+        }
+        return ocrProviderRegistry.get(settings.providerId()).extractReading(readingUrl, settings);
     }
 
     @Transactional
@@ -953,7 +996,13 @@ public class BfmReadingService {
                 // repeat, so a deterministic key would collapse a second refused attempt into the
                 // first and the operator's repeated tries would be invisible. The submission path
                 // wants the opposite and keys on (type, operator, scheme, date).
-                null);
+                null,
+                // ANOMALY-SUBMISSION-LINK: the reading being corrected. The refusal writes nothing
+                // to flow_reading_table, so this points at the standing row the correction targeted
+                // — which is the submission this anomaly is about, whether it is published (case B)
+                // or itself quarantined (case C).
+                reading.id(),
+                reading.correlationId());
 
         return CreateReadingResponse.builder()
                 .success(false)
@@ -1017,7 +1066,10 @@ public class BfmReadingService {
                 channelCodeFromReading(reading),
                 readingDate,
                 1,
-                0
+                0,
+                // ANOMALY-SUBMISSION-LINK: a correction republishes the same row, so it carries the
+                // row's own correlation id and the warehouse keeps pointing at one submission.
+                reading.correlationId()
         );
     }
 
@@ -1098,7 +1150,9 @@ public class BfmReadingService {
                 channelCodeFromReading(latestReading),
                 readingDate,
                 1,
-                0
+                0,
+                // ANOMALY-SUBMISSION-LINK: the reset republishes the row it just zeroed.
+                latestReading.correlationId()
         );
 
         return CreateReadingResponse.builder()
@@ -1241,7 +1295,9 @@ public class BfmReadingService {
                                               BigDecimal previousReading,
                                               LocalDateTime previousReadingDate,
                                               Integer consecutiveDaysMissed,
-                                              String correlationId) {
+                                              String correlationId,
+                                              Long flowReadingId,
+                                              String submissionCorrelationId) {
 //        int existingCount = telemetryTenantRepository.countAnomaliesByTypeForToday(
 //                schemaName,
 //                userId,
@@ -1281,7 +1337,7 @@ public class BfmReadingService {
                 schemaName,
                 tenantAnomaly(userId, schemeId, anomalyType, reason, retries,
                         aiReading, aiConfidencePercentage, overriddenReading,
-                        previousReading, previousReadingDate)
+                        previousReading, previousReadingDate, flowReadingId)
         );
         telemetryEventPublisher.publishAnomalyRecorded(
                 tenantId,
@@ -1297,7 +1353,8 @@ public class BfmReadingService {
                 consecutiveDaysMissed,
                 reason,
                 AnomalyConstants.STATUS_OPEN,
-                correlationId
+                correlationId,
+                submissionCorrelationId
         );
     }
 
@@ -1305,6 +1362,11 @@ public class BfmReadingService {
      * Records an anomaly on the tenant schema and publishes it, with no dedup of its own — the
      * correlationId decides whether analytics collapses repeats. Named for images until the supply
      * check reused it; nothing in the body was ever image-specific.
+     *
+     * <p>ANOMALY-SUBMISSION-LINK: {@code flowReadingId} and {@code submissionCorrelationId} are the
+     * two halves of the link to the submission that caused the anomaly — the surrogate id for the
+     * tenant row, the correlation id for the warehouse, which cannot see a tenant-local id. Both are
+     * {@code null} on the paths that reject a submission before any row is written.
      */
     private void recordAnomaly(String schemaName,
                                     Integer tenantId,
@@ -1319,12 +1381,14 @@ public class BfmReadingService {
                                     BigDecimal previousReading,
                                     LocalDateTime previousReadingDate,
                                     Integer consecutiveDaysMissed,
-                                    String correlationId) {
+                                    String correlationId,
+                                    Long flowReadingId,
+                                    String submissionCorrelationId) {
         telemetryTenantRepository.createTenantAnomalyRecord(
                 schemaName,
                 tenantAnomaly(userId, schemeId, anomalyType, reason, retries,
                         aiReading, aiConfidencePercentage, overriddenReading,
-                        previousReading, previousReadingDate)
+                        previousReading, previousReadingDate, flowReadingId)
         );
         telemetryEventPublisher.publishAnomalyRecorded(
                 tenantId,
@@ -1340,7 +1404,8 @@ public class BfmReadingService {
                 consecutiveDaysMissed,
                 reason,
                 AnomalyConstants.STATUS_OPEN,
-                correlationId
+                correlationId,
+                submissionCorrelationId
         );
     }
 
@@ -1362,8 +1427,10 @@ public class BfmReadingService {
                                                      BigDecimal aiConfidencePercentage,
                                                      BigDecimal overriddenReading,
                                                      BigDecimal previousReading,
-                                                     LocalDateTime previousReadingDate) {
+                                                     LocalDateTime previousReadingDate,
+                                                     Long flowReadingId) {
         return TenantAnomalyRecord.builder()
+                .flowReadingId(flowReadingId)
                 .userId(userId)
                 .schemeId(schemeId)
                 .type(anomalyType)

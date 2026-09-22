@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.message.channel;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -57,6 +58,9 @@ class GlificWhatsAppServiceTest {
         // Glific hands media URLs to Meta, which fetches them from the public internet, so every
         // sending path now requires a publicly reachable prefix.
         ReflectionTestUtils.setField(service, "mediaBaseUrl", "https://jalsoochak.jjmbrain.in/minio");
+        // Weekly reports ship suppressed until their Meta templates are approved, which is also the
+        // production default. Tests that exercise weekly delivery turn it on explicitly.
+        ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
     }
 
     // ──────────────────────────── optIn ────────────────────────────────────────
@@ -603,6 +607,7 @@ class GlificWhatsAppServiceTest {
             ReflectionTestUtils.setField(service, "nudgeDryRun", true);
             ReflectionTestUtils.setField(service, "escalationDryRun", true);
             ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
         }
 
         @Test
@@ -975,6 +980,39 @@ class GlificWhatsAppServiceTest {
             assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
         }
 
+        @Test
+        void validateTemplates_failsFast_whenOnlyTheWeeklyReportIsLiveButMediaBaseUrlIsInternal() {
+            // The weekly report is LINK-only, so Meta never downloads the file — but the same prefix
+            // is what the officer's phone opens and what is frozen into the approved template. The
+            // gate used to consult only the daily and escalation flags, so a weekly-only deployment
+            // started happily and delivered buttons that lead nowhere.
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", false);
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "77");
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://192.168.20.143:9000");
+
+            assertThatThrownBy(() -> service.validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("minio.base-url")
+                    .hasMessageContaining("MINIO_BASE_URL");
+        }
+
+        @Test
+        void validateTemplates_passes_whenOnlyTheWeeklyReportIsLiveAndTheBaseUrlIsPublic() {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", false);
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "77");
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", "https://jalsoochak.jjmbrain.in/minio");
+
+            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+        }
+
         /** A localhost MinIO is normal for local and CI runs, where nothing is delivered. */
         @Test
         void validateTemplates_toleratesAnInternalBaseUrl_whenNoDocumentIsEverSent() {
@@ -982,6 +1020,7 @@ class GlificWhatsAppServiceTest {
             ReflectionTestUtils.setField(service, "nudgeDryRun", true);
             ReflectionTestUtils.setField(service, "escalationDryRun", true);
             ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
             ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://localhost:9000");
 
             assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
@@ -1045,7 +1084,132 @@ class GlificWhatsAppServiceTest {
      * behaviour that matters is that no media is registered at all — that round trip is exactly what
      * fails with {@code (#131053)} behind the India-only firewall in front of production MinIO.
      */
-    @Nested
+@Nested
+    @DisplayName("weekly report")
+    class WeeklyReport {
+
+        private static final String PUBLIC_BASE = "https://jalsoochak.jjmbrain.in/minio";
+        private static final String OBJECT_PATH =
+                "weekly-water-reports/SO/2026-07-13_to_2026-07-19/weekly_water_report_SECTION_OFFICER_21343_2026-07-13_to_2026-07-19.pdf";
+        private static final String PUBLIC_URL = PUBLIC_BASE + "/" + OBJECT_PATH;
+        private static final LocalDate WEEK_START = LocalDate.of(2026, 7, 13);
+
+        @BeforeEach
+        void enableWeeklyDelivery() {
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", false);
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "7001");
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", PUBLIC_BASE);
+        }
+
+        private void stubSendHsm() throws Exception {
+            when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree("""
+                    {"sendHsmMessage":{"message":{"id":1,"body":"b","isHSM":true},"errors":[]}}
+                    """));
+        }
+
+        @Test
+        void sendsOneHsmAndNeverRegistersMedia() throws Exception {
+            // No DOCUMENT path at all: registering media would make Meta fetch the PDF through the
+            // India-only firewall, which is the failure the link mode exists to avoid.
+            stubSendHsm();
+
+            service.sendWeeklyReportHsm(21343L, PUBLIC_URL, "SECTION_OFFICER", WEEK_START, "Binod Nimoli");
+
+            verify(client).execute(contains("sendHsmMessage"), anyMap());
+            verify(client, never()).execute(contains("createMessageMedia"), anyMap());
+            verify(client, never()).execute(contains("createAndSendMessage"), anyMap());
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void putsTheUrlSuffixLastInTheParameterList() throws Exception {
+            // Glific flattens the list in order of occurrence: body variables first, the button's URL
+            // suffix last. Reordering them sends the officer a message addressed to a date.
+            stubSendHsm();
+
+            service.sendWeeklyReportHsm(21343L, PUBLIC_URL, "SECTION_OFFICER", WEEK_START, "Binod Nimoli");
+
+            ArgumentCaptor<Map<String, Object>> vars = ArgumentCaptor.forClass(Map.class);
+            verify(client).execute(contains("sendHsmMessage"), vars.capture());
+            List<String> params = (List<String>) vars.getValue().get("parameters");
+            assertThat(params).containsExactly("Binod Nimoli", "13-07-2026", OBJECT_PATH);
+        }
+
+        @Test
+        void prefersTheSdoTemplateWhenOneIsConfigured() throws Exception {
+            stubSendHsm();
+            ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "7002");
+
+            GlificSendResult result = service.sendWeeklyReportHsm(5521L, PUBLIC_URL,
+                    "SUB_DIVISIONAL_OFFICER", WEEK_START, "Bharat Sharma");
+
+            assertThat(result.templateId()).isEqualTo("7002");
+        }
+
+        @Test
+        void fallsBackToTheSoTemplateWhenNoSdoTemplateIsApproved() throws Exception {
+            stubSendHsm();
+            ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "");
+
+            GlificSendResult result = service.sendWeeklyReportHsm(5521L, PUBLIC_URL,
+                    "SUB_DIVISIONAL_OFFICER", WEEK_START, "Bharat Sharma");
+
+            assertThat(result.templateId()).isEqualTo("7001");
+        }
+
+        @Test
+        void refusesAUrlFromSomeOtherHostRatherThanSendingADeadButton() throws Exception {
+            // Meta appends the remainder to the template's frozen prefix verbatim, so a foreign URL
+            // yields a button pointing nowhere — and Glific would accept the send regardless.
+            assertThatThrownBy(() -> service.sendWeeklyReportHsm(21343L,
+                    "https://elsewhere.example.com/x.pdf", "SECTION_OFFICER", WEEK_START, "Binod"))
+                    .isInstanceOf(IllegalStateException.class);
+
+            verify(client, never()).execute(anyString(), anyMap());
+        }
+
+        @Test
+        void requiresTheWeekStartSinceItIsATemplateVariable() {
+            assertThatThrownBy(() -> service.sendWeeklyReportHsm(21343L, PUBLIC_URL,
+                    "SECTION_OFFICER", null, "Binod"))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        void suppressesTheSendWhileInDryRun() {
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
+
+            GlificSendResult result = service.sendWeeklyReportHsm(21343L, PUBLIC_URL,
+                    "SECTION_OFFICER", WEEK_START, "Binod");
+
+            assertThat(result.messageId()).isNull();
+            assertThat(service.isWeeklyReportDeliveryEnabled()).isFalse();
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void startupFailsWhenDeliveryIsLiveButNoTemplateIsConfigured() {
+            // Otherwise the job runs every Monday, builds and uploads a PDF, then fails per message —
+            // discovered from the logs rather than at deploy, with officers receiving nothing.
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "");
+            ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-1");
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+
+            assertThatThrownBy(() -> service.validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("weekly-report-so-link-id");
+        }
+
+        @Test
+        void startupPassesWhenTheTemplateIsConfigured() {
+            ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-1");
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+
+            service.validateTemplates();
+        }
+    }
+
+        @Nested
     class LinkDeliveryMode {
 
         private static final String PUBLIC_BASE = "https://jalsoochak.jjmbrain.in/minio";

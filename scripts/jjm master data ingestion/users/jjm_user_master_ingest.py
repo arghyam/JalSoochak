@@ -32,7 +32,10 @@ HMAC-hashed, and looked up against user_table.phone_number_hash.
   role outside this ingestion's scope            -> skip the row (see Roles)
   no live user with this number                  -> insert
   exactly one live user                          -> update the fields that differ
-  number repeated within the CSV                 -> skip every row for it
+  number repeated within the CSV                 -> keep the row with the highest
+                                                    role (ROLE_PRECEDENCE), skip
+                                                    the rest; if two rows share
+                                                    that role, skip every row
   number not a valid Indian mobile / blank name  -> skip the row
 
 Nothing about a row is guessed at. A CSV row that cannot be used is reported in
@@ -69,6 +72,10 @@ role           the CSV master is authoritative, so a differing role is applied
                role is held back, and the conflicts sheet lists every instance.
 
 Phone number, email, password and status of an existing user are never touched.
+
+New users are inserted with a NULL email. The CSV carries none, and an address
+minted from the phone number would be a login identifier nobody can receive
+mail at; user_table.email is nullable for exactly this kind of field staff.
 
 Roles
 -----
@@ -150,7 +157,6 @@ _SCHEME_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir
 sys.path.insert(0, _SCHEME_DIR)
 try:
     from jjm_scheme_master_ingest import (  # noqa: E402
-        EMAIL_DOMAIN,
         ONBOARD_PASSWORD,
         USER_STATUS_ACTIVE,
         AnalyticsWriter,
@@ -181,7 +187,7 @@ CSV_COLUMNS = ["public_id", "name", "phone", "role"]
 # naming anything else — jal-sahayak, khalasi, or a role invented in some future
 # export — is skipped as ROLE_NOT_INGESTED and reported, never guessed at and
 # never turned into a new user type. Widening the scope means adding the slug
-# here (plus an EMAIL_PREFIXES entry) and nothing else.
+# here (plus a ROLE_PRECEDENCE rank) and nothing else.
 ROLE_ALIASES = {
     "jal-mitra": "PUMP_OPERATOR",
     "jalmitra": "PUMP_OPERATOR",
@@ -216,17 +222,17 @@ PROTECTED_ROLES = {"SUPER_USER", "STATE_ADMIN", "SUPER_STATE_ADMIN", "SUPPORT_AD
 # an EXECUTIVE_ENGINEER is not a promotion and is never gated.
 GATED_TARGET_ROLES = {"EXECUTIVE_ENGINEER"}
 
-# PumpOperatorUploadChunkProcessor.emailPrefix — the generated login address for
-# an onboarded user is derived from their phone number and role.
-EMAIL_PREFIXES = {
-    "PUMP_OPERATOR": "po_",
-    "SECTION_OFFICER": "so_",
-    "SUB_DIVISIONAL_OFFICER": "sdo_",
-    "EXECUTIVE_ENGINEER": "ee_",
-}
-# Unreachable while every allow-listed role has a prefix above; kept so that
-# adding a role to ROLE_ALIASES cannot silently produce a "None…" address.
-DEFAULT_EMAIL_PREFIX = "usr_"
+# When one phone number sits on several CSV rows, the row whose role comes first
+# here is taken and the others are superseded. This is the business's call, not
+# departmental seniority: EXECUTIVE_ENGINEER deliberately ranks below
+# SECTION_OFFICER. Must rank every role in INGESTED_ROLES.
+ROLE_PRECEDENCE = (
+    "SUB_DIVISIONAL_OFFICER",
+    "SECTION_OFFICER",
+    "EXECUTIVE_ENGINEER",
+    "PUMP_OPERATOR",
+)
+ROLE_RANK = {role: rank for rank, role in enumerate(ROLE_PRECEDENCE)}
 
 # user_table columns update_users may touch, with the cast each one needs in the
 # bulk UPDATE ... FROM (VALUES ...). A VALUES list has no types of its own, so a
@@ -247,21 +253,28 @@ FIELD_STATE_USER_ID = "state_user_id"
 CAT_NEW = "NEW_USER"
 CAT_EXISTING = "EXISTING_USER"
 CAT_DUPLICATE = "DUPLICATE_WITHIN_CSV"
+CAT_SUPERSEDED = "SUPERSEDED_WITHIN_CSV"
 CAT_ROLE_NOT_INGESTED = "ROLE_NOT_INGESTED"
 CAT_INVALID = "INVALID_CSV_ROW"
 
-CATEGORY_ORDER = [CAT_NEW, CAT_EXISTING, CAT_DUPLICATE, CAT_ROLE_NOT_INGESTED, CAT_INVALID]
+CATEGORY_ORDER = [
+    CAT_NEW, CAT_EXISTING, CAT_DUPLICATE, CAT_SUPERSEDED, CAT_ROLE_NOT_INGESTED, CAT_INVALID,
+]
 CATEGORY_ACTION = {
     CAT_NEW: "insert",
     CAT_EXISTING: "update (only the fields that differ)",
     CAT_DUPLICATE: "skip",
+    CAT_SUPERSEDED: "skip",
     CAT_ROLE_NOT_INGESTED: "skip",
     CAT_INVALID: "skip",
 }
 CATEGORY_DESCRIPTION = {
     CAT_NEW: "No live user holds this phone number",
     CAT_EXISTING: "One live user holds this phone number",
-    CAT_DUPLICATE: "The phone number or public_id appears on more than one CSV row",
+    CAT_DUPLICATE: "The public_id appears on more than one CSV row, or the phone "
+                   "number does and two of its rows share the highest role",
+    CAT_SUPERSEDED: "The phone number is on another CSV row with a higher role "
+                    f"({' > '.join(ROLE_PRECEDENCE)}), which is taken instead",
     CAT_ROLE_NOT_INGESTED: "The row's role is outside this ingestion's scope "
                            "(see ROLE_ALIASES) — deliberately not onboarded",
     CAT_INVALID: "CSV row cannot be used (blank name/role or unusable phone number)",
@@ -301,10 +314,6 @@ def canonical_role(raw: Any) -> str:
     let one bad cell add a permission level nobody reviewed.
     """
     return ROLE_ALIASES.get(role_slug(raw), "")
-
-
-def email_prefix(role: str) -> str:
-    return EMAIL_PREFIXES.get(role, DEFAULT_EMAIL_PREFIX)
 
 
 def safe_mask(value: str) -> str:
@@ -443,24 +452,56 @@ def candidate_rows(rows: list[UserRow]) -> list[UserRow]:
     return [r for r in rows if not r.blocking_issues and not r.role_not_ingested]
 
 
-def find_csv_duplicates(rows: list[UserRow]) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
+@dataclass
+class CsvDuplicates:
+    """How the candidate rows collide on phone number and public_id."""
+    # phone -> every row_no for it, when two of them share the highest role.
+    phone: dict[str, list[int]] = field(default_factory=dict)
+    # lower(public_id) -> row_nos, counted after superseded rows are set aside.
+    public_id: dict[str, list[int]] = field(default_factory=dict)
+    # superseded row_no -> row_no of the higher-role row taken instead.
+    superseded: dict[int, int] = field(default_factory=dict)
+
+
+def find_csv_duplicates(rows: list[UserRow]) -> CsvDuplicates:
     """Phones and public_ids repeated among the candidate rows.
 
-    Both break the 1:1 contract: one person cannot be reconciled against two
-    rows that disagree on name, role or public_id, and two rows sharing a
-    public_id cannot both own it (the tenant's partial UNIQUE index says so).
+    One person cannot be reconciled against two rows, so a phone number on
+    several rows keeps the one whose role ranks highest in ROLE_PRECEDENCE and
+    supersedes the rest. When two rows share that highest role nothing tells
+    them apart, and every row for the phone is skipped.
+
+    Two rows sharing a public_id cannot both own it (the tenant's partial
+    UNIQUE index says so). Superseded rows are left out of that count, so a
+    person listed twice under one public_id is not knocked out by the row that
+    lost.
     """
-    by_phone: dict[str, list[int]] = defaultdict(list)
-    by_public_id: dict[str, list[int]] = defaultdict(list)
-    for row in candidate_rows(rows):
+    candidates = candidate_rows(rows)
+
+    by_phone: dict[str, list[UserRow]] = defaultdict(list)
+    for row in candidates:
         if row.phone:
-            by_phone[row.phone].append(row.row_no)
-        if row.public_id:
+            by_phone[row.phone].append(row)
+
+    dups = CsvDuplicates()
+    for phone, group in by_phone.items():
+        if len(group) < 2:
+            continue
+        top_rank = min(ROLE_RANK[r.role] for r in group)
+        top = [r for r in group if ROLE_RANK[r.role] == top_rank]
+        if len(top) > 1:
+            dups.phone[phone] = [r.row_no for r in group]
+            continue
+        for row in group:
+            if row is not top[0]:
+                dups.superseded[row.row_no] = top[0].row_no
+
+    by_public_id: dict[str, list[int]] = defaultdict(list)
+    for row in candidates:
+        if row.public_id and row.row_no not in dups.superseded:
             by_public_id[row.public_id.lower()].append(row.row_no)
-    return (
-        {k: v for k, v in by_phone.items() if len(v) > 1},
-        {k: v for k, v in by_public_id.items() if len(v) > 1},
-    )
+    dups.public_id = {k: v for k, v in by_public_id.items() if len(v) > 1}
+    return dups
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -616,8 +657,6 @@ class UserDecision:
     # counted separately so the operator can see how many are waiting on
     # --allow-officer-promotions rather than on a data fix.
     gated_promotion: bool = False
-    # Set on insert, so the analytics projection can address the new row.
-    email: str = ""
 
     @property
     def will_write(self) -> bool:
@@ -658,7 +697,8 @@ def classify_users(
     allow_promotions: bool = False,
 ) -> list[UserDecision]:
     """Resolve every CSV row against the tenant DB in bulk."""
-    dup_phone, dup_public_id = find_csv_duplicates(rows)
+    dups = find_csv_duplicates(rows)
+    role_by_row_no = {row.row_no: row.role for row in rows}
 
     decisions: list[UserDecision] = []
     resolvable: list[UserDecision] = []
@@ -673,15 +713,24 @@ def classify_users(
                 reason=f"role '{row.role_raw}' is outside this ingestion's scope",
             ))
             continue
-        if row.phone in dup_phone:
-            others = [r for r in dup_phone[row.phone] if r != row.row_no]
+        if row.row_no in dups.superseded:
+            winner = dups.superseded[row.row_no]
             decisions.append(UserDecision(
-                row, CAT_DUPLICATE,
-                reason=f"phone number repeated within the CSV (also on row(s) {others})",
+                row, CAT_SUPERSEDED,
+                reason=f"phone number repeated within the CSV — row {winner} "
+                       f"({role_by_row_no[winner]}) outranks {row.role} and is taken instead",
             ))
             continue
-        if row.public_id and row.public_id.lower() in dup_public_id:
-            others = [r for r in dup_public_id[row.public_id.lower()] if r != row.row_no]
+        if row.phone in dups.phone:
+            others = [r for r in dups.phone[row.phone] if r != row.row_no]
+            decisions.append(UserDecision(
+                row, CAT_DUPLICATE,
+                reason=f"phone number repeated within the CSV (also on row(s) {others}) "
+                       f"and two of its rows share the highest role",
+            ))
+            continue
+        if row.public_id and row.public_id.lower() in dups.public_id:
+            others = [r for r in dups.public_id[row.public_id.lower()] if r != row.row_no]
             decisions.append(UserDecision(
                 row, CAT_DUPLICATE,
                 reason=f"public_id repeated within the CSV (also on row(s) {others})",
@@ -901,37 +950,20 @@ class UserWriter:
         return {name.strip().upper(): type_id for name, type_id in created}
 
     def insert_users(self, decisions: list[UserDecision], user_type_ids: dict[str, int]) -> None:
-        """Create users the same way PumpOperatorUploadChunkProcessor does.
-
-        Collisions on the generated email are resolved against one bulk lookup
-        rather than a query per person — the address is derived from the phone
-        number, so two rows can never generate the same one and the only way it
-        can be taken is by a row we did not create (a soft-deleted user counts:
-        the uniqueness constraint on email does not exclude them).
-        """
+        """Create users the same way PumpOperatorUploadChunkProcessor does, bar
+        the email: it is left NULL rather than minted from the phone number,
+        since the CSV carries none (see the module docstring)."""
         if not decisions:
             return
 
         with_state_user_id = self.db.with_state_user_id
-        candidates = [
-            f"{email_prefix(d.row.role)}{d.row.phone}{EMAIL_DOMAIN}" for d in decisions
-        ]
-        taken = self.db.emails_in_use(candidates)
-
         payload = []
-        for decision, email in zip(decisions, candidates):
-            if email.lower() in taken:
-                email = (
-                    f"{email_prefix(decision.row.role)}{decision.row.phone}"
-                    f"_{uuid_mod.uuid4()}{EMAIL_DOMAIN}"
-                )
-            taken.add(email.lower())
-            decision.email = email
+        for decision in decisions:
             decision.existing_uuid = str(uuid_mod.uuid4())
             values = [
                 decision.existing_uuid, self.tenant_id,
                 self.pii.encrypt(decision.row.name), self.pii.title_hash(decision.row.name),
-                email, user_type_ids[decision.row.role],
+                user_type_ids[decision.row.role],
                 self.pii.encrypt(decision.row.phone), self.pii.hmac(decision.row.phone),
             ]
             if with_state_user_id:
@@ -959,7 +991,7 @@ class UserWriter:
         with self.conn.cursor() as cur:
             ids = psycopg2.extras.execute_values(
                 cur, sql, payload,
-                template=f"(%s,%s,%s,%s,%s,%s,%s,%s,{state_user_id_value}%s,%s,"
+                template=f"(%s,%s,%s,%s,NULL,%s,%s,%s,{state_user_id_value}%s,%s,"
                          f"true,true,%s,NOW(),%s,NOW())",
                 page_size=500, fetch=True,
             )
@@ -1027,8 +1059,8 @@ class IngestPlan:
     role_plans: list[RolePlan]
     user_types: dict[str, UserTypeRow]
     csv_issues: list[dict]
-    dup_phone: dict[str, list[int]]
-    dup_public_id: dict[str, list[int]]
+    # Empty for a plan assembled from already-resolved decisions (the mapping tools).
+    duplicates: CsvDuplicates = field(default_factory=CsvDuplicates)
     # False = the CSV's public_id is reported but never written (V36 not needed).
     with_state_user_id: bool = False
     # False = promotions into a GATED_TARGET_ROLE are reported, not applied.
@@ -1057,11 +1089,17 @@ def build_plan(
     allow_promotions: bool = False,
 ) -> IngestPlan:
     LOG.info("Classifying %d CSV rows …", len(rows))
-    dup_phone, dup_public_id = find_csv_duplicates(rows)
-    if dup_phone or dup_public_id:
+    duplicates = find_csv_duplicates(rows)
+    if duplicates.superseded:
         LOG.warning(
-            "CSV repeats %d phone number(s) and %d public_id(s) — those rows are skipped",
-            len(dup_phone), len(dup_public_id),
+            "%d CSV row(s) share a phone number with a higher-role row, which is taken instead",
+            len(duplicates.superseded),
+        )
+    if duplicates.phone or duplicates.public_id:
+        LOG.warning(
+            "CSV repeats %d phone number(s) with a tied highest role and %d public_id(s) "
+            "— those rows are skipped",
+            len(duplicates.phone), len(duplicates.public_id),
         )
 
     decisions = classify_users(rows, db, update_roles, allow_promotions)
@@ -1081,8 +1119,7 @@ def build_plan(
         role_plans=role_plans,
         user_types=user_types,
         csv_issues=csv_issues,
-        dup_phone=dup_phone,
-        dup_public_id=dup_public_id,
+        duplicates=duplicates,
         with_state_user_id=db.with_state_user_id,
         allow_promotions=allow_promotions,
     )
@@ -1215,7 +1252,7 @@ def build_conflict_frame(plan: IngestPlan, include_pii: bool) -> pd.DataFrame:
         # Out-of-scope roles are not conflicts — they are counted in
         # role_summary and listed row by row in csv_issues, and putting several
         # hundred of them here would bury the rows that do need a decision.
-        if decision.category in (CAT_DUPLICATE, CAT_INVALID):
+        if decision.category in (CAT_DUPLICATE, CAT_SUPERSEDED, CAT_INVALID):
             records.append({
                 "row_no": decision.row.row_no,
                 "kind": decision.category,

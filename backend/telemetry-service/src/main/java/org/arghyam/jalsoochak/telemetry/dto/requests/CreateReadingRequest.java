@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.dto.requests;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -51,6 +52,13 @@ public class CreateReadingRequest {
      * byte-identical.
      */
     private boolean supplyPlausibilityChecked;
+
+    /**
+     * Channel declared by the submitting system, already validated. Null means the submission did not
+     * declare one, in which case the channel is resolved from the operator's stored preference — the
+     * behaviour every caller had before this field existed.
+     */
+    private ReadingChannel declaredChannel;
 
     // LENIENT-INGEST: tracking fields populated only when a submission is recorded through the
     // lenient path (missing scheme / missing operator / operator-not-mapped). Null/0 for normal reads.

@@ -30,4 +30,10 @@ public class MeterReadingEvent {
     private String readingDate;
     private Integer submissionStatus;
     private Integer readingType;
+    /**
+     * ANOMALY-SUBMISSION-LINK: {@code flow_reading_table.correlation_id} of the row this event came
+     * from, so an anomaly naming the same submission can be joined back to this fact row. Null on
+     * events from a telemetry-service still on the old contract.
+     */
+    private String correlationId;
 }

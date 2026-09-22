@@ -135,7 +135,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                 eq(CALLER_TENANT_ID), eq(10L), eq(1L),
                 isNull(),
                 eq(BigDecimal.ZERO), isNull(), eq(""), eq(READING_AT),
-                any(), eq(READING_DATE), eq(1), eq(0));
+                any(), eq(READING_DATE), eq(1), eq(0), any());
     }
 
     @Test

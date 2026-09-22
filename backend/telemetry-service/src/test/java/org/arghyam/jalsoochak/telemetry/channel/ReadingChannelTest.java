@@ -41,4 +41,66 @@ class ReadingChannelTest {
         assertThat(ReadingChannel.IOT.getCode()).isEqualTo(4);
         assertThat(ReadingChannel.MAN.getCode()).isEqualTo(5);
     }
+
+    @Test
+    void isDeclared_onlyForANonBlankValue() {
+        assertThat(ReadingChannel.isDeclared(null)).isFalse();
+        assertThat(ReadingChannel.isDeclared("")).isFalse();
+        assertThat(ReadingChannel.isDeclared("   ")).isFalse();
+        assertThat(ReadingChannel.isDeclared("BFM")).isTrue();
+        assertThat(ReadingChannel.isDeclared("nonsense")).isTrue();
+    }
+
+    @Test
+    void parseStrict_acceptsEveryCanonicalCodeTrimmedAndCaseInsensitively() {
+        for (ReadingChannel channel : ReadingChannel.values()) {
+            assertThat(ReadingChannel.parseStrict(channel.name())).contains(channel);
+            assertThat(ReadingChannel.parseStrict(channel.name().toLowerCase())).contains(channel);
+            assertThat(ReadingChannel.parseStrict("  " + channel.name() + "  ")).contains(channel);
+        }
+    }
+
+    @Test
+    void parseStrict_rejectsNullAndBlank() {
+        assertThat(ReadingChannel.parseStrict(null)).isEmpty();
+        assertThat(ReadingChannel.parseStrict("")).isEmpty();
+        assertThat(ReadingChannel.parseStrict("   ")).isEmpty();
+    }
+
+    @Test
+    void parseStrict_rejectsUnsupportedValuesInsteadOfDefaultingToBfm() {
+        assertThat(ReadingChannel.parseStrict("something-else")).isEmpty();
+        assertThat(ReadingChannel.parseStrict("BF")).isEmpty();
+        assertThat(ReadingChannel.parseStrict("BFMX")).isEmpty();
+    }
+
+    @Test
+    void parseStrict_rejectsTheLegacyLabelsThatFromChannelValueAccepts() {
+        // The tolerance in fromChannelValue exists for free-form values already stored in
+        // user_channel_preference. An API caller declares a channel from a published list, so the
+        // same tolerance there would turn a typo into a silent BFM reading.
+        assertThat(ReadingChannel.fromChannelValue("Electric Meter")).isEqualTo(ReadingChannel.ELM);
+        assertThat(ReadingChannel.parseStrict("Electric Meter")).isEmpty();
+    }
+
+    @Test
+    void allowedValues_listsEveryCanonicalCode() {
+        assertThat(ReadingChannel.allowedValues()).isEqualTo("BFM, ELM, PDU, IOT, MAN");
+    }
+
+    @Test
+    void isUnsupportedDeclaration_onlyForADeclaredValueOutsideTheCanonicalSet() {
+        assertThat(ReadingChannel.isUnsupportedDeclaration("BFMX")).isTrue();
+        assertThat(ReadingChannel.isUnsupportedDeclaration("Electric Meter")).isTrue();
+        assertThat(ReadingChannel.isUnsupportedDeclaration("pdu")).isFalse();
+        // Not declared is not unsupported — it falls back to the stored preference.
+        assertThat(ReadingChannel.isUnsupportedDeclaration(null)).isFalse();
+        assertThat(ReadingChannel.isUnsupportedDeclaration("   ")).isFalse();
+    }
+
+    @Test
+    void unsupportedDeclarationMessage_namesTheAllowedSetAndNothingTheCallerSent() {
+        assertThat(ReadingChannel.unsupportedDeclarationMessage())
+                .isEqualTo("Unsupported channel. Allowed values are: BFM, ELM, PDU, IOT, MAN");
+    }
 }

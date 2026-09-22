@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,8 +18,12 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import io.minio.BucketExistsArgs;
+import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.UploadObjectArgs;
+import io.minio.errors.ErrorResponseException;
+import io.minio.messages.ErrorResponse;
 
 /**
  * Unit tests for {@link MinioStorageService}.
@@ -193,5 +199,64 @@ class MinioStorageServiceTest {
                 new MinioStorageService("http://minio.example.com", "my-access-key", null))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("minio.secret-key");
+    }
+
+    // ───────────────────── bucket creation on the report upload ────────────────────
+
+    @Test
+    void upload_toAMissingBucket_createsItFirst() throws Exception {
+        Path pdfFile = tempDir.resolve("weekly.pdf");
+        Files.write(pdfFile, "dummy pdf content".getBytes());
+        when(minioClient.bucketExists(any(BucketExistsArgs.class))).thenReturn(false);
+
+        String url = minioStorageService.upload(pdfFile, "weekly-water-reports", "SO/2026-07-13/weekly.pdf");
+
+        verify(minioClient).makeBucket(any(MakeBucketArgs.class));
+        assertThat(url).isEqualTo(BASE_URL + "/weekly-water-reports/SO/2026-07-13/weekly.pdf");
+    }
+
+    @Test
+    void upload_succeeds_whenAnotherUploadCreatesTheBucketFirst() throws Exception {
+        // The report jobs upload one PDF per officer concurrently. On the first run after a bucket is
+        // added they all see it missing and all call makeBucket; the losers get BucketAlreadyOwnedByYou,
+        // which is the state this wanted anyway — failing on it lost those officers their reports.
+        Path pdfFile = tempDir.resolve("weekly.pdf");
+        Files.write(pdfFile, "dummy pdf content".getBytes());
+        when(minioClient.bucketExists(any(BucketExistsArgs.class))).thenReturn(false);
+        doThrow(errorResponse("BucketAlreadyOwnedByYou"))
+                .when(minioClient).makeBucket(any(MakeBucketArgs.class));
+
+        String url = minioStorageService.upload(pdfFile, "weekly-water-reports", "SO/2026-07-13/weekly.pdf");
+
+        assertThat(url).isEqualTo(BASE_URL + "/weekly-water-reports/SO/2026-07-13/weekly.pdf");
+        verify(minioClient).uploadObject(any(UploadObjectArgs.class));
+    }
+
+    @Test
+    void upload_propagates_whenTheBucketNameIsTakenByAnotherAccount() throws Exception {
+        // BucketAlreadyExists is a different error from BucketAlreadyOwnedByYou: the name belongs to
+        // someone else, so the upload that follows would not land where the URL points.
+        Path pdfFile = tempDir.resolve("weekly.pdf");
+        Files.write(pdfFile, "dummy pdf content".getBytes());
+        when(minioClient.bucketExists(any(BucketExistsArgs.class))).thenReturn(false);
+        doThrow(errorResponse("BucketAlreadyExists"))
+                .when(minioClient).makeBucket(any(MakeBucketArgs.class));
+
+        assertThatThrownBy(() ->
+                minioStorageService.upload(pdfFile, "weekly-water-reports", "SO/2026-07-13/weekly.pdf"))
+                .isInstanceOf(ErrorResponseException.class);
+        verify(minioClient, never()).uploadObject(any(UploadObjectArgs.class));
+    }
+
+    /** A MinIO {@link ErrorResponseException} carrying the given S3 error code. */
+    private static ErrorResponseException errorResponse(String code) {
+        ErrorResponse body = new ErrorResponse(code, code, "weekly-water-reports", null, null, null, null);
+        okhttp3.Response httpResponse = new okhttp3.Response.Builder()
+                .request(new okhttp3.Request.Builder().url("http://minio.example.com").build())
+                .protocol(okhttp3.Protocol.HTTP_1_1)
+                .code(409)
+                .message("Conflict")
+                .build();
+        return new ErrorResponseException(body, httpResponse, null);
     }
 }

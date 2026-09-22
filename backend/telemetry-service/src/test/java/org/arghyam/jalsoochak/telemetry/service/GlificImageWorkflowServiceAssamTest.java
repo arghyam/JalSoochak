@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
@@ -15,6 +16,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -91,7 +93,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, java.time.LocalDate.now()))
+        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
@@ -136,7 +138,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, java.time.LocalDate.now()))
+        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
@@ -1030,5 +1032,82 @@ class GlificImageWorkflowServiceAssamTest {
         return appender.list.stream()
                 .filter(event -> event.getLevel() == Level.INFO)
                 .anyMatch(event -> event.getFormattedMessage().contains(fragment));
+    }
+
+    @Test
+    void processAssamReadingPassesTheDeclaredChannelThrough() {
+        AssamReadingRequest request = assamRequestWithChannel("PDU");
+        stubAssamSubmission();
+
+        service.processAssamReading(request, 22);
+
+        assertEquals(ReadingChannel.PDU, capturedCreateReadingRequest().getDeclaredChannel());
+    }
+
+    @Test
+    void processAssamReadingAcceptsADeclaredChannelInAnyCase() {
+        AssamReadingRequest request = assamRequestWithChannel("  elm  ");
+        stubAssamSubmission();
+
+        service.processAssamReading(request, 22);
+
+        assertEquals(ReadingChannel.ELM, capturedCreateReadingRequest().getDeclaredChannel());
+    }
+
+    @Test
+    void processAssamReadingLeavesTheChannelUnsetWhenTheSubmissionOmitsIt() {
+        // Null is what keeps every existing integration on its current path: BfmReadingService then
+        // resolves the channel from the operator's stored preference exactly as before.
+        AssamReadingRequest request = assamRequestWithChannel(null);
+        stubAssamSubmission();
+
+        service.processAssamReading(request, 22);
+
+        assertNull(capturedCreateReadingRequest().getDeclaredChannel());
+    }
+
+    @Test
+    void processAssamReadingLeavesTheChannelUnsetWhenItIsBlank() {
+        AssamReadingRequest request = assamRequestWithChannel("   ");
+        stubAssamSubmission();
+
+        service.processAssamReading(request, 22);
+
+        assertNull(capturedCreateReadingRequest().getDeclaredChannel());
+    }
+
+    private static AssamReadingRequest assamRequestWithChannel(String channel) {
+        return AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .centreSchemeId("30244993")
+                .phoneNumber("919876543210")
+                .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
+                .channel(channel)
+                .build();
+    }
+
+    private void stubAssamSubmission() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_assam",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
+                .thenReturn(Optional.of(30244993L));
+        when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(),
+                anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+                .thenReturn(CreateReadingResponse.builder().success(true).qualityStatus("CONFIRMED").build());
+    }
+
+    private CreateReadingRequest capturedCreateReadingRequest() {
+        ArgumentCaptor<CreateReadingRequest> captor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        verify(bfmReadingService).createReading(captor.capture(), anyString(), any(), anyString(),
+                anyBoolean(), any(FlowVisionRetryMode.class));
+        return captor.getValue();
     }
 }

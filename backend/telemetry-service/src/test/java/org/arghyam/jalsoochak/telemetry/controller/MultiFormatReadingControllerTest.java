@@ -329,4 +329,85 @@ class MultiFormatReadingControllerTest {
             return null;
         }
     }
+
+    private static final String CANONICAL_BODY_WITH_CHANNEL = """
+            {
+              "reading_url": "https://example.com/meter.jpg",
+              "confirmed_reading": 123.4,
+              "state_scheme_id": "30178236",
+              "phone_number": "91XXXXXXXXXX",
+              "channel": "%s"
+            }
+            """;
+
+    @Test
+    void unsupportedChannelIsRejectedWithItsOwnErrorCode() throws Exception {
+        when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(22));
+
+        mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
+                        .header("X-Api-Key", "valid")
+                        .contentType("application/json")
+                        .content(CANONICAL_BODY_WITH_CHANNEL.formatted("BFMX")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data.errorCode").value("CHANNEL_NOT_SUPPORTED"));
+
+        verifyNoInteractions(webhook);
+    }
+
+    @Test
+    void aDeclaredChannelIsAcceptedInAnyCase() throws Exception {
+        when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(22));
+        when(webhook.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+                .success(true).message("ok").correlationId("corr-1").build());
+
+        mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
+                        .header("X-Api-Key", "valid")
+                        .contentType("application/json")
+                        .content(CANONICAL_BODY_WITH_CHANNEL.formatted("elm")))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<AssamReadingRequest> captor = ArgumentCaptor.forClass(AssamReadingRequest.class);
+        verify(webhook).processAssamReading(captor.capture(), any());
+        assertEquals("elm", captor.getValue().getChannel());
+    }
+
+    @Test
+    void channelIsCheckedAfterTheApiKeySoAnUnauthenticatedCallerLearnsNothing() throws Exception {
+        when(apiKeyService.resolveTenantIdFromRawApiKey("bad")).thenReturn(Optional.empty());
+
+        mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
+                        .header("X-Api-Key", "bad")
+                        .contentType("application/json")
+                        .content(CANONICAL_BODY_WITH_CHANNEL.formatted("BFMX")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.data.errorCode").value("INVALID_API_KEY"));
+
+        verifyNoInteractions(webhook);
+    }
+
+    @Test
+    void structuralValidationStillWinsOverTheChannelCheck() throws Exception {
+        // Both endpoints must agree on precedence. On the canonical endpoint @Valid runs before the
+        // method body, so a structurally invalid payload can never reach the channel check; this
+        // endpoint validates by hand, so the same order is pinned here.
+        when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(22));
+
+        String noSchemeAndBadChannel = """
+                {
+                  "confirmed_reading": 123.4,
+                  "phone_number": "91XXXXXXXXXX",
+                  "channel": "BFMX"
+                }
+                """;
+
+        mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
+                        .header("X-Api-Key", "valid")
+                        .contentType("application/json")
+                        .content(noSchemeAndBadChannel))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.data.errorCode").value("VALIDATION_FAILED"));
+
+        verifyNoInteractions(webhook);
+    }
 }

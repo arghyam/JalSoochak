@@ -134,7 +134,11 @@ CREATE TABLE tenant_as.anomaly_table (
     created_at                  TIMESTAMP    NOT NULL DEFAULT NOW(),
     status                      INTEGER      NOT NULL,
     deleted_at                  TIMESTAMP,
-    deleted_by                  INTEGER
+    deleted_by                  INTEGER,
+    -- ANOMALY-SUBMISSION-LINK (V43): the submission this anomaly was raised over, NULL for the
+    -- types that have no submission behind them. ON DELETE SET NULL so a hard-deleted reading
+    -- costs the link, never the anomaly.
+    flow_reading_id             INTEGER      REFERENCES tenant_as.flow_reading_table(id) ON DELETE SET NULL
 );
 
 -- tenant_zz predates V8: the reason column is still called detail and none of the

@@ -107,7 +107,9 @@ class BfmReadingServiceImplausibleSupplyTest {
                 repo, flowVisionService, telemetryEventPublisher, tenantConfigRepository,
                 new ObjectMapper(), glificOperatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
-                SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository));
+                SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
+                null,
+                null);
     }
 
     /** The scheme is migrated, has 100 connections, and has a reading to be measured against. */
@@ -163,7 +165,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             // publishMeterReadingRecorded is the single event that writes fact_meter_reading,
             // dim_operator_attendance and fact_water_quantity. Withholding it is the whole point.
             verify(telemetryEventPublisher, never()).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -209,7 +211,7 @@ class BfmReadingServiceImplausibleSupplyTest {
                     eq(TENANT_ID), eq(AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY), eq(OPERATOR_ID),
                     eq(SCHEME_ID), isNull(), isNull(), overridden.capture(), eq(0), previous.capture(),
                     eq(BASELINE_AT), eq(0), eq(AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_SUBMITTED),
-                    eq(AnomalyConstants.STATUS_OPEN), anyString());
+                    eq(AnomalyConstants.STATUS_OPEN), anyString(), any());
 
             assertThat(overridden.getValue()).isEqualByComparingTo("1100");
             assertThat(previous.getValue()).isEqualByComparingTo(BASELINE);
@@ -323,7 +325,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             submit(SupplyPlausibilityProperties.Mode.AUDIT, "1100", true);
 
             verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
                     any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull());
@@ -339,7 +341,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             verify(repo, never()).createTenantAnomalyRecord(anyString(), any());
             verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                     any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                    any(), any());
+                    any(), any(), any());
         }
     }
 
@@ -355,7 +357,7 @@ class BfmReadingServiceImplausibleSupplyTest {
 
             assertThat(response.isSuccess()).isTrue();
             verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test

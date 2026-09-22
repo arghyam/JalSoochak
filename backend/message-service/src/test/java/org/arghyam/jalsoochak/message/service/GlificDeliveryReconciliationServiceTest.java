@@ -53,6 +53,7 @@ class GlificDeliveryReconciliationServiceTest {
     private static final String SO = "SECTION_OFFICER";
     private static final String SDO = "SUB_DIVISIONAL_OFFICER";
     private static final int DAILY_REPORT_TEMPLATE = 880557;
+    private static final int WEEKLY_REPORT_TEMPLATE = 990101;
     private static final int NUDGE_TEMPLATE = 770001;
 
     /** Not a real number. Present so a test can prove it never reaches a log line. */
@@ -86,6 +87,8 @@ class GlificDeliveryReconciliationServiceTest {
         ReflectionTestUtils.setField(service, "dailyReportSdoTemplateId", "");
         ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "");
         ReflectionTestUtils.setField(service, "dailyReportSdoLinkTemplateId", "");
+        ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", String.valueOf(WEEKLY_REPORT_TEMPLATE));
+        ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "");
 
         logger = (Logger) LoggerFactory.getLogger(GlificDeliveryReconciliationService.class);
         appender = new ListAppender<>();
@@ -117,11 +120,12 @@ class GlificDeliveryReconciliationServiceTest {
     @Test
     void refusesToRunWithNoConfiguredTemplateIds() {
         ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "");
+        ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "");
 
         service.reconcile(from, to);
 
         verifyNoInteractions(glificDeliveryStatusService);
-        assertThat(logLines()).anyMatch(l -> l.contains("No daily-report template ids configured"));
+        assertThat(logLines()).anyMatch(l -> l.contains("No report template ids configured"));
     }
 
     // ───────────────────────── goals 1, 2 and 3 ────────────────────────────────
@@ -198,6 +202,62 @@ class GlificDeliveryReconciliationServiceTest {
             service.reconcile(from, to);
 
             assertThat(logLines()).noneMatch(l -> l.contains("failedOfficers:"));
+        }
+
+        /**
+         * A Section Officer receives both reports on the same Glific account, so a per-role count alone
+         * cannot say which one arrived. Without {@code report=}, a week in which no weekly report was
+         * delivered at all is invisible behind the daily traffic.
+         */
+        @Test
+        void countsDeliveriesPerReportAsWellAsPerRole() {
+            stubTenants(tenant(74, "MH"));
+            stubOfficers(Map.of(6530736L, officer(16714L, SO)));
+            stubStatus("DELIVERED",
+                    delivered("1", 6530736L),
+                    onWeeklyTemplate(delivered("2", 6530736L)));
+
+            service.reconcile(from, to);
+
+            assertThat(summaryTotal())
+                    .contains("matched=2")
+                    .contains("deliveredByRole={SECTION_OFFICER=2}")
+                    .contains("matchedByReport={DAILY=1, WEEKLY=1}")
+                    .contains("deliveredByReport={DAILY=1, WEEKLY=1}");
+        }
+
+        /** The same split on the per-message line, appended after officer= so the recipes still work. */
+        @Test
+        void namesTheReportOnEachPerMessageLine() {
+            stubTenants(tenant(74, "MH"));
+            stubOfficers(Map.of(6530736L, officer(16714L, SO)));
+            stubStatus("DELIVERED", onWeeklyTemplate(delivered("241952654", 6530736L)));
+
+            service.reconcile(from, to);
+
+            assertThat(logLines()).anyMatch(l -> l.contains(
+                    "result=DELIVERED role=SECTION_OFFICER tenant=74 officer=16714 report=WEEKLY"));
+        }
+
+        /**
+         * An officer who got their daily report but not their weekly one is a different problem from one
+         * who got neither, and a combined hand-off list cannot say which.
+         */
+        @Test
+        void groupsFailedOfficersByReportAsWellAsByCode() {
+            stubTenants(tenant(74, "MH"));
+            stubOfficers(Map.of(6629592L, officer(16733L, SO), 6629593L, officer(16744L, SO)));
+            stubStatus("ERROR",
+                    undeliverable("1", 6629592L),
+                    onWeeklyTemplate(undeliverable("2", 6629593L)));
+
+            service.reconcile(from, to);
+
+            assertThat(logLines()).anyMatch(l -> l.contains("failedOfficers:")
+                    && l.contains("report=DAILY") && l.contains("officers=[16733]"));
+            assertThat(logLines()).anyMatch(l -> l.contains("failedOfficers:")
+                    && l.contains("report=WEEKLY") && l.contains("officers=[16744]"));
+            assertThat(summaryTotal()).contains("failedByReport={DAILY=1, WEEKLY=1}");
         }
 
         /** Glific's SENT is "Meta has it, not delivered" — it must land in pending, never in delivered. */
@@ -287,7 +347,86 @@ class GlificDeliveryReconciliationServiceTest {
             ReflectionTestUtils.setField(service, "dailyReportSdoTemplateId", "880558");
             ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880559");
 
-            assertThat(service.resolveTemplateIds()).containsExactlyInAnyOrder(880557, 880558, 880559);
+            assertThat(service.resolveTemplateIds())
+                    .containsExactlyInAnyOrder(880557, 880558, 880559, WEEKLY_REPORT_TEMPLATE);
+        }
+
+        @Test
+        void includesTheWeeklyTemplatesToo() {
+            // A weekly report Glific accepted but never delivered would otherwise look exactly like a
+            // quiet week — reconciliation only reports on templates it was told to watch.
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "7001");
+            ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "7002");
+
+            assertThat(service.resolveTemplateIds()).contains(7001, 7002);
+        }
+
+        /** Both reports share a Glific account, so the template id is the only thing that tells them apart. */
+        @Test
+        void labelsEachTemplateIdWithTheReportItCarries() {
+            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880559");
+            ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "990102");
+
+            assertThat(service.resolveTemplateKinds().kinds())
+                    .containsEntry(DAILY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.DAILY)
+                    .containsEntry(880559, GlificDeliveryReconciliationService.ReportKind.DAILY)
+                    .containsEntry(WEEKLY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.WEEKLY)
+                    .containsEntry(990102, GlificDeliveryReconciliationService.ReportKind.WEEKLY);
+        }
+
+        /**
+         * The SDO ids fall back to the SO ones at send time, so the same id under both properties of one
+         * report is ordinary configuration — not the ambiguity that stops a pass.
+         */
+        @Test
+        void theSameIdUnderTwoPropertiesOfOneReportIsNotAConflict() {
+            ReflectionTestUtils.setField(service, "dailyReportSdoTemplateId",
+                    String.valueOf(DAILY_REPORT_TEMPLATE));
+            ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId",
+                    String.valueOf(WEEKLY_REPORT_TEMPLATE));
+
+            assertThat(service.resolveTemplateKinds().conflicts()).isEmpty();
+            assertThat(service.resolveTemplateKinds().kinds())
+                    .containsEntry(DAILY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.DAILY)
+                    .containsEntry(WEEKLY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.WEEKLY);
+        }
+
+        /**
+         * An id claimed by both reports has no right label: every delivery on it lands under whichever
+         * property was read first, so one of the two per-report tallies is wrong and nothing in the
+         * output says which. The pass refuses rather than publish that.
+         */
+        @Test
+        void refusesToRunWhenOneTemplateIdIsClaimedByBothReports() {
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId",
+                    String.valueOf(DAILY_REPORT_TEMPLATE));
+
+            service.reconcile(from, to);
+
+            verifyNoInteractions(glificDeliveryStatusService);
+            assertThat(logLines()).anyMatch(l -> l.contains("configured for more than one report")
+                    && l.contains(String.valueOf(DAILY_REPORT_TEMPLATE))
+                    && l.contains("DAILY")
+                    && l.contains("WEEKLY"));
+            assertThat(logLines()).noneMatch(l -> l.contains("summaryTotal:"));
+        }
+
+        /**
+         * The override picks which ids are watched, not what they mean. Leaving the ambiguous id out of
+         * it must not turn the conflict into a pass that quietly keeps the first-wins label.
+         */
+        @Test
+        void anOverrideDoesNotMaskAConflict() {
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId",
+                    String.valueOf(DAILY_REPORT_TEMPLATE));
+            ReflectionTestUtils.setField(service, "templateIdsCsv", "111");
+
+            assertThat(service.resolveTemplateKinds().conflicts()).containsKey(DAILY_REPORT_TEMPLATE);
+
+            service.reconcile(from, to);
+
+            verifyNoInteractions(glificDeliveryStatusService);
+            assertThat(logLines()).anyMatch(l -> l.contains("configured for more than one report"));
         }
 
         @Test
@@ -295,6 +434,21 @@ class GlificDeliveryReconciliationServiceTest {
             ReflectionTestUtils.setField(service, "templateIdsCsv", " 111 , 222 ");
 
             assertThat(service.resolveTemplateIds()).containsExactlyInAnyOrder(111, 222);
+        }
+
+        /**
+         * An override says which ids to watch, not what they are. Ids the typed properties still name
+         * keep their label; the rest are UNKNOWN rather than silently counted as daily.
+         */
+        @Test
+        void anOverrideKeepsTheLabelsTheTypedPropertiesStillGive() {
+            ReflectionTestUtils.setField(service, "templateIdsCsv",
+                    DAILY_REPORT_TEMPLATE + "," + WEEKLY_REPORT_TEMPLATE + ",111");
+
+            assertThat(service.resolveTemplateKinds().kinds())
+                    .containsEntry(DAILY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.DAILY)
+                    .containsEntry(WEEKLY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.WEEKLY)
+                    .containsEntry(111, GlificDeliveryReconciliationService.ReportKind.UNKNOWN);
         }
 
         @Test
@@ -550,6 +704,11 @@ class GlificDeliveryReconciliationServiceTest {
                                                GlificDeliveryOutcome outcome, String code, String reason) {
         return new GlificMessageStatus(id, "gs-" + id, bspStatus, DAILY_REPORT_TEMPLATE, true, "OUTBOUND",
                 contactId, outcome, code, reason);
+    }
+
+    /** The same message, moved onto the weekly template — the only thing that tells the reports apart. */
+    private static GlificMessageStatus onWeeklyTemplate(GlificMessageStatus m) {
+        return withTemplate(m, WEEKLY_REPORT_TEMPLATE);
     }
 
     private static GlificMessageStatus withTemplate(GlificMessageStatus m, Integer templateId) {

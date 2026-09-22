@@ -14,6 +14,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -113,7 +114,7 @@ class BfmReadingServicePlaceholderRowTest {
                 schemaName,
                 10L,
                 1L,
-                LocalDate.now()
+                ReadingTime.today()
         )).thenReturn(Optional.of(99L));
         when(readingChannelResolver.resolve(1, "919999999999")).thenReturn(ReadingChannel.BFM);
 
@@ -191,7 +192,7 @@ class BfmReadingServicePlaceholderRowTest {
                 anyString(),
                 anyInt(),
                 anyString()
-        );
+        , any());
     }
 
     @Test
@@ -240,7 +241,7 @@ class BfmReadingServicePlaceholderRowTest {
                 readingDate,
                 1,
                 0
-        );
+        , "corr-1");
     }
 
     @Test
@@ -289,6 +290,6 @@ class BfmReadingServicePlaceholderRowTest {
                 readingDate,
                 1,
                 0
-        );
+        , "corr-1");
     }
 }

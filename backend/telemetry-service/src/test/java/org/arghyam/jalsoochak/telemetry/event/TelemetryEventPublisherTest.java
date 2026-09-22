@@ -213,7 +213,7 @@ class TelemetryEventPublisherTest {
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L,
                     new BigDecimal("120.4"), new BigDecimal("0.85"), new BigDecimal("130"),
                     2, new BigDecimal("100"), LocalDateTime.of(2026, 2, 28, 6, 0),
-                    4, "Low confidence", 0, "corr-1");
+                    4, "Low confidence", 0, "corr-1", "submission-corr-1");
 
             AnomalyEvent event = publishedTo(TOPIC, AnomalyEvent.class);
             assertThat(event.getEventType()).isEqualTo("ANOMALY_RECORDED");
@@ -227,17 +227,44 @@ class TelemetryEventPublisherTest {
             assertThat(event.getConsecutiveDaysMissed()).isEqualTo(4);
             assertThat(event.getReason()).isEqualTo("Low confidence");
             assertThat(event.getCorrelationId()).isEqualTo("corr-1");
+            assertThat(event.getSubmissionCorrelationId()).isEqualTo("submission-corr-1");
+        }
+
+        @Test
+        @DisplayName("ANOMALY-SUBMISSION-LINK: the submission link is carried without touching the dedup key")
+        void carriesTheSubmissionLinkSeparatelyFromTheDedupKey() {
+            publisher.publishAnomalyRecorded(17, 10, 11L, 7L, null, null, null, null, null, null,
+                    null, "Implausible supply", 1, "dedup-key", "flow-corr-9");
+            AnomalyEvent event = publishedTo(TOPIC, AnomalyEvent.class);
+
+            assertThat(event.getSubmissionCorrelationId()).isEqualTo("flow-corr-9");
+            // The uuid analytics dedups on must still come from correlationId alone: if the
+            // submission link fed it, two submissions on one day would stop collapsing.
+            assertThat(event.getCorrelationId()).isEqualTo("dedup-key");
+            org.mockito.Mockito.reset(kafkaProducer);
+            publisher.publishAnomalyRecorded(17, 10, 11L, 7L, null, null, null, null, null, null,
+                    null, "Implausible supply", 1, "dedup-key", "a-different-submission");
+            assertThat(publishedTo(TOPIC, AnomalyEvent.class).getUuid()).isEqualTo(event.getUuid());
+        }
+
+        @Test
+        @DisplayName("ANOMALY-SUBMISSION-LINK: a type with no submission leaves the link null")
+        void leavesTheSubmissionLinkNullWhenThereIsNoSubmission() {
+            publisher.publishAnomalyRecorded(17, 9, 11L, 7L, null, null, null, null, null, null,
+                    null, "Meter not working", 1, "corr-1", null);
+
+            assertThat(publishedTo(TOPIC, AnomalyEvent.class).getSubmissionCorrelationId()).isNull();
         }
 
         @Test
         void derivesAStableUuidFromTheCorrelationIdAndUser() {
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L, null, null, null, null, null, null,
-                    null, null, 0, "corr-1");
+                    null, null, 0, "corr-1", null);
             String first = publishedTo(TOPIC, AnomalyEvent.class).getUuid();
 
             org.mockito.Mockito.reset(kafkaProducer);
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L, null, null, null, null, null, null,
-                    null, null, 0, "corr-1");
+                    null, null, 0, "corr-1", null);
             String second = publishedTo(TOPIC, AnomalyEvent.class).getUuid();
 
             // Deduplication downstream depends on the same submission producing the same uuid.
@@ -247,12 +274,12 @@ class TelemetryEventPublisherTest {
         @Test
         void derivesDifferentUuidsForDifferentUsersOnTheSameCorrelationId() {
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L, null, null, null, null, null, null,
-                    null, null, 0, "corr-1");
+                    null, null, 0, "corr-1", null);
             String first = publishedTo(TOPIC, AnomalyEvent.class).getUuid();
 
             org.mockito.Mockito.reset(kafkaProducer);
             publisher.publishAnomalyRecorded(17, 3, 22L, 7L, null, null, null, null, null, null,
-                    null, null, 0, "corr-1");
+                    null, null, 0, "corr-1", null);
 
             assertThat(publishedTo(TOPIC, AnomalyEvent.class).getUuid()).isNotEqualTo(first);
         }
@@ -260,7 +287,7 @@ class TelemetryEventPublisherTest {
         @Test
         void usesTheCorrelationIdVerbatimWhenThereIsNoUser() {
             publisher.publishAnomalyRecorded(17, 3, null, 7L, null, null, null, null, null, null,
-                    null, null, 0, "corr-1");
+                    null, null, 0, "corr-1", null);
 
             assertThat(publishedTo(TOPIC, AnomalyEvent.class).getUuid()).isEqualTo("corr-1");
         }
@@ -268,12 +295,12 @@ class TelemetryEventPublisherTest {
         @Test
         void generatesARandomUuidWhenThereIsNoCorrelationId() {
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L, null, null, null, null, null, null,
-                    null, null, 0, null);
+                    null, null, 0, null, null);
             String first = publishedTo(TOPIC, AnomalyEvent.class).getUuid();
 
             org.mockito.Mockito.reset(kafkaProducer);
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L, null, null, null, null, null, null,
-                    null, null, 0, "  ");
+                    null, null, 0, "  ", null);
 
             assertThat(first).isNotBlank();
             assertThat(publishedTo(TOPIC, AnomalyEvent.class).getUuid()).isNotEqualTo(first);
@@ -282,7 +309,7 @@ class TelemetryEventPublisherTest {
         @Test
         void leavesThePreviousReadingDateNullWhenAbsent() {
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L, null, null, null, null, null, null,
-                    null, null, 0, "corr-1");
+                    null, null, 0, "corr-1", null);
 
             assertThat(publishedTo(TOPIC, AnomalyEvent.class).getPreviousReadingDate()).isNull();
         }
@@ -326,7 +353,7 @@ class TelemetryEventPublisherTest {
         void publishesTheReadingWithItsDerivedDate() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L,
                     new BigDecimal("1234"), new BigDecimal("1234"), new BigDecimal("0.92"),
-                    "https://minio/img.jpg", LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0);
+                    "https://minio/img.jpg", LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, "flow-corr-1");
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getEventType()).isEqualTo("METER_READING_RECORDED");
@@ -336,12 +363,16 @@ class TelemetryEventPublisherTest {
             assertThat(event.getReadingAt()).isEqualTo("2026-03-01T06:30");
             assertThat(event.getChannel()).isEqualTo(1);
             assertThat(event.getReadingDate()).isEqualTo("2026-03-01");
+            // ANOMALY-SUBMISSION-LINK: the fact row's join counterpart for an anomaly over the same
+            // submission. Previously the event carried no correlation id at all, so the warehouse
+            // had nothing to match an anomaly against.
+            assertThat(event.getCorrelationId()).isEqualTo("flow-corr-1");
         }
 
         @Test
         void fallsBackToTheReadingTimestampsDateWhenNoReadingDateIsGiven() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
-                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, null, 1, 0);
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, null, 1, 0, null);
 
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getReadingDate()).isEqualTo("2026-03-01");
         }
@@ -353,7 +384,7 @@ class TelemetryEventPublisherTest {
             // analytics derives from two of them.
             publisher.publishMeterReadingRecorded(17, 7L, 11L,
                     new BigDecimal("1247.8"), new BigDecimal("1235.55"), null,
-                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0);
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getExtractedReading()).isEqualByComparingTo("1247.8");
@@ -363,7 +394,7 @@ class TelemetryEventPublisherTest {
         @Test
         void carriesNullReadingsThrough() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, null, null, null,
-                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0);
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getExtractedReading()).isNull();
@@ -373,7 +404,7 @@ class TelemetryEventPublisherTest {
         @Test
         void leavesTheDateNullWhenNeitherIsGiven() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
-                    null, null, 1, null, 1, 0);
+                    null, null, 1, null, 1, 0, null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getReadingDate()).isNull();
@@ -390,7 +421,7 @@ class TelemetryEventPublisherTest {
         })
         void normalisesModelConfidenceToAWholePercentage(String confidence, int expected) {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN,
-                    new BigDecimal(confidence), null, null, 1, DATE, 1, 0);
+                    new BigDecimal(confidence), null, null, 1, DATE, 1, 0, null);
 
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isEqualTo(expected);
         }
@@ -398,12 +429,12 @@ class TelemetryEventPublisherTest {
         @Test
         void treatsAMissingOrNegativeConfidenceAsUnknown() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN,
-                    null, null, null, 1, DATE, 1, 0);
+                    null, null, null, 1, DATE, 1, 0, null);
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isNull();
 
             org.mockito.Mockito.reset(kafkaProducer);
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN,
-                    new BigDecimal("-1"), null, null, 1, DATE, 1, 0);
+                    new BigDecimal("-1"), null, null, 1, DATE, 1, 0, null);
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isNull();
         }
     }

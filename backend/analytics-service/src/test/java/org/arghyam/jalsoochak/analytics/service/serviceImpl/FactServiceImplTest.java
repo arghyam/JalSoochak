@@ -134,6 +134,98 @@ class FactServiceImplTest {
     }
 
     @Test
+    void ingestMeterReading_carriesTheSubmissionCorrelationIdIntoTheFactRow() {
+        // ANOMALY-SUBMISSION-LINK: without this the warehouse has no counterpart for an anomaly's
+        // submission_correlation_id, and the two can only be matched by scheme and day.
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setExtractedReading(m3("100.4"));
+        event.setConfirmedReading(m3("95.7"));
+        event.setReadingAt("2026-01-01T10:15:00");
+        event.setReadingDate("2026-01-01");
+        event.setCorrelationId("flow-corr-77");
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+                .thenReturn(false);
+
+        service.ingestMeterReading(event);
+
+        ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
+        verify(meterReadingRepository).save(captor.capture());
+        assertThat(captor.getValue().getCorrelationId()).isEqualTo("flow-corr-77");
+    }
+
+    @Test
+    void ingestMeterReading_fromAnOlderTelemetryLeavesTheCorrelationIdNull() {
+        // The field is additive: this service is deployed first and must take events that predate it.
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setExtractedReading(m3("100.4"));
+        event.setConfirmedReading(m3("95.7"));
+        event.setReadingAt("2026-01-01T10:15:00");
+        event.setReadingDate("2026-01-01");
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+                .thenReturn(false);
+
+        service.ingestMeterReading(event);
+
+        ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
+        verify(meterReadingRepository).save(captor.capture());
+        assertThat(captor.getValue().getCorrelationId()).isNull();
+    }
+
+    @Test
+    void ingestAnomalyRecorded_storesTheSubmissionLinkWithoutDisturbingTheDedupKey() {
+        // ANOMALY-SUBMISSION-LINK: the two ids answer different questions and must both survive —
+        // correlationId is what uuid dedup is keyed on, submissionCorrelationId is the pointer.
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("anom-uuid-1");
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setType(10);
+        event.setStatus(1);
+        event.setReason("Submitted reading implies an implausible daily water supply for this scheme.");
+        event.setCorrelationId("dedup-key");
+        event.setSubmissionCorrelationId("flow-corr-77");
+        when(anomalyRepository.existsByUuid("anom-uuid-1")).thenReturn(false);
+
+        service.ingestAnomalyRecorded(event);
+
+        ArgumentCaptor<Anomaly> captor = ArgumentCaptor.forClass(Anomaly.class);
+        verify(anomalyRepository).save(captor.capture());
+        assertThat(captor.getValue().getSubmissionCorrelationId()).isEqualTo("flow-corr-77");
+        assertThat(captor.getValue().getCorrelationId()).isEqualTo("dedup-key");
+    }
+
+    @Test
+    void ingestAnomalyRecorded_withNoSubmissionBehindItLeavesTheLinkNull() {
+        // Type 9 NO_SUBMISSION: nothing was submitted, so there is nothing to point at. The link
+        // must stay NULL rather than be synthesised the way correlationId can be.
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("anom-uuid-2");
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setType(9);
+        event.setStatus(1);
+        event.setReason("Meter not working.");
+        event.setCorrelationId("issue-report-1");
+        when(anomalyRepository.existsByUuid("anom-uuid-2")).thenReturn(false);
+
+        service.ingestAnomalyRecorded(event);
+
+        ArgumentCaptor<Anomaly> captor = ArgumentCaptor.forClass(Anomaly.class);
+        verify(anomalyRepository).save(captor.capture());
+        assertThat(captor.getValue().getSubmissionCorrelationId()).isNull();
+    }
+
+    @Test
     void ingestMeterReading_mapsAndSavesFactEntity() {
         MeterReadingEvent event = new MeterReadingEvent();
         event.setTenantId(1);

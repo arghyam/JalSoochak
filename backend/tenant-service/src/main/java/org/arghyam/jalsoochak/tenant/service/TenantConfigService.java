@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.tenant.service;
 import org.arghyam.jalsoochak.tenant.config.DailyReportScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
+import org.arghyam.jalsoochak.tenant.config.WeeklyReportScheduleConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ public class TenantConfigService {
     private static final String NUDGE_KEY = "PUMP_OPERATOR_REMINDER_NUDGE_TIME";
     private static final String ESCALATION_KEY = "FIELD_STAFF_ESCALATION_RULES";
     private static final String DAILY_REPORT_KEY = "DAILY_SITUATION_REPORT_TIME";
+    private static final String WEEKLY_REPORT_KEY = "WEEKLY_SITUATION_REPORT_TIME";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -53,11 +55,25 @@ public class TenantConfigService {
     @Value("${escalation.level2.officer.user_type:DISTRICT_OFFICER}")
     private String defaultLevel2OfficerType;
 
-    @Value("${daily-report.schedule.hour:6}")
+    @Value("${daily-report.schedule.hour:16}")
     private int defaultDailyReportHour;
 
     @Value("${daily-report.schedule.minute:0}")
     private int defaultDailyReportMinute;
+
+    /** 1 = Monday, in the cron convention 0–7 where both 0 and 7 are Sunday. */
+    @Value("${weekly-report.schedule.day-of-week:1}")
+    private int defaultWeeklyReportDayOfWeek;
+
+    @Value("${weekly-report.schedule.hour:9}")
+    private int defaultWeeklyReportHour;
+
+    @Value("${weekly-report.schedule.minute:0}")
+    private int defaultWeeklyReportMinute;
+
+    /** Day the reported week begins on, same cron convention. 1 = Monday, i.e. a Monday–Sunday week. */
+    @Value("${weekly-report.week-start-day:1}")
+    private int defaultWeeklyReportWeekStartDay;
 
     public NudgeScheduleConfig getNudgeConfig(int tenantId) {
         String json = fetchConfigValue(tenantId, NUDGE_KEY);
@@ -117,6 +133,46 @@ public class TenantConfigService {
         return DailyReportScheduleConfig.builder()
                 .hour(defaultDailyReportHour)
                 .minute(defaultDailyReportMinute)
+                .build();
+    }
+
+    /**
+     * Schedule and reporting window for the Weekly Water Service Situation Report (both SO and SDO),
+     * from config key {@code WEEKLY_SITUATION_REPORT_TIME}:
+     * {@code {"weeklyReport":{"schedule":{"dayOfWeek":1,"hour":9,"minute":0},"weekStartDay":1}}}.
+     *
+     * <p>{@code schedule} says when the job fires; {@code weekStartDay} — a sibling of it, not a cron
+     * field — says which seven days the report covers. Both use the cron convention 0–7.</p>
+     *
+     * <p>A missing row or an unparseable value degrades to the application defaults rather than
+     * throwing — a tenant with bad config still gets its report on the default schedule instead of
+     * silently getting none. Per-field too: an absent or {@code null} {@code weekStartDay} falls back
+     * to the default, while an explicit {@code 0} is honoured as Sunday.</p>
+     */
+    public WeeklyReportScheduleConfig getWeeklyReportConfig(int tenantId) {
+        String json = fetchConfigValue(tenantId, WEEKLY_REPORT_KEY);
+        if (json == null) return defaultWeeklyReportConfig();
+        try {
+            JsonNode weekly = objectMapper.readTree(json).path("weeklyReport");
+            JsonNode sched = weekly.path("schedule");
+            return WeeklyReportScheduleConfig.builder()
+                    .dayOfWeek(sched.path("dayOfWeek").asInt(defaultWeeklyReportDayOfWeek))
+                    .hour(sched.path("hour").asInt(defaultWeeklyReportHour))
+                    .minute(sched.path("minute").asInt(defaultWeeklyReportMinute))
+                    .weekStartDay(weekly.path("weekStartDay").asInt(defaultWeeklyReportWeekStartDay))
+                    .build();
+        } catch (Exception e) {
+            log.warn("[TenantConfig] Failed to parse weekly-report config for tenant={}: {}", tenantId, e.getMessage());
+            return defaultWeeklyReportConfig();
+        }
+    }
+
+    private WeeklyReportScheduleConfig defaultWeeklyReportConfig() {
+        return WeeklyReportScheduleConfig.builder()
+                .dayOfWeek(defaultWeeklyReportDayOfWeek)
+                .hour(defaultWeeklyReportHour)
+                .minute(defaultWeeklyReportMinute)
+                .weekStartDay(defaultWeeklyReportWeekStartDay)
                 .build();
     }
 

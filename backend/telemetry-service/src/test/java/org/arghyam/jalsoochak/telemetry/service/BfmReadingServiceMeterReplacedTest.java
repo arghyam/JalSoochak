@@ -11,6 +11,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnap
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -95,8 +96,8 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
-        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
+        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.createFlowReading(
                 anyString(),
@@ -150,7 +151,7 @@ class BfmReadingServiceMeterReplacedTest {
                 anyString(),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
                 anyString()
-        );
+        , any());
     }
 
     @Test
@@ -169,7 +170,7 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("800"), LocalDateTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("800"), ReadingTime.now().minusDays(1))));
 
         when(tenantConfigRepository.findConfigValue(1, "TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD"))
                 .thenReturn(Optional.empty());
@@ -177,7 +178,7 @@ class BfmReadingServiceMeterReplacedTest {
                 .thenReturn(Optional.of("{\"undersupplyThresholdPercent\":10,\"oversupplyThresholdPercent\":20}"));
         when(tenantConfigRepository.findConfigValue(1, "WATER_NORM"))
                 .thenReturn(Optional.of("{\"value\":\"1000\"}"));
-        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.now()))
+        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.createFlowReading(
                 anyString(),
@@ -218,7 +219,7 @@ class BfmReadingServiceMeterReplacedTest {
         String schemaName = "tenant_test";
         TelemetryOperator operator = new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null);
 
-        LocalDateTime readingAt = LocalDateTime.now();
+        LocalDateTime readingAt = ReadingTime.now();
         CreateReadingRequest request = CreateReadingRequest.builder()
                 .schemeId(10L)
                 .operatorId(1L)
@@ -232,7 +233,7 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
 
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.from(readingAt)))
                 .thenReturn(Optional.empty());
