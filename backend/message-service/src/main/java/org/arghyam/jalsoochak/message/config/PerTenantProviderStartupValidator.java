@@ -1,10 +1,9 @@
 package org.arghyam.jalsoochak.message.config;
 
 import org.arghyam.jalsoochak.message.service.SecretCryptoService;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -21,9 +20,14 @@ import lombok.extern.slf4j.Slf4j;
  * per-tenant providers needs no new environment variable, so turning the feature on is the only
  * thing that makes {@code MESSAGING_SECRET_MASTER_KEY_V<n>} mandatory.
  *
- * <p>It runs on {@link ApplicationReadyEvent} rather than in a constructor so that a misconfigured
- * environment produces one clear message after the context has built, next to the other startup
- * checks in this service, rather than a bean creation failure buried in a cascade.
+ * <p>It runs in {@link PostConstruct}, the same point {@code SingleTenantModeStartupValidator}
+ * checks its invariant at, because the check has to complete before any message is consumed.
+ * {@code KafkaListenerEndpointRegistry} is a {@code SmartLifecycle} started inside
+ * {@code finishRefresh()} and {@code ApplicationReadyEvent} is published after that, so a check
+ * deferred to the event would let {@code NotificationEventRouter} drain {@code common-topic} —
+ * every message in that window falling back to the platform's account — before it ever ran.
+ * Spring surfaces the {@link IllegalStateException} below as the cause of a
+ * {@code BeanCreationException}, so the message an operator needs is still the one they see.
  */
 @Component
 @RequiredArgsConstructor
@@ -33,7 +37,7 @@ public class PerTenantProviderStartupValidator {
     private final PerTenantProviderProperties properties;
     private final SecretCryptoService cryptoService;
 
-    @EventListener(ApplicationReadyEvent.class)
+    @PostConstruct
     public void validate() {
         if (!properties.isEnabled()) {
             log.info("[Providers] notification.per-tenant-providers.enabled=false: every send uses the"

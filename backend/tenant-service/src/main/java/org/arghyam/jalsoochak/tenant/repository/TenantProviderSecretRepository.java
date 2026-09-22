@@ -37,6 +37,13 @@ public class TenantProviderSecretRepository {
     /** Status of a superseded key version, kept for audit. */
     public static final String KEY_STATUS_RETIRED = "RETIRED";
 
+    /**
+     * Advisory-lock namespace for this table. The number itself is arbitrary — it only has to be
+     * distinct from the other advisory locks this service takes, which
+     * {@code TenantSchemaRepository} keys on a schema name in the same way.
+     */
+    private static final int SECRET_KEY_LOCK_NAMESPACE = "common_schema.tenant_secret_key".hashCode();
+
     private final JdbcTemplate jdbcTemplate;
 
     private static final RowMapper<TenantSecretKeyDTO> SECRET_KEY_ROW_MAPPER = (rs, rowNum) -> TenantSecretKeyDTO
@@ -77,6 +84,36 @@ public class TenantProviderSecretRepository {
             .build();
 
     // ── tenant_secret_key ───────────────────────────────────────────────────────
+
+    /**
+     * Serialises changes to one tenant's key rows for the rest of the surrounding transaction.
+     *
+     * <p>Every write to this table reads it first and then decides what to insert:
+     * {@code getOrCreateActiveKey} inserts only if no ACTIVE row exists, and a rotation retires
+     * the row it just read before inserting the next version. {@code uq_tenant_secret_key_active}
+     * (V44) permits one ACTIVE row per tenant, so two of those running at once — a state admin
+     * setting EMAIL and SMS secrets in parallel on a tenant with no key yet, or a provisioning
+     * script retrying — both read the same state, both write, and the loser fails the constraint.
+     * That surfaces as a 500 on an operation the caller did nothing wrong in.
+     *
+     * <p>Catching the violation and re-reading instead would not work: the callers are
+     * {@code @Transactional}, and PostgreSQL aborts the whole transaction on a constraint error, so
+     * no statement after it can run. The read has to be the thing that is protected.
+     *
+     * <p>Keyed on the tenant, so two tenants never wait on each other, and transaction-scoped, so
+     * it is released on commit or rollback with no unlock call. It must therefore be taken inside
+     * a transaction: outside one it is released immediately and guards nothing.
+     */
+    public void lockKeys(Integer tenantId) {
+        // Two int keys rather than a concatenated string: no SQL built from input, and the pair
+        // distributes better. Same form as TenantSchemaRepository's hierarchy lock.
+        jdbcTemplate.query("SELECT pg_advisory_xact_lock(?, ?)",
+                ps -> {
+                    ps.setInt(1, SECRET_KEY_LOCK_NAMESPACE);
+                    ps.setInt(2, tenantId);
+                },
+                rs -> null);
+    }
 
     /** The tenant's usable key version, or empty if no secret has ever been written for it. */
     public Optional<TenantSecretKeyDTO> findActiveKey(Integer tenantId) {

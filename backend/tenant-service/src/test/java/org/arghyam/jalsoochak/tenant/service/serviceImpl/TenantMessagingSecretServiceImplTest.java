@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
@@ -47,6 +48,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.MockedStatic;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -240,6 +242,34 @@ class TenantMessagingSecretServiceImplTest {
                     eq(MASTER_V1), eq(ADMIN_USER));
             // The wrapped key really is unwrappable for this tenant and version.
             assertThat(crypto.unwrapDataKey(wrapped.getValue(), TENANT_MP, 1, MASTER_V1)).hasSize(32);
+        }
+
+        @Test
+        @DisplayName("Takes the tenant's key lock before deciding whether to create one")
+        void locksBeforeDecidingToCreateADataKey() {
+            // The read and the insert are one decision. Without the lock, two admins setting EMAIL
+            // and SMS secrets in parallel on a tenant with no key both see none, both compute
+            // version 1, and the loser fails uq_tenant_secret_key_active as a 500. The lock has to
+            // precede the read: taking it after would leave the read it protects unprotected.
+            givenOnboardedTenant();
+            givenCurrentUser();
+            when(secretRepository.findActiveKey(TENANT_MP)).thenReturn(Optional.empty());
+            when(secretRepository.findMaxKeyVersion(TENANT_MP)).thenReturn(0);
+            when(secretRepository.insertActiveKey(eq(TENANT_MP), eq(1), anyString(), eq(MASTER_V1), eq(ADMIN_USER)))
+                    .thenAnswer(inv -> TenantSecretKeyDTO.builder()
+                            .id(1).tenantId(TENANT_MP).keyVersion(1)
+                            .wrappedKey(inv.getArgument(2)).masterKeyId(MASTER_V1)
+                            .status(TenantProviderSecretRepository.KEY_STATUS_ACTIVE).build());
+            when(secretRepository.findByTenantAndChannel(TENANT_MP, MessagingChannel.EMAIL))
+                    .thenReturn(List.of());
+
+            service.setSecrets(TENANT_MP, MessagingChannel.EMAIL, request(Map.of("apiKey", "SG.key")));
+
+            InOrder order = inOrder(secretRepository);
+            order.verify(secretRepository).lockKeys(TENANT_MP);
+            order.verify(secretRepository).findActiveKey(TENANT_MP);
+            order.verify(secretRepository).insertActiveKey(eq(TENANT_MP), eq(1), anyString(),
+                    eq(MASTER_V1), eq(ADMIN_USER));
         }
 
         @Test
@@ -613,6 +643,34 @@ class TenantMessagingSecretServiceImplTest {
     @Nested
     @DisplayName("rotateTenantDataKey")
     class RotateTenantDataKey {
+
+        @Test
+        @DisplayName("Takes the tenant's key lock before reading the version it will retire")
+        void locksBeforeReadingTheKeyItRetires() {
+            // The row read here is the one retired below, so two rotations at once would both read
+            // version n, both retire it — the second WHERE status = 'ACTIVE' matching nothing — and
+            // both insert version n+1.
+            givenOnboardedTenant();
+            givenCurrentUser();
+            TenantSecretKeyDTO oldKey = realKeyRow(1, MASTER_V1, crypto);
+            when(secretRepository.findActiveKey(TENANT_MP)).thenReturn(Optional.of(oldKey));
+            when(secretRepository.findMaxKeyVersion(TENANT_MP)).thenReturn(1);
+            when(secretRepository.findByTenant(TENANT_MP)).thenReturn(List.of());
+            when(secretRepository.insertActiveKey(eq(TENANT_MP), eq(2), anyString(), eq(MASTER_V1), eq(ADMIN_USER)))
+                    .thenAnswer(inv -> TenantSecretKeyDTO.builder()
+                            .id(2).tenantId(TENANT_MP).keyVersion(2)
+                            .wrappedKey(inv.getArgument(2)).masterKeyId(MASTER_V1)
+                            .status(TenantProviderSecretRepository.KEY_STATUS_ACTIVE).build());
+
+            service.rotateTenantDataKey(TENANT_MP);
+
+            InOrder order = inOrder(secretRepository);
+            order.verify(secretRepository).lockKeys(TENANT_MP);
+            order.verify(secretRepository).findActiveKey(TENANT_MP);
+            order.verify(secretRepository).retireKey(oldKey.getId(), ADMIN_USER);
+            order.verify(secretRepository).insertActiveKey(eq(TENANT_MP), eq(2), anyString(),
+                    eq(MASTER_V1), eq(ADMIN_USER));
+        }
 
         @Test
         @DisplayName("Re-encrypts the tenant's secrets under a new key version, unchanged in value")

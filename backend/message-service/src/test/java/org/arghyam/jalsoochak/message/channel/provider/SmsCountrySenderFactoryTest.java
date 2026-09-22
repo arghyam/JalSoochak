@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.message.channel.provider;
 
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 
 import org.arghyam.jalsoochak.message.config.SmsCountryProperties;
@@ -175,6 +176,66 @@ class SmsCountrySenderFactoryTest {
                 secrets(TENANT_A_KEY, TENANT_A_TOKEN)))
                 .isInstanceOf(ProviderNotUsableException.class)
                 .hasMessageContaining("smscountry.dltHeaderId");
+    }
+
+    @Test
+    void create_missingOrBlankSecrets_areRefused() {
+        // TenantSecretResolver checks that a secret row exists, not that it decrypts to anything,
+        // so an empty value reaches the factory. A blank key would build /Accounts//SMSes/ — a
+        // wrong request rather than a refused one — and a blank token a permanent 401.
+        assertThatThrownBy(() -> factory.create(
+                settings("SENDER-A", "pe-a", "tmpl-a", "hdr-a", null),
+                TenantSecrets.of(MessagingChannel.SMS,
+                        Map.of(SmsCountrySenderFactory.SECRET_AUTH_TOKEN, TENANT_A_TOKEN))))
+                .isInstanceOf(ProviderNotUsableException.class)
+                .hasMessageContaining(SmsCountrySenderFactory.SECRET_AUTH_KEY);
+
+        assertThatThrownBy(() -> factory.create(
+                settings("SENDER-A", "pe-a", "tmpl-a", "hdr-a", null),
+                secrets("   ", TENANT_A_TOKEN)))
+                .isInstanceOf(ProviderNotUsableException.class)
+                .hasMessageContaining(SmsCountrySenderFactory.SECRET_AUTH_KEY);
+
+        assertThatThrownBy(() -> factory.create(
+                settings("SENDER-A", "pe-a", "tmpl-a", "hdr-a", null),
+                TenantSecrets.of(MessagingChannel.SMS,
+                        Map.of(SmsCountrySenderFactory.SECRET_AUTH_KEY, TENANT_A_KEY))))
+                .isInstanceOf(ProviderNotUsableException.class)
+                .hasMessageContaining(SmsCountrySenderFactory.SECRET_AUTH_TOKEN);
+
+        assertThatThrownBy(() -> factory.create(
+                settings("SENDER-A", "pe-a", "tmpl-a", "hdr-a", null),
+                secrets(TENANT_A_KEY, "   ")))
+                .isInstanceOf(ProviderNotUsableException.class)
+                .hasMessageContaining(SmsCountrySenderFactory.SECRET_AUTH_TOKEN);
+    }
+
+    @Test
+    void create_authKeyCarryingUriSyntax_isRefused() {
+        // The key is also the /Accounts/{authKey}/ path segment of every request this account
+        // makes. SmsCountrySender percent-encodes it, so this is the second defence rather than
+        // the only one — but refusing here is what turns a hostile or malformed key into one ERROR
+        // and the system default instead of a request to a path SMSCountry will not recognise.
+        // The dot is refused with the rest: it survives encoding, so '..' would still traverse.
+        for (String hostileKey : List.of("a/../../admin", "a?x=1", "a{0}", "a b", "a.b")) {
+            assertThatThrownBy(() -> factory.create(
+                    settings("SENDER-A", "pe-a", "tmpl-a", "hdr-a", null),
+                    secrets(hostileKey, TENANT_A_TOKEN)))
+                    .isInstanceOf(ProviderNotUsableException.class)
+                    .hasMessageContaining(SmsCountrySenderFactory.SECRET_AUTH_KEY);
+        }
+    }
+
+    @Test
+    void create_refusedAuthKey_isNotQuotedInTheFailure() {
+        // S-4: the key is half of this account's basic-auth pair, and TenantChannelProviders logs a
+        // ProviderNotUsableException message in full.
+        String hostileKey = "a/../../admin";
+
+        assertThatThrownBy(() -> factory.create(
+                settings("SENDER-A", "pe-a", "tmpl-a", "hdr-a", null),
+                secrets(hostileKey, TENANT_A_TOKEN)))
+                .hasMessageNotContaining(hostileKey);
     }
 
     @Test

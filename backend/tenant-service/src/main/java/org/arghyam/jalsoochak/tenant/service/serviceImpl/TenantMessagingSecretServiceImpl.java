@@ -171,6 +171,10 @@ public class TenantMessagingSecretServiceImpl implements TenantMessagingSecretSe
         TenantResponseDTO tenant = requireConfigurableTenant(tenantId);
         Integer currentUserId = resolveCurrentUserId();
 
+        // Same lock as the create-on-first-write path, and for the same reason: the row read here
+        // is the one retired below, so two rotations at once would both retire it and both insert
+        // the same next version.
+        secretRepository.lockKeys(tenantId);
         TenantSecretKeyDTO current = secretRepository.findActiveKey(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Tenant with tenantId " + tenantId + " has no messaging secret key to rotate"));
@@ -258,8 +262,16 @@ public class TenantMessagingSecretServiceImpl implements TenantMessagingSecretSe
         return normalised;
     }
 
-    /** Creates the tenant's first data key on demand, so writing a secret needs no provisioning step. */
+    /**
+     * Creates the tenant's first data key on demand, so writing a secret needs no provisioning
+     * step.
+     *
+     * <p>The read and the insert are one decision, so they are taken under
+     * {@link TenantProviderSecretRepository#lockKeys} — without it, two secret writes issued in
+     * parallel for a tenant with no key yet both see none and both insert version 1.
+     */
     private TenantSecretKeyDTO getOrCreateActiveKey(Integer tenantId, Integer currentUserId) {
+        secretRepository.lockKeys(tenantId);
         return secretRepository.findActiveKey(tenantId).orElseGet(() -> {
             String masterKeyId = secretCryptoService.getActiveMasterKeyId();
             int version = secretRepository.findMaxKeyVersion(tenantId) + 1;

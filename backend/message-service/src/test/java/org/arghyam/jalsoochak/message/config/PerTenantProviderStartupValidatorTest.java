@@ -1,8 +1,10 @@
 package org.arghyam.jalsoochak.message.config;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.lang.reflect.Method;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -11,6 +13,9 @@ import java.util.Map;
 import org.arghyam.jalsoochak.message.service.SecretCryptoService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.event.EventListener;
+
+import jakarta.annotation.PostConstruct;
 
 /**
  * PER-TENANT-PROVIDERS: unit tests for {@link PerTenantProviderStartupValidator}.
@@ -72,6 +77,20 @@ class PerTenantProviderStartupValidatorTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("no messaging.secret.master-keys entry is configured")
                 .hasMessageContaining("MESSAGING_SECRET_MASTER_KEY_V");
+    }
+
+    @Test
+    @DisplayName("the check runs before the Kafka listeners start")
+    void checkRunsBeforeTheKafkaListenersStart() throws Exception {
+        // The lifecycle point is the whole value of the check. KafkaListenerEndpointRegistry is a
+        // SmartLifecycle started inside finishRefresh(), which precedes ApplicationReadyEvent: a
+        // check deferred to that event would let NotificationEventRouter drain common-topic first,
+        // and every message in that window would send from the platform's account. @PostConstruct
+        // is the point SingleTenantModeStartupValidator uses, and it is before any container starts.
+        Method validate = PerTenantProviderStartupValidator.class.getDeclaredMethod("validate");
+
+        assertThat(validate.isAnnotationPresent(PostConstruct.class)).isTrue();
+        assertThat(validate.isAnnotationPresent(EventListener.class)).isFalse();
     }
 
     @Test

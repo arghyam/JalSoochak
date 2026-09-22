@@ -53,9 +53,14 @@ class SmsCountrySenderTest {
 
     /** @param otpTemplate the tenant's own text, or null for the default one */
     private SmsCountrySettings settings(String otpTemplate) {
+        return settings(otpTemplate, AUTH_KEY);
+    }
+
+    /** @param authKey the account key, which is also a path segment of the endpoint */
+    private SmsCountrySettings settings(String otpTemplate, String authKey) {
         return new SmsCountrySettings(
                 wireMockServer.baseUrl() + "/v0.1",
-                AUTH_KEY, AUTH_TOKEN, SENDER_ID,
+                authKey, AUTH_TOKEN, SENDER_ID,
                 DLT_PE_ID, DLT_TEMPLATE_ID, DLT_HEADER_ID,
                 otpTemplate == null
                         ? SmsProviderSettings.SmsCountry.DEFAULT_OTP_TEMPLATE
@@ -229,6 +234,29 @@ class SmsCountrySenderTest {
 
         wireMockServer.verify(postRequestedFor(urlEqualTo(SMS_PATH))
                 .withRequestBody(containing("OTP: 135791. Do not share.")));
+    }
+
+    @Test
+    void sendOtp_authKeyCarryingUriSyntax_goesOutAsOneEncodedPathSegment() {
+        // PER-TENANT-PROVIDERS: the key is a per-tenant secret a state admin writes. Spliced into a
+        // string and handed to WebClient.uri(String) it would be read as a URI template, moving the
+        // POST — and with it that tenant's basic-auth pair — to a path of the writer's choosing.
+        String hostileKey = "a/../../admin?x=1";
+        wireMockServer.stubFor(post(anyUrl())
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody(SUCCESS_RESPONSE)));
+
+        new SmsCountrySender(WebClient.builder(), settings(null, hostileKey), false)
+                .sendOtp("919876543210", "123456", 5).block();
+
+        String requested = wireMockServer.findAll(postRequestedFor(anyUrl())).get(0).getUrl();
+        assertThat(requested)
+                .startsWith("/v0.1/Accounts/")
+                .endsWith("/SMSes/")
+                .doesNotContain("/../")
+                .doesNotContain("?");
     }
 
     @Test

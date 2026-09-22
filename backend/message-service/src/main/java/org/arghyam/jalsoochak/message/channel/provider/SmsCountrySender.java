@@ -6,7 +6,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
@@ -39,6 +41,7 @@ public class SmsCountrySender implements SmsSender {
 
     private final WebClient webClient;
     private final SmsCountrySettings settings;
+    private final URI endpoint;
     private final OtpMessageTemplate otpTemplate;
     private final boolean dryRun;
 
@@ -52,8 +55,35 @@ public class SmsCountrySender implements SmsSender {
     public SmsCountrySender(WebClient.Builder webClientBuilder, SmsCountrySettings settings, boolean dryRun) {
         this.webClient = webClientBuilder.build();
         this.settings = settings;
+        this.endpoint = endpointFor(settings);
         this.otpTemplate = OtpMessageTemplate.compile(settings.otpTemplate());
         this.dryRun = dryRun;
+    }
+
+    /**
+     * {@code {baseUrl}/Accounts/{authKey}/SMSes/}, with the key as one percent-encoded path
+     * segment.
+     *
+     * <p>PER-TENANT-PROVIDERS: the key used to come from {@code smscountry.auth-key}, so
+     * concatenating it into a string and handing that to {@code WebClient.uri(String)} was
+     * harmless. It is now a per-tenant secret a state admin writes, and that overload reads its
+     * argument as a URI <em>template</em>: a key of {@code a/../../x} or {@code a?y=} would be
+     * parsed as URI syntax and move the POST — which carries that tenant's own basic-auth pair —
+     * to a path of the writer's choosing. Building the segment through
+     * {@link UriComponentsBuilder} and passing the resulting {@link URI} encodes the key instead of
+     * interpreting it, and {@code SmsCountrySenderFactory} rejects a key outside
+     * {@code [A-Za-z0-9_-]} before it ever reaches here.
+     *
+     * <p>The trailing slash is appended explicitly because {@code pathSegment} does not emit one
+     * and the endpoint this adapter has always called ends in one.
+     */
+    private static URI endpointFor(SmsCountrySettings settings) {
+        return UriComponentsBuilder.fromUriString(settings.baseUrl())
+                .pathSegment("Accounts", settings.authKey(), "SMSes")
+                .path("/")
+                .build()
+                .encode()
+                .toUri();
     }
 
     /**
@@ -77,11 +107,9 @@ public class SmsCountrySender implements SmsSender {
             return Mono.just(true);
         }
 
-        String authKey = settings.authKey();
         String text = otpTemplate.render(otp, expiryMinutes);
-        String url = settings.baseUrl() + "/Accounts/" + authKey + "/SMSes/";
-        String credentials = Base64.getEncoder()
-                .encodeToString((authKey + ":" + settings.authToken()).getBytes(StandardCharsets.UTF_8));
+        String credentials = Base64.getEncoder().encodeToString(
+                (settings.authKey() + ":" + settings.authToken()).getBytes(StandardCharsets.UTF_8));
 
         Map<String, String> body = Map.of(
                 "Text", text,
@@ -94,7 +122,8 @@ public class SmsCountrySender implements SmsSender {
         );
 
         return webClient.post()
-                .uri(url)
+                // The URI overload: the String one would expand the path as a URI template.
+                .uri(endpoint)
                 .header(HttpHeaders.AUTHORIZATION, "Basic " + credentials)
                 .header(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
                 .contentType(MediaType.APPLICATION_JSON)

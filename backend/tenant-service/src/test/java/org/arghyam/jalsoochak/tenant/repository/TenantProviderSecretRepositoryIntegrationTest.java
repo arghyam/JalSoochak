@@ -6,7 +6,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,6 +33,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -112,6 +118,9 @@ class TenantProviderSecretRepositoryIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     @BeforeEach
     void cleanup() {
         jdbcTemplate.update("DELETE FROM common_schema.tenant_provider_secret");
@@ -127,6 +136,25 @@ class TenantProviderSecretRepositoryIntegrationTest {
 
     private TenantProviderSecretDTO givenSecret(int tenantId, MessagingChannel channel, String name, int keyVersion) {
         return repository.upsertSecret(tenantId, channel, name, CIPHERTEXT, keyVersion, ADMIN_USER);
+    }
+
+    /**
+     * Runs a query on a connection of its own. An advisory lock leaves nothing the session holding
+     * it can assert on, so every check below has to look at it from outside.
+     */
+    private static List<Long> onAnotherSession(String sql) {
+        try (Connection other = DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+                Statement statement = other.createStatement();
+                ResultSet rs = statement.executeQuery(sql)) {
+            List<Long> values = new ArrayList<>();
+            while (rs.next()) {
+                values.add(rs.getLong(1));
+            }
+            return values;
+        } catch (SQLException e) {
+            throw new IllegalStateException(sql, e);
+        }
     }
 
     // ── migration ───────────────────────────────────────────────────────────────
@@ -316,6 +344,68 @@ class TenantProviderSecretRepositoryIntegrationTest {
             assertThat(key.toString())
                     .contains("tenantId=101", "keyVersion=1", "masterKeyId=v1", "status=ACTIVE")
                     .doesNotContain("wrapped-101-1");
+        }
+    }
+
+    // ── key lock ────────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Key lock")
+    class KeyLock {
+
+        /**
+         * The two-argument {@code pg_advisory_xact_lock(int, int)} is recorded with the first key
+         * in {@code classid}, the second in {@code objid} and {@code objsubid = 2}.
+         */
+        private static final String HELD_TENANT_IDS =
+                "SELECT objid::bigint FROM pg_locks WHERE locktype = 'advisory' AND objsubid = 2";
+
+        private static final String HELD_NAMESPACES =
+                "SELECT classid::bigint FROM pg_locks WHERE locktype = 'advisory' AND objsubid = 2";
+
+        @Test
+        @DisplayName("Locks the tenant it was given, and only until the transaction ends")
+        void isKeyedOnTheTenantAndEndsWithTheTransaction() {
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                repository.lockKeys(TENANT_MP);
+
+                assertThat(onAnotherSession(HELD_TENANT_IDS)).containsExactly((long) TENANT_MP);
+            });
+
+            // Transaction-scoped: nothing has to unlock it, and nothing is left holding it once the
+            // surrounding transaction commits or rolls back.
+            assertThat(onAnotherSession(HELD_TENANT_IDS)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Shuts out a second writer for the same tenant, never for another")
+        void excludesTheSameTenantOnly() {
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                repository.lockKeys(TENANT_MP);
+                int namespace = Math.toIntExact(onAnotherSession(HELD_NAMESPACES).get(0));
+
+                // The second admin writing this tenant's secrets waits, rather than reading the key
+                // state the first one is part-way through changing.
+                assertThat(tryLockOnAnotherSession(namespace, TENANT_MP)).isFalse();
+                // Another tenant's write is untouched: the lock is per tenant, not per table.
+                assertThat(tryLockOnAnotherSession(namespace, TENANT_TR)).isTrue();
+            });
+        }
+
+        private boolean tryLockOnAnotherSession(int namespace, int tenantId) {
+            try (Connection other = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+                    PreparedStatement ps = other.prepareStatement(
+                            "SELECT pg_try_advisory_xact_lock(?, ?)")) {
+                ps.setInt(1, namespace);
+                ps.setInt(2, tenantId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    return rs.getBoolean(1);
+                }
+            } catch (SQLException e) {
+                throw new IllegalStateException(e);
+            }
         }
     }
 

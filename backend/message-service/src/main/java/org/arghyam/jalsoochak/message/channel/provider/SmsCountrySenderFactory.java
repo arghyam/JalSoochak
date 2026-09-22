@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.message.channel.provider;
 
+import java.util.regex.Pattern;
+
 import org.arghyam.jalsoochak.message.config.SmsCountryProperties;
 import org.arghyam.jalsoochak.message.dto.SmsProviderSettings;
 import org.arghyam.jalsoochak.message.dto.TenantSecrets;
@@ -38,6 +40,21 @@ public class SmsCountrySenderFactory implements SmsSenderFactory {
     static final String SECRET_AUTH_KEY = "authKey";
     static final String SECRET_AUTH_TOKEN = "authToken";
 
+    /**
+     * What an SMSCountry account key may contain. The key is not only the basic-auth username: it
+     * is also the {@code /Accounts/{authKey}/} path segment of every request this account makes,
+     * so a value outside this set is a value that decides part of a URL.
+     *
+     * <p>{@code SmsCountrySender} percent-encodes the segment, which is the defence that matters;
+     * this is the second one, and it is here rather than there because a shape this factory refuses
+     * costs the tenant one ERROR and the system default (O2-9), while a value that reaches the
+     * sender costs it a request to a path SMSCountry will not recognise.
+     *
+     * <p>The dot is deliberately excluded. It needs no encoding, so {@code ..} would survive
+     * encoding unchanged and still traverse; no real account key contains one.
+     */
+    private static final Pattern AUTH_KEY_PATTERN = Pattern.compile("[A-Za-z0-9_-]+");
+
     private final WebClient.Builder webClientBuilder;
     private final SmsCountryProperties properties;
     private final boolean dryRun;
@@ -67,8 +84,8 @@ public class SmsCountrySenderFactory implements SmsSenderFactory {
         // outage; refusing to build the sender turns that into one ERROR and the system default.
         SmsCountrySettings resolved = new SmsCountrySettings(
                 properties.baseUrl(),
-                secrets.get(SECRET_AUTH_KEY),
-                secrets.get(SECRET_AUTH_TOKEN),
+                requireAuthKey(secrets.get(SECRET_AUTH_KEY)),
+                requireSecret(secrets.get(SECRET_AUTH_TOKEN), SECRET_AUTH_TOKEN),
                 require(block.senderId(), "smscountry.senderId"),
                 require(block.dltPrincipalEntityId(), "smscountry.dltPrincipalEntityId"),
                 require(block.dltTemplateId(), "smscountry.dltTemplateId"),
@@ -83,5 +100,34 @@ public class SmsCountrySenderFactory implements SmsSenderFactory {
             throw new ProviderNotUsableException(field + " is required but is not set");
         }
         return value.trim();
+    }
+
+    /**
+     * A stored secret is present by the time {@code TenantChannelProviders} calls this — but only
+     * by name: {@code TenantSecretResolver.resolveAll} checks that a row exists, not that it
+     * decrypts to anything. A blank key would produce {@code /Accounts//SMSes/}, which is a wrong
+     * request rather than a refused one.
+     *
+     * <p>Not trimmed, unlike the settings above: silently altering a credential turns a bad value
+     * into a 401 with nothing in the logs to explain it. A key with stray whitespace is refused by
+     * {@link #AUTH_KEY_PATTERN} instead, with a message that names the rule.
+     */
+    private static String requireSecret(String value, String name) {
+        if (value == null || value.isBlank()) {
+            throw new ProviderNotUsableException(
+                    "secret '" + name + "' is required but is not set");
+        }
+        return value;
+    }
+
+    /** Never names the value: the key is half of this account's basic-auth pair (S-4). */
+    private static String requireAuthKey(String value) {
+        String authKey = requireSecret(value, SECRET_AUTH_KEY);
+        if (!AUTH_KEY_PATTERN.matcher(authKey).matches()) {
+            throw new ProviderNotUsableException("secret '" + SECRET_AUTH_KEY
+                    + "' must match " + AUTH_KEY_PATTERN.pattern()
+                    + "; it is sent as a path segment of every request");
+        }
+        return authKey;
     }
 }
