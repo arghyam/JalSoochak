@@ -20,6 +20,8 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService;
+import org.arghyam.jalsoochak.telemetry.service.location.ReadingSubmission;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
 import org.arghyam.jalsoochak.telemetry.service.water.Verdict;
@@ -57,6 +59,10 @@ public class BfmReadingService {
     // the collaborators they exercise (passing null here) fall back to the built-in FlowVision path.
     private final OcrProviderResolver ocrProviderResolver;
     private final OcrProviderRegistry ocrProviderRegistry;
+    // LOCATION-AFFINITY: the scheme-boundary check. Nullable on the same terms as the OCR
+    // collaborators above — a unit test that does not exercise it may pass null, and the check is
+    // then simply not run rather than costing the reading.
+    private final LocationAffinityService locationAffinityService;
 
     /**
      * Trailing-history window (days) fetched for the rollover consumption band. A few extra days over
@@ -536,6 +542,53 @@ public class BfmReadingService {
         if (confirmedReadingSource == RolloverResolutionService.SOURCE_ROLLOVER_RESOLVED) {
             telemetryTenantRepository.applyConfirmedReadingSource(
                     schemaName, readingId, confirmedReadingSource, rolloverAuditJson);
+        }
+
+        // LOCATION-AFFINITY: coordinates the request carried belong on the reading row, not only in
+        // the anomaly. Only the state-IT paths supply them here — the Glific paths write them onto the
+        // placeholder row from /location and leave the request null — and without this an
+        // API-submitted mismatch could not be re-measured from the stored reading alone, which is what
+        // the anomaly's own distance disclosure promises. Best-effort by design: createReading is not
+        // @Transactional at this point and the row is already stored, so failing to annotate it must
+        // not lose a recorded reading. Runs before the quarantine block below, which returns early.
+        if (request.getLatitude() != null && request.getLongitude() != null) {
+            try {
+                telemetryTenantRepository.updateReadingLocation(
+                        schemaName,
+                        readingId,
+                        request.getLatitude(),
+                        request.getLongitude(),
+                        operatorInRequest.id());
+            } catch (Exception e) {
+                log.warn("reading_location_persist_failed readingId={}: {}", readingId, e.getMessage());
+            }
+        }
+
+        // LOCATION-AFFINITY: the row now exists, so this is the point at which "the anomaly is
+        // captured against this submission" becomes possible. Deliberately *before* the quarantine
+        // block below, which returns early: a reading can be both implausibly high and taken from
+        // the wrong place, and suppressing one because of the other would lose a real signal.
+        //
+        // This is also where the WhatsApp operator's "Yes" is observed. The flow never tells the
+        // backend the answer — a confirmation is this method being reached at all, and a decline
+        // leaves only the placeholder row /location already wrote.
+        //
+        // Coordinates on the request come only from the state-IT APIs (same scoping as
+        // supplyPlausibilityChecked); the Glific paths leave them null and the service reads them
+        // back off the reused placeholder row. That origin is what the metric's path tag records,
+        // so if a future caller starts supplying coordinates the tag follows it.
+        if (locationAffinityService != null) {
+            locationAffinityService.recordMismatchIfAny(
+                    schemaName,
+                    tenantId,
+                    operatorInRequest.id(),
+                    request.getSchemeId(),
+                    new ReadingSubmission(readingId, storageCorrelationId, LocalDate.from(readingAt)),
+                    request.getLatitude(),
+                    request.getLongitude(),
+                    request.getLatitude() != null
+                            ? LocationAffinityService.Path.STATE_API
+                            : LocationAffinityService.Path.IMAGE_SUBMISSION);
         }
 
         // SUPPLY-PLAUSIBILITY: the row is stored and marked, but it is not a reading. The channel

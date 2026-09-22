@@ -11,7 +11,6 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
-import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
@@ -178,6 +177,12 @@ public class GlificImageWorkflowService {
             // reading_at/reading_date are stored in IST (see ReadingTime); other columns stay UTC.
             LocalDateTime readingTime = ReadingTime.fromClient(request.getReadingDateTime());
 
+            // LOCATION-AFFINITY: validated here, before anything is written. It used to be checked
+            // after createReading had returned, so a malformed geolocation produced a failure
+            // response for a reading that was already committed — and a caller who retried then hit
+            // same-day placeholder reuse. Rejecting first makes the failure honest and the retry clean.
+            validateGeolocation(request.getGeolocation());
+
             boolean lenient = ingestionSource != IngestionSource.NORMAL;
             CreateReadingRequest createReadingRequest = CreateReadingRequest.builder()
                     .schemeId(schemeId)
@@ -203,6 +208,11 @@ public class GlificImageWorkflowService {
                     // CHANNEL_NOT_SUPPORTED — so an empty parse means the submission simply did not
                     // declare a channel, and the stored preference decides as before.
                     .declaredChannel(ReadingChannel.parseStrict(request.getChannel()).orElse(null))
+                    // LOCATION-AFFINITY: GeoJSON orders coordinates [longitude, latitude] — the
+                    // opposite of how they read aloud, and the single easiest thing here to get
+                    // backwards. Pinned by GlificImageWorkflowServiceAssamTest.
+                    .latitude(geolocationCoordinate(request.getGeolocation(), 1))
+                    .longitude(geolocationCoordinate(request.getGeolocation(), 0))
                     .build();
 
             if (lenient) {
@@ -235,7 +245,6 @@ public class GlificImageWorkflowService {
                     FlowVisionRetryMode.RESILIENT
             );
 
-            applyGeolocationIfPresent(request, schemaName, operatorId, response.getCorrelationId());
             response.setMessage(localizationService.localizeMessage(response.getMessage(), languageKey));
             return response;
         } catch (Exception e) {
@@ -556,38 +565,35 @@ public class GlificImageWorkflowService {
         return "****" + digits.substring(digits.length() - 4);
     }
 
-    private void applyGeolocationIfPresent(AssamReadingRequest request,
-                                           String schemaName,
-                                           Long operatorId,
-                                           String correlationId) {
-        AssamReadingRequest.Geolocation geolocation = request.getGeolocation();
+    /**
+     * LOCATION-AFFINITY: one coordinate out of a validated GeoJSON {@code Point}.
+     *
+     * <p>{@code index} is the GeoJSON position, so <strong>0 is longitude and 1 is latitude</strong>.
+     * Callers pass the index rather than naming the field precisely so that the reversal is visible
+     * at the call site, where it can be checked against the builder line it feeds.
+     *
+     * <p>Returns {@code null} for an absent geolocation, which is the ordinary case: the field is
+     * optional and every WhatsApp submission omits it.
+     */
+    private BigDecimal geolocationCoordinate(AssamReadingRequest.Geolocation geolocation, int index) {
+        if (geolocation == null || geolocation.getCoordinates() == null
+                || geolocation.getCoordinates().size() != 2) {
+            return null;
+        }
+        return geolocation.getCoordinates().get(index);
+    }
+
+    /**
+     * Rejects a geolocation that is present but unusable.
+     *
+     * <p>Called before the reading is written. An absent geolocation is not an error — the field is
+     * optional — but a malformed one is, and failing before persistence is what keeps the caller's
+     * retry clean.
+     */
+    private void validateGeolocation(AssamReadingRequest.Geolocation geolocation) {
         if (geolocation == null) {
             return;
         }
-
-        validateGeolocation(geolocation);
-        if (correlationId == null || correlationId.isBlank()) {
-            return;
-        }
-
-        Optional<TelemetryReadingRecord> readingOpt = telemetryTenantRepository.findReadingByCorrelationId(schemaName, correlationId);
-        if (readingOpt.isEmpty()) {
-            return;
-        }
-
-        List<BigDecimal> coordinates = geolocation.getCoordinates();
-        BigDecimal longitude = coordinates.get(0);
-        BigDecimal latitude = coordinates.get(1);
-        telemetryTenantRepository.updateReadingLocation(
-                schemaName,
-                readingOpt.get().id(),
-                latitude,
-                longitude,
-                operatorId
-        );
-    }
-
-    private void validateGeolocation(AssamReadingRequest.Geolocation geolocation) {
         String type = geolocation.getType();
         if (type != null && !type.isBlank() && !"Point".equalsIgnoreCase(type)) {
             throw new IllegalStateException("geolocation.type must be Point");

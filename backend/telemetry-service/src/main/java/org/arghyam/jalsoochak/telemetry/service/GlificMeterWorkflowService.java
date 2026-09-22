@@ -23,6 +23,9 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
+import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService;
+import org.arghyam.jalsoochak.telemetry.service.location.LocationVerdict;
+import org.arghyam.jalsoochak.telemetry.service.location.ReadingSubmission;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -95,6 +98,18 @@ public class GlificMeterWorkflowService {
     private static final String DEFAULT_METER_CHANGE_PROMPT_HINDI =
             "कृपया नंबर टाइप करके सबमिशन न होने के कारण चुनें";
 
+    /** LOCATION-AFFINITY: {@code GLIFIC_MESSAGE_TEMPLATES} screen holding the boundary warning. */
+    private static final String LOCATION_BOUNDARY_SCREEN = "LOCATION_BOUNDARY";
+    /** Legacy per-language config key, suffixed with the normalized language name. */
+    private static final String LOCATION_BOUNDARY_CONFIG_KEY = "location_boundary_warning";
+    /**
+     * The floor a tenant gets before configuring anything. Carries no {@code Yes | No} — those are
+     * quick-reply buttons rendered by the Glific flow, not part of this sentence.
+     */
+    private static final String DEFAULT_LOCATION_BOUNDARY_WARNING =
+            "System detected that reading is being submitted outside the Scheme boundary. "
+                    + "Do you want to proceed?";
+
     private static final List<String> DEFAULT_ISSUE_REASONS = List.of(
             "Meter Replaced",
             "Meter not working",
@@ -159,6 +174,7 @@ public class GlificMeterWorkflowService {
     private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final ObjectMapper objectMapper;
+    private final LocationAffinityService locationAffinityService;
 
     public GlificMeterWorkflowService(GlificOperatorContextService operatorContextService,
                                       GlificLocalizationService localizationService,
@@ -167,7 +183,8 @@ public class GlificMeterWorkflowService {
                                       TelemetryTenantRepository telemetryTenantRepository,
                                       UserChannelPreferenceRepository userChannelPreferenceRepository,
                                       TelemetryEventPublisher telemetryEventPublisher,
-                                      ObjectMapper objectMapper) {
+                                      ObjectMapper objectMapper,
+                                      LocationAffinityService locationAffinityService) {
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
         this.tenantConfigRepository = tenantConfigRepository;
@@ -176,6 +193,7 @@ public class GlificMeterWorkflowService {
         this.userChannelPreferenceRepository = userChannelPreferenceRepository;
         this.telemetryEventPublisher = telemetryEventPublisher;
         this.objectMapper = objectMapper;
+        this.locationAffinityService = locationAffinityService;
     }
 
     public IntroResponse meterChangeMessage(IntroRequest request) {
@@ -1380,6 +1398,22 @@ public class GlificMeterWorkflowService {
                 }
             }
 
+            // LOCATION-AFFINITY: the manual path never reaches BfmReadingService.createReading, so it
+            // needs its own call or an operator who types the reading in — typically after an
+            // unreadable photo — escapes the boundary check entirely. No coordinates are passed: the
+            // operator shared them in a separate /location message and they are already on
+            // manualReadingId, which the service reads back.
+            locationAffinityService.recordMismatchIfAny(
+                    operatorWithSchema.schemaName(),
+                    tenantId,
+                    operatorWithSchema.operator().id(),
+                    schemeId,
+                    new ReadingSubmission(manualReadingId, correlationId, today),
+                    null,
+                    null,
+                    LocationAffinityService.Path.MANUAL_READING
+            );
+
             int unreadableRetryCountToday = telemetryTenantRepository.countAnomaliesByTypeForToday(
                     operatorWithSchema.schemaName(),
                     operatorWithSchema.operator().id(),
@@ -1571,9 +1605,29 @@ public class GlificMeterWorkflowService {
                     operatorId
             );
 
+            // LOCATION-AFFINITY: evaluate only. No reading exists yet — the operator has not been
+            // asked for a photo — so recording an anomaly here would leave one behind for someone
+            // who sees the warning and cancels. The mismatch is recorded later, if and when a
+            // reading actually lands on this row.
+            LocationVerdict verdict = locationAffinityService.assess(
+                    operatorWithSchema.schemaName(),
+                    operatorWithSchema.operator().tenantId(),
+                    schemeId,
+                    latitude,
+                    longitude,
+                    LocationAffinityService.Path.LOCATION_WEBHOOK
+            );
+            boolean outsideBoundary = verdict instanceof LocationVerdict.Outside;
+
             return CreateReadingResponse.builder()
                     .success(true)
-                    .message(localizationService.localizeMessage("Location saved successfully.", languageKey))
+                    .locationMismatch(outsideBoundary)
+                    .message(outsideBoundary
+                            ? resolveBoundaryWarning(operatorWithSchema.operator().tenantId(), languageKey)
+                            : localizationService.localizeMessage("Location saved successfully.", languageKey))
+                    // Unchanged on a mismatch: the coordinates WERE saved, and the flow in the
+                    // Glific instance may already route on this value. The new branch reads
+                    // locationMismatch instead.
                     .qualityStatus("CONFIRMED")
                     .build();
         } catch (Exception e) {
@@ -1588,6 +1642,33 @@ public class GlificMeterWorkflowService {
                     .correlationId(safeContactId)
                     .build();
         }
+    }
+
+    /**
+     * LOCATION-AFFINITY: the wording an operator sees when their location is outside the scheme
+     * boundary, in their own language.
+     *
+     * <p>Resolved the same way as every other operator-facing screen — the tenant's
+     * {@code GLIFIC_MESSAGE_TEMPLATES} JSON first, then the legacy per-key config rows, then the
+     * English floor — so a tenant that configures nothing still gets a usable sentence.
+     *
+     * <p>The {@code Yes | No} choices are deliberately absent. They are Glific quick-reply buttons
+     * rendered by the flow; folding them into this string would force every tenant to translate
+     * button labels inside a sentence, and would break the moment the flow's button wording changed.
+     */
+    private String resolveBoundaryWarning(Integer tenantId, String languageKey) {
+        // Each source is filtered on its own: a blank template string or an empty config row is not a
+        // configured wording, and filtering only the end of the chain would let one short-circuit the
+        // fallbacks behind it and drop the operator straight to the English floor.
+        return templatesService.resolveScreenMessage(tenantId, LOCATION_BOUNDARY_SCREEN, languageKey)
+                .filter(text -> !text.isBlank())
+                .or(() -> tenantConfigRepository.findConfigValue(
+                                tenantId, LOCATION_BOUNDARY_CONFIG_KEY + "_" + languageKey)
+                        .filter(text -> !text.isBlank()))
+                .or(() -> tenantConfigRepository.findConfigValue(tenantId, LOCATION_BOUNDARY_CONFIG_KEY)
+                        .filter(text -> !text.isBlank()))
+                .orElseGet(() -> localizationService.localizeMessage(
+                        DEFAULT_LOCATION_BOUNDARY_WARNING, languageKey));
     }
 
     public CreateReadingResponse updatePreviousReadingMessage(UpdatedPreviousReadingRequest request) {

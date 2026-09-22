@@ -60,6 +60,26 @@ public class CreateReadingRequest {
      */
     private ReadingChannel declaredChannel;
 
+    /**
+     * LOCATION-AFFINITY: where the submission says it was made, when the coordinates arrive
+     * <em>with</em> the reading. Set only by the state-IT reading APIs, which carry a
+     * {@code geolocation} object on the request — the same scoping as
+     * {@link #supplyPlausibilityChecked}.
+     *
+     * <p>Null on the WhatsApp paths, and that is not an omission: there the operator shares a
+     * location in a separate message minutes earlier, {@code POST /location} writes it onto a
+     * placeholder row, and the reading reuses that row. {@code createReading} reads the coordinates
+     * back off the row in that case.
+     *
+     * <p>Carrying them on the request rather than applying them afterwards is what lets the boundary
+     * check live at a single point for both channels, and it means a malformed {@code geolocation}
+     * is rejected before anything is stored instead of after.
+     */
+    private BigDecimal latitude;
+
+    /** LOCATION-AFFINITY: see {@link #latitude}. */
+    private BigDecimal longitude;
+
     // LENIENT-INGEST: tracking fields populated only when a submission is recorded through the
     // lenient path (missing scheme / missing operator / operator-not-mapped). Null/0 for normal reads.
     private Integer ingestionSource;

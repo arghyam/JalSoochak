@@ -62,6 +62,13 @@ class GlificMeterWorkflowServiceManualReadingTest {
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
 
+    /**
+     * LOCATION-AFFINITY: the manual path runs the boundary check too, because an operator who types
+     * the reading in — usually after an unreadable photo — would otherwise escape it.
+     */
+    @Mock
+    private org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService locationAffinityService;
+
     @Spy
     private com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
@@ -690,5 +697,58 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 anyInt(),
                 any()
         , any());
+    }
+
+    @Test
+    void manualReadingRunsTheBoundaryCheckAgainstTheRowItWroteTo() {
+        // An operator reaching manual entry has usually just failed an image submission, so this is
+        // the path most likely to carry an out-of-boundary location — and it never touches
+        // BfmReadingService.createReading, where the check for every other path lives.
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L, "bfm-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO)));
+        when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt()))
+                .thenReturn(0);
+        when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt()))
+                .thenReturn(List.of());
+        when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString()))
+                .thenReturn(Optional.empty());
+
+        service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("123")
+                .build());
+
+        org.mockito.ArgumentCaptor<org.arghyam.jalsoochak.telemetry.service.location.ReadingSubmission> submission =
+                org.mockito.ArgumentCaptor.forClass(
+                        org.arghyam.jalsoochak.telemetry.service.location.ReadingSubmission.class);
+        verify(locationAffinityService).recordMismatchIfAny(
+                org.mockito.ArgumentMatchers.eq("tenant_test"),
+                org.mockito.ArgumentMatchers.eq(1),
+                org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.eq(10L),
+                submission.capture(),
+                // No coordinates on a manual reading: they arrived in an earlier /location message
+                // and are already on the row, which the service reads back.
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq(
+                        org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService.Path.MANUAL_READING));
+
+        assertEquals(99L, submission.getValue().readingId());
+        assertEquals(ReadingTime.today(), submission.getValue().readingDate());
     }
 }

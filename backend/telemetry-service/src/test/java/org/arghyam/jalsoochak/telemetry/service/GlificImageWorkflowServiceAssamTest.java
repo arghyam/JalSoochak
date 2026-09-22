@@ -12,7 +12,6 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
-import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
@@ -38,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyBoolean;
+import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.never;
@@ -333,8 +333,14 @@ class GlificImageWorkflowServiceAssamTest {
         assertEquals(true, requestCaptor.getValue().isSupplyPlausibilityChecked());
     }
 
+    /**
+     * LOCATION-AFFINITY: the coordinates now travel <em>into</em> {@code createReading} on the
+     * request rather than being applied by a second UPDATE after it returned. That is what lets the
+     * boundary check run at one point for both submission channels, and it means the coordinates
+     * commit with the row instead of in a separate, non-transactional statement.
+     */
     @Test
-    void processAssamReadingUpdatesLocationWhenGeolocationPresent() {
+    void processAssamReadingCarriesGeolocationIntoTheReadingRequest() {
         AssamReadingRequest request = AssamReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
@@ -371,8 +377,6 @@ class GlificImageWorkflowServiceAssamTest {
                         .correlationId("corr-1")
                         .qualityStatus("CONFIRMED")
                         .build());
-        when(telemetryTenantRepository.findReadingByCorrelationId("tenant_assam", "corr-1"))
-                .thenReturn(Optional.of(new TelemetryReadingRecord(100L, "corr-1", 11L)));
 
         CreateReadingResponse response = service.processAssamReading(request, 22);
 
@@ -391,13 +395,88 @@ class GlificImageWorkflowServiceAssamTest {
         assertEquals(30244993L, requestCaptor.getValue().getSchemeId());
         assertEquals(new BigDecimal("123.4"), requestCaptor.getValue().getReadingValue());
 
-        verify(telemetryTenantRepository).updateReadingLocation(
+        // GeoJSON orders coordinates [longitude, latitude] — the reverse of how they read aloud, and
+        // the single easiest thing on this path to get backwards. The request was built with
+        // [56.78, 12.34], so latitude is 12.34.
+        assertEquals(new BigDecimal("12.34"), requestCaptor.getValue().getLatitude());
+        assertEquals(new BigDecimal("56.78"), requestCaptor.getValue().getLongitude());
+
+        // The separate post-insert UPDATE is gone: the coordinates commit with the row.
+        verify(telemetryTenantRepository, never())
+                .updateReadingLocation(anyString(), anyLong(), any(), any(), anyLong());
+    }
+
+    @Test
+    void processAssamReadingLeavesCoordinatesNullWhenNoGeolocationSent() {
+        // The overwhelmingly common case, and the one that must stay byte-identical: geolocation is
+        // optional, and a submission without it is neither rejected nor boundary-checked.
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .centreSchemeId("30244993")
+                .phoneNumber("919876543210")
+                .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
+                .build();
+
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_assam",
-                100L,
-                new BigDecimal("12.34"),
-                new BigDecimal("56.78"),
-                11L
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
+
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
+                .thenReturn(Optional.of(30244993L));
+        when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+                .thenReturn(CreateReadingResponse.builder().success(true).correlationId("corr-2").build());
+
+        service.processAssamReading(request, 22);
+
+        ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        verify(bfmReadingService).createReading(
+                requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any());
+        assertNull(requestCaptor.getValue().getLatitude());
+        assertNull(requestCaptor.getValue().getLongitude());
+    }
+
+    @Test
+    void processAssamReadingRejectsAMalformedGeolocationBeforeStoringTheReading() {
+        // This used to validate AFTER createReading had returned, so a caller with a bad geolocation
+        // got a failure response for a reading that was already committed — and their retry then hit
+        // same-day placeholder reuse. Rejecting first makes the failure honest and the retry clean.
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .centreSchemeId("30244993")
+                .phoneNumber("919876543210")
+                .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
+                .geolocation(AssamReadingRequest.Geolocation.builder()
+                        .type("Polygon")
+                        .coordinates(List.of(new BigDecimal("56.78"), new BigDecimal("12.34")))
+                        .build())
+                .build();
+
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_assam",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
+                .thenReturn(Optional.of(30244993L));
+        when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
+
+        CreateReadingResponse response = service.processAssamReading(request, 22);
+
+        assertEquals(false, response.isSuccess());
+        verify(bfmReadingService, never())
+                .createReading(any(), anyString(), any(), anyString(), anyBoolean(), any());
     }
 
     @Test
