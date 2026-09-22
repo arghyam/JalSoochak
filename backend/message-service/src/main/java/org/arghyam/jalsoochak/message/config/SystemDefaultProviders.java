@@ -46,7 +46,8 @@ public class SystemDefaultProviders {
     /**
      * @throws IllegalStateException if the SendGrid block, its API key or its templates are
      *         missing — the three checks the former {@code SendGridMailSender} constructor made,
-     *         with their messages unchanged
+     *         with their messages unchanged — or if {@code notification.mail.from-address} is blank
+     *         (see {@link #requireFromAddress})
      */
     @Bean
     @ConditionalOnProperty(name = "notification.mail.provider", havingValue = "sendgrid", matchIfMissing = true)
@@ -66,6 +67,7 @@ public class SystemDefaultProviders {
             throw new IllegalStateException(
                     "Missing SendGrid templates: notification.mail.sendgrid.templates must be configured when provider=sendgrid");
         }
+        requireFromAddress(mailProperties);
         SendGridSettings settings = new SendGridSettings(
                 sendgrid.apiUrl(),
                 sendgrid.apiKey(),
@@ -85,11 +87,15 @@ public class SystemDefaultProviders {
      * Pairs the platform's identity with Spring Boot's auto-configured {@code spring.mail.*}
      * sender. Missing templates are deliberately not checked here: they failed at the first send
      * before, and {@code SmtpMailSender} still fails there.
+     *
+     * @throws IllegalStateException if {@code notification.mail.from-address} is blank (see
+     *         {@link #requireFromAddress})
      */
     @Bean
     @ConditionalOnProperty(name = "notification.mail.provider", havingValue = "smtp")
     public EmailSender systemDefaultSmtpSender(MailProperties mailProperties,
             JavaMailSender javaMailSender) {
+        requireFromAddress(mailProperties);
         MailProperties.Smtp smtp = mailProperties.smtp();
         SmtpSettings settings = new SmtpSettings(
                 mailProperties.fromAddress(),
@@ -127,5 +133,26 @@ public class SystemDefaultProviders {
                 // registration change, not a restart.
                 SmsProviderSettings.SmsCountry.DEFAULT_OTP_TEMPLATE);
         return new SmsCountrySender(webClientBuilder, settings, dryRun);
+    }
+
+    /**
+     * The platform's own sender address, which every email adapter needs and no binding enforces —
+     * {@code MailProperties.fromAddress} carries no {@code @NotBlank}, so a cleared
+     * {@code MAIL_FROM_EMAIL} binds null or blank.
+     *
+     * <p>Unlike {@code fromName}, this cannot be defaulted away: mail with no sender is not mail.
+     * SendGrid would put the null in the payload's {@code from} block, which is assembled with
+     * {@code Map.of}, and fail per send; SMTP would hand it to
+     * {@code SimpleMailMessage.setFrom} and be refused by the relay. Both tenant factories already
+     * {@code require} it, so the system default was the only path left that could build a sender
+     * with no sender — and it is the path every send takes while the feature flag is off.
+     *
+     * @throws IllegalStateException if {@code notification.mail.from-address} is null or blank
+     */
+    private static void requireFromAddress(MailProperties mailProperties) {
+        if (mailProperties.fromAddress() == null || mailProperties.fromAddress().isBlank()) {
+            throw new IllegalStateException(
+                    "notification.mail.from-address must not be blank; set MAIL_FROM_EMAIL");
+        }
     }
 }

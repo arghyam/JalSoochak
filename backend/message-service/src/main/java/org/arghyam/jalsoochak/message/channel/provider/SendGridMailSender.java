@@ -58,7 +58,7 @@ public class SendGridMailSender implements EmailSender {
         dynamicData.put("logo_image", settings.logoImageUrl() != null ? settings.logoImageUrl() : "");
 
         Map<String, Object> payload = Map.of(
-                "from", Map.of("email", settings.fromAddress(), "name", settings.fromName()),
+                "from", fromBlock(),
                 "personalizations", List.of(Map.of(
                         "to", List.of(Map.of("email", request.to())),
                         "dynamic_template_data", dynamicData
@@ -85,6 +85,26 @@ public class SendGridMailSender implements EmailSender {
             log.error("[SendGridMailSender] failure template={}: {}", request.template(), e.getMessage(), e);
             throw new RuntimeException("SendGridMailSender failure for " + request.template(), e);
         }
+    }
+
+    /**
+     * The {@code from} object, carrying {@code name} only when there is one.
+     *
+     * <p>A mutable map, for the reason {@code logo_image} above uses one: {@code fromName} is
+     * optional both on a tenant's settings write and on {@code notification.mail.from-name}, so
+     * {@link SendGridMailSenderFactory}'s platform fallback can resolve to null, and
+     * {@code Map.of} rejects a null value. Omitting the key sends under the verified address alone,
+     * which is what SendGrid does with a {@code from} that names no display name — the alternative
+     * would be to refuse to build the sender, and a missing display name must not cost a tenant its
+     * own account (O2-9).
+     */
+    private Map<String, String> fromBlock() {
+        Map<String, String> from = new HashMap<>();
+        from.put("email", settings.fromAddress());
+        if (settings.fromName() != null && !settings.fromName().isBlank()) {
+            from.put("name", settings.fromName());
+        }
+        return from;
     }
 
     private String resolveTemplateId(MailTemplate template) {

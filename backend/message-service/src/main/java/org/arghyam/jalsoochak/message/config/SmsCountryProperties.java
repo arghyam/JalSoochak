@@ -35,6 +35,26 @@ public record SmsCountryProperties(
 
     public SmsCountryProperties {
         baseUrl = (baseUrl == null || baseUrl.isBlank()) ? DEFAULT_BASE_URL : baseUrl.trim();
+        authKey = orEmpty(authKey);
+        authToken = orEmpty(authToken);
+        senderId = orEmpty(senderId);
+        dltPrincipalEntityId = orEmpty(dltPrincipalEntityId);
+        dltTemplateId = orEmpty(dltTemplateId);
+        dltHeaderId = orEmpty(dltHeaderId);
+    }
+
+    /**
+     * Restores the {@code ""} default the six non-URL fields carried as
+     * {@code @Value("${smscountry.x:}")}: an unset property bound to an empty string, never null.
+     *
+     * <p>{@code application.yml}'s {@code ${VAR:default}} is not enough on its own. An operator
+     * clearing a key in a Helm values file writes a YAML null, which binds null, and
+     * {@code SmsCountrySender} assembles its request body with {@code Map.of} — which rejects a
+     * null value. That NPE would land on the <em>system default</em> sender, so every login OTP on
+     * the platform would fail with a stack trace that names nothing about configuration.
+     */
+    private static String orEmpty(String value) {
+        return value == null ? "" : value.trim();
     }
 
     /** Credentials must not reach a log line, an exception message or a heap dump label (S-4). */

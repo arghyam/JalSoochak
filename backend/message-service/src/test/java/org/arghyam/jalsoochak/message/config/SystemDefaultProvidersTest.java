@@ -128,6 +128,41 @@ class SystemDefaultProvidersTest {
     }
 
     @Test
+    void smsProperties_clearedKeys_bindToEmptyStringsNotNulls() {
+        // How an operator "clears" a key in a values file is a YAML null, which binds null however
+        // the ${VAR:default} in application.yml reads. The six non-URL fields were
+        // @Value("${smscountry.x:}") before, so an unset one bound "".
+        SmsCountryProperties cleared =
+                new SmsCountryProperties(null, null, null, "ARGHYM", null, null, null);
+
+        assertThat(cleared.authKey()).isEmpty();
+        assertThat(cleared.authToken()).isEmpty();
+        assertThat(cleared.dltPrincipalEntityId()).isEmpty();
+        assertThat(cleared.dltTemplateId()).isEmpty();
+        assertThat(cleared.dltHeaderId()).isEmpty();
+    }
+
+    @Test
+    void systemDefaultSmsSender_clearedDltKeys_stillSendsRatherThanThrowing() {
+        // sendOtp assembles its body with Map.of, which rejects a null value. A cleared DLT key
+        // would therefore NPE on the system-default sender — every login OTP on the platform, with
+        // a stack trace that names nothing about configuration.
+        wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody(SUCCESS_RESPONSE)));
+
+        SmsSender sender = providers.systemDefaultSmsSender(WebClient.builder(),
+                new SmsCountryProperties(wireMockServer.baseUrl() + "/v0.1",
+                        AUTH_KEY, AUTH_TOKEN, "ARGHYM", null, null, null),
+                false);
+
+        assertThat(sender.sendOtp("919876543210", "123456", 5).block()).isTrue();
+        wireMockServer.verify(postRequestedFor(urlEqualTo(SMS_PATH)));
+    }
+
+    @Test
     void smsProperties_toString_carriesNoCredentials() {
         assertThat(smsProperties("ARGHYM").toString())
                 .contains("ARGHYM")
@@ -180,6 +215,26 @@ class SystemDefaultProvidersTest {
                 mailProperties(sendGrid(API_KEY, null)), WebClient.builder()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("notification.mail.sendgrid.templates must be configured");
+    }
+
+    @Test
+    void systemDefaultEmailSenders_blankFromAddress_failFast() {
+        // notification.mail.from-address carries no @NotBlank, and both adapters need it: SendGrid
+        // puts it in a Map.of and would NPE per send, SMTP hands it to SimpleMailMessage.setFrom
+        // and would be refused by the relay. Both tenant factories already require it, so the
+        // system default was the last path that could build a sender with no sender.
+        assertThatThrownBy(() -> providers.systemDefaultSendGridSender(
+                new MailProperties("sendgrid", "  ", FROM_NAME, LOGO,
+                        sendGrid(API_KEY, templates()), null),
+                WebClient.builder()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("MAIL_FROM_EMAIL");
+
+        assertThatThrownBy(() -> providers.systemDefaultSmtpSender(
+                new MailProperties("smtp", null, FROM_NAME, LOGO, null, null),
+                mock(JavaMailSender.class)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("MAIL_FROM_EMAIL");
     }
 
     @Test

@@ -126,6 +126,29 @@ class SendGridMailSenderFactoryTest {
     }
 
     @Test
+    void create_noTenantOrPlatformFromName_sendsUnderTheAddressAlone() throws Exception {
+        // fromName is optional on write and carries no @NotBlank on notification.mail.from-name
+        // either, so the platform fallback can itself be null. The payload's from block is built
+        // with Map.of, which rejects a null value — that NPE would route every invite and reset for
+        // this tenant to the email DLT as email_delivery_error.
+        SendGridMailSenderFactory noPlatformName = new SendGridMailSenderFactory(
+                WebClient.builder(),
+                new MailProperties("sendgrid", "noreply@example.com", null, PLATFORM_LOGO,
+                        new MailProperties.SendGrid(wireMockServer.baseUrl(), "SG.platform", null),
+                        null));
+
+        EmailSender sender = noPlatformName.create(
+                settings("noreply@mp.gov.in", null, null, templates("a")), secrets(TENANT_A_KEY));
+
+        sender.send(new MailRequest("op@mp.in", MailTemplate.PASSWORD_RESET,
+                Map.of("reset_link", "https://a", "expiry_minutes", 30)));
+
+        JsonNode from = bodyOf(0).get("from");
+        assertThat(from.get("email").asText()).isEqualTo("noreply@mp.gov.in");
+        assertThat(from.has("name")).isFalse();
+    }
+
+    @Test
     void create_tenantLogo_overridesThePlatformOne() throws Exception {
         EmailSender sender = factory.create(
                 settings("noreply@mp.gov.in", "MP Jal", "https://mp/logo.png", templates("a")),
