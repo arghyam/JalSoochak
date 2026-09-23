@@ -39,18 +39,6 @@
             **/org/arghyam/jalsoochak/telemetry/config/RequestCorrelationFilter.java,
             **/org/arghyam/jalsoochak/telemetry/config/RestTemplateConfig.java,
             **/org/arghyam/jalsoochak/telemetry/config/WebConfig.java,
-            **/org/arghyam/jalsoochak/telemetry/service/AnomalyConstants.java,
-            **/org/arghyam/jalsoochak/telemetry/service/BfmReadingService.java,
-            **/org/arghyam/jalsoochak/telemetry/service/ConversationLocalizationService.java,
-            **/org/arghyam/jalsoochak/telemetry/service/ConversationMessageService.java,
-            **/org/arghyam/jalsoochak/telemetry/service/ConversationSelectionService.java,
-            **/org/arghyam/jalsoochak/telemetry/service/ConversationTemplateService.java,
-            **/org/arghyam/jalsoochak/telemetry/service/GlificContactSyncService.java,
-            **/org/arghyam/jalsoochak/telemetry/service/GlificMediaService.java,
-            **/org/arghyam/jalsoochak/telemetry/service/MeterImageWorkflowService.java,
-            **/org/arghyam/jalsoochak/telemetry/service/MeterReadingConversationService.java,
-            **/org/arghyam/jalsoochak/telemetry/service/MinioService.java,
-            **/org/arghyam/jalsoochak/telemetry/service/OperatorContextService.java,
             **/org/arghyam/jalsoochak/telemetry/TelemetryServiceApplication.java
         </sonar.coverage.exclusions>
     </properties>
