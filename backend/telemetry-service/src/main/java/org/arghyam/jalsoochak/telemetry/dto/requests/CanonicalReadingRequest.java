@@ -21,7 +21,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class AssamReadingRequest {
+public class CanonicalReadingRequest {
 
     @ValidReadingUrl
     @JsonProperty("reading_url")

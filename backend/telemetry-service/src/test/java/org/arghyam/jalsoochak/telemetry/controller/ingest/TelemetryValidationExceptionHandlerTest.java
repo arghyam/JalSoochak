@@ -1,6 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.controller.ingest;
 
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
@@ -61,7 +61,7 @@ class TelemetryValidationExceptionHandlerTest {
     @BeforeEach
     void setUp() {
         handler = new TelemetryValidationExceptionHandler(auditService, eventPublisher);
-        when(auditService.captureForAssamReading(any(), any()))
+        when(auditService.captureForCanonicalReading(any(), any()))
                 .thenReturn(new TelemetrySubmissionAuditService.SubmissionAuditSnapshot(
                         "****0001", 7L, 1, LocalDate.of(2026, 3, 1)));
         when(auditService.captureForPhoneAndScheme(any(), any()))
@@ -82,8 +82,8 @@ class TelemetryValidationExceptionHandlerTest {
         return new MethodArgumentNotValidException((MethodParameter) null, bindingResult);
     }
 
-    private static AssamReadingRequest assamRequest(String phone, String stateSchemeId, String centreSchemeId) {
-        AssamReadingRequest request = new AssamReadingRequest();
+    private static CanonicalReadingRequest canonicalRequest(String phone, String stateSchemeId, String centreSchemeId) {
+        CanonicalReadingRequest request = new CanonicalReadingRequest();
         request.setPhoneNumber(phone);
         request.setStateSchemeId(stateSchemeId);
         request.setCentreSchemeId(centreSchemeId);
@@ -98,7 +98,7 @@ class TelemetryValidationExceptionHandlerTest {
         @ValueSource(strings = {READINGS_PATH, READINGS_PATH + "/"})
         void returnsTheReadingsEnvelopeForBothPathVariants(String path) {
             var response = handler.handleValidation(
-                    validationFailure(assamRequest("919999900001", "S-1", null),
+                    validationFailure(canonicalRequest("919999900001", "S-1", null),
                             "phoneNumber", "phoneNumber is required"),
                     request(path));
 
@@ -115,7 +115,7 @@ class TelemetryValidationExceptionHandlerTest {
         @Test
         void joinsMultipleValidationMessages() {
             BindingResult bindingResult = new BeanPropertyBindingResult(
-                    assamRequest("919999900001", "S-1", null), "request");
+                    canonicalRequest("919999900001", "S-1", null), "request");
             bindingResult.rejectValue("phoneNumber", "NotBlank", "phoneNumber is required");
             bindingResult.rejectValue("readingUrl", "NotBlank", "readingUrl is required");
 
@@ -130,7 +130,7 @@ class TelemetryValidationExceptionHandlerTest {
         @Test
         void fallsBackToAGenericMessageWhenNoErrorCarriesText() {
             BindingResult bindingResult = new BeanPropertyBindingResult(
-                    assamRequest("919999900001", "S-1", null), "request");
+                    canonicalRequest("919999900001", "S-1", null), "request");
             bindingResult.rejectValue("phoneNumber", "NotBlank", "");
 
             var response = handler.handleValidation(
@@ -176,7 +176,7 @@ class TelemetryValidationExceptionHandlerTest {
         @Test
         void returnsAPlainMessageBody() {
             var response = handler.handleValidation(
-                    validationFailure(assamRequest("919999900001", "S-1", null),
+                    validationFailure(canonicalRequest("919999900001", "S-1", null),
                             "phoneNumber", "phoneNumber is required"),
                     request("/api/v1/telemetry/other"));
 
@@ -187,7 +187,7 @@ class TelemetryValidationExceptionHandlerTest {
         @Test
         void doesNotPublishASubmissionRejectedEvent() {
             handler.handleValidation(
-                    validationFailure(assamRequest("919999900001", "S-1", null),
+                    validationFailure(canonicalRequest("919999900001", "S-1", null),
                             "phoneNumber", "phoneNumber is required"),
                     request("/api/v1/telemetry/other"));
 
@@ -203,7 +203,7 @@ class TelemetryValidationExceptionHandlerTest {
         @Test
         void publishesTheRejectWhenAStateSchemeIdWasSubmitted() {
             handler.handleValidation(
-                    validationFailure(assamRequest("919999900001", "S-1", null),
+                    validationFailure(canonicalRequest("919999900001", "S-1", null),
                             "phoneNumber", "phoneNumber is required"),
                     request(READINGS_PATH));
 
@@ -215,7 +215,7 @@ class TelemetryValidationExceptionHandlerTest {
         @Test
         void publishesTheRejectWhenOnlyACentreSchemeIdWasSubmitted() {
             handler.handleValidation(
-                    validationFailure(assamRequest("919999900001", null, "C-1"),
+                    validationFailure(canonicalRequest("919999900001", null, "C-1"),
                             "phoneNumber", "phoneNumber is required"),
                     request(READINGS_PATH));
 
@@ -226,7 +226,7 @@ class TelemetryValidationExceptionHandlerTest {
         @Test
         void publishesNothingWhenNeitherSchemeIdWasSubmitted() {
             handler.handleValidation(
-                    validationFailure(assamRequest("919999900001", "  ", null),
+                    validationFailure(canonicalRequest("919999900001", "  ", null),
                             "phoneNumber", "phoneNumber is required"),
                     request(READINGS_PATH));
 
@@ -238,7 +238,7 @@ class TelemetryValidationExceptionHandlerTest {
         @Test
         void neverSendsAPhoneHashForAValidationReject() {
             handler.handleValidation(
-                    validationFailure(assamRequest("919999900001", "S-1", null),
+                    validationFailure(canonicalRequest("919999900001", "S-1", null),
                             "phoneNumber", "phoneNumber is required"),
                     request(READINGS_PATH));
 
@@ -250,7 +250,7 @@ class TelemetryValidationExceptionHandlerTest {
             var noPublisher = new TelemetryValidationExceptionHandler(auditService, null);
 
             var response = noPublisher.handleValidation(
-                    validationFailure(assamRequest("919999900001", "S-1", null),
+                    validationFailure(canonicalRequest("919999900001", "S-1", null),
                             "phoneNumber", "phoneNumber is required"),
                     request(READINGS_PATH));
 
@@ -262,7 +262,7 @@ class TelemetryValidationExceptionHandlerTest {
             var noAudit = new TelemetryValidationExceptionHandler(null, eventPublisher);
 
             var response = noAudit.handleValidation(
-                    validationFailure(assamRequest("919999900001", "S-1", null),
+                    validationFailure(canonicalRequest("919999900001", "S-1", null),
                             "phoneNumber", "phoneNumber is required"),
                     request(READINGS_PATH));
 
@@ -357,7 +357,7 @@ class TelemetryValidationExceptionHandlerTest {
             request.setMethod("");
 
             var response = handler.handleValidation(
-                    validationFailure(assamRequest("919999900001", "S-1", null),
+                    validationFailure(canonicalRequest("919999900001", "S-1", null),
                             "phoneNumber", "phoneNumber is required"),
                     request);
 

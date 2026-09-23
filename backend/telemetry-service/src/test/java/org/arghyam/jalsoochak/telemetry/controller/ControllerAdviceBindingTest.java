@@ -141,7 +141,7 @@ class ControllerAdviceBindingTest {
 
     @BeforeEach
     void setUp() {
-        when(auditService.captureForAssamReading(any(), any()))
+        when(auditService.captureForCanonicalReading(any(), any()))
                 .thenReturn(new TelemetrySubmissionAuditService.SubmissionAuditSnapshot(
                         "****0001", 7L, 1, LocalDate.of(2026, 3, 1)));
 
@@ -259,7 +259,7 @@ class ControllerAdviceBindingTest {
         // The reported-scheme KPI: a validation reject still counts the scheme as having reported.
         verify(eventPublisher).publishSubmissionRejected(
                 isNull(), eq("S-1"), isNull(), isNull(), startsWith("validation: "));
-        verify(auditService).captureForAssamReading(any(), isNull());
+        verify(auditService).captureForCanonicalReading(any(), isNull());
 
         List<String> rejectLines = appender.list.stream()
                 .map(ILoggingEvent::getFormattedMessage)

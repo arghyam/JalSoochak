@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.telemetry.controller.ingest;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ResetLatestReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -39,17 +39,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ReadingIngestControllerUnitTest {
 
     @Test
-    void assamReadingsReturnsOkWithCorrelationIdOnSuccess() {
+    void canonicalReadingsReturnsOkWithCorrelationIdOnSuccess() {
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
 
-        ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
+        ResponseEntity<ReadingsApiResponse> response = controller.receiveReading(
                 "js_valid_key",
                 null,
-                AssamReadingRequest.builder()
+                CanonicalReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .confirmedReading(new BigDecimal("123.4"))
                         .stateSchemeId("30178236")
@@ -68,17 +68,17 @@ class ReadingIngestControllerUnitTest {
     }
 
     @Test
-    void assamReadingsReturnsUnauthorizedWithoutCorrelationIdOnFailure() {
+    void canonicalReadingsReturnsUnauthorizedWithoutCorrelationIdOnFailure() {
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 new StubBfmReadingService(false)
         );
 
-        ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
+        ResponseEntity<ReadingsApiResponse> response = controller.receiveReading(
                 "js_invalid_key",
                 null,
-                AssamReadingRequest.builder()
+                CanonicalReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .phoneNumber("919999999999")
                         .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
@@ -93,17 +93,17 @@ class ReadingIngestControllerUnitTest {
     }
 
     @Test
-    void assamReadingsReturnsBadRequestAndSuccessFalseWhenServiceRejects() {
+    void canonicalReadingsReturnsBadRequestAndSuccessFalseWhenServiceRejects() {
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(true),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
 
-        ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
+        ResponseEntity<ReadingsApiResponse> response = controller.receiveReading(
                 "js_valid_key",
                 null,
-                AssamReadingRequest.builder()
+                CanonicalReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .phoneNumber("919999999999")
                         .stateSchemeId("30178236")
@@ -120,7 +120,7 @@ class ReadingIngestControllerUnitTest {
     }
 
     @Test
-    void assamReadingsReturnsServiceUnavailableWhenOcrTransientlyUnavailable() {
+    void canonicalReadingsReturnsServiceUnavailableWhenOcrTransientlyUnavailable() {
         // A transient FlowVision outage is signalled by qualityStatus=RETRY (success=false). It is not a
         // client error, so the endpoint must surface it as 503 Service Unavailable, not 400 Bad Request.
         ReadingIngestController controller = new ReadingIngestController(
@@ -129,10 +129,10 @@ class ReadingIngestControllerUnitTest {
                 new StubBfmReadingService(false)
         );
 
-        ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
+        ResponseEntity<ReadingsApiResponse> response = controller.receiveReading(
                 "js_valid_key",
                 null,
-                AssamReadingRequest.builder()
+                CanonicalReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .phoneNumber("919999999999")
                         .stateSchemeId("30178236")
@@ -151,7 +151,7 @@ class ReadingIngestControllerUnitTest {
     }
 
     @Test
-    void assamReadingsAcceptsPayloadWithoutPhoneNumber() throws Exception {
+    void canonicalReadingsAcceptsPayloadWithoutPhoneNumber() throws Exception {
         // PHONE-OPTIONAL: a submission that omits phone_number must reach the service (which infers the
         // operator from the scheme) instead of being rejected by bean validation.
         ReadingIngestController controller = new ReadingIngestController(
@@ -178,7 +178,7 @@ class ReadingIngestControllerUnitTest {
     }
 
     @Test
-    void assamReadingsValidationFailureReturnsRejectedResponse() throws Exception {
+    void canonicalReadingsValidationFailureReturnsRejectedResponse() throws Exception {
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -207,7 +207,7 @@ class ReadingIngestControllerUnitTest {
     }
 
     @Test
-    void assamReadingsValidationFailureReturnsRejectedResponseWithContextPath() throws Exception {
+    void canonicalReadingsValidationFailureReturnsRejectedResponseWithContextPath() throws Exception {
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -237,7 +237,7 @@ class ReadingIngestControllerUnitTest {
     }
 
     @Test
-    void assamReadingsAcceptsTrailingSlashPath() throws Exception {
+    void canonicalReadingsAcceptsTrailingSlashPath() throws Exception {
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -263,7 +263,7 @@ class ReadingIngestControllerUnitTest {
     }
 
     @Test
-    void assamReadingsValidationFailureOnTrailingSlashReturnsRejectedResponse() throws Exception {
+    void canonicalReadingsValidationFailureOnTrailingSlashReturnsRejectedResponse() throws Exception {
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -593,10 +593,10 @@ class ReadingIngestControllerUnitTest {
                 new StubBfmReadingService(false)
         );
 
-        ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
+        ResponseEntity<ReadingsApiResponse> response = controller.receiveReading(
                 "js_valid_key",
                 null,
-                AssamReadingRequest.builder()
+                CanonicalReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .phoneNumber("919999999999")
                         .stateSchemeId("30178236")
@@ -677,7 +677,7 @@ class ReadingIngestControllerUnitTest {
     }
 
     @Test
-    void assamReadingsMaskPhoneAtInfoAndExposeRawOnlyAtDebug() {
+    void canonicalReadingsMaskPhoneAtInfoAndExposeRawOnlyAtDebug() {
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -693,10 +693,10 @@ class ReadingIngestControllerUnitTest {
         logger.addAppender(appender);
 
         try {
-            controller.receiveAssamReading(
+            controller.receiveReading(
                     "js_valid_key",
                     null,
-                    AssamReadingRequest.builder()
+                    CanonicalReadingRequest.builder()
                             .readingUrl("https://example.com/meter.jpg")
                             .confirmedReading(new BigDecimal("123.4"))
                             .stateSchemeId("30178236")
@@ -1063,7 +1063,7 @@ class ReadingIngestControllerUnitTest {
 
     private static final class StubImageWorkflowService extends MeterImageWorkflowService {
         private final boolean rejected;
-        private int processAssamReadingCount;
+        private int processCanonicalReadingCount;
 
         private StubImageWorkflowService() {
             this(false);
@@ -1075,8 +1075,8 @@ class ReadingIngestControllerUnitTest {
         }
 
         @Override
-        public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
-            processAssamReadingCount++;
+        public CreateReadingResponse processCanonicalReading(CanonicalReadingRequest request, Integer preferredTenantId) {
+            processCanonicalReadingCount++;
             if (rejected) {
                 return CreateReadingResponse.builder()
                         .success(false)
@@ -1103,7 +1103,7 @@ class ReadingIngestControllerUnitTest {
         }
 
         @Override
-        public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
+        public CreateReadingResponse processCanonicalReading(CanonicalReadingRequest request, Integer preferredTenantId) {
             throw failure;
         }
     }
@@ -1114,7 +1114,7 @@ class ReadingIngestControllerUnitTest {
         }
 
         @Override
-        public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
+        public CreateReadingResponse processCanonicalReading(CanonicalReadingRequest request, Integer preferredTenantId) {
             return CreateReadingResponse.builder()
                     .success(false)
                     .qualityStatus("RETRY")
@@ -1228,7 +1228,7 @@ class ReadingIngestControllerUnitTest {
     }
 
     @Test
-    void assamReadingsRejectsAnUnsupportedChannel() {
+    void canonicalReadingsRejectsAnUnsupportedChannel() {
         StubImageWorkflowService imageWorkflow = new StubImageWorkflowService();
         ReadingIngestController controller = new ReadingIngestController(
                 imageWorkflow,
@@ -1237,7 +1237,7 @@ class ReadingIngestControllerUnitTest {
         );
 
         ResponseEntity<ReadingsApiResponse> response =
-                controller.receiveAssamReading("js_valid_key", null, assamReadingWithChannel("BFMX"));
+                controller.receiveReading("js_valid_key", null, canonicalReadingWithChannel("BFMX"));
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertNotNull(response.getBody());
@@ -1248,11 +1248,11 @@ class ReadingIngestControllerUnitTest {
         // going back to the specification.
         assertTrue(response.getBody().getData().getMessage().contains("BFM, ELM, PDU, IOT, MAN"));
         // Refused before any processing: nothing is stored, nothing is published.
-        assertEquals(0, imageWorkflow.processAssamReadingCount);
+        assertEquals(0, imageWorkflow.processCanonicalReadingCount);
     }
 
     @Test
-    void assamReadingsDoNotEchoTheRejectedChannelBack() {
+    void canonicalReadingsDoNotEchoTheRejectedChannelBack() {
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -1260,15 +1260,15 @@ class ReadingIngestControllerUnitTest {
         );
 
         ResponseEntity<ReadingsApiResponse> response =
-                controller.receiveAssamReading("js_valid_key", null,
-                        assamReadingWithChannel("<script>alert(1)</script>"));
+                controller.receiveReading("js_valid_key", null,
+                        canonicalReadingWithChannel("<script>alert(1)</script>"));
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertFalse(response.getBody().getData().getMessage().contains("script"));
     }
 
     @Test
-    void assamReadingsAcceptADeclaredChannelInAnyCase() {
+    void canonicalReadingsAcceptADeclaredChannelInAnyCase() {
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -1276,14 +1276,14 @@ class ReadingIngestControllerUnitTest {
         );
 
         ResponseEntity<ReadingsApiResponse> response =
-                controller.receiveAssamReading("js_valid_key", null, assamReadingWithChannel("  pdu  "));
+                controller.receiveReading("js_valid_key", null, canonicalReadingWithChannel("  pdu  "));
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertTrue(response.getBody().isSuccess());
     }
 
     @Test
-    void assamReadingsAcceptASubmissionThatDeclaresNoChannel() {
+    void canonicalReadingsAcceptASubmissionThatDeclaresNoChannel() {
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -1291,15 +1291,15 @@ class ReadingIngestControllerUnitTest {
         );
 
         assertEquals(HttpStatus.OK,
-                controller.receiveAssamReading("js_valid_key", null, assamReadingWithChannel(null))
+                controller.receiveReading("js_valid_key", null, canonicalReadingWithChannel(null))
                         .getStatusCode());
         assertEquals(HttpStatus.OK,
-                controller.receiveAssamReading("js_valid_key", null, assamReadingWithChannel("   "))
+                controller.receiveReading("js_valid_key", null, canonicalReadingWithChannel("   "))
                         .getStatusCode());
     }
 
     @Test
-    void assamReadingsCheckTheApiKeyBeforeTheChannel() {
+    void canonicalReadingsCheckTheApiKeyBeforeTheChannel() {
         // An unauthenticated caller must not learn which channels exist by probing the field.
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(),
@@ -1308,14 +1308,14 @@ class ReadingIngestControllerUnitTest {
         );
 
         ResponseEntity<ReadingsApiResponse> response =
-                controller.receiveAssamReading("js_invalid_key", null, assamReadingWithChannel("BFMX"));
+                controller.receiveReading("js_invalid_key", null, canonicalReadingWithChannel("BFMX"));
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
         assertEquals(TelemetryErrorCode.INVALID_API_KEY, response.getBody().getData().getErrorCode());
     }
 
-    private static AssamReadingRequest assamReadingWithChannel(String channel) {
-        return AssamReadingRequest.builder()
+    private static CanonicalReadingRequest canonicalReadingWithChannel(String channel) {
+        return CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("30178236")

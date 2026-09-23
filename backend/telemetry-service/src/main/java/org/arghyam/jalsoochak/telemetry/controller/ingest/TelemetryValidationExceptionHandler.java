@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.telemetry.controller.ingest;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
@@ -212,7 +212,7 @@ public class TelemetryValidationExceptionHandler {
     // so analytics can count the scheme as having reported. Tenant is not resolved at validation time;
     // analytics resolves the scheme/tenant from the submitted scheme id. No raw PII is sent.
     private void publishSubmissionRejected(Object target, String reason) {
-        if (telemetryEventPublisher == null || !(target instanceof AssamReadingRequest request)) {
+        if (telemetryEventPublisher == null || !(target instanceof CanonicalReadingRequest request)) {
             return;
         }
         boolean hasSchemeId = (request.getStateSchemeId() != null && !request.getStateSchemeId().isBlank())
@@ -232,8 +232,8 @@ public class TelemetryValidationExceptionHandler {
     }
 
     private TelemetrySubmissionAuditService.SubmissionAuditSnapshot auditSnapshot(Object target) {
-        if (telemetrySubmissionAuditService != null && target instanceof AssamReadingRequest request) {
-            return telemetrySubmissionAuditService.captureForAssamReading(request, null);
+        if (telemetrySubmissionAuditService != null && target instanceof CanonicalReadingRequest request) {
+            return telemetrySubmissionAuditService.captureForCanonicalReading(request, null);
         }
         if (telemetrySubmissionAuditService != null && target instanceof UpdateReadingRequest request) {
             return telemetrySubmissionAuditService.captureForPhoneAndScheme(request.getPhoneNumber(), null);
@@ -262,9 +262,9 @@ public class TelemetryValidationExceptionHandler {
     }
 
     private String summarizeTarget(Object target) {
-        if (target instanceof AssamReadingRequest request) {
+        if (target instanceof CanonicalReadingRequest request) {
             return String.format(
-                    "{type=AssamReadingRequest,phone=%s,stateSchemeId=%s,centreSchemeId=%s,hasReadingUrl=%s,confirmedReading=%s,readingDateTime=%s,hasGeolocation=%s}",
+                    "{type=CanonicalReadingRequest,phone=%s,stateSchemeId=%s,centreSchemeId=%s,hasReadingUrl=%s,confirmedReading=%s,readingDateTime=%s,hasGeolocation=%s}",
                     maskPhone(request.getPhoneNumber()),
                     sanitizeLogValue(request.getStateSchemeId()),
                     sanitizeLogValue(request.getCentreSchemeId()),
@@ -295,7 +295,7 @@ public class TelemetryValidationExceptionHandler {
     }
 
     private String rawTargetPhone(Object target) {
-        if (target instanceof AssamReadingRequest request) {
+        if (target instanceof CanonicalReadingRequest request) {
             return request.getPhoneNumber();
         }
         if (target instanceof UpdateReadingRequest request) {

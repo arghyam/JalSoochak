@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.validation.Validator;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.ingest.CanonicalReadingRequestMapper;
@@ -76,7 +76,7 @@ class MultiFormatReadingControllerTest {
     @Test
     void canonicalFormatHappyPathReturns200() throws Exception {
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(22));
-        when(imageWorkflowService.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processCanonicalReading(any(), any())).thenReturn(CreateReadingResponse.builder()
                 .success(true).message("ok").correlationId("corr-1").build());
 
         mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
@@ -87,9 +87,9 @@ class MultiFormatReadingControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.correlationId").value("corr-1"));
 
-        ArgumentCaptor<AssamReadingRequest> requestCaptor = ArgumentCaptor.forClass(AssamReadingRequest.class);
+        ArgumentCaptor<CanonicalReadingRequest> requestCaptor = ArgumentCaptor.forClass(CanonicalReadingRequest.class);
         ArgumentCaptor<Integer> tenantCaptor = ArgumentCaptor.forClass(Integer.class);
-        verify(imageWorkflowService).processAssamReading(requestCaptor.capture(), tenantCaptor.capture());
+        verify(imageWorkflowService).processCanonicalReading(requestCaptor.capture(), tenantCaptor.capture());
         assertEquals(22, tenantCaptor.getValue());
         assertEquals("91XXXXXXXXXX", requestCaptor.getValue().getPhoneNumber());
         assertEquals("30178236", requestCaptor.getValue().getStateSchemeId());
@@ -98,7 +98,7 @@ class MultiFormatReadingControllerTest {
     @Test
     void customFormatIsMappedToCanonicalThenProcessed() throws Exception {
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(7));
-        when(imageWorkflowService.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processCanonicalReading(any(), any())).thenReturn(CreateReadingResponse.builder()
                 .success(true).message("ok").correlationId("corr-x").build());
 
         // A completely different wire shape from an imaginary "stateX" IT system.
@@ -114,9 +114,9 @@ class MultiFormatReadingControllerTest {
                 .andExpect(jsonPath("$.success").value(true));
 
         // Proves the core pipeline received a canonical request without any change to core code.
-        ArgumentCaptor<AssamReadingRequest> requestCaptor = ArgumentCaptor.forClass(AssamReadingRequest.class);
+        ArgumentCaptor<CanonicalReadingRequest> requestCaptor = ArgumentCaptor.forClass(CanonicalReadingRequest.class);
         ArgumentCaptor<Integer> tenantCaptor = ArgumentCaptor.forClass(Integer.class);
-        verify(imageWorkflowService).processAssamReading(requestCaptor.capture(), tenantCaptor.capture());
+        verify(imageWorkflowService).processCanonicalReading(requestCaptor.capture(), tenantCaptor.capture());
         assertEquals(7, tenantCaptor.getValue());
         assertEquals("91YYYYYYYYYY", requestCaptor.getValue().getPhoneNumber());
         assertEquals("SX-42", requestCaptor.getValue().getStateSchemeId());
@@ -127,7 +127,7 @@ class MultiFormatReadingControllerTest {
         // SUPPLY-PLAUSIBILITY: the contract an integrating client branches on. ABNORMAL_READING is
         // deliberately vaguer than the internal IMPLAUSIBLE_WATER_SUPPLY anomaly it comes from.
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(22));
-        when(imageWorkflowService.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processCanonicalReading(any(), any())).thenReturn(CreateReadingResponse.builder()
                 .success(false)
                 .qualityStatus("REJECTED")
                 .errorCode(TelemetryErrorCode.ABNORMAL_READING)
@@ -248,7 +248,7 @@ class MultiFormatReadingControllerTest {
     @Test
     void rejectedProcessingReturns400() throws Exception {
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(1));
-        when(imageWorkflowService.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processCanonicalReading(any(), any())).thenReturn(CreateReadingResponse.builder()
                 .success(false).qualityStatus("REJECTED").message("nope").correlationId("c").build());
 
         mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
@@ -262,7 +262,7 @@ class MultiFormatReadingControllerTest {
     @Test
     void transientRetryReturns503() throws Exception {
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(1));
-        when(imageWorkflowService.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processCanonicalReading(any(), any())).thenReturn(CreateReadingResponse.builder()
                 .success(false).qualityStatus("RETRY").message("try later").correlationId("c").build());
 
         mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
@@ -295,8 +295,8 @@ class MultiFormatReadingControllerTest {
         }
 
         @Override
-        public AssamReadingRequest map(JsonNode rawBody) {
-            return AssamReadingRequest.builder()
+        public CanonicalReadingRequest map(JsonNode rawBody) {
+            return CanonicalReadingRequest.builder()
                     .phoneNumber(rawBody.path("msisdn").asText(null))
                     .stateSchemeId(rawBody.path("scheme").asText(null))
                     .confirmedReading(rawBody.has("value") ? rawBody.get("value").decimalValue() : null)
@@ -312,7 +312,7 @@ class MultiFormatReadingControllerTest {
         }
 
         @Override
-        public AssamReadingRequest map(JsonNode rawBody) {
+        public CanonicalReadingRequest map(JsonNode rawBody) {
             throw new IllegalArgumentException("bad payload");
         }
     }
@@ -325,7 +325,7 @@ class MultiFormatReadingControllerTest {
         }
 
         @Override
-        public AssamReadingRequest map(JsonNode rawBody) {
+        public CanonicalReadingRequest map(JsonNode rawBody) {
             return null;
         }
     }
@@ -358,7 +358,7 @@ class MultiFormatReadingControllerTest {
     @Test
     void aDeclaredChannelIsAcceptedInAnyCase() throws Exception {
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(22));
-        when(imageWorkflowService.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processCanonicalReading(any(), any())).thenReturn(CreateReadingResponse.builder()
                 .success(true).message("ok").correlationId("corr-1").build());
 
         mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
@@ -367,8 +367,8 @@ class MultiFormatReadingControllerTest {
                         .content(CANONICAL_BODY_WITH_CHANNEL.formatted("elm")))
                 .andExpect(status().isOk());
 
-        ArgumentCaptor<AssamReadingRequest> captor = ArgumentCaptor.forClass(AssamReadingRequest.class);
-        verify(imageWorkflowService).processAssamReading(captor.capture(), any());
+        ArgumentCaptor<CanonicalReadingRequest> captor = ArgumentCaptor.forClass(CanonicalReadingRequest.class);
+        verify(imageWorkflowService).processCanonicalReading(captor.capture(), any());
         assertEquals("elm", captor.getValue().getChannel());
     }
 

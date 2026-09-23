@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
@@ -31,11 +31,11 @@ import java.util.stream.Collectors;
 
 /**
  * Pluggable ingestion endpoint for state IT systems whose reading payload does not match the
- * canonical contract served by {@code ReadingIngestController#receiveAssamReading}.
+ * canonical contract served by {@code ReadingIngestController#receiveReading}.
  *
  * <p>{@code POST /api/v1/telemetry/readings/formats/{format}} accepts the raw JSON body, selects the
  * matching {@link ReadingRequestMapper} (via {@link ReadingRequestMapperRegistry}), maps it to the
- * canonical {@link AssamReadingRequest}, applies the same bean-validation constraints, then runs the
+ * {@link CanonicalReadingRequest}, applies the same bean-validation constraints, then runs the
  * identical processing path as the canonical endpoint. Adding a new state format therefore needs only
  * a new mapper bean — no change to this controller or the core pipeline.
  *
@@ -92,7 +92,7 @@ public class MultiFormatReadingController {
         }
         ReadingRequestMapper mapper = mapperRegistry.resolve(format);
 
-        AssamReadingRequest request;
+        CanonicalReadingRequest request;
         try {
             request = mapper.map(rawBody);
         } catch (Exception e) {
@@ -106,7 +106,7 @@ public class MultiFormatReadingController {
                     "Mapper produced no reading for format '" + safeFormat + "'");
         }
 
-        Set<ConstraintViolation<AssamReadingRequest>> violations = validator.validate(request);
+        Set<ConstraintViolation<CanonicalReadingRequest>> violations = validator.validate(request);
         if (!violations.isEmpty()) {
             String message = violations.stream()
                     .map(ConstraintViolation::getMessage)
@@ -130,7 +130,7 @@ public class MultiFormatReadingController {
         }
 
         try {
-            CreateReadingResponse response = imageWorkflowService.processAssamReading(request, tenantId);
+            CreateReadingResponse response = imageWorkflowService.processCanonicalReading(request, tenantId);
             boolean retry = response != null
                     && !response.isSuccess()
                     && "RETRY".equalsIgnoreCase(response.getQualityStatus());

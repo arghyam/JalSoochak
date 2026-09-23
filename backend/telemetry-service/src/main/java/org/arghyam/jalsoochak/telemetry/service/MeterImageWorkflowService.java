@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -138,7 +138,7 @@ public class MeterImageWorkflowService {
         }
     }
 
-    public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
+    public CreateReadingResponse processCanonicalReading(CanonicalReadingRequest request, Integer preferredTenantId) {
         String safeContactId = request != null ? request.getPhoneNumber() : null;
         try {
             String contactId = safeContactId;
@@ -210,7 +210,7 @@ public class MeterImageWorkflowService {
                     .declaredChannel(ReadingChannel.parseStrict(request.getChannel()).orElse(null))
                     // LOCATION-AFFINITY: GeoJSON orders coordinates [longitude, latitude] — the
                     // opposite of how they read aloud, and the single easiest thing here to get
-                    // backwards. Pinned by MeterImageWorkflowServiceAssamTest.
+                    // backwards. Pinned by MeterImageWorkflowServiceCanonicalReadingTest.
                     .latitude(geolocationCoordinate(request.getGeolocation(), 1))
                     .longitude(geolocationCoordinate(request.getGeolocation(), 0))
                     .build();
@@ -301,7 +301,7 @@ public class MeterImageWorkflowService {
      * not registered so the submission is still recorded — and the scheme is then preferred among the
      * ones that operator is mapped to.
      */
-    private SubmissionContext resolveFromSubmittedPhone(AssamReadingRequest request,
+    private SubmissionContext resolveFromSubmittedPhone(CanonicalReadingRequest request,
                                                         String contactId,
                                                         Integer preferredTenantId) {
         Optional<TelemetryOperatorWithSchema> resolvedOperator =
@@ -334,7 +334,7 @@ public class MeterImageWorkflowService {
             throw new IllegalStateException("No operator found for the provided contactId");
         }
 
-        SchemeResolution schemeResolution = resolveAssamSchemeLenient(
+        SchemeResolution schemeResolution = resolveSchemeLenient(
                 operatorWithSchema.schemaName(), operatorWithSchema.operator().id(), operatorIsSentinel,
                 request.getStateSchemeId(), request.getCentreSchemeId());
 
@@ -354,12 +354,12 @@ public class MeterImageWorkflowService {
      * tagged {@link IngestionSource#PHONE_ABSENT} so an inferred operator is never mistaken for the real
      * submitter — including the case where the inferred operator is a perfectly normal, mapped user.
      */
-    private SubmissionContext resolveOperatorFromScheme(AssamReadingRequest request, Integer preferredTenantId) {
+    private SubmissionContext resolveOperatorFromScheme(CanonicalReadingRequest request, Integer preferredTenantId) {
         String schemaName = telemetryTenantRepository.findSchemaNameByTenantId(preferredTenantId)
                 .orElseThrow(() -> new IllegalStateException(
                         "No phone number was submitted and the tenant schema could not be resolved"));
 
-        SchemeResolution schemeResolution = resolveAssamSchemeWithoutOperator(
+        SchemeResolution schemeResolution = resolveSchemeWithoutOperator(
                 schemaName, request.getStateSchemeId(), request.getCentreSchemeId());
         int ingestionSource = IngestionSource.PHONE_ABSENT | schemeResolution.ingestionSourceBits();
 
@@ -403,11 +403,11 @@ public class MeterImageWorkflowService {
 
     /**
      * PHONE-OPTIONAL: scheme resolution for a phone-less submission — the same state-then-centre lookup
-     * as {@link #resolveAssamSchemeLenient} minus the operator-mapping preference, which has no meaning
+     * as {@link #resolveSchemeLenient} minus the operator-mapping preference, which has no meaning
      * before an operator is known. Unknown ids auto-provision a placeholder scheme when lenient
      * ingestion is enabled, and are rejected as before when it is disabled.
      */
-    private SchemeResolution resolveAssamSchemeWithoutOperator(String schemaName,
+    private SchemeResolution resolveSchemeWithoutOperator(String schemaName,
                                                                String stateSchemeId,
                                                                String centreSchemeId) {
         // Any scheme the submitted ids resolve to is usable: there is no operator to prefer one by.
@@ -500,7 +500,7 @@ public class MeterImageWorkflowService {
      * scheme id is unknown — tagging each case so it can be filtered later. When lenient ingestion is
      * disabled it preserves the original reject behaviour.
      */
-    private SchemeResolution resolveAssamSchemeLenient(String schemaName,
+    private SchemeResolution resolveSchemeLenient(String schemaName,
                                                        Long operatorId,
                                                        boolean operatorIsSentinel,
                                                        String stateSchemeId,
@@ -575,7 +575,7 @@ public class MeterImageWorkflowService {
      * <p>Returns {@code null} for an absent geolocation, which is the ordinary case: the field is
      * optional and every WhatsApp submission omits it.
      */
-    private BigDecimal geolocationCoordinate(AssamReadingRequest.Geolocation geolocation, int index) {
+    private BigDecimal geolocationCoordinate(CanonicalReadingRequest.Geolocation geolocation, int index) {
         if (geolocation == null || geolocation.getCoordinates() == null
                 || geolocation.getCoordinates().size() != 2) {
             return null;
@@ -590,7 +590,7 @@ public class MeterImageWorkflowService {
      * optional — but a malformed one is, and failing before persistence is what keeps the caller's
      * retry clean.
      */
-    private void validateGeolocation(AssamReadingRequest.Geolocation geolocation) {
+    private void validateGeolocation(CanonicalReadingRequest.Geolocation geolocation) {
         if (geolocation == null) {
             return;
         }

@@ -5,7 +5,7 @@ import jakarta.validation.Valid;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.config.OpenApiConfig;
 import org.arghyam.jalsoochak.telemetry.config.TelemetryApiKeyAuthFilter;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ResetLatestReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateYesterdayFinalReadingBySchemeRequest;
@@ -169,27 +169,27 @@ public class ReadingIngestController {
             consumes = "application/json",
             produces = "application/json"
     )
-    public ResponseEntity<ReadingsApiResponse> receiveAssamReading(
+    public ResponseEntity<ReadingsApiResponse> receiveReading(
             @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
             @RequestHeader(value = TENANT_CODE_HEADER, required = false) String tenantCode,
-            @RequestBody @Valid AssamReadingRequest request
+            @RequestBody @Valid CanonicalReadingRequest request
     ) {
-        log.info("POST /api/v1/telemetry/readings received request={}", summarizeAssamReadingRequest(request));
+        log.info("POST /api/v1/telemetry/readings received request={}", summarizeReadingRequest(request));
         Integer tenantId = null;
         try {
             if (telemetryApiKeyService == null) {
                 log.info("POST /api/v1/telemetry/readings rejected reason=\"API key service not configured\" request={}",
-                        summarizeAssamReadingRequest(request));
+                        summarizeReadingRequest(request));
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "API key service not configured");
             }
             log.info("POST /api/v1/telemetry/readings resolving API key present={} request={}",
                     apiKey != null && !apiKey.isBlank(),
-                    summarizeAssamReadingRequest(request));
+                    summarizeReadingRequest(request));
             tenantId = telemetryApiKeyService.resolveTenantIdFromRawApiKey(apiKey)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
             log.info("POST /api/v1/telemetry/readings API key accepted tenantId={} request={}",
                     tenantId,
-                    summarizeAssamReadingRequest(request));
+                    summarizeReadingRequest(request));
 
             // Checked here rather than with a Bean Validation constraint: every @Valid failure on
             // this endpoint is funnelled into VALIDATION_FAILED, and a caller needs to tell an
@@ -199,7 +199,7 @@ public class ReadingIngestController {
                 String message = ReadingChannel.unsupportedDeclarationMessage();
                 log.info("POST /api/v1/telemetry/readings rejected tenantId={} reason=\"unsupported channel\" request={}",
                         tenantId,
-                        summarizeAssamReadingRequest(request));
+                        summarizeReadingRequest(request));
                 logReadingSubmission("/api/v1/telemetry/readings", request, tenantId, "FAILED", message);
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
                         ReadingsApiResponse.builder()
@@ -215,8 +215,8 @@ public class ReadingIngestController {
 
             log.info("POST /api/v1/telemetry/readings processing tenantId={} request={}",
                     tenantId,
-                    summarizeAssamReadingRequest(request));
-            CreateReadingResponse response = imageWorkflowService.processAssamReading(request, tenantId);
+                    summarizeReadingRequest(request));
+            CreateReadingResponse response = imageWorkflowService.processCanonicalReading(request, tenantId);
             // A transient OCR outage is signalled by qualityStatus=RETRY (success=false). It is a server-side,
             // retryable condition — not a client error — so surface it as 503 Service Unavailable, not 400.
             boolean retry = response != null
@@ -263,7 +263,7 @@ public class ReadingIngestController {
                     tenantId,
                     e.getStatusCode(),
                     sanitizeLogMessage(e.getReason()),
-                    summarizeAssamReadingRequest(request));
+                    summarizeReadingRequest(request));
             logReadingSubmission(
                     "/api/v1/telemetry/readings",
                     request,
@@ -288,7 +288,7 @@ public class ReadingIngestController {
             log.info("POST /api/v1/telemetry/readings failed tenantId={} reason=\"{}\" request={}",
                     tenantId,
                     sanitizeLogMessage(e.getMessage()),
-                    summarizeAssamReadingRequest(request));
+                    summarizeReadingRequest(request));
             logReadingSubmission(
                     "/api/v1/telemetry/readings",
                     request,
@@ -651,10 +651,10 @@ public class ReadingIngestController {
         logRawSubmissionPhoneAtDebug(api, status, phoneNumber, audit);
     }
 
-    private void logReadingSubmission(String api, AssamReadingRequest request, Integer tenantId, String status, String message) {
+    private void logReadingSubmission(String api, CanonicalReadingRequest request, Integer tenantId, String status, String message) {
         TelemetrySubmissionAuditService.SubmissionAuditSnapshot audit =
                 telemetrySubmissionAuditService != null
-                        ? telemetrySubmissionAuditService.captureForAssamReading(request, tenantId)
+                        ? telemetrySubmissionAuditService.captureForCanonicalReading(request, tenantId)
                         : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now(ReadingTime.ZONE));
 
         String submittedPhone = request != null ? request.getPhoneNumber() : null;
@@ -716,7 +716,7 @@ public class ReadingIngestController {
         );
     }
 
-    private String summarizeAssamReadingRequest(AssamReadingRequest request) {
+    private String summarizeReadingRequest(CanonicalReadingRequest request) {
         if (request == null) {
             return "null";
         }

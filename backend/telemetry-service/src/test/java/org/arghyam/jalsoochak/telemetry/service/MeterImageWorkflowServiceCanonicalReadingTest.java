@@ -5,7 +5,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -46,7 +46,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class MeterImageWorkflowServiceAssamTest {
+class MeterImageWorkflowServiceCanonicalReadingTest {
 
     @Mock
     private InboundMediaService inboundMediaService;
@@ -166,8 +166,8 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingSkipsLocationUpdateWhenGeolocationMissing() {
-        AssamReadingRequest request = AssamReadingRequest.builder()
+    void processCanonicalReadingSkipsLocationUpdateWhenGeolocationMissing() {
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("30178236")
@@ -198,7 +198,7 @@ class MeterImageWorkflowServiceAssamTest {
                         .qualityStatus("CONFIRMED")
                         .build());
 
-        CreateReadingResponse response = service.processAssamReading(request, 22);
+        CreateReadingResponse response = service.processCanonicalReading(request, 22);
 
         assertNotNull(response);
         assertEquals(true, response.isSuccess());
@@ -206,11 +206,11 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingFlagsSchemeIdMismatchWhenMatchedSchemeIsReal() {
+    void processCanonicalReadingFlagsSchemeIdMismatchWhenMatchedSchemeIsReal() {
         // SCHEME-ID-MISMATCH: the reading matched on the state id and resolved to a real scheme; the
         // other (centre) id must be cross-checked so a wrong master id can be reconciled later. The raw
         // submitted ids are handed to the repository, which decides whether they actually disagree.
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("30178236")
@@ -240,7 +240,7 @@ class MeterImageWorkflowServiceAssamTest {
                         .qualityStatus("CONFIRMED")
                         .build());
 
-        CreateReadingResponse response = service.processAssamReading(request, 22);
+        CreateReadingResponse response = service.processCanonicalReading(request, 22);
 
         assertNotNull(response);
         assertTrue(response.isSuccess());
@@ -249,12 +249,12 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingDoesNotFlagMismatchForAutoProvisionedPlaceholder() {
+    void processCanonicalReadingDoesNotFlagMismatchForAutoProvisionedPlaceholder() {
         // SCHEME-ID-MISMATCH: when both ids are unknown the reading lands on an auto-provisioned
         // placeholder scheme; there is no master row to reconcile against, so nothing must be flagged.
         ReflectionTestUtils.setField(service, "lenientIngestionEnabled", true);
 
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("99999999")
@@ -287,7 +287,7 @@ class MeterImageWorkflowServiceAssamTest {
                         .qualityStatus("CONFIRMED")
                         .build());
 
-        CreateReadingResponse response = service.processAssamReading(request, 22);
+        CreateReadingResponse response = service.processCanonicalReading(request, 22);
 
         assertNotNull(response);
         assertTrue(response.isSuccess());
@@ -296,11 +296,11 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingOptsIntoTheSupplyPlausibilityCheck() {
+    void processCanonicalReadingOptsIntoTheSupplyPlausibilityCheck() {
         // SUPPLY-PLAUSIBILITY: this endpoint is the only caller that turns the check on.
         // createReading is shared with the Glific/WhatsApp image path, which must stay untouched, so
         // the flag is an opt-in set here and nowhere else.
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .centreSchemeId("30244993")
@@ -324,7 +324,7 @@ class MeterImageWorkflowServiceAssamTest {
                 anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder().success(true).qualityStatus("CONFIRMED").build());
 
-        service.processAssamReading(request, 22);
+        service.processCanonicalReading(request, 22);
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
         verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(),
@@ -340,15 +340,15 @@ class MeterImageWorkflowServiceAssamTest {
      * commit with the row instead of in a separate, non-transactional statement.
      */
     @Test
-    void processAssamReadingCarriesGeolocationIntoTheReadingRequest() {
-        AssamReadingRequest request = AssamReadingRequest.builder()
+    void processCanonicalReadingCarriesGeolocationIntoTheReadingRequest() {
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("30178236")
                 .centreSchemeId("30244993")
                 .phoneNumber("919876543210")
                 .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
-                .geolocation(AssamReadingRequest.Geolocation.builder()
+                .geolocation(CanonicalReadingRequest.Geolocation.builder()
                         .type("Point")
                         .coordinates(List.of(new BigDecimal("56.78"), new BigDecimal("12.34")))
                         .build())
@@ -378,7 +378,7 @@ class MeterImageWorkflowServiceAssamTest {
                         .qualityStatus("CONFIRMED")
                         .build());
 
-        CreateReadingResponse response = service.processAssamReading(request, 22);
+        CreateReadingResponse response = service.processCanonicalReading(request, 22);
 
         assertNotNull(response);
         assertEquals(true, response.isSuccess());
@@ -407,10 +407,10 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingLeavesCoordinatesNullWhenNoGeolocationSent() {
+    void processCanonicalReadingLeavesCoordinatesNullWhenNoGeolocationSent() {
         // The overwhelmingly common case, and the one that must stay byte-identical: geolocation is
         // optional, and a submission without it is neither rejected nor boundary-checked.
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .centreSchemeId("30244993")
@@ -433,7 +433,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder().success(true).correlationId("corr-2").build());
 
-        service.processAssamReading(request, 22);
+        service.processCanonicalReading(request, 22);
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
         verify(bfmReadingService).createReading(
@@ -443,17 +443,17 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingRejectsAMalformedGeolocationBeforeStoringTheReading() {
+    void processCanonicalReadingRejectsAMalformedGeolocationBeforeStoringTheReading() {
         // This used to validate AFTER createReading had returned, so a caller with a bad geolocation
         // got a failure response for a reading that was already committed — and their retry then hit
         // same-day placeholder reuse. Rejecting first makes the failure honest and the retry clean.
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .centreSchemeId("30244993")
                 .phoneNumber("919876543210")
                 .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
-                .geolocation(AssamReadingRequest.Geolocation.builder()
+                .geolocation(CanonicalReadingRequest.Geolocation.builder()
                         .type("Polygon")
                         .coordinates(List.of(new BigDecimal("56.78"), new BigDecimal("12.34")))
                         .build())
@@ -472,7 +472,7 @@ class MeterImageWorkflowServiceAssamTest {
                 .thenReturn(Optional.of(30244993L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
 
-        CreateReadingResponse response = service.processAssamReading(request, 22);
+        CreateReadingResponse response = service.processCanonicalReading(request, 22);
 
         assertEquals(false, response.isSuccess());
         verify(bfmReadingService, never())
@@ -480,8 +480,8 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingAllowsMissingReadingUrlWhenConfirmedReadingProvided() {
-        AssamReadingRequest request = AssamReadingRequest.builder()
+    void processCanonicalReadingAllowsMissingReadingUrlWhenConfirmedReadingProvided() {
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl(null)
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("30178236")
@@ -511,7 +511,7 @@ class MeterImageWorkflowServiceAssamTest {
                         .qualityStatus("CONFIRMED")
                         .build());
 
-        CreateReadingResponse response = service.processAssamReading(request, 22);
+        CreateReadingResponse response = service.processCanonicalReading(request, 22);
 
         assertNotNull(response);
         assertEquals(true, response.isSuccess());
@@ -523,8 +523,8 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingAllowsMissingReadingDateTime() {
-        AssamReadingRequest request = AssamReadingRequest.builder()
+    void processCanonicalReadingAllowsMissingReadingDateTime() {
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("30178236")
@@ -554,7 +554,7 @@ class MeterImageWorkflowServiceAssamTest {
                         .qualityStatus("CONFIRMED")
                         .build());
 
-        CreateReadingResponse response = service.processAssamReading(request, 22);
+        CreateReadingResponse response = service.processCanonicalReading(request, 22);
 
         assertNotNull(response);
         assertEquals(true, response.isSuccess());
@@ -565,12 +565,12 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingRecordsAgainstPlaceholderWhenSchemeIdsUnknown() {
+    void processCanonicalReadingRecordsAgainstPlaceholderWhenSchemeIdsUnknown() {
         // LENIENT-INGEST: unknown scheme ids are now recorded against an auto-provisioned placeholder
         // scheme (and tagged UNKNOWN_SCHEME) instead of being rejected.
         ReflectionTestUtils.setField(service, "lenientIngestionEnabled", true);
 
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("99999999")
@@ -606,7 +606,7 @@ class MeterImageWorkflowServiceAssamTest {
         ListAppender<ILoggingEvent> appender = attachAppender();
         CreateReadingResponse response;
         try {
-            response = service.processAssamReading(request, 22);
+            response = service.processCanonicalReading(request, 22);
         } finally {
             detachAppender(appender);
         }
@@ -628,12 +628,12 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingRecordsAgainstExistingSchemeWhenOperatorNotMapped() {
+    void processCanonicalReadingRecordsAgainstExistingSchemeWhenOperatorNotMapped() {
         // LENIENT-INGEST: when the scheme exists but the operator is not mapped to it, the reading is
         // now recorded against that scheme and tagged OPERATOR_NOT_MAPPED instead of being rejected.
         ReflectionTestUtils.setField(service, "lenientIngestionEnabled", true);
 
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("30178236")
@@ -669,7 +669,7 @@ class MeterImageWorkflowServiceAssamTest {
         ListAppender<ILoggingEvent> appender = attachAppender();
         CreateReadingResponse response;
         try {
-            response = service.processAssamReading(request, 22);
+            response = service.processCanonicalReading(request, 22);
         } finally {
             detachAppender(appender);
         }
@@ -691,12 +691,12 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingRecordsAgainstSentinelWhenOperatorNotFoundAndNeverLogsRawPhoneAboveDebug() {
+    void processCanonicalReadingRecordsAgainstSentinelWhenOperatorNotFoundAndNeverLogsRawPhoneAboveDebug() {
         // LENIENT-INGEST: an unregistered phone is now recorded against the sentinel "Unknown operator"
         // (tagged UNKNOWN_OPERATOR). The raw phone must still never appear above DEBUG.
         ReflectionTestUtils.setField(service, "lenientIngestionEnabled", true);
 
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("30178236")
@@ -739,7 +739,7 @@ class MeterImageWorkflowServiceAssamTest {
 
         CreateReadingResponse response;
         try {
-            response = service.processAssamReading(request, 22);
+            response = service.processCanonicalReading(request, 22);
         } finally {
             logger.detachAppender(appender);
             logger.setLevel(originalLevel);
@@ -767,11 +767,11 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingRejectsUnknownSchemeWhenLenientIngestionDisabled() {
+    void processCanonicalReadingRejectsUnknownSchemeWhenLenientIngestionDisabled() {
         // With the LENIENT-INGEST off-switch disabled, the original reject behaviour is preserved.
         ReflectionTestUtils.setField(service, "lenientIngestionEnabled", false);
 
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("99999999")
@@ -794,7 +794,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
                 .thenReturn("Reading rejected");
 
-        CreateReadingResponse response = service.processAssamReading(request, 22);
+        CreateReadingResponse response = service.processCanonicalReading(request, 22);
 
         assertNotNull(response);
         assertFalse(response.isSuccess());
@@ -805,11 +805,11 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingWithoutPhoneCreditsFirstPumpOperatorOfScheme() {
+    void processCanonicalReadingWithoutPhoneCreditsFirstPumpOperatorOfScheme() {
         // PHONE-OPTIONAL: no phone in the payload -> the scheme is resolved first and the reading is
         // credited to the pump operator mapped to it, tagged PHONE_ABSENT so the inferred operator is
         // never mistaken for the actual submitter.
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("30178236")
@@ -841,7 +841,7 @@ class MeterImageWorkflowServiceAssamTest {
         ListAppender<ILoggingEvent> appender = attachAppender();
         CreateReadingResponse response;
         try {
-            response = service.processAssamReading(request, 22);
+            response = service.processCanonicalReading(request, 22);
         } finally {
             detachAppender(appender);
         }
@@ -870,9 +870,9 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingTreatsBlankPhoneAsAbsent() {
+    void processCanonicalReadingTreatsBlankPhoneAsAbsent() {
         // A blank phone carries no more information than a missing one, so it takes the same path.
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("30178236")
@@ -900,7 +900,7 @@ class MeterImageWorkflowServiceAssamTest {
                         .qualityStatus("CONFIRMED")
                         .build());
 
-        CreateReadingResponse response = service.processAssamReading(request, 22);
+        CreateReadingResponse response = service.processCanonicalReading(request, 22);
 
         assertNotNull(response);
         assertTrue(response.isSuccess());
@@ -913,12 +913,12 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingWithoutPhoneFallsBackToSentinelWhenSchemeHasNoPumpOperator() {
+    void processCanonicalReadingWithoutPhoneFallsBackToSentinelWhenSchemeHasNoPumpOperator() {
         // PHONE-OPTIONAL: a scheme with no mapped pump operator has nobody to credit, so the reading is
         // recorded against the tenant sentinel and tagged PHONE_ABSENT | UNKNOWN_OPERATOR.
         ReflectionTestUtils.setField(service, "lenientIngestionEnabled", true);
 
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("30178236")
@@ -950,7 +950,7 @@ class MeterImageWorkflowServiceAssamTest {
         ListAppender<ILoggingEvent> appender = attachAppender();
         CreateReadingResponse response;
         try {
-            response = service.processAssamReading(request, 22);
+            response = service.processCanonicalReading(request, 22);
         } finally {
             detachAppender(appender);
         }
@@ -969,12 +969,12 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingWithoutPhoneRecordsAgainstPlaceholderWhenSchemeIdsUnknown() {
+    void processCanonicalReadingWithoutPhoneRecordsAgainstPlaceholderWhenSchemeIdsUnknown() {
         // PHONE-OPTIONAL + LENIENT-INGEST: neither the scheme nor a submitter is known, so the reading
         // lands on an auto-provisioned placeholder credited to the sentinel, carrying all three bits.
         ReflectionTestUtils.setField(service, "lenientIngestionEnabled", true);
 
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("99999999")
@@ -1008,7 +1008,7 @@ class MeterImageWorkflowServiceAssamTest {
                         .qualityStatus("CONFIRMED")
                         .build());
 
-        CreateReadingResponse response = service.processAssamReading(request, 22);
+        CreateReadingResponse response = service.processCanonicalReading(request, 22);
 
         assertNotNull(response);
         assertTrue(response.isSuccess());
@@ -1026,12 +1026,12 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingWithoutPhoneIsRejectedWhenLenientIngestionDisabled() {
+    void processCanonicalReadingWithoutPhoneIsRejectedWhenLenientIngestionDisabled() {
         // With the off-switch disabled there is no sentinel to fall back on, so a phone-less submission
         // for a scheme with no mapped pump operator is rejected rather than credited to nobody.
         ReflectionTestUtils.setField(service, "lenientIngestionEnabled", false);
 
-        AssamReadingRequest request = AssamReadingRequest.builder()
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .stateSchemeId("30178236")
@@ -1046,7 +1046,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
                 .thenReturn("Reading rejected");
 
-        CreateReadingResponse response = service.processAssamReading(request, 22);
+        CreateReadingResponse response = service.processCanonicalReading(request, 22);
 
         assertNotNull(response);
         assertFalse(response.isSuccess());
@@ -1114,49 +1114,49 @@ class MeterImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingPassesTheDeclaredChannelThrough() {
-        AssamReadingRequest request = assamRequestWithChannel("PDU");
-        stubAssamSubmission();
+    void processCanonicalReadingPassesTheDeclaredChannelThrough() {
+        CanonicalReadingRequest request = canonicalRequestWithChannel("PDU");
+        stubCanonicalSubmission();
 
-        service.processAssamReading(request, 22);
+        service.processCanonicalReading(request, 22);
 
         assertEquals(ReadingChannel.PDU, capturedCreateReadingRequest().getDeclaredChannel());
     }
 
     @Test
-    void processAssamReadingAcceptsADeclaredChannelInAnyCase() {
-        AssamReadingRequest request = assamRequestWithChannel("  elm  ");
-        stubAssamSubmission();
+    void processCanonicalReadingAcceptsADeclaredChannelInAnyCase() {
+        CanonicalReadingRequest request = canonicalRequestWithChannel("  elm  ");
+        stubCanonicalSubmission();
 
-        service.processAssamReading(request, 22);
+        service.processCanonicalReading(request, 22);
 
         assertEquals(ReadingChannel.ELM, capturedCreateReadingRequest().getDeclaredChannel());
     }
 
     @Test
-    void processAssamReadingLeavesTheChannelUnsetWhenTheSubmissionOmitsIt() {
+    void processCanonicalReadingLeavesTheChannelUnsetWhenTheSubmissionOmitsIt() {
         // Null is what keeps every existing integration on its current path: BfmReadingService then
         // resolves the channel from the operator's stored preference exactly as before.
-        AssamReadingRequest request = assamRequestWithChannel(null);
-        stubAssamSubmission();
+        CanonicalReadingRequest request = canonicalRequestWithChannel(null);
+        stubCanonicalSubmission();
 
-        service.processAssamReading(request, 22);
+        service.processCanonicalReading(request, 22);
 
         assertNull(capturedCreateReadingRequest().getDeclaredChannel());
     }
 
     @Test
-    void processAssamReadingLeavesTheChannelUnsetWhenItIsBlank() {
-        AssamReadingRequest request = assamRequestWithChannel("   ");
-        stubAssamSubmission();
+    void processCanonicalReadingLeavesTheChannelUnsetWhenItIsBlank() {
+        CanonicalReadingRequest request = canonicalRequestWithChannel("   ");
+        stubCanonicalSubmission();
 
-        service.processAssamReading(request, 22);
+        service.processCanonicalReading(request, 22);
 
         assertNull(capturedCreateReadingRequest().getDeclaredChannel());
     }
 
-    private static AssamReadingRequest assamRequestWithChannel(String channel) {
-        return AssamReadingRequest.builder()
+    private static CanonicalReadingRequest canonicalRequestWithChannel(String channel) {
+        return CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
                 .centreSchemeId("30244993")
@@ -1166,7 +1166,7 @@ class MeterImageWorkflowServiceAssamTest {
                 .build();
     }
 
-    private void stubAssamSubmission() {
+    private void stubCanonicalSubmission() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_assam",
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
