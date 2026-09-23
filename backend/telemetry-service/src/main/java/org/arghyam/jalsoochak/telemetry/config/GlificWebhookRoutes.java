@@ -8,7 +8,7 @@ import java.util.Set;
  * The exact set of Glific webhook routes protected by {@link GlificWebhookAuthFilter}.
  *
  * <p><b>Why a closed allowlist rather than a prefix rule on {@code /api/v1/telemetry/**}.</b>
- * That prefix is shared with the vendor ingestion endpoints on {@code SingleTenantTelemetryController}
+ * That prefix is shared with the vendor ingestion endpoints on {@code ReadingIngestController}
  * and {@code MultiFormatReadingController}, which authenticate with a different credential
  * ({@code X-Api-Key}, issued per tenant to state IT departments). {@code /readings} and
  * {@code /schemes} are each shared prefixes across both families — {@code POST /schemes} is a Glific

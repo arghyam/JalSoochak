@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.telemetry.controller;
+package org.arghyam.jalsoochak.telemetry.controller.ingest;
 
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateYesterdayFinalReadingBySchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.UpdateYesterdayFinalReadingBySchemeResponse;
@@ -48,8 +48,8 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("SingleTenantTelemetryController — yesterday-final-reading authentication")
-class SingleTenantTelemetryControllerPatchAuthTest {
+@DisplayName("ReadingIngestController — yesterday-final-reading authentication")
+class ReadingIngestControllerPatchAuthTest {
 
     private static final long SCHEME_ID = 7L;
     private static final String PHONE = "919999900001";
@@ -66,11 +66,11 @@ class SingleTenantTelemetryControllerPatchAuthTest {
     @Mock
     private TelemetrySubmissionAuditService auditService;
 
-    private SingleTenantTelemetryController controller;
+    private ReadingIngestController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new SingleTenantTelemetryController(
+        controller = new ReadingIngestController(
                 glificWebhookService,
                 telemetryApiKeyService,
                 bfmReadingService,

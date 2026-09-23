@@ -1,6 +1,5 @@
-package org.arghyam.jalsoochak.telemetry.controller;
+package org.arghyam.jalsoochak.telemetry.controller.webhook;
 
-import org.arghyam.jalsoochak.telemetry.controller.webhook.IssueReportWebhookController;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
@@ -30,11 +29,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>Driven through {@code standaloneSetup} rather than {@code @WebMvcTest} — this service has no
  * test {@code application.properties} and its {@code application.yml} carries unresolved
  * placeholders, so booting a Spring context fails. Same reasoning as
- * {@link MultiFormatReadingControllerTest}.
+ * {@code MultiFormatReadingControllerTest}.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-class GlificWebhookValidationExceptionHandlerTest {
+class WebhookValidationExceptionHandlerTest {
 
     private static final String SUBMIT = "/api/v1/telemetry/issue-report/submit";
     private static final String TELEMETRY_SUBMIT = "/api/v1/telemetry/issue-report/telemetry/submit";
@@ -45,7 +44,7 @@ class GlificWebhookValidationExceptionHandlerTest {
 
     private MockMvc mockMvc() {
         return MockMvcBuilders.standaloneSetup(new IssueReportWebhookController(webhookService))
-                .setControllerAdvice(new GlificWebhookValidationExceptionHandler())
+                .setControllerAdvice(new WebhookValidationExceptionHandler())
                 .build();
     }
 

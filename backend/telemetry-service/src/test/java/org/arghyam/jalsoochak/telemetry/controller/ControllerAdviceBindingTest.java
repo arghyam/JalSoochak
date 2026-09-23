@@ -6,11 +6,15 @@ import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
+import org.arghyam.jalsoochak.telemetry.controller.ingest.MultiFormatReadingController;
+import org.arghyam.jalsoochak.telemetry.controller.ingest.ReadingIngestController;
+import org.arghyam.jalsoochak.telemetry.controller.ingest.TelemetryValidationExceptionHandler;
 import org.arghyam.jalsoochak.telemetry.controller.webhook.ConversationWebhookController;
 import org.arghyam.jalsoochak.telemetry.controller.webhook.IssueReportWebhookController;
 import org.arghyam.jalsoochak.telemetry.controller.webhook.MeterChangeWebhookController;
 import org.arghyam.jalsoochak.telemetry.controller.webhook.ReadingWebhookController;
 import org.arghyam.jalsoochak.telemetry.controller.webhook.SelectionWebhookController;
+import org.arghyam.jalsoochak.telemetry.controller.webhook.WebhookValidationExceptionHandler;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.ingest.CanonicalReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapperRegistry;
@@ -76,7 +80,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * types carry no constraint that could trigger the advice). The HTTP cases then prove the binding
  * end to end, through a {@code MockMvc} holding every controller and both advices at once.
  * {@code standaloneSetup} rather than {@code @WebMvcTest} for the reason given in
- * {@link MultiFormatReadingControllerTest}.
+ * {@code MultiFormatReadingControllerTest}.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -113,8 +117,8 @@ class ControllerAdviceBindingTest {
     @BeforeAll
     static void discoverAdvices() {
         adviceContext = new GenericApplicationContext();
-        adviceContext.registerBean(GlificWebhookValidationExceptionHandler.class,
-                GlificWebhookValidationExceptionHandler::new);
+        adviceContext.registerBean(WebhookValidationExceptionHandler.class,
+                WebhookValidationExceptionHandler::new);
         adviceContext.registerBean(TelemetryValidationExceptionHandler.class,
                 () -> new TelemetryValidationExceptionHandler(null, null));
         adviceContext.refresh();
@@ -140,12 +144,12 @@ class ControllerAdviceBindingTest {
                         new IssueReportWebhookController(webhookService),
                         new MeterChangeWebhookController(webhookService),
                         new ConversationWebhookController(webhookService, welcomeMessageService),
-                        new SingleTenantTelemetryController(webhookService, apiKeyService, bfmReadingService),
+                        new ReadingIngestController(webhookService, apiKeyService, bfmReadingService),
                         new MultiFormatReadingController(registry, apiKeyService, webhookService,
                                 ReadingUrlTestValidation.validator()))
                 .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(
-                        new GlificWebhookValidationExceptionHandler(),
+                        new WebhookValidationExceptionHandler(),
                         new TelemetryValidationExceptionHandler(auditService, eventPublisher))
                 .build();
     }
@@ -158,7 +162,7 @@ class ControllerAdviceBindingTest {
         // A new advice — above all an unscoped, global one — changes the error contract of every
         // controller at once. Failing here forces a deliberate look at the bindings below.
         assertThat(ControllerRoutes.productionTypes(ControllerAdvice.class)).containsExactlyInAnyOrder(
-                GlificWebhookValidationExceptionHandler.class,
+                WebhookValidationExceptionHandler.class,
                 TelemetryValidationExceptionHandler.class);
     }
 
@@ -173,13 +177,13 @@ class ControllerAdviceBindingTest {
                 .isNotEmpty()
                 .allSatisfy(controller -> assertThat(advicesFor(controller))
                         .as("advices applying to %s", controller.getSimpleName())
-                        .containsExactly(GlificWebhookValidationExceptionHandler.class));
+                        .containsExactly(WebhookValidationExceptionHandler.class));
     }
 
     @Test
     @DisplayName("the canonical ingestion controller is answered by the ingest advice alone")
     void theCanonicalIngestControllerIsAnsweredByTheIngestAdviceAlone() {
-        assertThat(advicesFor(SingleTenantTelemetryController.class))
+        assertThat(advicesFor(ReadingIngestController.class))
                 .containsExactly(TelemetryValidationExceptionHandler.class);
     }
 

@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.telemetry.controller;
+package org.arghyam.jalsoochak.telemetry.controller.ingest;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -36,11 +36,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-class SingleTenantTelemetryControllerUnitTest {
+class ReadingIngestControllerUnitTest {
 
     @Test
     void assamReadingsReturnsOkWithCorrelationIdOnSuccess() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -69,7 +69,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void assamReadingsReturnsUnauthorizedWithoutCorrelationIdOnFailure() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 new StubBfmReadingService(false)
@@ -94,7 +94,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void assamReadingsReturnsBadRequestAndSuccessFalseWhenServiceRejects() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(true),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -123,7 +123,7 @@ class SingleTenantTelemetryControllerUnitTest {
     void assamReadingsReturnsServiceUnavailableWhenOcrTransientlyUnavailable() {
         // A transient FlowVision outage is signalled by qualityStatus=RETRY (success=false). It is not a
         // client error, so the endpoint must surface it as 503 Service Unavailable, not 400 Bad Request.
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new RetryGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -154,7 +154,7 @@ class SingleTenantTelemetryControllerUnitTest {
     void assamReadingsAcceptsPayloadWithoutPhoneNumber() throws Exception {
         // PHONE-OPTIONAL: a submission that omits phone_number must reach the service (which infers the
         // operator from the scheme) instead of being rejected by bean validation.
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -179,7 +179,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void assamReadingsValidationFailureReturnsRejectedResponse() throws Exception {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -208,7 +208,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void assamReadingsValidationFailureReturnsRejectedResponseWithContextPath() throws Exception {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -238,7 +238,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void assamReadingsAcceptsTrailingSlashPath() throws Exception {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -264,7 +264,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void assamReadingsValidationFailureOnTrailingSlashReturnsRejectedResponse() throws Exception {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -293,7 +293,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void updateReadingsAcceptsTrailingSlashPath() throws Exception {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -320,7 +320,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void updateReadingsReturnsBadRequestWhenConfirmedReadingMissing() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -343,7 +343,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void updateReadingsReturnsUnauthorizedWhenApiKeyInvalid() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 new StubBfmReadingService(false)
@@ -366,7 +366,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void updateReadingsUsesPhoneNumberWhenCorrelationIdMissing() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -389,7 +389,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void updateReadingsUsesCorrelationIdWhenProvided() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -416,7 +416,7 @@ class SingleTenantTelemetryControllerUnitTest {
         // Regression test for the reported finding: this route used to process an unauthenticated
         // request and destroy the reading, returning 200 whether or not a key was supplied.
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 bfmReadingService
@@ -440,7 +440,7 @@ class SingleTenantTelemetryControllerUnitTest {
     @Test
     void resetLatestReadingRejectsAnInvalidApiKey() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 bfmReadingService
@@ -461,7 +461,7 @@ class SingleTenantTelemetryControllerUnitTest {
     @Test
     void resetLatestReadingAcceptsAValidApiKeyAndScopesTheResetToItsTenant() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 bfmReadingService
@@ -489,7 +489,7 @@ class SingleTenantTelemetryControllerUnitTest {
         // request the filter already accepted, and must not hash the key a second time.
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
         StubTelemetryApiKeyService apiKeyService = new StubTelemetryApiKeyService(Optional.empty());
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 apiKeyService,
                 bfmReadingService
@@ -511,20 +511,20 @@ class SingleTenantTelemetryControllerUnitTest {
     @Test
     void resetLatestReadingAuditsTheDestroyedValueAndTheRefusals() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 bfmReadingService
         );
 
-        SingleTenantTelemetryController unauthenticatedController = new SingleTenantTelemetryController(
+        ReadingIngestController unauthenticatedController = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 new StubBfmReadingService(false)
         );
 
         ch.qos.logback.classic.Logger logger =
-                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(SingleTenantTelemetryController.class);
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ReadingIngestController.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
@@ -565,7 +565,7 @@ class SingleTenantTelemetryControllerUnitTest {
         // The service answers an unknown contact and a contact belonging to another tenant with this
         // same 404, so neither confirms the contact exists elsewhere. The error code has to stay just
         // as undiscriminating: one code for both, naming the lookup, not the caller's request.
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(
@@ -586,7 +586,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void aMissingSchemeReportsSchemeNotFound() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new ThrowingGlificWebhookService(
                         new ResponseStatusException(HttpStatus.NOT_FOUND, "State scheme not found")),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -612,7 +612,7 @@ class SingleTenantTelemetryControllerUnitTest {
         // "Reading not found" from the correlation-id correction path. There is no READING_NOT_FOUND
         // code, and inventing one would widen a contract the Assam integration already matches on —
         // so it takes the unclassified fallback rather than a code that misdescribes it.
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(
@@ -634,7 +634,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void aGenuineBadRequestStillReportsBadRequest() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(
@@ -657,7 +657,7 @@ class SingleTenantTelemetryControllerUnitTest {
     @Test
     void anApiKeyFailureKeepsItsOwnCodeWhateverTheStatus() {
         // The api-key reason check must keep winning over the status-based branches.
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(
@@ -678,14 +678,14 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void assamReadingsMaskPhoneAtInfoAndExposeRawOnlyAtDebug() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
 
         ch.qos.logback.classic.Logger logger =
-                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(SingleTenantTelemetryController.class);
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ReadingIngestController.class);
         Level originalLevel = logger.getLevel();
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
@@ -726,7 +726,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void statusExceptionErrorCodeMappingsArePinned() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -776,7 +776,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void updateReadingSetsInvalidApiKeyErrorCodeWhenApiKeyInvalid() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 new StubBfmReadingService(false)
@@ -798,7 +798,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void updateReadingSetsBadRequestErrorCodeWhenBothIdentifiersMissing() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -824,7 +824,7 @@ class SingleTenantTelemetryControllerUnitTest {
     @Test
     void updateReadingSucceedsWithCorrelationIdAndNoPhoneNumber() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 bfmReadingService
@@ -850,7 +850,7 @@ class SingleTenantTelemetryControllerUnitTest {
     @Test
     void updateReadingPassesApiKeyTenantIdToService() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 bfmReadingService
@@ -872,7 +872,7 @@ class SingleTenantTelemetryControllerUnitTest {
     @Test
     void updateReadingStillAcceptsPhoneNumberWithoutCorrelationId() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 bfmReadingService
@@ -894,7 +894,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void updateReadingSetsBadRequestErrorCodeWhenConfirmedReadingMissing() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -915,7 +915,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void updateReadingSetsBadRequestErrorCodeWhenServiceRejects() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(true)
@@ -946,7 +946,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 throw new IllegalStateException("boom");
             }
         };
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 failing
@@ -992,7 +992,7 @@ class SingleTenantTelemetryControllerUnitTest {
                         .build();
             }
         };
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 rejecting
@@ -1021,7 +1021,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void resetLatestReadingSetsBadRequestErrorCodeWhenContactIdMissing() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -1045,7 +1045,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 throw new IllegalStateException("boom");
             }
         };
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 failing
@@ -1230,7 +1230,7 @@ class SingleTenantTelemetryControllerUnitTest {
     @Test
     void assamReadingsRejectsAnUnsupportedChannel() {
         StubGlificWebhookService webhook = new StubGlificWebhookService();
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 webhook,
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -1253,7 +1253,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void assamReadingsDoNotEchoTheRejectedChannelBack() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -1269,7 +1269,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void assamReadingsAcceptADeclaredChannelInAnyCase() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -1284,7 +1284,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void assamReadingsAcceptASubmissionThatDeclaresNoChannel() {
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -1301,7 +1301,7 @@ class SingleTenantTelemetryControllerUnitTest {
     @Test
     void assamReadingsCheckTheApiKeyBeforeTheChannel() {
         // An unauthenticated caller must not learn which channels exist by probing the field.
-        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+        ReadingIngestController controller = new ReadingIngestController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 new StubBfmReadingService(false)

@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.telemetry.controller;
+package org.arghyam.jalsoochak.telemetry.controller.ingest;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.ConstraintViolation;
@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
 
 /**
  * Pluggable ingestion endpoint for state IT systems whose reading payload does not match the
- * canonical contract served by {@code SingleTenantTelemetryController#receiveAssamReading}.
+ * canonical contract served by {@code ReadingIngestController#receiveAssamReading}.
  *
  * <p>{@code POST /api/v1/telemetry/readings/formats/{format}} accepts the raw JSON body, selects the
  * matching {@link ReadingRequestMapper} (via {@link ReadingRequestMapperRegistry}), maps it to the

@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.telemetry.controller;
+package org.arghyam.jalsoochak.telemetry.controller.ingest;
 
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
@@ -43,9 +43,9 @@ import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 @RestController
 @RequestMapping("/api/v1/telemetry")
 @SecurityRequirement(name = OpenApiConfig.API_KEY_SCHEME)
-public class SingleTenantTelemetryController {
+public class ReadingIngestController {
 
-    private static final Logger log = LoggerFactory.getLogger(SingleTenantTelemetryController.class);
+    private static final Logger log = LoggerFactory.getLogger(ReadingIngestController.class);
     private static final String TENANT_CODE_HEADER = "X-Tenant-Code";
     private static final String API_KEY_TOKEN = "api key";
     private static final String SCHEME_TOKEN = "scheme";
@@ -57,14 +57,14 @@ public class SingleTenantTelemetryController {
     private final TelemetrySchemeReadingService telemetrySchemeReadingService;
     private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
 
-    public SingleTenantTelemetryController(GlificWebhookService glificWebhookService,
+    public ReadingIngestController(GlificWebhookService glificWebhookService,
                                            TelemetryApiKeyService telemetryApiKeyService,
                                            BfmReadingService bfmReadingService) {
         this(glificWebhookService, telemetryApiKeyService, bfmReadingService, null, null);
     }
 
     @Autowired
-    public SingleTenantTelemetryController(GlificWebhookService glificWebhookService,
+    public ReadingIngestController(GlificWebhookService glificWebhookService,
                                            TelemetryApiKeyService telemetryApiKeyService,
                                            BfmReadingService bfmReadingService,
                                            TelemetrySchemeReadingService telemetrySchemeReadingService,

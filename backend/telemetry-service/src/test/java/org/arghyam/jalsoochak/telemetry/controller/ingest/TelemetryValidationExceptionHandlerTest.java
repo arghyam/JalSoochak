@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.telemetry.controller;
+package org.arghyam.jalsoochak.telemetry.controller.ingest;
 
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;

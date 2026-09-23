@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.telemetry.controller;
+package org.arghyam.jalsoochak.telemetry.controller.ingest;
 
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -42,7 +42,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @RequiredArgsConstructor
-@RestControllerAdvice(assignableTypes = SingleTenantTelemetryController.class)
+@RestControllerAdvice(assignableTypes = ReadingIngestController.class)
 public class TelemetryValidationExceptionHandler {
 
     private static final String READINGS_PATH = "/api/v1/telemetry/readings";

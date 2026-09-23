@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.telemetry.controller;
+package org.arghyam.jalsoochak.telemetry.controller.webhook;
 
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
@@ -21,8 +21,8 @@ import java.util.stream.Collectors;
  * every webhook handler method can never see it. Without an advice the rejection
  * falls through to Boot's default error shape ({@code {timestamp,status,error,path}}) — still a
  * {@code 400}, but not the envelope a Glific flow node reads. The sibling
- * {@link TelemetryValidationExceptionHandler} cannot cover this because it is scoped to
- * {@code SingleTenantTelemetryController} and answers in the readings envelope instead.
+ * {@code TelemetryValidationExceptionHandler} cannot cover this because it is scoped to
+ * {@code ReadingIngestController} and answers in the readings envelope instead.
  *
  * <p><strong>Bound on {@link WebhookRoute}, not on a controller type.</strong> The webhook surface is
  * meant to span several controllers. A type-pinned binding would cover only the class it names, and
@@ -45,7 +45,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @RestControllerAdvice(annotations = WebhookRoute.class)
-public class GlificWebhookValidationExceptionHandler {
+public class WebhookValidationExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<IntroResponse> handleValidation(MethodArgumentNotValidException ex) {

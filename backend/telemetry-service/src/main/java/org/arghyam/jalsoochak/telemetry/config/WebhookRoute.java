@@ -19,7 +19,7 @@ import java.lang.annotation.Target;
  *       annotated controller are exactly {@link GlificWebhookRoutes}. A webhook route missing from
  *       that allowlist is exempt from the API-key gate and unknown to the webhook gate — fully
  *       public.</li>
- *   <li>{@code GlificWebhookValidationExceptionHandler} binds on it, so every annotated controller
+ *   <li>{@code WebhookValidationExceptionHandler} binds on it, so every annotated controller
  *       answers a validation failure in the envelope the chatbot flow parses.</li>
  * </ul>
  *
