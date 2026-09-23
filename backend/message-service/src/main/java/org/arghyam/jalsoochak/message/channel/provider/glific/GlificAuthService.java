@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -18,27 +20,41 @@ import java.util.Map;
 @Slf4j
 public class GlificAuthService {
 
-    @Value("${glific.auth-url:https://api.arghyam.glific.com/api/v1/session}")
+    @Value("${whatsapp.auth-url:https://api.arghyam.glific.com/api/v1/session}")
     private String authUrl;
 
-    @Value("${glific.username:}")
+    @Value("${whatsapp.username:}")
     private String username;
 
-    @Value("${glific.password:}")
+    @Value("${whatsapp.password:}")
     private String password;
 
     private final WebClient webClient;
+    private final GlificWhatsAppSettings settings;
 
     private volatile String accessToken;
     private volatile String renewalToken;
 
-    public GlificAuthService(WebClient.Builder builder) {
+    public GlificAuthService(WebClient.Builder builder, GlificWhatsAppSettings settings) {
         this.webClient = builder.build();
+        this.settings = settings;
     }
 
+    /**
+     * Logs in, or refuses to start when the connection settings are blank and any purpose is live.
+     *
+     * <p>Only a deployment that suppresses every purpose may run without them: it makes no Glific call.
+     * Anywhere else a blank value would let the service start and then fail every send.</p>
+     */
     @PostConstruct
     public void login() {
-        if (username == null || username.isBlank() || password == null || password.isBlank()) {
+        List<String> missing = missingConnectionSettings();
+        if (!missing.isEmpty()) {
+            if (!settings.dryRun().allPurposes()) {
+                throw new IllegalStateException("WhatsApp delivery is enabled but " + String.join(", ", missing)
+                        + " resolved empty. Set them, or suppress every purpose (NOTIFICATIONS_*_DRY_RUN=true)"
+                        + " to run without a WhatsApp provider account.");
+            }
             log.warn("[GlificAuth] Credentials are not configured; WhatsApp/Glific flows will remain disabled");
             return;
         }
@@ -110,6 +126,20 @@ public class GlificAuthService {
         accessToken = requireNonBlankToken(tokenData, "access_token", "refresh");
         renewalToken = requireNonBlankToken(tokenData, "renewal_token", "refresh");
         log.info("[GlificAuth] Token refreshed successfully");
+    }
+
+    private List<String> missingConnectionSettings() {
+        List<String> missing = new ArrayList<>();
+        if (authUrl == null || authUrl.isBlank()) {
+            missing.add("whatsapp.auth-url (WHATSAPP_AUTH_URL)");
+        }
+        if (username == null || username.isBlank()) {
+            missing.add("whatsapp.username (WHATSAPP_USERNAME)");
+        }
+        if (password == null || password.isBlank()) {
+            missing.add("whatsapp.password (WHATSAPP_PASSWORD)");
+        }
+        return missing;
     }
 
     private String requireNonBlankToken(JsonNode tokenData, String key, String flow) {

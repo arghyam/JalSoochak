@@ -26,6 +26,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -177,6 +178,50 @@ class GlificConversationResumeGatewayTest {
             service.resumeReadingsFlow(CONTACT, JOB_ID, result());
 
             verify(restTemplate).postForEntity(eq(SESSION_URL), any(), eq(Map.class));
+        }
+    }
+
+    /**
+     * Resume is on by default, so a credential missed in an environment's secrets would otherwise only
+     * surface as a per-reading WARN while operators stop getting the flow's reply.
+     */
+    @Nested
+    @DisplayName("startup validation")
+    class StartupValidation {
+
+        @Test
+        void passesWhenResumeIsFullyConfigured() {
+            assertThatCode(service::validateConfiguration).doesNotThrowAnyException();
+        }
+
+        @Test
+        void passesWhenResumeIsDisabled_evenWithNothingConfigured() {
+            configure(false, "", "", "", "");
+
+            assertThatCode(service::validateConfiguration).doesNotThrowAnyException();
+        }
+
+        @Test
+        void refusesToStartAndNamesEachBlankCredential() {
+            configure(true, BASE_URL, "", " ", "37172");
+
+            assertThatThrownBy(service::validateConfiguration)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("whatsapp.resume.user.phone (WHATSAPP_RESUME_USER_PHONE")
+                    .hasMessageContaining("whatsapp.resume.user.password (WHATSAPP_RESUME_USER_PASSWORD")
+                    .hasMessageContaining("WHATSAPP_RESUME_ENABLED=false")
+                    .hasMessageNotContaining("WHATSAPP_RESUME_BASE_URL")
+                    .hasMessageNotContaining("WHATSAPP_RESUME_FLOW_ID");
+        }
+
+        @Test
+        void refusesToStartWithoutABaseUrlOrFlowId() {
+            configure(true, "", "919000000000", "password", "  ");
+
+            assertThatThrownBy(service::validateConfiguration)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("whatsapp.resume.base-url (WHATSAPP_RESUME_BASE_URL)")
+                    .hasMessageContaining("whatsapp.resume.flow-id (WHATSAPP_RESUME_FLOW_ID)");
         }
     }
 

@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.provider.whatsapp.glific;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.provider.whatsapp.ConversationResumeGateway;
@@ -30,24 +31,53 @@ public class GlificConversationResumeGateway implements ConversationResumeGatewa
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
-    @Value("${glific.resume.enabled:false}")
+    @Value("${whatsapp.resume.enabled:false}")
     private boolean resumeEnabled;
 
-    @Value("${glific.resume.base-url:https://api.staging.glific.com}")
+    @Value("${whatsapp.resume.base-url:https://api.staging.glific.com}")
     private String glificBaseUrl;
 
-    @Value("${glific.resume.user.phone:}")
+    @Value("${whatsapp.resume.user.phone:}")
     private String glificUserPhone;
 
-    @Value("${glific.resume.user.password:}")
+    @Value("${whatsapp.resume.user.password:}")
     private String glificUserPassword;
 
-    @Value("${glific.resume.flow-id:37172}")
+    @Value("${whatsapp.resume.flow-id:37172}")
     private String flowId;
 
     public GlificConversationResumeGateway(RestTemplate restTemplate, ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
+    }
+
+    /**
+     * Refuses to start when resume is enabled but a setting it needs is blank. Otherwise every reading
+     * would skip the resume with a WARN, and operators would silently stop getting the flow's reply.
+     */
+    @PostConstruct
+    void validateConfiguration() {
+        if (!resumeEnabled) {
+            return;
+        }
+        List<String> missing = new ArrayList<>();
+        if (glificBaseUrl == null || glificBaseUrl.isBlank()) {
+            missing.add("whatsapp.resume.base-url (WHATSAPP_RESUME_BASE_URL)");
+        }
+        if (flowId == null || flowId.isBlank()) {
+            missing.add("whatsapp.resume.flow-id (WHATSAPP_RESUME_FLOW_ID)");
+        }
+        if (glificUserPhone == null || glificUserPhone.isBlank()) {
+            missing.add("whatsapp.resume.user.phone (WHATSAPP_RESUME_USER_PHONE, or WHATSAPP_SYNC_USER_PHONE)");
+        }
+        if (glificUserPassword == null || glificUserPassword.isBlank()) {
+            missing.add("whatsapp.resume.user.password"
+                    + " (WHATSAPP_RESUME_USER_PASSWORD, or WHATSAPP_SYNC_USER_PASSWORD)");
+        }
+        if (!missing.isEmpty()) {
+            throw new IllegalStateException("whatsapp.resume.enabled=true but " + String.join(", ", missing)
+                    + " resolved empty. Set them, or set WHATSAPP_RESUME_ENABLED=false.");
+        }
     }
 
     @Override

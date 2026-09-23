@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.message.channel.provider.glific;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -24,18 +25,34 @@ public class GlificGraphQLClient {
 
     private final WebClient webClient;
     private final GlificAuthService glificAuthService;
+    private final GlificWhatsAppSettings settings;
 
-    @Value("${glific.api-url:}")
+    @Value("${whatsapp.api-url:}")
     private String apiUrl;
 
-    @Value("${glific.request-interval-ms:500}")
+    @Value("${whatsapp.request-interval-ms:500}")
     private long requestIntervalMs;
 
     private final AtomicLong lastCallEpochMs = new AtomicLong(0);
 
-    public GlificGraphQLClient(WebClient.Builder builder, GlificAuthService glificAuthService) {
+    public GlificGraphQLClient(WebClient.Builder builder, GlificAuthService glificAuthService,
+                               GlificWhatsAppSettings settings) {
         this.webClient = builder.build();
         this.glificAuthService = glificAuthService;
+        this.settings = settings;
+    }
+
+    /**
+     * Refuses to start without an API URL while any purpose is live. The yml supplies a default, so this
+     * fires only when {@code WHATSAPP_API_URL} is set but empty — which would otherwise fail every send.
+     */
+    @PostConstruct
+    void requireApiUrl() {
+        if ((apiUrl == null || apiUrl.isBlank()) && !settings.dryRun().allPurposes()) {
+            throw new IllegalStateException("WhatsApp delivery is enabled but whatsapp.api-url (WHATSAPP_API_URL)"
+                    + " resolved empty. Set it, or suppress every purpose (NOTIFICATIONS_*_DRY_RUN=true) to run"
+                    + " without a WhatsApp provider account.");
+        }
     }
 
     private static final int MAX_RATE_LIMIT_RETRIES = 3;
@@ -49,7 +66,7 @@ public class GlificGraphQLClient {
     private JsonNode executeWithRetry(String query, Map<String, Object> variables,
                                       boolean tokenRefreshed, int attempt) {
         if (apiUrl == null || apiUrl.isBlank()) {
-            throw new RuntimeException("Glific API URL is not configured (glific.api-url)");
+            throw new RuntimeException("Glific API URL is not configured (whatsapp.api-url)");
         }
 
         throttleIfNeeded();

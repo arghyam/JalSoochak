@@ -13,9 +13,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -301,7 +304,7 @@ class GlificWhatsAppSenderTest {
 
         assertThatThrownBy(() -> sender().startNudgeFlow(42L, "Ramesh", "06 March 2026"))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("glific.flow.nudge-id");
+                .hasMessageContaining("whatsapp.flow.nudge-id");
     }
 
     @Test
@@ -541,6 +544,29 @@ class GlificWhatsAppSenderTest {
                 .hasMessageContaining("sendHsmMessage");
     }
 
+    // ────────────── required ids name their variable (@PostConstruct) ──────────────
+
+    /**
+     * Ops set environment variables, not properties, and the {@code WHATSAPP_*} names replaced the old ones
+     * with no fallback — so a refused boot must name the variable that was missed.
+     */
+    @ParameterizedTest
+    @CsvSource({
+            "nudgeFlowId,          whatsapp.flow.nudge-id,          WHATSAPP_NUDGE_FLOW_ID",
+            "escalationTemplateId, whatsapp.template.escalation-id, WHATSAPP_ESCALATION_TEMPLATE_ID",
+            "welcomeFlowId,        whatsapp.flow.welcome-id,        WHATSAPP_WELCOME_FLOW_ID",
+            "loginOtpTemplateId,   whatsapp.template.login-otp-id,  WHATSAPP_LOGIN_OTP_TEMPLATE_ID"})
+    void validateTemplates_namesThePropertyAndTheVariable_whenARequiredIdIsBlank(
+            String fixtureField, String property, String variable) {
+        settings.loginOtpTemplateId = "otp-tmpl-1";
+        settings.dailyReportDryRun = true;
+        ReflectionTestUtils.setField(settings, fixtureField, "");
+
+        assertThatThrownBy(() -> sender().validateTemplates())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(property + " (" + variable + ")");
+    }
+
     // ────────────── daily-report template-id validation (@PostConstruct) ────────────
 
     @Test
@@ -552,7 +578,8 @@ class GlificWhatsAppSenderTest {
 
         assertThatThrownBy(() -> sender().validateTemplates())
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("daily-report-so-id");
+                .hasMessageContaining("daily-report-so-id")
+                .hasMessageContaining("WHATSAPP_DAILY_REPORT_SO_TEMPLATE_ID");
     }
 
     @Test
@@ -563,7 +590,8 @@ class GlificWhatsAppSenderTest {
 
         assertThatThrownBy(() -> sender().validateTemplates())
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("daily-report-sdo-id");
+                .hasMessageContaining("daily-report-sdo-id")
+                .hasMessageContaining("WHATSAPP_DAILY_REPORT_SDO_TEMPLATE_ID");
     }
 
     @Test
@@ -578,7 +606,8 @@ class GlificWhatsAppSenderTest {
 
         assertThatThrownBy(() -> sender().validateTemplates())
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("daily-report-so-id");
+                .hasMessageContaining("daily-report-so-id")
+                .hasMessageContaining("WHATSAPP_DAILY_REPORT_SO_TEMPLATE_ID");
     }
 
     @Test
@@ -1234,7 +1263,8 @@ class GlificWhatsAppSenderTest {
 
             assertThatThrownBy(() -> sender().validateTemplates())
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("weekly-report-so-link-id");
+                    .hasMessageContaining("weekly-report-so-link-id")
+                    .hasMessageContaining("WHATSAPP_WEEKLY_REPORT_SO_LINK_TEMPLATE_ID");
         }
 
         @Test
@@ -1415,7 +1445,8 @@ class GlificWhatsAppSenderTest {
             settings.dailyReportSoLinkTemplateId = "";
             assertThatThrownBy(() -> sender().validateTemplates())
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("glific.template.daily-report-so-link-id");
+                    .hasMessageContaining("whatsapp.template.daily-report-so-link-id")
+                    .hasMessageContaining("WHATSAPP_DAILY_REPORT_SO_LINK_TEMPLATE_ID");
         }
 
         @Test

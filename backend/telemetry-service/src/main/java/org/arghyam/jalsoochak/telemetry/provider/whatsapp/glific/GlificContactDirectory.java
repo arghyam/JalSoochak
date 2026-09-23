@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.provider.whatsapp.glific;
 
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
 import org.arghyam.jalsoochak.telemetry.repository.LanguageCatalogRepository;
@@ -13,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -37,22 +39,47 @@ public class GlificContactDirectory implements WhatsAppContactDirectory {
     @Autowired(required = false)
     private LanguageCatalogRepository languageCatalogRepository;
 
-    @Value("${glific.sync.enabled:false}")
+    @Value("${whatsapp.sync.enabled:false}")
     private boolean glificSyncEnabled;
 
-    @Value("${glific.sync.base-url:https://api.arghyam.glific.com}")
+    @Value("${whatsapp.sync.base-url:https://api.arghyam.glific.com}")
     private String glificBaseUrl;
 
-    @Value("${glific.sync.user.phone:}")
+    @Value("${whatsapp.sync.user.phone:}")
     private String glificUserPhone;
 
-    @Value("${glific.sync.user.password:}")
+    @Value("${whatsapp.sync.user.password:}")
     private String glificUserPassword;
 
     public GlificContactDirectory(RestTemplate restTemplate,
                                   @Qualifier("whatsAppSyncExecutor") Executor whatsAppSyncExecutor) {
         this.restTemplate = restTemplate;
         this.whatsAppSyncExecutor = whatsAppSyncExecutor;
+    }
+
+    /**
+     * Refuses to start when language sync is enabled but a setting it needs is blank. Otherwise every
+     * language change would be dropped without a log line.
+     */
+    @PostConstruct
+    void validateConfiguration() {
+        if (!glificSyncEnabled) {
+            return;
+        }
+        List<String> missing = new ArrayList<>();
+        if (glificBaseUrl == null || glificBaseUrl.isBlank()) {
+            missing.add("whatsapp.sync.base-url (WHATSAPP_SYNC_BASE_URL)");
+        }
+        if (glificUserPhone == null || glificUserPhone.isBlank()) {
+            missing.add("whatsapp.sync.user.phone (WHATSAPP_SYNC_USER_PHONE)");
+        }
+        if (glificUserPassword == null || glificUserPassword.isBlank()) {
+            missing.add("whatsapp.sync.user.password (WHATSAPP_SYNC_USER_PASSWORD)");
+        }
+        if (!missing.isEmpty()) {
+            throw new IllegalStateException("whatsapp.sync.enabled=true but " + String.join(", ", missing)
+                    + " resolved empty. Set them, or set WHATSAPP_SYNC_ENABLED=false.");
+        }
     }
 
     @Override

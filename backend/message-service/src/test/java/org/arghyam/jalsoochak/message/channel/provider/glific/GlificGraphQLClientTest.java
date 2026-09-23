@@ -13,6 +13,7 @@ import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
@@ -47,7 +48,7 @@ class GlificGraphQLClientTest {
                                 """)));
 
         // Build real GlificAuthService pointing to WireMock, then call login manually
-        authService = new GlificAuthService(WebClient.builder());
+        authService = new GlificAuthService(WebClient.builder(), settings(false));
         ReflectionTestUtils.setField(authService, "authUrl",
                 wireMockServer.baseUrl() + AUTH_PATH);
         ReflectionTestUtils.setField(authService, "username", "test_user");
@@ -55,7 +56,7 @@ class GlificGraphQLClientTest {
         authService.login();
 
         // Build GlificGraphQLClient pointing at WireMock's GraphQL endpoint
-        client = new GlificGraphQLClient(WebClient.builder(), authService);
+        client = new GlificGraphQLClient(WebClient.builder(), authService, settings(false));
         ReflectionTestUtils.setField(client, "apiUrl", wireMockServer.baseUrl() + GRAPHQL_PATH);
     }
 
@@ -189,6 +190,49 @@ class GlificGraphQLClientTest {
     }
 
     @Test
+    void requireApiUrl_refusesToStartAndNamesTheVariable_whenApiUrlIsBlankAndDeliveryIsLive() {
+        ReflectionTestUtils.setField(client, "apiUrl", "");
+
+        assertThatThrownBy(() -> client.requireApiUrl())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("whatsapp.api-url")
+                .hasMessageContaining("WHATSAPP_API_URL");
+    }
+
+    @Test
+    void requireApiUrl_allowsABlankApiUrl_whenEveryPurposeIsDryRun() {
+        GlificGraphQLClient dryRunClient = new GlificGraphQLClient(WebClient.builder(), authService, settings(true));
+        ReflectionTestUtils.setField(dryRunClient, "apiUrl", "");
+
+        assertThatCode(dryRunClient::requireApiUrl).doesNotThrowAnyException();
+    }
+
+    @Test
+    void login_refusesToStartAndNamesEachBlankVariable_whenDeliveryIsLive() {
+        GlificAuthService unconfigured = new GlificAuthService(WebClient.builder(), settings(false));
+        ReflectionTestUtils.setField(unconfigured, "authUrl", wireMockServer.baseUrl() + AUTH_PATH);
+        ReflectionTestUtils.setField(unconfigured, "username", "");
+        ReflectionTestUtils.setField(unconfigured, "password", " ");
+
+        assertThatThrownBy(unconfigured::login)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("whatsapp.username (WHATSAPP_USERNAME)")
+                .hasMessageContaining("whatsapp.password (WHATSAPP_PASSWORD)")
+                .hasMessageNotContaining("WHATSAPP_AUTH_URL");
+        wireMockServer.verify(1, postRequestedFor(urlEqualTo(AUTH_PATH))); // setUp's login only
+    }
+
+    @Test
+    void login_skipsWithoutFailing_whenCredentialsAreBlankAndEveryPurposeIsDryRun() {
+        GlificAuthService dryRun = new GlificAuthService(WebClient.builder(), settings(true));
+        ReflectionTestUtils.setField(dryRun, "authUrl", wireMockServer.baseUrl() + AUTH_PATH);
+
+        assertThatCode(dryRun::login).doesNotThrowAnyException();
+        assertThatThrownBy(dryRun::getAccessToken).isInstanceOf(IllegalStateException.class);
+        wireMockServer.verify(1, postRequestedFor(urlEqualTo(AUTH_PATH))); // setUp's login only
+    }
+
+    @Test
     void execute_throwsRuntimeException_whenResponseIsNull() {
         wireMockServer.stubFor(post(urlEqualTo(GRAPHQL_PATH))
                 .willReturn(aResponse()
@@ -240,5 +284,17 @@ class GlificGraphQLClientTest {
         authService.refresh();
 
         assertThat(authService.getAccessToken()).isEqualTo("refreshed_token");
+    }
+
+    /** Settings that matter to the client and the auth service: only whether every purpose is suppressed. */
+    private static GlificWhatsAppSettings settings(boolean everyPurposeDryRun) {
+        boolean dry = everyPurposeDryRun;
+        return new GlificWhatsAppSettings(
+                new GlificWhatsAppSettings.DryRun(dry, dry, dry, dry, dry),
+                new GlificWhatsAppSettings.Templates(null, null, null, null, null, null, null, null, null),
+                new GlificWhatsAppSettings.Flows(null, null),
+                new GlificWhatsAppSettings.Media(null, null, null, null),
+                null,
+                null);
     }
 }

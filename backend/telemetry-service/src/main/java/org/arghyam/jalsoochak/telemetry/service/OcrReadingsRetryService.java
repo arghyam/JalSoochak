@@ -19,8 +19,9 @@ import java.util.function.Supplier;
 @Slf4j
 public class OcrReadingsRetryService {
 
-    static final String INSTANCE_NAME = "flowvisionReadings";
-    /** Per-provider resilience instances are named "flowvisionReadings-<providerId>" for isolation + metrics. */
+    /** Must match the {@code resilience4j.*.instances} keys in application.yml, or library defaults apply. */
+    public static final String INSTANCE_NAME = "ocrReadings";
+    /** Per-provider resilience instances are named "ocrReadings-<providerId>" for isolation + metrics. */
     static final String PROVIDER_INSTANCE_PREFIX = INSTANCE_NAME + "-";
 
     /** The primary {@link MeterReadingExtractor}, serving tenants that set no {@code ocr_*} override. */

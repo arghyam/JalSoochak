@@ -25,8 +25,8 @@ import java.util.Map;
  * and {@code {{2}}} = localized body text.</p>
  *
  * <p>Configure Glific credentials and template IDs via environment variables:
- * {@code GLIFIC_API_URL}, {@code GLIFIC_USERNAME}, {@code GLIFIC_PASSWORD},
- * {@code GLIFIC_NUDGE_TEMPLATE_ID}, {@code GLIFIC_ESCALATION_TEMPLATE_ID}.</p>
+ * {@code WHATSAPP_API_URL}, {@code WHATSAPP_USERNAME}, {@code WHATSAPP_PASSWORD},
+ * {@code WHATSAPP_NUDGE_TEMPLATE_ID}, {@code WHATSAPP_ESCALATION_TEMPLATE_ID}.</p>
  */
 @Component
 @RequiredArgsConstructor

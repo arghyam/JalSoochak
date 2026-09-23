@@ -11,7 +11,8 @@ import java.util.Objects;
  * There is no such factory: every tenant shares one organisation (see {@code WhatsAppSender}).</p>
  *
  * <p>Carries no credential — the login stays with {@link GlificAuthService} — so the generated
- * {@code toString} is safe to log.</p>
+ * {@code toString} is safe to log. That service and {@link GlificGraphQLClient} read only
+ * {@link #dryRun()}, to decide whether blank connection settings may be tolerated at startup.</p>
  *
  * @param dryRun                  which purposes are suppressed
  * @param templates               the approved HSM template ids
@@ -72,6 +73,11 @@ public record GlificWhatsAppSettings(
      */
     public record DryRun(boolean whatsapp, boolean nudge, boolean escalation, boolean dailyReport,
                          boolean weeklyReport) {
+
+        /** Whether every purpose is suppressed — the only configuration that makes no Glific call at all. */
+        public boolean allPurposes() {
+            return whatsapp && nudge && escalation && dailyReport && weeklyReport;
+        }
     }
 
     /**

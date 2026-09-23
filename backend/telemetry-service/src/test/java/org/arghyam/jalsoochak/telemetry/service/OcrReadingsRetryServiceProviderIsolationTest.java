@@ -92,7 +92,7 @@ class OcrReadingsRetryServiceProviderIsolationTest {
 
     @Test
     void defaultProviderUsesTheSharedTunedInstance() {
-        // Sanity: null settings resolve the shared "flowvisionReadings" breaker, not a per-provider one.
+        // Sanity: null settings resolve the shared "ocrReadings" breaker, not a per-provider one.
         MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
         OcrReadingResult ok = OcrReadingResult.builder().adjustedReading(new BigDecimal("1")).build();
         when(defaultOcrExtractor.extractReadingOrThrow(anyString(), isNull())).thenReturn(ok);

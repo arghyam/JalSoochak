@@ -31,8 +31,8 @@ public class GlificMediaFetcher implements InboundMediaFetcher {
     private final String glificApiToken;
 
     public GlificMediaFetcher(RestTemplate restTemplate,
-                              @Value("${glific.media-base-url:https://api.glific.org/v1/media}") String glificMediaBaseUrl,
-                              @Value("${glific.api-token:}") String glificApiToken) {
+                              @Value("${whatsapp.media-base-url:https://api.glific.org/v1/media}") String glificMediaBaseUrl,
+                              @Value("${whatsapp.api-token:}") String glificApiToken) {
         this.restTemplate = restTemplate;
         this.glificMediaBaseUrl = glificMediaBaseUrl.endsWith("/")
                 ? glificMediaBaseUrl.substring(0, glificMediaBaseUrl.length() - 1)

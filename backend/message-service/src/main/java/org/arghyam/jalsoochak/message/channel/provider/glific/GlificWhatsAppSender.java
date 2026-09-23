@@ -129,17 +129,18 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         // Validate only the templates whose delivery is enabled.
         if (!dryRun.nudge() && isBlank(settings.flows().nudge())) {
             throw new IllegalStateException(
-                    "glific.flow.nudge-id must be configured when nudge delivery is enabled"
-                    + " (set NOTIFICATIONS_NUDGE_DRY_RUN=true to suppress nudges)");
+                    "whatsapp.flow.nudge-id (WHATSAPP_NUDGE_FLOW_ID) must be configured when nudge delivery is"
+                    + " enabled (set NOTIFICATIONS_NUDGE_DRY_RUN=true to suppress nudges)");
         }
         if (!dryRun.escalation() && isBlank(settings.templates().escalation())) {
             throw new IllegalStateException(
-                    "glific.template.escalation-id must be configured when escalation delivery is enabled"
+                    "whatsapp.template.escalation-id (WHATSAPP_ESCALATION_TEMPLATE_ID) must be configured when"
+                    + " escalation delivery is enabled"
                     + " (set NOTIFICATIONS_ESCALATION_DRY_RUN=true to suppress escalations)");
         }
         if (!dryRun.whatsapp() && isBlank(settings.flows().welcome())) {
             throw new IllegalStateException(
-                    "glific.flow.welcome-id must be configured");
+                    "whatsapp.flow.welcome-id (WHATSAPP_WELCOME_FLOW_ID) must be configured");
         }
         validateAccountAndReportTemplates();
     }
@@ -147,7 +148,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
     private void validateAccountAndReportTemplates() {
         if (!settings.dryRun().whatsapp() && isBlank(settings.templates().loginOtp())) {
             throw new IllegalStateException(
-                    "glific.template.login-otp-id must be configured — SEND_LOGIN_OTP events cannot be delivered without it");
+                    "whatsapp.template.login-otp-id (WHATSAPP_LOGIN_OTP_TEMPLATE_ID) must be configured —"
+                    + " SEND_LOGIN_OTP events cannot be delivered without it");
         }
         if (!settings.dryRun().dailyReport()) {
             // Only the templates the configured mode actually sends are required. A LINK deployment
@@ -174,7 +176,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
     private void validateWeeklyReportTemplates() {
         if (isBlank(settings.templates().weeklyReportSoLink())) {
             throw new IllegalStateException(
-                    "glific.template.weekly-report-so-link-id must be configured when weekly-report delivery"
+                    "whatsapp.template.weekly-report-so-link-id (WHATSAPP_WEEKLY_REPORT_SO_LINK_TEMPLATE_ID)"
+                    + " must be configured when weekly-report delivery"
                     + " is enabled (set NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN=true to generate and upload the"
                     + " reports without sending them, until the Meta template is approved)");
         }
@@ -184,17 +187,19 @@ public class GlificWhatsAppSender implements WhatsAppSender {
     private void validateDailyReportDocumentTemplates() {
         if (isBlank(settings.templates().dailyReportSo())) {
             throw new IllegalStateException(
-                    "glific.template.daily-report-so-id must be configured when daily-report delivery is enabled"
+                    "whatsapp.template.daily-report-so-id (WHATSAPP_DAILY_REPORT_SO_TEMPLATE_ID) must be"
+                    + " configured when daily-report delivery is enabled"
                     + " (set NOTIFICATIONS_DAILY_REPORT_DRY_RUN=true to suppress daily reports)");
         }
         // sendDailyReportDocumentHsm does Integer.parseInt on the resolved template id, so fail fast at
         // startup on a non-numeric id rather than per-message (retry → DLT) at delivery time.
-        requireNumericTemplateId(settings.templates().dailyReportSo(), "glific.template.daily-report-so-id");
+        requireNumericTemplateId(settings.templates().dailyReportSo(),
+                "whatsapp.template.daily-report-so-id (WHATSAPP_DAILY_REPORT_SO_TEMPLATE_ID)");
         // The SDO id is optional (resolveDailyReportTemplateId falls back to the SO template),
         // so validate it only when it has been configured.
         if (!isBlank(settings.templates().dailyReportSdo())) {
             requireNumericTemplateId(settings.templates().dailyReportSdo(),
-                    "glific.template.daily-report-sdo-id");
+                    "whatsapp.template.daily-report-sdo-id (WHATSAPP_DAILY_REPORT_SDO_TEMPLATE_ID)");
         }
     }
 
@@ -206,7 +211,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
     private void validateDailyReportLinkTemplates() {
         if (isBlank(settings.templates().dailyReportSoLink())) {
             throw new IllegalStateException(
-                    "glific.template.daily-report-so-link-id must be configured when daily-report delivery is"
+                    "whatsapp.template.daily-report-so-link-id (WHATSAPP_DAILY_REPORT_SO_LINK_TEMPLATE_ID)"
+                    + " must be configured when daily-report delivery is"
                     + " enabled and notifications.daily-report.delivery-mode=LINK"
                     + " (set NOTIFICATIONS_DAILY_REPORT_DRY_RUN=true to suppress daily reports,"
                     + " or NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE=DOCUMENT to send the PDF as an attachment)");
@@ -306,9 +312,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * "Receiver does not exist" for every message.</p>
      */
     private boolean isAllDryRun() {
-        GlificWhatsAppSettings.DryRun dryRun = settings.dryRun();
-        return dryRun.whatsapp() && dryRun.nudge() && dryRun.escalation() && dryRun.dailyReport()
-                && dryRun.weeklyReport();
+        return settings.dryRun().allPurposes();
     }
 
     /**
@@ -357,7 +361,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         if (isDryRun(settings.dryRun().whatsapp(), "sendLoginOtpHsm")) return;
         requireContactId(contactId, "sendLoginOtpHsm");
         if (isBlank(settings.templates().loginOtp())) {
-            throw new IllegalStateException("glific.template.login-otp-id is not configured");
+            throw new IllegalStateException("whatsapp.template.login-otp-id is not configured");
         }
         JsonNode response = client.execute(NUDGE_HSM_MUTATION, Map.of(
                 "templateId", settings.templates().loginOtp(),
@@ -509,7 +513,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         String templateId = resolveDailyReportLinkTemplateId(officerUserType);
         if (isBlank(templateId)) {
             throw new IllegalStateException(
-                    "glific.template.daily-report-so-link-id is not configured — LINK mode cannot send");
+                    "whatsapp.template.daily-report-so-link-id is not configured — LINK mode cannot send");
         }
         // Required, unlike the document path where a null date only costs the date in the filename:
         // here it is template variable {{2}} and Glific rejects a null parameter outright.
@@ -670,7 +674,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         String templateId = resolveWeeklyReportLinkTemplateId(officerUserType);
         if (isBlank(templateId)) {
             throw new IllegalStateException(
-                    "glific.template.weekly-report-so-link-id is not configured — the weekly report cannot"
+                    "whatsapp.template.weekly-report-so-link-id is not configured — the weekly report cannot"
                     + " be sent (set NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN=true to suppress it until the"
                     + " template is approved)");
         }
@@ -753,20 +757,20 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * Initiates a Glific flow for the nudge contact via the {@code startContactFlow} mutation.
      *
      * <p>Instead of sending a plain HSM message, this triggers the interactive nudge flow
-     * configured in Glific (identified by {@code glific.flow.nudge-id}). The flow sends
+     * configured in Glific (identified by {@code whatsapp.flow.nudge-id}). The flow sends
      * an HSM template with clickable buttons and continues the conversation based on
      * the operator's button response.</p>
      *
      * <p>Operator name and date are passed as {@code defaultResults} using the keys
      * {@code "name"} and {@code "date"} respectively, matching the HSM template parameter names.</p>
      *
-     * <p>{@code glific.flow.nudge-id} is a required configuration — startup fails fast
+     * <p>{@code whatsapp.flow.nudge-id} is a required configuration — startup fails fast
      * if it is absent (see {@code @PostConstruct} validation).</p>
      *
      * @param contactId    Glific contact ID obtained from {@link #optIn}
      * @param operatorName operator name; passed as {@code defaultResults} key {@code "name"}
      * @param date         today's date string; passed as {@code defaultResults} key {@code "state"}
-     * @throws IllegalStateException if {@code glific.flow.nudge-id} is blank
+     * @throws IllegalStateException if {@code whatsapp.flow.nudge-id} is blank
      * @throws RuntimeException      if Glific returns GraphQL errors or {@code success=false}
      */
     @Override
@@ -774,7 +778,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         if (isDryRun(settings.dryRun().nudge(), "startNudgeFlow")) return;
         requireContactId(contactId, "startNudgeFlow");
         if (isBlank(settings.flows().nudge())) {
-            throw new IllegalStateException("glific.flow.nudge-id is not configured");
+            throw new IllegalStateException("whatsapp.flow.nudge-id is not configured");
         }
 
         String defaultResults;
@@ -828,7 +832,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         if (isDryRun(settings.dryRun().whatsapp(), "startWelcomeFlow")) return;
         requireContactId(contactId, "startWelcomeFlow");
         if (flowId == null || flowId.isBlank()) {
-            throw new IllegalStateException("glific.flow.welcome-id is not configured");
+            throw new IllegalStateException("whatsapp.flow.welcome-id is not configured");
         }
 
         String defaultResults = serializeDefaultResults(name, state);

@@ -27,6 +27,7 @@ import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -134,6 +135,38 @@ class GlificContactDirectoryTest {
             service.syncContactLanguageAsync(PHONE, "Hindi");
 
             verifyNoInteractions(restTemplate);
+        }
+    }
+
+    /** Without it, a credential missed in an environment's secrets would drop every sync without a log line. */
+    @Nested
+    @DisplayName("startup validation")
+    class StartupValidation {
+
+        @Test
+        void passesWhenSyncIsFullyConfigured() {
+            assertThatCode(service::validateConfiguration).doesNotThrowAnyException();
+        }
+
+        @Test
+        void passesWhenSyncIsDisabled_evenWithNothingConfigured() {
+            configure(false, "", "");
+            ReflectionTestUtils.setField(service, "glificBaseUrl", "");
+
+            assertThatCode(service::validateConfiguration).doesNotThrowAnyException();
+        }
+
+        @Test
+        void refusesToStartAndNamesEachBlankVariable() {
+            configure(true, "", " ");
+            ReflectionTestUtils.setField(service, "glificBaseUrl", "");
+
+            assertThatThrownBy(service::validateConfiguration)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("whatsapp.sync.base-url (WHATSAPP_SYNC_BASE_URL)")
+                    .hasMessageContaining("whatsapp.sync.user.phone (WHATSAPP_SYNC_USER_PHONE)")
+                    .hasMessageContaining("whatsapp.sync.user.password (WHATSAPP_SYNC_USER_PASSWORD)")
+                    .hasMessageContaining("WHATSAPP_SYNC_ENABLED=false");
         }
     }
 

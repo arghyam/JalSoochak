@@ -89,23 +89,23 @@ public class WhatsAppDeliveryReconciliationService {
     private final WhatsAppDeliveryStatusReader deliveryStatusReader;
     private final JdbcTemplate jdbcTemplate;
 
-    @Value("${glific.status.reconcile.enabled:false}")
+    @Value("${whatsapp.status.reconcile.enabled:false}")
     private boolean enabled;
 
-    @Value("${glific.status.reconcile.window-hours:6}")
+    @Value("${whatsapp.status.reconcile.window-hours:6}")
     private long windowHours;
 
-    @Value("${glific.status.reconcile.page-size:250}")
+    @Value("${whatsapp.status.reconcile.page-size:250}")
     private int pageSize;
 
-    @Value("${glific.status.reconcile.max-pages:40}")
+    @Value("${whatsapp.status.reconcile.max-pages:40}")
     private int maxPages;
 
-    @Value("${glific.status.reconcile.date-column:inserted_at}")
+    @Value("${whatsapp.status.reconcile.date-column:inserted_at}")
     private String dateColumn;
 
     /** Explicit override; blank means "derive from the configured daily-report template ids". */
-    @Value("${glific.status.reconcile.template-ids:}")
+    @Value("${whatsapp.status.reconcile.template-ids:}")
     private String templateIdsCsv;
 
     /**
@@ -113,29 +113,29 @@ public class WhatsAppDeliveryReconciliationService {
      * {@code 9999} ("low balance") fails every message in flight regardless of who it was for, so
      * counting it as N officer failures would read as a mass data problem instead of a billing one.
      */
-    @Value("${glific.status.reconcile.account-level-error-codes:9999}")
+    @Value("${whatsapp.status.reconcile.account-level-error-codes:9999}")
     private String accountLevelErrorCodesCsv;
 
     // Every report template, whichever mode is live. Read here rather than passed in so the job
     // needs no configuration of its own in the common case.
-    @Value("${glific.template.daily-report-so-id:}")
+    @Value("${whatsapp.template.daily-report-so-id:}")
     private String dailyReportSoTemplateId;
 
-    @Value("${glific.template.daily-report-sdo-id:}")
+    @Value("${whatsapp.template.daily-report-sdo-id:}")
     private String dailyReportSdoTemplateId;
 
-    @Value("${glific.template.daily-report-so-link-id:}")
+    @Value("${whatsapp.template.daily-report-so-link-id:}")
     private String dailyReportSoLinkTemplateId;
 
-    @Value("${glific.template.daily-report-sdo-link-id:}")
+    @Value("${whatsapp.template.daily-report-sdo-link-id:}")
     private String dailyReportSdoLinkTemplateId;
 
     // The weekly templates too. Without them a weekly report would be sent, accepted by Glific, and
     // then never reconciled — so a week of undelivered reports would look exactly like a quiet week.
-    @Value("${glific.template.weekly-report-so-link-id:}")
+    @Value("${whatsapp.template.weekly-report-so-link-id:}")
     private String weeklyReportSoLinkTemplateId;
 
-    @Value("${glific.template.weekly-report-sdo-link-id:}")
+    @Value("${whatsapp.template.weekly-report-sdo-link-id:}")
     private String weeklyReportSdoLinkTemplateId;
 
     /**
@@ -144,8 +144,8 @@ public class WhatsAppDeliveryReconciliationService {
      * <p>Off by default: it costs Glific calls that share the 500 ms throttle with live sends, so a
      * deployment opts in once the window and interval suit its volume.</p>
      */
-    @Scheduled(fixedDelayString = "${glific.status.reconcile.interval-ms:1800000}",
-            initialDelayString = "${glific.status.reconcile.initial-delay-ms:600000}")
+    @Scheduled(fixedDelayString = "${whatsapp.status.reconcile.interval-ms:1800000}",
+            initialDelayString = "${whatsapp.status.reconcile.initial-delay-ms:600000}")
     public void reconcileScheduled() {
         if (!enabled) {
             return;
@@ -165,7 +165,7 @@ public class WhatsAppDeliveryReconciliationService {
             log.error("[GlificStatus] Template id(s) {} are configured for more than one report. Every"
                             + " delivery on such an id would be filed under whichever property happened to"
                             + " be read first, so neither the daily nor the weekly tally can be trusted."
-                            + " Fix the glific.template.daily-report-* / glific.template.weekly-report-*"
+                            + " Fix the whatsapp.template.daily-report-* / whatsapp.template.weekly-report-*"
                             + " properties so each id names one report. Skipping this pass.",
                     templates.conflicts());
             return;
@@ -173,8 +173,8 @@ public class WhatsAppDeliveryReconciliationService {
         Map<Integer, ReportKind> templateKinds = templates.kinds();
         if (templateKinds.isEmpty()) {
             log.warn("[GlificStatus] No report template ids configured — every message in the window"
-                    + " would be discarded. Set GLIFIC_STATUS_RECONCILE_TEMPLATE_IDS or the"
-                    + " glific.template.daily-report-* / glific.template.weekly-report-* properties."
+                    + " would be discarded. Set WHATSAPP_STATUS_RECONCILE_TEMPLATE_IDS or the"
+                    + " whatsapp.template.daily-report-* / whatsapp.template.weekly-report-* properties."
                     + " Skipping this pass.");
             return;
         }

@@ -121,7 +121,7 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
         }
         log.warn("[GlificStatus] Hit the {}-page cap for bspStatus={} in window {}→{}; results are"
                         + " TRUNCATED and the counts below understate reality. Raise"
-                        + " glific.status.reconcile.max-pages or narrow window-hours.",
+                        + " whatsapp.status.reconcile.max-pages or narrow window-hours.",
                 maxPages, bspStatus, from, to);
         return all;
     }
