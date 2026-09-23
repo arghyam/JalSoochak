@@ -121,7 +121,7 @@ class ReadingIngestControllerUnitTest {
 
     @Test
     void canonicalReadingsReturnsServiceUnavailableWhenOcrTransientlyUnavailable() {
-        // A transient FlowVision outage is signalled by qualityStatus=RETRY (success=false). It is not a
+        // A transient OCR provider outage is signalled by qualityStatus=RETRY (success=false). It is not a
         // client error, so the endpoint must surface it as 503 Service Unavailable, not 400 Bad Request.
         ReadingIngestController controller = new ReadingIngestController(
                 new RetryImageWorkflowService(),
@@ -610,7 +610,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void aNotFoundThatNamesNeitherOperatorNorSchemeFallsBackToRequestFailed() {
         // "Reading not found" from the correlation-id correction path. There is no READING_NOT_FOUND
-        // code, and inventing one would widen a contract the Assam integration already matches on —
+        // code, and inventing one would widen a contract the state IT integration already matches on —
         // so it takes the unclassified fallback rather than a code that misdescribes it.
         ReadingIngestController controller = new ReadingIngestController(
                 new StubImageWorkflowService(),

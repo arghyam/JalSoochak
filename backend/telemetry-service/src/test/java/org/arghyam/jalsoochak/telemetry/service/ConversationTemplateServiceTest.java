@@ -30,7 +30,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Glific screen copy resolved from the consolidated {@code WHATSAPP_MESSAGE_TEMPLATES} JSON blob.
+ * Chatbot screen copy resolved from the consolidated {@code WHATSAPP_MESSAGE_TEMPLATES} JSON blob.
  *
  * <p>Resolution always degrades rather than fails: a missing language falls back to English, then to
  * whatever translation exists, then to empty so the caller can use the legacy per-key configs.</p>

@@ -9,10 +9,10 @@ import java.util.regex.Pattern;
  * places hand us text that contains them without asking:</p>
  * <ul>
  *   <li>Kafka notification payloads, which carry operator and officer mobile numbers.</li>
- *   <li><strong>Glific's {@code errors} blob.</strong> A Gupshup/Meta delivery failure arrives as
- *       {@code {"payload":{"payload":{"reason":…,"code":…},"destination":"91XXXXXXXXXX"}}} — the
- *       recipient's raw number sits in {@code destination}. Anything that logs or persists that blob
- *       whole leaks it.</li>
+ *   <li><strong>The WhatsApp provider's {@code errors} blob.</strong> A Gupshup/Meta delivery failure
+ *       arrives as {@code {"payload":{"payload":{"reason":…,"code":…},"destination":"91XXXXXXXXXX"}}}
+ *       — the recipient's raw number sits in {@code destination}. Anything that logs or persists that
+ *       blob whole leaks it.</li>
  * </ul>
  *
  * <p>Deliberately blunt: a run of ten or more digits is masked, which covers both the bare 10-digit

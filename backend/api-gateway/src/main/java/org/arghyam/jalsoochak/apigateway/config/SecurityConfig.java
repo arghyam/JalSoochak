@@ -16,7 +16,7 @@ import java.util.stream.Stream;
  *
  * <p>Every rule here mirrors the owning service's own SecurityConfig. That is not redundancy: a JWT
  * gate at the gateway on an endpoint the service publishes without one rejects callers that have no
- * token to send at all — Glific webhooks (X-Webhook-Token), vendor reading ingestion (X-Api-Key),
+ * token to send at all — chatbot webhooks (X-Webhook-Token), vendor reading ingestion (X-Api-Key),
  * and the public dashboards and branding the login screen loads before anyone has signed in. When a
  * service's public list changes, this one has to change with it.
  *
@@ -66,7 +66,7 @@ public class SecurityConfig {
 
     /**
      * telemetry-service runs without Spring Security: every route under this prefix authenticates
-     * with its own credential instead — X-Webhook-Token on the 26 Glific webhooks
+     * with its own credential instead — X-Webhook-Token on the 26 chatbot webhooks
      * (WebhookRoutes), X-Api-Key on the vendor ingestion routes (TelemetryApiKeyAuthFilter).
      * Neither credential is a JWT, so a bearer-token gate here would reject all of it and protect
      * nothing that is not already protected upstream.
@@ -76,7 +76,7 @@ public class SecurityConfig {
     /** scheme-service's public scheme lookups. */
     private static final String[] SCHEME_SERVICE_PUBLIC = {"/api/v1/public/**"};
 
-    /** message-service's welcome trigger, called by the Glific flow. */
+    /** message-service's welcome trigger, called by the chatbot flow. */
     private static final String[] MESSAGE_SERVICE_PUBLIC = {"/api/v1/message/trigger-welcome-message"};
 
     /**

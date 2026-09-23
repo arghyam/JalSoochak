@@ -6,7 +6,7 @@ import java.net.URISyntaxException;
 /**
  * Decides whether a URL can be fetched by a third party on the public internet.
  *
- * <p>Glific hands every media URL to Meta, which downloads it from its own network. A URL that
+ * <p>The WhatsApp provider hands every media URL to Meta, which downloads it from its own network. A URL that
  * resolves perfectly from inside our cluster — a container name, a service IP, an RFC 1918 address —
  * is refused there by a destination filter, and the officer receives a WhatsApp document that will
  * not open:</p>

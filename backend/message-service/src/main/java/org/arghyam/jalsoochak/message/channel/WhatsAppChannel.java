@@ -18,13 +18,13 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * WhatsApp channel powered by <strong>Glific</strong> GraphQL HSM API.
+ * WhatsApp channel, sending HSM templates through the {@link WhatsAppSender} port.
  *
  * <p>Nudges use a text HSM template with {@code {{1}}} = operator name and {@code {{2}}} = today's date.</p>
  * <p>Escalations use a document HSM template with {@code {{1}}} = MinIO URL
  * and {@code {{2}}} = localized body text.</p>
  *
- * <p>Configure Glific credentials and template IDs via environment variables:
+ * <p>Configure the WhatsApp provider's credentials and template IDs via environment variables:
  * {@code WHATSAPP_API_URL}, {@code WHATSAPP_USERNAME}, {@code WHATSAPP_PASSWORD},
  * {@code WHATSAPP_NUDGE_TEMPLATE_ID}, {@code WHATSAPP_ESCALATION_TEMPLATE_ID}.</p>
  */
@@ -61,7 +61,7 @@ public class WhatsAppChannel implements NotificationChannel {
      * @param phone        recipient WhatsApp phone number (E.164 format)
      * @param operatorName operator name for template {@code {{1}}}
      * @param date         today's date string for template {@code {{2}}}
-     * @return {@code true} if the message was accepted by Glific
+     * @return {@code true} if the message was accepted by the WhatsApp provider
      */
     public boolean sendNudge(String phone, String operatorName, String date) {
         try {
@@ -77,11 +77,11 @@ public class WhatsAppChannel implements NotificationChannel {
     }
 
     /**
-     * Initiates a Glific nudge flow using an already-resolved Glific contact ID.
+     * Initiates a nudge flow using an already-resolved WhatsApp contact ID.
      * No {@code optIn} call is made — use this path when {@code whatsapp_connection_id}
      * is already stored in {@code user_table}.
      *
-     * @param contactId    Glific contact ID
+     * @param contactId    WhatsApp contact ID
      * @param operatorName operator name passed as flow variable
      * @param date         today's date passed as flow variable
      * @return {@code true} if the flow was successfully initiated
@@ -99,12 +99,13 @@ public class WhatsAppChannel implements NotificationChannel {
     }
 
     /**
-     * Opts a pump operator into Glific, sets their preferred language, and starts the welcome flow.
+     * Opts a pump operator into the WhatsApp provider, sets their preferred language, and starts the
+     * welcome flow.
      * Called during staff-sync onboarding.
      *
      * @param phone              operator phone number (E.164 format)
-     * @param providerLanguageId Glific-side language ID
-     * @return Glific contact ID assigned to this operator
+     * @param providerLanguageId the WhatsApp provider's language ID
+     * @return WhatsApp contact ID assigned to this operator
      */
     public long onboardOperator(String phone, int providerLanguageId) {
         long contactId = whatsAppSender.optIn(phone);
@@ -119,12 +120,12 @@ public class WhatsAppChannel implements NotificationChannel {
     }
 
     /**
-     * Sends the login OTP HSM to an officer using an already-resolved Glific contact ID.
+     * Sends the login OTP HSM to an officer using an already-resolved WhatsApp contact ID.
      * Template {{1}} = OTP.
      *
-     * @param contactId Glific contact ID of the officer
+     * @param contactId WhatsApp contact ID of the officer
      * @param otp       one-time password for template variable
-     * @return {@code true} if the message was accepted by Glific
+     * @return {@code true} if the message was accepted by the WhatsApp provider
      */
     public boolean sendLoginOtp(long contactId, String otp) {
         try {
@@ -139,12 +140,12 @@ public class WhatsAppChannel implements NotificationChannel {
     }
 
     /**
-     * Sends the escalation PDF (document HSM) to the officer via Glific using an
-     * already-resolved Glific contact ID.
+     * Sends the escalation PDF (document HSM) to the officer using an already-resolved
+     * WhatsApp contact ID.
      *
-     * @param contactId   Glific contact ID of the officer
+     * @param contactId   WhatsApp contact ID of the officer
      * @param documentUrl publicly reachable MinIO URL of the escalation PDF
-     * @return {@code true} if the message was accepted by Glific
+     * @return {@code true} if the message was accepted by the WhatsApp provider
      */
     public boolean sendDocument(long contactId, String documentUrl) {
         try {
@@ -159,21 +160,21 @@ public class WhatsAppChannel implements NotificationChannel {
     }
 
     /**
-     * Sends the Daily Water Service Situation Report to an officer via Glific using an already-resolved
-     * Glific contact ID. The template is chosen by officer role, and the shape — PDF attachment or a
+     * Sends the Daily Water Service Situation Report to an officer using an already-resolved
+     * WhatsApp contact ID. The template is chosen by officer role, and the shape — PDF attachment or a
      * "View Report" link button — by {@code notifications.daily-report.delivery-mode}.
      *
-     * @param contactId       Glific contact ID of the officer
+     * @param contactId       WhatsApp contact ID of the officer
      * @param documentUrl     publicly reachable MinIO URL of the report PDF
      * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
      * @param reportDate      the day the report's data covers (D-1); shown in the document name the
      *                        officer sees in WhatsApp, and template variable {{2}} in link mode
      * @param officerName     the officer's name; template variable {{1}} in link mode, unused for the
      *                        document. Not logged — see the privacy rule in CLAUDE.md
-     * @return an accepted outcome carrying Glific's message id, template id and mode, or a failed
+     * @return an accepted outcome carrying the provider's message id, template id and mode, or a failed
      *         outcome naming the {@link WhatsAppSendStage} it broke at. <strong>Acceptance is not
-     *         delivery</strong> — it means the GraphQL mutation returned no errors; Gupshup and Meta
-     *         act after this call returns and report back only to Glific
+     *         delivery</strong> — it means the provider's send call returned no errors; Gupshup and
+     *         Meta act after this call returns and report back only to the provider
      */
     public ReportSendOutcome sendDailyReport(long contactId, String documentUrl, String officerUserType,
                                              LocalDate reportDate, String officerName) {
@@ -220,12 +221,12 @@ public class WhatsAppChannel implements NotificationChannel {
 
     /**
      * Classifies a send failure so the router's terminal line — {@code result=FAILED_DELIVERY}, or
-     * {@code result=DELIVERY_UNCONFIRMED} for the stages after which Glific may already hold the
+     * {@code result=DELIVERY_UNCONFIRMED} for the stages after which the provider may already hold the
      * message — says which half of the handoff broke.
      *
      * <p>Order matters. A {@code block()} timeout surfaces as an {@link IllegalStateException}, so it
      * must be recognised <em>before</em> the generic configuration branch — it is the one failure a
-     * retry makes worse, because Glific may already have sent the message.</p>
+     * retry makes worse, because the provider may already have sent the message.</p>
      *
      * <p>A failure the provider reported already carries its stage: the adapter assigns it, because
      * only the adapter knows which of its calls registers media and which sends.</p>

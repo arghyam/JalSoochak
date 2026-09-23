@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 /**
  * The gateway's authorization rules must mirror each service's own SecurityConfig: a JWT gate here on
  * an endpoint the service publishes without one rejects callers that have no token to send — vendor
- * integrations keyed by X-Api-Key, Glific webhooks keyed by X-Webhook-Token, and the public
+ * integrations keyed by X-Api-Key, chatbot webhooks keyed by X-Webhook-Token, and the public
  * dashboards. No route is registered in this slice, so 404 means a request cleared security and 401
  * means it did not.
  */
@@ -75,7 +75,7 @@ class SecurityConfigTest {
             "/api/v1/state-admin/pump-operators/upload",
             "/user/api/v1/state-admin/pump-operators/upload",
             "/api/v1/state-admin/user-scheme-mappings/upload",
-            // telemetry-service: Glific webhooks (X-Webhook-Token) and vendor ingestion (X-Api-Key)
+            // telemetry-service: chatbot webhooks (X-Webhook-Token) and vendor ingestion (X-Api-Key)
             "/api/v1/telemetry/readings/whatsapp",
             "/telemetry/api/v1/telemetry/readings/whatsapp",
             "/api/v1/telemetry/readings/glific",

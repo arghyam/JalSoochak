@@ -18,7 +18,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Resolves Glific UI messages/options from the consolidated tenant config:
+ * Resolves chatbot UI messages/options from the consolidated tenant config:
  * config_key = WHATSAPP_MESSAGE_TEMPLATES, config_value = JSON.
  *
  * Falls back to empty results if the config is missing/invalid; callers can then use legacy per-key configs.

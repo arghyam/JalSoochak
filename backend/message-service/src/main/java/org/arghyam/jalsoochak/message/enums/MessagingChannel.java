@@ -15,7 +15,7 @@ import java.util.Set;
  * {@code secretNames} are the locations the secret store derives. A divergence would show up
  * as a tenant whose settings are saved but whose cache never evicts. Change both together.
  *
- * <p>{@code WHATSAPP} is deliberately absent. Every tenant shares one Glific organisation
+ * <p>{@code WHATSAPP} is deliberately absent. Every tenant shares one WhatsApp provider organisation
  * today, so a per-tenant WhatsApp credential has nothing to point at.
  */
 public enum MessagingChannel {

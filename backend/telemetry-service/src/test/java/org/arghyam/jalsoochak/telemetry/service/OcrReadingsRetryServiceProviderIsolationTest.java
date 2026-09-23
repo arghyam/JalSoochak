@@ -113,12 +113,12 @@ class OcrReadingsRetryServiceProviderIsolationTest {
 
     @Test
     void unknownProviderRecordsOnTheDefaultBreakerNotAPhantomInstance() {
-        // Registry knows only the built-in flowvision provider (which fails transiently here).
-        MeterReadingExtractor flowvision = mock(MeterReadingExtractor.class);
-        when(flowvision.providerId()).thenReturn("flowvision");
-        when(flowvision.extractReadingOrThrow(anyString(), any(OcrProviderSettings.class)))
+        // Registry knows only the built-in provider (which fails transiently here).
+        MeterReadingExtractor builtIn = mock(MeterReadingExtractor.class);
+        when(builtIn.providerId()).thenReturn("flowvision");
+        when(builtIn.extractReadingOrThrow(anyString(), any(OcrProviderSettings.class)))
                 .thenThrow(new ResourceAccessException("Read timed out"));
-        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(flowvision), "flowvision");
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(builtIn), "flowvision");
 
         CircuitBreakerRegistry cbRegistry = CircuitBreakerRegistry.ofDefaults();
         OcrReadingsRetryService service = new OcrReadingsRetryService(
@@ -131,7 +131,7 @@ class OcrReadingsRetryServiceProviderIsolationTest {
                 cbRegistry,
                 BulkheadRegistry.ofDefaults());
 
-        // A mis-typed provider id degrades to FlowVision in the registry.
+        // A mis-typed provider id degrades to the built-in provider in the registry.
         OcrProviderSettings unknown =
                 new OcrProviderSettings("typo-provider", "https://custom/extract", "k", "Authorization");
         assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(URL, unknown));

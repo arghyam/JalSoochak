@@ -20,7 +20,7 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 
 /**
- * Authenticates the Glific webhook endpoints with a shared secret header.
+ * Authenticates the chatbot webhook endpoints with a shared secret header.
  *
  * <p><b>Why a plain filter rather than Spring Security.</b> telemetry-service has no security starter
  * on the classpath. Adding {@code spring-boot-starter-security} would insert
@@ -36,7 +36,7 @@ import java.util.Deque;
  * <p><b>Relationship to {@link TelemetryApiKeyAuthFilter}.</b> That filter guards the partner
  * ingestion routes under {@code /readings**} and {@code /schemes/*} with a per-tenant key, and exempts
  * {@code /readings/whatsapp}, its alias {@code /readings/glific}, and {@code /schemes} because those
- * are Glific webhooks. This filter is what authenticates them. {@code WebhookRouteCoverageTest} asserts that handoff in both
+ * are chatbot webhooks. This filter is what authenticates them. {@code WebhookRouteCoverageTest} asserts that handoff in both
  * directions, so neither gate can be narrowed without the other noticing.
  *
  * <p><b>Why a filter rather than a {@code HandlerInterceptor}.</b> An interceptor runs after handler
@@ -70,7 +70,7 @@ public class WebhookAuthFilter extends OncePerRequestFilter {
     /**
      * Written directly rather than via {@code response.sendError}, which would render Tomcat's HTML
      * error page. A rejected request lands inside a live WhatsApp flow, so the body must stay JSON
-     * that Glific can parse.
+     * that the chatbot flow can parse.
      */
     private static final String UNAUTHORIZED_BODY = "{\"success\":false,\"message\":\"Unauthorized\"}";
 

@@ -152,7 +152,7 @@ class TenantConfigKeyEnumTest {
 
         @Test
         @DisplayName("GLIFIC_MESSAGE_TEMPLATES is the only legacy alias, and it resolves to WHATSAPP_MESSAGE_TEMPLATES")
-        void glificMessageTemplates_isAliasOfWhatsAppMessageTemplates() {
+        void legacyMessageTemplatesKey_isAliasOfWhatsAppMessageTemplates() {
             List<TenantConfigKeyEnum> aliases = Arrays.stream(TenantConfigKeyEnum.values())
                     .filter(TenantConfigKeyEnum::isLegacyAlias)
                     .toList();

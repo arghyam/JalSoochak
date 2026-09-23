@@ -29,7 +29,7 @@ import static org.mockito.Mockito.verify;
 @DisplayName("WebhookAuthFilter")
 class WebhookAuthFilterTest {
 
-    private static final String TOKEN = "js_glific_webhook_token";
+    private static final String TOKEN = "js_webhook_token";
     private static final String TOKEN_HASH = WebhookAuthProperties.sha256Hex(TOKEN);
     private static final String HEADER = "X-Webhook-Token";
     private static final String PROTECTED_PATH = "/api/v1/telemetry/intro";
@@ -115,7 +115,7 @@ class WebhookAuthFilterTest {
         }
 
         @Test
-        @DisplayName("returns JSON, not Tomcat's HTML error page, so Glific can parse the reply")
+        @DisplayName("returns JSON, not Tomcat's HTML error page, so the chatbot flow can parse the reply")
         void returnsParseableJson() throws Exception {
             MockHttpServletResponse response = new MockHttpServletResponse();
 

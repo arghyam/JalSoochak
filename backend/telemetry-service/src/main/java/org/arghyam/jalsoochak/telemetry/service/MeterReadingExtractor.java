@@ -5,7 +5,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 /**
  * Strategy for extracting a water-meter reading from an image via an external AI/OCR provider.
  *
- * <p>One Spring bean per provider (FlowVision is the built-in implementation). The active provider is
+ * <p>One Spring bean per provider, with one built-in implementation. The active provider is
  * chosen per tenant by {@link OcrProviderResolver} and dispatched to by {@link OcrProviderRegistry},
  * keyed on {@link #providerId()}. To add a new AI model for a state/tenant, implement this interface,
  * register it as a bean, and point that tenant's {@code ocr_provider} config key at its id — no changes

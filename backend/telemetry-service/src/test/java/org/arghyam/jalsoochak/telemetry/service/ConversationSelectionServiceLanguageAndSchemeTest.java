@@ -41,7 +41,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Language and scheme steps of the Glific selection flow.
+ * Language and scheme steps of the chatbot selection flow.
  *
  * <p>Both steps accept the operator's reply either as the list number they were shown or as the
  * label itself, in any configured language — so selection resolution is the interesting part, along
@@ -215,7 +215,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
         }
 
         @Test
-        void persistsTheSelectionAndSyncsItToGlific() {
+        void persistsTheSelectionAndSyncsItToTheWhatsAppProvider() {
             var response = service.selectedLanguageMessage(languageRequest(CONTACT, "2"));
 
             assertThat(response.isSuccess()).isTrue();

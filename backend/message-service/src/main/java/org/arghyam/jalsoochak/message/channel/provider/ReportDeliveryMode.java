@@ -5,7 +5,7 @@ import java.util.Locale;
 /**
  * How the Daily Water Service Situation Report PDF reaches the officer on WhatsApp.
  *
- * <p>{@link #DOCUMENT} is the original path: the PDF is registered with Glific via
+ * <p>{@link #DOCUMENT} is the original path: the PDF is registered with the WhatsApp provider via
  * {@code createMessageMedia} and sent as a document HSM, which requires <em>Meta</em> to download the
  * MinIO URL from its own network. Production MinIO answers Indian source addresses only, so that
  * download fails inside Meta with {@code (#131053) Media upload error — Your server hosting media

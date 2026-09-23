@@ -46,7 +46,8 @@ import java.util.stream.Collectors;
 public class TelemetryValidationExceptionHandler {
 
     private static final String READINGS_PATH = "/api/v1/telemetry/readings";
-    // Assam's integration hits both /readings and /readings/ (trailing slash), so treat both as the readings endpoint.
+    // The state IT integration hits both /readings and /readings/ (trailing slash), so treat both as the
+    // readings endpoint.
     private static final String READINGS_PATH_TRAILING_SLASH = READINGS_PATH + "/";
     private static final String API_KEY_HEADER = "X-Api-Key";
 

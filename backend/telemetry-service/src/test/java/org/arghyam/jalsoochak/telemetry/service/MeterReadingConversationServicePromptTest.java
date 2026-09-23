@@ -327,7 +327,7 @@ class MeterReadingConversationServicePromptTest {
     }
 
     /**
-     * These two return a raw JSON body straight to Glific and, unlike the prompt builders, propagate
+     * These two return a raw JSON body straight to the chatbot and, unlike the prompt builders, propagate
      * their failures — the controller turns them into a JSON error body.
      */
     @Nested

@@ -206,9 +206,9 @@ class WhatsAppDeliveryReconciliationServiceTest {
         }
 
         /**
-         * A Section Officer receives both reports on the same Glific account, so a per-role count alone
-         * cannot say which one arrived. Without {@code report=}, a week in which no weekly report was
-         * delivered at all is invisible behind the daily traffic.
+         * A Section Officer receives both reports on the same WhatsApp provider account, so a per-role
+         * count alone cannot say which one arrived. Without {@code report=}, a week in which no weekly
+         * report was delivered at all is invisible behind the daily traffic.
          */
         @Test
         void countsDeliveriesPerReportAsWellAsPerRole() {
@@ -261,9 +261,9 @@ class WhatsAppDeliveryReconciliationServiceTest {
             assertThat(summaryTotal()).contains("failedByReport={DAILY=1, WEEKLY=1}");
         }
 
-        /** Glific's SENT is "Meta has it, not delivered" — it must land in pending, never in delivered. */
+        /** The provider's SENT is "Meta has it, not delivered" — it must land in pending, not delivered. */
         @Test
-        void glificSentCountsAsPendingNotDelivered() {
+        void providerSentCountsAsPendingNotDelivered() {
             stubTenants(tenant(74, "MH"));
             stubOfficers(Map.of(6530736L, officer(16714L, SO)));
             stubStatus("SENT", message("1", "SENT", 6530736L, WhatsAppDeliveryOutcome.PENDING, null, null));
@@ -311,7 +311,7 @@ class WhatsAppDeliveryReconciliationServiceTest {
         }
 
         @Test
-        void skipsAStatusGlificReportsAsEmpty() {
+        void skipsAStatusTheProviderReportsAsEmpty() {
             stubTenants(tenant(74, "MH"));
             when(deliveryStatusReader.countMessages(any(), any(), anyString(), anyString()))
                     .thenReturn(0);
@@ -354,7 +354,7 @@ class WhatsAppDeliveryReconciliationServiceTest {
 
         @Test
         void includesTheWeeklyTemplatesToo() {
-            // A weekly report Glific accepted but never delivered would otherwise look exactly like a
+            // A weekly report the provider accepted but never delivered would otherwise look exactly like a
             // quiet week — reconciliation only reports on templates it was told to watch.
             ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "7001");
             ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "7002");
@@ -362,7 +362,7 @@ class WhatsAppDeliveryReconciliationServiceTest {
             assertThat(service.resolveTemplateIds()).contains(7001, 7002);
         }
 
-        /** Both reports share a Glific account, so the template id is the only thing that tells them apart. */
+        /** Both reports share a provider account, so only the template id tells them apart. */
         @Test
         void labelsEachTemplateIdWithTheReportItCarries() {
             ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880559");

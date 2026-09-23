@@ -52,7 +52,7 @@ import java.util.UUID;
  *       sends it as a WhatsApp HSM to the operator.</li>
  *   <li>{@code ESCALATION} — generates a PDF, uploads it to MinIO, fetches
  *       the localized body text, and sends a document HSM to the officer.</li>
- *   <li>{@code STAFF_SYNC_COMPLETED} — onboards pump operators into Glific and
+ *   <li>{@code STAFF_SYNC_COMPLETED} — onboards pump operators into the WhatsApp provider and
  *       publishes {@code WHATSAPP_CONTACT_REGISTERED} events so tenant-service
  *       can persist the contact IDs.</li>
  * </ul>
@@ -68,7 +68,7 @@ public class NotificationEventRouter {
      * Dead-letter topic for {@code SEND_WELCOME_MESSAGE} per-phone failures.
      *
      * <p>Messages are published here when a single phone cannot be processed
-     * (missing {@code whatsapp_connection_id} or a Glific API error) so that
+     * (missing {@code whatsapp_connection_id} or a WhatsApp provider API error) so that
      * already-succeeded phones in the same batch are not re-sent by Kafka retry.
      *
      * <p>This service intentionally does <em>not</em> consume this topic.
@@ -726,7 +726,7 @@ public class NotificationEventRouter {
     }
 
     /**
-     * Looks up the Glific contact ID stored for a given phone number in the tenant's user_table.
+     * Looks up the WhatsApp contact ID stored for a given phone number in the tenant's user_table.
      * tenantSchema is pre-validated to match {@code [a-z0-9_]+} before this call.
      */
     private Long fetchWhatsappConnectionId(String tenantSchema, String phone) {
@@ -743,7 +743,7 @@ public class NotificationEventRouter {
     record UserContactInfo(Long contactId, String name) {}
 
     /**
-     * Looks up both the Glific contact ID and display name for a phone number.
+     * Looks up both the WhatsApp contact ID and display name for a phone number.
      * tenantSchema is pre-validated to match {@code [a-z0-9_]+} before this call.
      */
     private UserContactInfo fetchUserContactInfo(String tenantSchema, String phone) {
@@ -894,14 +894,14 @@ public class NotificationEventRouter {
     /**
      * Handles a {@code DAILY_REPORT_KPIS} event: resolves the officer's contact from the operational
      * {@code user_table} (analytics never sees PII), renders the report PDF, uploads it to MinIO, and
-     * sends the document HSM via Glific. Mirrors {@link #handleEscalation}.
+     * sends the document HSM through the WhatsApp provider. Mirrors {@link #handleEscalation}.
      *
      * <p>Every terminal outcome — one per officer — is logged with a {@code result=} tag and a
      * {@code role=} field so daily-report delivery can be counted per role straight from the logs.
-     * {@code result=GENERATED} marks a rendered PDF and {@code result=SENT} a send Glific
+     * {@code result=GENERATED} marks a rendered PDF and {@code result=SENT} a send the provider
      * <em>accepted</em>, so the two are counted separately. Three more tags keep the SENT count honest:
-     * {@code SUPPRESSED} is a dry-run that reached no Glific mutation, {@code FAILED_DELIVERY} a
-     * rejected send, and {@code DELIVERY_UNCONFIRMED} one Glific may have sent but cannot confirm —
+     * {@code SUPPRESSED} is a dry-run that reached no provider mutation, {@code FAILED_DELIVERY} a
+     * rejected send, and {@code DELIVERY_UNCONFIRMED} one the provider may have sent but cannot confirm —
      * the last of which is deliberately <strong>not</strong> retried (see
      * {@link #isAmbiguousDelivery}). None of them means WhatsApp delivered anything; only
      * {@link WhatsAppDeliveryReconciliationService} can say that.</p>
@@ -910,7 +910,7 @@ public class NotificationEventRouter {
         int tenantId = root.path("tenantId").asInt(0);
         String tenantSchema = root.path("tenantSchema").asText("");
         long officerUserId = root.path("officerUserId").asLong(0);
-        // Canonical role: trimmed once so the SDO gate, the PDF layout and the Glific template are all
+        // Canonical role: trimmed once so the SDO gate, the PDF layout and the WhatsApp template are all
         // chosen from the same token (the latter two trim internally, the gate below did not).
         String officerUserType = root.path("officerUserType").asText("").trim();
         String corr = root.path("correlationId").asText("");
@@ -961,7 +961,7 @@ public class NotificationEventRouter {
                 corr, officerUserId, officerName, officer.contactId() != null);
 
         // Resolved before the report is built. A contact id of 0 while delivery is live means the opt-in
-        // never produced a Glific contact, and nothing downstream can recover from that: sending anyway
+        // never produced a WhatsApp contact, and nothing downstream can recover from that: sending anyway
         // comes back as "Receiver does not exist", and retrying cannot conjure a contact id while it
         // stalls the whole partition. Doing it here means the dead end costs no PDF render and no MinIO
         // upload — the previous order paid for both, then deleted the file and gave up.
@@ -1027,7 +1027,7 @@ public class NotificationEventRouter {
      * layout their role calls for.
      *
      * <p>Mirrors the daily handler's order deliberately: validate, resolve the officer, resolve the
-     * Glific contact id <em>before</em> rendering, then build → upload → send. Resolving the contact
+     * WhatsApp contact id <em>before</em> rendering, then build → upload → send. Resolving the contact
      * first means a dead end costs no PDF render and no MinIO upload.</p>
      */
     private void handleWeeklySituationReport(JsonNode root) throws Exception {
@@ -1192,12 +1192,12 @@ public class NotificationEventRouter {
      *
      * <p>Three outcomes, only one of which is retried:</p>
      * <ul>
-     *   <li>{@link #isAmbiguousDelivery} ({@code TIMEOUT}, {@code SEND_NO_MESSAGE_ID}) — Glific may
+     *   <li>{@link #isAmbiguousDelivery} ({@code TIMEOUT}, {@code SEND_NO_MESSAGE_ID}) — the provider may
      *       already hold the message, so re-driving the event would send the officer a second copy of
      *       the same report, which is worse than the missing confirmation it was trying to fix.
      *       Recorded as {@code DELIVERY_UNCONFIRMED} for reconciliation.</li>
-     *   <li>{@link WhatsAppSendStage#CONFIG} — a definite rejection that never reached Glific, and one no
-     *       retry can repair: the template id, contact id or MinIO URL prefix is wrong on our side.
+     *   <li>{@link WhatsAppSendStage#CONFIG} — a definite rejection that never reached the provider, and
+     *       one no retry can repair: the template id, contact id or MinIO URL prefix is wrong on our side.
      *       Retrying only stalls the partition until the configuration changes, so it is terminal.</li>
      *   <li>Everything else ({@code MEDIA_REGISTER}, {@code SEND}) — a definite rejection a retry can
      *       plausibly repair, so it rethrows for the Kafka container's retry policy.</li>
@@ -1235,7 +1235,7 @@ public class NotificationEventRouter {
 
     /**
      * Logs an accepted send — or a suppressed one, which is not the same event and no longer shares a
-     * line with it. A dry-run reached no Glific mutation at all: it has no {@code PROVIDER_ACCEPTED}
+     * line with it. A dry-run reached no provider mutation at all: it has no {@code PROVIDER_ACCEPTED}
      * stage, no message id and nothing for reconciliation to match, so counting it as {@code SENT}
      * reported a muted deployment as a delivering one.
      *
@@ -1253,8 +1253,8 @@ public class NotificationEventRouter {
                     sendResult.modeForLog(), noSupplyRows, tookMs, loggableUrl);
             return;
         }
-        // result=SENT means Glific ACCEPTED the send — it is not a WhatsApp delivery confirmation.
-        // providerMsgId is what lets the delivery status Gupshup and Meta later report to Glific be
+        // result=SENT means the provider ACCEPTED the send — it is not a WhatsApp delivery confirmation.
+        // providerMsgId is what lets the delivery status Gupshup and Meta later report to the provider be
         // matched back to this officer; see WhatsAppDeliveryReconciliationService. Every new field goes after officer= to preserve
         // the field adjacency the log-counting recipes rely on.
         log.info("[Router/{}] corr={} result=SENT role={} tenant={} officer={}"
@@ -1266,9 +1266,9 @@ public class NotificationEventRouter {
     }
 
     /**
-     * Stages after which Glific may already have created and sent the message, so the event must not be
+     * Stages after which the provider may already have created and sent the message, so the event must not be
      * retried: a {@code block()} timeout, and a mutation that returned no errors but no message id
-     * either. Both leave delivery unconfirmed rather than failed, and only Glific can settle which.
+     * either. Both leave delivery unconfirmed rather than failed, and only the provider can settle which.
      */
     private static boolean isAmbiguousDelivery(WhatsAppSendStage stage) {
         return stage == WhatsAppSendStage.TIMEOUT || stage == WhatsAppSendStage.SEND_NO_MESSAGE_ID;
@@ -1492,7 +1492,7 @@ public class NotificationEventRouter {
     private record OfficerContact(Long contactId, String name, String phone) {}
 
     /**
-     * Returns the officer's stored Glific contact id, or opts them in by phone and publishes a
+     * Returns the officer's stored WhatsApp contact id, or opts them in by phone and publishes a
      * {@code WHATSAPP_CONTACT_REGISTERED} event so tenant-service persists the new contact id.
      */
     private long resolveContactIdOrOptIn(OfficerContact officer, String tenantSchema, long officerUserId) {
@@ -1513,7 +1513,7 @@ public class NotificationEventRouter {
     }
 
     /**
-     * Resolves an officer's Glific contact id, decrypted display name, and decrypted phone number
+     * Resolves an officer's WhatsApp contact id, decrypted display name, and decrypted phone number
      * from {@code <tenantSchema>.user_table} by user id. {@code tenantSchema} is validated by the
      * caller against {@link #SCHEMA_PATTERN} before interpolation (schema names are SQL identifiers
      * and cannot be bound as {@code ?}); the user id is bound as a parameter.

@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.message.channel.provider;
 
 /**
- * Where a Glific send failed, so a {@code result=FAILED_DELIVERY} log line says which half of the
+ * Where a WhatsApp send failed, so a {@code result=FAILED_DELIVERY} log line says which half of the
  * handoff broke instead of collapsing every cause into one token.
  *
  * <p>The distinction is operational, not cosmetic. The 20 Aug 2026 incident
@@ -12,7 +12,7 @@ package org.arghyam.jalsoochak.message.channel.provider;
 public enum WhatsAppSendStage {
 
     /**
-     * {@code createMessageMedia} rejected the PDF. DOCUMENT mode only: Glific validates the media URL
+     * {@code createMessageMedia} rejected the PDF. DOCUMENT mode only: the provider validates the media URL
      * with the BSP before accepting it, so an unreachable or geo-blocked MinIO surfaces here.
      */
     MEDIA_REGISTER,
@@ -21,26 +21,26 @@ public enum WhatsAppSendStage {
     SEND,
 
     /**
-     * Glific accepted the send but returned no {@code message.id}
-     * ({@code GlificMissingMessageIdException}).
+     * The provider accepted the send but returned no {@code message.id}.
      *
      * <p>Ambiguous in the same way as {@link #TIMEOUT}, and for a stronger reason: the mutation
-     * returned no errors, so Glific has the message and a retry sends a duplicate. What is lost is the
-     * join key, which means only a reconciliation pass against Glific can say whether it arrived.</p>
+     * returned no errors, so the provider has the message and a retry sends a duplicate. What is lost is
+     * the join key, which means only a reconciliation pass against the provider can say whether it
+     * arrived.</p>
      */
     SEND_NO_MESSAGE_ID,
 
     /**
-     * The 30 s {@code block()} in {@code GlificGraphQLClient} expired.
+     * The provider call's 30 s {@code block()} expired.
      *
-     * <p>Its own token because it is the one failure a retry makes <em>worse</em>: Glific may already
+     * <p>Its own token because it is the one failure a retry makes <em>worse</em>: the provider may already
      * have created and sent the message, so re-driving the event delivers a duplicate rather than
      * repairing anything.</p>
      */
     TIMEOUT,
 
     /**
-     * The send never reached Glific because our own configuration or inputs were wrong — a missing
+     * The send never reached the provider because our own configuration or inputs were wrong — a missing
      * template id, an unresolved contact id, or a MinIO URL that does not sit under the prefix the
      * approved template froze. Retrying cannot help until configuration changes.
      */

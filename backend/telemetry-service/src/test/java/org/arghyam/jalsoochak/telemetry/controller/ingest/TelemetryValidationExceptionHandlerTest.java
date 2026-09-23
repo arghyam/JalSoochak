@@ -40,7 +40,7 @@ import static org.mockito.Mockito.when;
 /**
  * Bean-validation and malformed-body handling for the single-tenant readings API.
  *
- * <p>Assam's integration expects a {@code ReadingsApiResponse} envelope on the readings path (and on
+ * <p>The state IT integration expects a {@code ReadingsApiResponse} envelope on the readings path (and on
  * its trailing-slash variant) rather than Spring's default error body, and a validation reject is
  * also published so analytics can still count the scheme as having reported.</p>
  */

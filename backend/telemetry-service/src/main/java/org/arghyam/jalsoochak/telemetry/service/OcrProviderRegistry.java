@@ -14,8 +14,9 @@ import java.util.Map;
  *
  * <p>All extractor beans are collected at startup and indexed by {@link MeterReadingExtractor#providerId()}
  * (case-insensitively). An unknown / unconfigured provider falls back to the configured default
- * ({@code ocr.default-provider}, default {@code flowvision}) so a mis-typed tenant config can never
- * drop a reading — it degrades to the built-in provider with a warning.
+ * ({@code ocr.default-provider}, default {@link OcrProviderSettings#DEFAULT_PROVIDER_ID}) so a
+ * mis-typed tenant config can never drop a reading — it degrades to the built-in provider with a
+ * warning.
  */
 @Component
 @Slf4j

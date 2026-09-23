@@ -104,7 +104,7 @@ public class MeterReadingConversationService {
     private static final String LOCATION_BOUNDARY_CONFIG_KEY = "location_boundary_warning";
     /**
      * The floor a tenant gets before configuring anything. Carries no {@code Yes | No} — those are
-     * quick-reply buttons rendered by the Glific flow, not part of this sentence.
+     * quick-reply buttons rendered by the chatbot flow, not part of this sentence.
      */
     private static final String DEFAULT_LOCATION_BOUNDARY_WARNING =
             "System detected that reading is being submitted outside the Scheme boundary. "
@@ -1555,7 +1555,8 @@ public class MeterReadingConversationService {
                 throw new IllegalStateException("longitude must be between -180 and 180");
             }
 
-            // Glific supplies organization_id; use it as a tenant hint when resolving operator across tenants.
+            // The chatbot supplies organization_id; use it as a tenant hint when resolving operator
+            // across tenants.
             TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(
                     contactId,
                     request.getOrganizationId()
@@ -1626,7 +1627,7 @@ public class MeterReadingConversationService {
                             ? resolveBoundaryWarning(operatorWithSchema.operator().tenantId(), languageKey)
                             : localizationService.localizeMessage("Location saved successfully.", languageKey))
                     // Unchanged on a mismatch: the coordinates WERE saved, and the flow in the
-                    // Glific instance may already route on this value. The new branch reads
+                    // chatbot may already route on this value. The new branch reads
                     // locationMismatch instead.
                     .qualityStatus("CONFIRMED")
                     .build();
@@ -1652,7 +1653,7 @@ public class MeterReadingConversationService {
      * {@code WHATSAPP_MESSAGE_TEMPLATES} JSON first, then the legacy per-key config rows, then the
      * English floor — so a tenant that configures nothing still gets a usable sentence.
      *
-     * <p>The {@code Yes | No} choices are deliberately absent. They are Glific quick-reply buttons
+     * <p>The {@code Yes | No} choices are deliberately absent. They are chatbot quick-reply buttons
      * rendered by the flow; folding them into this string would force every tenant to translate
      * button labels inside a sentence, and would break the moment the flow's button wording changed.
      */
@@ -1747,7 +1748,7 @@ public class MeterReadingConversationService {
 
             // A hand-typed correction moves confirmed_reading only. This used to call
             // updateReadingValues, which also overwrote extracted_reading and so destroyed the only
-            // record of what FlowVision read off that day's photo. Retag MANUAL only when the value
+            // record of what the OCR provider read off that day's photo. Retag MANUAL only when the value
             // actually moves, so restating the stored number keeps an existing ROLLOVER_RESOLVED or
             // EXTERNALLY_ASSERTED marker.
             telemetryTenantRepository.updateConfirmedReading(

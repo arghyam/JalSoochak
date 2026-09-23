@@ -341,7 +341,7 @@ public class NudgeRepository {
     }
 
     /**
-     * Persists the Glific contact ID for the given user.
+     * Persists the WhatsApp contact ID for the given user.
      * Called by the Kafka consumer when a {@code WHATSAPP_CONTACT_REGISTERED} event arrives.
      */
     @SuppressWarnings("java:S2077")

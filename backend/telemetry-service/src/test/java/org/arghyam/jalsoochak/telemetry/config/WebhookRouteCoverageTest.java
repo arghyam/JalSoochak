@@ -44,7 +44,7 @@ class WebhookRouteCoverageTest {
 
         assertThat(declared)
                 .as("Routes on @WebhookRoute controllers that WebhookRoutes does not protect. "
-                        + "A new Glific webhook must be added to WebhookRoutes, or it ships "
+                        + "A new chatbot webhook must be added to WebhookRoutes, or it ships "
                         + "unauthenticated.")
                 .containsExactlyInAnyOrderElementsOf(WebhookRoutes.relativePaths());
     }
@@ -82,7 +82,7 @@ class WebhookRouteCoverageTest {
     @DisplayName("the audit reported 12 endpoints; the webhook surface actually has 27 paths")
     void protectsEveryEndpointNotJustTheReportedOnes() {
         // The security audit listed 12 paths. Pinning the real count keeps that discrepancy visible:
-        // if this number changes, the Glific flow webhook nodes need updating too. 26 endpoints, one
+        // if this number changes, the chatbot flow webhook nodes need updating too. 26 endpoints, one
         // of them served on two paths while /readings/glific remains an alias of /readings/whatsapp;
         // both are live, so both must be protected. Back to 26 when the alias is removed.
         assertThat(WebhookRoutes.relativePaths()).hasSize(27);
@@ -91,16 +91,16 @@ class WebhookRouteCoverageTest {
 
     /**
      * The two gates must hand off cleanly. {@link TelemetryApiKeyAuthFilter} denies by default under
-     * {@code /readings**} and {@code /schemes/*}; a Glific route landing inside one of those prefixes
+     * {@code /readings**} and {@code /schemes/*}; a chatbot route landing inside one of those prefixes
      * without being on its exemption list would be rejected for lacking an {@code X-Api-Key} it is
      * never going to have, breaking the flow in the field. Nothing else in either class would catch it.
      */
     @Test
-    @DisplayName("no Glific webhook route is intercepted by the API-key gate")
+    @DisplayName("no chatbot webhook route is intercepted by the API-key gate")
     void noWebhookRouteIsBlockedByTheApiKeyGate() {
         assertThat(WebhookRoutes.absolutePaths())
                 .filteredOn(TelemetryApiKeyAuthFilter::requiresApiKey)
-                .as("Glific routes that TelemetryApiKeyAuthFilter would 401 before the webhook token "
+                .as("Chatbot routes that TelemetryApiKeyAuthFilter would 401 before the webhook token "
                         + "is ever checked. Add them to its UNAUTHENTICATED_WEBHOOK_PATHS.")
                 .isEmpty();
     }

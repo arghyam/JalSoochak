@@ -55,7 +55,7 @@ class WhatsAppChannelTest {
     @Test
     void sendNudge_returnsFalse_whenOptInThrows() {
         when(whatsAppSender.optIn(anyString()))
-                .thenThrow(new RuntimeException("Glific unreachable"));
+                .thenThrow(new RuntimeException("provider unreachable"));
 
         boolean result = whatsAppChannel.sendNudge("919876543210", "Ramesh", "02 March 2026");
 
@@ -161,7 +161,7 @@ class WhatsAppChannelTest {
     @Test
     void onboardOperator_throwsException_whenOptInFails() {
         when(whatsAppSender.optIn(anyString()))
-                .thenThrow(new RuntimeException("Glific unreachable"));
+                .thenThrow(new RuntimeException("provider unreachable"));
 
         assertThatThrownBy(() -> whatsAppChannel.onboardOperator("919876543210", 2))
                 .isInstanceOf(RuntimeException.class);
@@ -184,16 +184,17 @@ class WhatsAppChannelTest {
     // ─────────────────────────── sendDailyReport ───────────────────────────────
 
     /**
-     * Acceptance carries Glific's message id forward. That id is the only join key between a report we
-     * sent and the delivery status Gupshup and Meta later report back to Glific — without it the whole
-     * reconciliation is impossible, so losing it must fail a test rather than pass silently.
+     * Acceptance carries the provider's message id forward. That id is the only join key between a
+     * report we sent and the delivery status Gupshup and Meta later report back to the provider —
+     * without it the whole reconciliation is impossible, so losing it must fail a test rather than pass
+     * silently.
      */
     @Test
-    void sendDailyReport_returnsGlificsMessageIdOnAcceptance() {
-        WhatsAppSendResult glificResult =
+    void sendDailyReport_returnsProvidersMessageIdOnAcceptance() {
+        WhatsAppSendResult providerResult =
                 new WhatsAppSendResult("241952654", "880557", ReportDeliveryMode.LINK);
         when(whatsAppSender.sendDailyReportHsm(42L, "https://minio/r.pdf", "SECTION_OFFICER",
-                LocalDate.of(2026, 8, 27), "Binod")).thenReturn(glificResult);
+                LocalDate.of(2026, 8, 27), "Binod")).thenReturn(providerResult);
 
         ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
                 42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
@@ -232,15 +233,15 @@ class WhatsAppChannelTest {
     }
 
     @Test
-    void sendDailyReport_doesNotThrow_whenGlificFails() {
+    void sendDailyReport_doesNotThrow_whenProviderFails() {
         when(whatsAppSender.sendDailyReportHsm(anyLong(), anyString(), anyString(), any(), any()))
-                .thenThrow(new RuntimeException("Glific unreachable"));
+                .thenThrow(new RuntimeException("provider unreachable"));
 
         ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
                 42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
 
         assertThat(outcome.accepted()).isFalse();
-        assertThat(outcome.failure().message()).contains("Glific unreachable");
+        assertThat(outcome.failure().message()).contains("provider unreachable");
     }
 
     /**
@@ -304,7 +305,7 @@ class WhatsAppChannelTest {
 
     /**
      * A block timeout is an IllegalStateException, so it has to be matched before the configuration
-     * branch. It is the one failure a retry makes worse — Glific may already have sent the message.
+     * branch. It is the one failure a retry makes worse — the provider may already have sent the message.
      */
     @Test
     void stageOf_tagsABlockTimeoutBeforeTreatingItAsConfiguration() {

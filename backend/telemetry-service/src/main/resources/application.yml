@@ -54,7 +54,7 @@ whatsapp:
       phone: ${WHATSAPP_RESUME_USER_PHONE:${WHATSAPP_SYNC_USER_PHONE:}}
       password: ${WHATSAPP_RESUME_USER_PASSWORD:${WHATSAPP_SYNC_USER_PASSWORD:}}
 
-# LENIENT-INGEST: when true, Assam meter-reading submissions whose scheme id or operator phone is
+# LENIENT-INGEST: when true, canonical meter-reading submissions whose scheme id or operator phone is
 # missing from the tenant master data are still recorded (against a placeholder scheme / sentinel
 # operator) and tagged on flow_reading_table.ingestion_source, instead of being rejected. Set to
 # false to restore the original reject behaviour once the underlying data gaps are fixed.
@@ -64,12 +64,12 @@ telemetry:
   reading-url:
     validation:
       # Kill switch for the `reading_url` check on POST /readings only. The rules themselves come
-      # from media-download.ssrf-guard below, shared with the Glific media fetch; this exists so the
+      # from media-download.ssrf-guard below, shared with the WhatsApp media fetch; this exists so the
       # higher-volume of the two paths can be turned off without disarming that one.
       enabled: ${TELEMETRY_READING_URL_VALIDATION_ENABLED:true}
   webhook:
     auth:
-      # Shared-secret authentication for the 26 Glific webhook endpoints on the @WebhookRoute
+      # Shared-secret authentication for the 26 chatbot webhook endpoints on the @WebhookRoute
       # controllers in controller/webhook/. These are exposed publicly by ingress, bypassing the
       # api-gateway, so this filter is the only thing standing in front of them.
       #
@@ -82,14 +82,14 @@ telemetry:
       # field submission. The default is ENFORCE so the endpoints cannot be shipped unprotected by
       # omission. For local development, set TELEMETRY_WEBHOOK_AUTH_MODE=OFF.
       #
-      # ORDER OF OPERATIONS when rolling this out: add the header to the Glific flow webhook nodes
+      # ORDER OF OPERATIONS when rolling this out: add the header to the chatbot flow webhook nodes
       # FIRST (harmless while unauthenticated — unknown headers are ignored), and only then set
       # token-hashes and deploy. The reverse order rejects every field submission until the flows
       # catch up. Watch the telemetry.webhook.auth{result="missing"} counter on /actuator/prometheus.
       mode: ${TELEMETRY_WEBHOOK_AUTH_MODE:ENFORCE}
       header-name: ${TELEMETRY_WEBHOOK_AUTH_HEADER:X-Webhook-Token}
       # Comma-separated SHA-256 hex hashes of the accepted tokens — NOT the tokens themselves.
-      # Two entries make a rotation window: add the new hash, update Glific, drop the old one.
+      # Two entries make a rotation window: add the new hash, update the chatbot flows, drop the old one.
       # Startup fails if this is empty while mode=ENFORCE, or if an entry is not 64-char lowercase hex.
       token-hashes: ${TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES:}
   supply-plausibility:
@@ -145,7 +145,7 @@ ocr:
   # pluggable per state/tenant: implement MeterReadingExtractor, register it as a bean, and point the
   # tenant's `ocr_provider` (+ optional `ocr_url` / `ocr_api_key` / `ocr_auth_header`) config at its id.
   default-provider: ${OCR_DEFAULT_PROVIDER:flowvision}
-  # Optional auth for the global-default FlowVision endpoint (per-tenant keys override via `ocr_api_key`).
+  # Optional auth for the global-default OCR endpoint (per-tenant keys override via `ocr_api_key`).
   api-key: ${OCR_API_KEY:}
   auth-header: ${OCR_AUTH_HEADER:Authorization}
   bypass-system-proxy: ${OCR_BYPASS_SYSTEM_PROXY:true}
@@ -155,7 +155,7 @@ ocr:
   rollover:
     resolution:
       # Kill-switch for the rollover-digit resolver. Default OFF for a safe cutover — must only be
-      # flipped ON after the confirmed_reading history is cleaned (§6) and FlowVision is emitting the
+      # flipped ON after the confirmed_reading history is cleaned (§6) and the OCR provider is emitting the
       # new rollover payload in prod. When OFF, behaviour is byte-identical to legacy (source 0).
       enabled: ${OCR_ROLLOVER_RESOLUTION_ENABLED:false}
 
@@ -195,14 +195,14 @@ media-download:
     read-timeout-ms: ${MEDIA_DOWNLOAD_READ_TIMEOUT_MS:10000}
   # One policy for both caller-supplied meter-image URLs: the `mediaUrl` this service fetches for
   # readings/whatsapp, and the `reading_url` submitted to POST /readings, which this service does not
-  # fetch but hands to FlowVision as `imageURL`. FlowVision, Glific and MinIO calls of our own go out
-  # on the shared client and are unaffected.
+  # fetch but hands to the OCR provider as `imageURL`. Our own calls to the OCR provider, the WhatsApp
+  # provider and object storage go out on the shared client and are unaffected.
   ssrf-guard:
     # Master switch: disabling this disarms both paths.
     enabled: ${MEDIA_DOWNLOAD_SSRF_GUARD_ENABLED:true}
     # Empty means any public host. Populating it turns the guard from deny-internal into
-    # allow-listed — and it governs BOTH paths, so it must hold the union: Glific's media hosts
-    # (confirm from traffic) plus the observed reading_url senders
+    # allow-listed — and it governs BOTH paths, so it must hold the union: the WhatsApp provider's
+    # media hosts (confirm from traffic) plus the observed reading_url senders
     # adc-ecos.enlightcloud.com,nyc3.digitaloceanspaces.com,flowvision-test.s3.ap-south-1.amazonaws.com,filemanager.gupshup.io
     allowed-hosts: ${MEDIA_DOWNLOAD_ALLOWED_HOSTS:}
     require-https: ${MEDIA_DOWNLOAD_REQUIRE_HTTPS:false}

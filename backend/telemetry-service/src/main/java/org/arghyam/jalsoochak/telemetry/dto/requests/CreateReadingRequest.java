@@ -42,11 +42,11 @@ public class CreateReadingRequest {
     private boolean externallyAsserted;
 
     /**
-     * SUPPLY-PLAUSIBILITY: opt-in to the implausible-daily-supply check. True only on the Assam
+     * SUPPLY-PLAUSIBILITY: opt-in to the implausible-daily-supply check. True only on the canonical
      * reading APIs.
      *
      * <p>An opt-in rather than an opt-out because {@code createReading} is shared with the
-     * Glific/WhatsApp image path, which the check was deliberately scoped out of: a rejection there
+     * WhatsApp image path, which the check was deliberately scoped out of: a rejection there
      * would land inside a live conversation with no way for the operator to correct it, whereas an
      * API caller gets a 400 and can resubmit. Defaulting to false keeps every other caller
      * byte-identical.

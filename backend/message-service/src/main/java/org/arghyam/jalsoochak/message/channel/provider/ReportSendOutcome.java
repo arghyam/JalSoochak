@@ -1,8 +1,8 @@
 package org.arghyam.jalsoochak.message.channel.provider;
 
 /**
- * The result of one daily-report send attempt — either Glific accepted it, or it failed at a
- * identifiable stage.
+ * The result of one daily-report send attempt — either the WhatsApp provider accepted it, or it failed
+ * at a identifiable stage.
  *
  * <p>Replaces the previous bare {@code boolean}, which told the router that something went wrong but
  * not <em>where</em>. Every failure between registering the media and sending the message collapsed
@@ -16,7 +16,7 @@ public record ReportSendOutcome(WhatsAppSendResult result, Failure failure) {
     /** Why a send failed, in the two fields that make a log line actionable. */
     public record Failure(WhatsAppSendStage stage, String errorKey, String message) {
 
-        /** Glific's error key for logging, or {@code "-"} when the failure came from our own side. */
+        /** The provider's error key for logging, or {@code "-"} when the failure came from our own side. */
         public String errorKeyForLog() {
             return errorKey == null || errorKey.isBlank() ? "-" : errorKey;
         }
@@ -30,7 +30,7 @@ public record ReportSendOutcome(WhatsAppSendResult result, Failure failure) {
         return new ReportSendOutcome(null, new Failure(stage, errorKey, message));
     }
 
-    /** True when Glific accepted the send. <strong>Not</strong> a delivery confirmation. */
+    /** True when the provider accepted the send. <strong>Not</strong> a delivery confirmation. */
     public boolean accepted() {
         return failure == null;
     }

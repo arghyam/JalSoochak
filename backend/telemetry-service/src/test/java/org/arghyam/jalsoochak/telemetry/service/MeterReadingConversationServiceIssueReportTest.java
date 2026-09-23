@@ -288,7 +288,7 @@ class MeterReadingConversationServiceIssueReportTest {
     }
 
     @Test
-    void issueReportSubmitIgnoresDeletedChannelOutsideGlificReadingSubmission() {
+    void issueReportSubmitIgnoresDeletedChannelOutsideChatbotReadingSubmission() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -429,7 +429,7 @@ class MeterReadingConversationServiceIssueReportTest {
     // ── Free-text character allowlist (CWE-20 remediation) ──────────────────────────────────────
     //
     // ISSUE_REASON_ALLOWED guards only input that matched no configured reason. The rejection is a
-    // localised 200 rather than a 400 so a real operator typo does not stall the Glific flow, and
+    // localised 200 rather than a 400 so a real operator typo does not stall the chatbot flow, and
     // it happens before any write, so nothing is stored or published.
 
     private TelemetryOperatorWithSchema stubOperator() {

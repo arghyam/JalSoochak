@@ -13,14 +13,14 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.util.stream.Collectors;
 
 /**
- * Bean-validation failures on the Glific webhook endpoints, answered in the
+ * Bean-validation failures on the chatbot webhook endpoints, answered in the
  * {@code {success, message}} shape those endpoints contract for.
  *
  * <p><strong>Why this class has to exist.</strong> {@link MethodArgumentNotValidException} is raised
  * by the argument resolver <em>before</em> the handler body runs, so the {@code try/catch} inside
  * every webhook handler method can never see it. Without an advice the rejection
  * falls through to Boot's default error shape ({@code {timestamp,status,error,path}}) — still a
- * {@code 400}, but not the envelope a Glific flow node reads. The sibling
+ * {@code 400}, but not the envelope a chatbot flow node reads. The sibling
  * {@code TelemetryValidationExceptionHandler} cannot cover this because it is scoped to
  * {@code ReadingIngestController} and answers in the readings envelope instead.
  *

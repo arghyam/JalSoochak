@@ -56,7 +56,7 @@ public class BfmReadingService {
     private final RolloverResolutionService rolloverResolutionService;
     private final SupplyPlausibilityGuard supplyPlausibilityGuard;
     // Per-tenant OCR provider selection. Nullable so unit tests that construct BfmReadingService with only
-    // the collaborators they exercise (passing null here) fall back to the built-in FlowVision path.
+    // the collaborators they exercise (passing null here) fall back to the built-in OCR provider path.
     private final OcrProviderResolver ocrProviderResolver;
     private final OcrProviderRegistry ocrProviderRegistry;
     // LOCATION-AFFINITY: the scheme-boundary check. Nullable on the same terms as the OCR
@@ -244,7 +244,7 @@ public class BfmReadingService {
                 .orElse(null);
         LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(ReadingTime.now());
 
-        // READING-PROVENANCE: extracted_reading records what FlowVision read off the meter photo. The
+        // READING-PROVENANCE: extracted_reading records what the OCR provider read off the meter photo. The
         // OCR gate above runs only when the caller supplied no value, so on an API-asserted submission
         // nothing extracted anything — echoing the caller's own number back into extracted_reading made
         // such a row indistinguishable from an AI-extracted one, fed the duplicate-image guard below a
@@ -358,7 +358,7 @@ public class BfmReadingService {
 //                    .build();
 //        }
 
-        // A duplicate *image* is one FlowVision re-read to the previous confirmed value. An asserted
+        // A duplicate *image* is one the OCR provider re-read to the previous confirmed value. An asserted
         // value carries no extraction, so ocrExtractedReading is null and the guard stays out of its way
         // — otherwise a genuine zero-consumption day resubmitted through the API was rejected as a
         // duplicate photo.
@@ -400,7 +400,7 @@ public class BfmReadingService {
                     .build();
         }
 
-        // ── ROLLOVER-RESOLVE: resolve FlowVision rollover-digit ambiguity before the reading is confirmed.
+        // ── ROLLOVER-RESOLVE: resolve OCR rollover-digit ambiguity before the reading is confirmed.
         // The resolved value seeds confirmed_reading and is the number surfaced to the operator for
         // confirmation; extracted_reading stays the model value (dedup/audit). When the resolver is not
         // applicable (empty result) effectiveConfirmedReading is left untouched — byte-identical to legacy.
@@ -545,7 +545,7 @@ public class BfmReadingService {
         }
 
         // LOCATION-AFFINITY: coordinates the request carried belong on the reading row, not only in
-        // the anomaly. Only the state-IT paths supply them here — the Glific paths write them onto the
+        // the anomaly. Only the state-IT paths supply them here — the chatbot paths write them onto the
         // placeholder row from /location and leave the request null — and without this an
         // API-submitted mismatch could not be re-measured from the stored reading alone, which is what
         // the anomaly's own distance disclosure promises. Best-effort by design: createReading is not
@@ -574,7 +574,7 @@ public class BfmReadingService {
         // leaves only the placeholder row /location already wrote.
         //
         // Coordinates on the request come only from the state-IT APIs (same scoping as
-        // supplyPlausibilityChecked); the Glific paths leave them null and the service reads them
+        // supplyPlausibilityChecked); the chatbot paths leave them null and the service reads them
         // back off the reused placeholder row. That origin is what the metric's path tag records,
         // so if a future caller starts supplying coordinates the tag follows it.
         if (locationAffinityService != null) {
@@ -726,7 +726,7 @@ public class BfmReadingService {
      * Runs the rollover resolver when — and only when — it can act, returning its result or
      * {@link Optional#empty()} to signal "leave confirmed_reading exactly as the caller had it".
      *
-     * <p>The gate is kept tight for Glific-timeout hygiene: the overwhelming majority of readings have no
+     * <p>The gate is kept tight for chatbot-timeout hygiene: the overwhelming majority of readings have no
      * rollover, so the common path must add <em>zero</em> extra DB round-trips — the trailing-history fetch
      * happens only after every cheap in-memory check passes (never eagerly, relying on an in-{@code resolve}
      * short-circuit that runs after the query). The gate also requires the tenant schema to be migrated with
@@ -762,7 +762,7 @@ public class BfmReadingService {
 
     /**
      * Runs OCR for {@code readingUrl}. When {@code settings} is {@code null} the tenant has no per-tenant
-     * OCR override and the built-in FlowVision path is used unchanged; otherwise the resolved provider is
+     * OCR override and the built-in provider path is used unchanged; otherwise the resolved provider is
      * dispatched via {@link OcrProviderRegistry}. Honours the resilient (retry/circuit-breaker) path.
      */
     private OcrReadingResult extractReading(String readingUrl, OcrProviderSettings settings, OcrRetryMode ocrRetryMode) {
@@ -899,7 +899,7 @@ public class BfmReadingService {
 
     /**
      * The extracted reading to publish for a stored row. {@code extracted_reading} is NOT NULL, so every
-     * row whose value did not come from FlowVision carries a 0 sentinel — an API submission that supplied
+     * row whose value did not come from OCR carries a 0 sentinel — an API submission that supplied
      * confirmed_reading, a hand-typed reading that opened the row, a reused placeholder. Republishing that
      * 0 would file the row under "operator overrode the AI" (extracted <> confirmed) on the dashboards,
      * which needs an AI reading to have existed; null keeps it out of both buckets. A row that really was
@@ -937,8 +937,8 @@ public class BfmReadingService {
      * master data or the threshold, not forcing the number through.
      *
      * <p>Unlike the submission path there is no opt-in flag: {@code createReading} is shared with the
-     * Glific image workflow and so needs one, whereas this method is reached only from
-     * {@code PUT /readings} — the Glific confirm path updates the repository directly.
+     * chatbot image workflow and so needs one, whereas this method is reached only from
+     * {@code PUT /readings} — the chatbot confirm path updates the repository directly.
      *
      * @param updatedBy     the operator credited with the correction, and the operator the anomaly
      *                      is filed against

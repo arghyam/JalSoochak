@@ -371,7 +371,7 @@ class NotificationEventRouterTest {
     void route_rethrowsException_forKafkaRetry_whenNudgeFails() {
         when(whatsAppSender.optIn(anyString())).thenReturn(55L);
         when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString()))
-                .thenThrow(new RuntimeException("Glific unreachable"));
+                .thenThrow(new RuntimeException("provider unreachable"));
 
         assertThatThrownBy(() -> router.route("""
                 {"eventType":"NUDGE","recipientPhone":"919000000001","operatorName":"Op","tenantId":1}
@@ -462,7 +462,7 @@ class NotificationEventRouterTest {
 
     @Test
     void route_rethrowsException_whenAllStaffSyncOnboardingsFail() {
-        doThrow(new RuntimeException("Glific error"))
+        doThrow(new RuntimeException("provider error"))
                 .when(whatsAppChannel).onboardOperator(anyString(), anyInt());
 
         assertThatThrownBy(() -> router.route("""
@@ -476,7 +476,7 @@ class NotificationEventRouterTest {
 
     @Test
     void route_rethrowsException_whenPartialStaffSyncOnboardingFails() {
-        doThrow(new RuntimeException("Glific error"))
+        doThrow(new RuntimeException("provider error"))
                 .when(whatsAppChannel).onboardOperator(eq("919876543210"), anyInt());
         when(whatsAppChannel.onboardOperator(eq("919123456789"), anyInt())).thenReturn(43L);
 
@@ -1394,7 +1394,7 @@ class NotificationEventRouterTest {
 
     /**
      * Regression: a live daily report with an opt-in that yields no contact id must stop at the
-     * contact-resolution step. Sending with {@code contactId=0} made Glific answer
+     * contact-resolution step. Sending with {@code contactId=0} made the provider answer
      * "Receiver does not exist", which the router turned into a rethrow and a Kafka retry loop that
      * stalled every other event on the partition.
      *
@@ -1507,9 +1507,9 @@ class NotificationEventRouterTest {
     // ───────────────── delivery-status join keys on the SENT line ─────────────────
 
     /**
-     * {@code result=SENT} means Glific ACCEPTED the send, not that WhatsApp delivered it. The
+     * {@code result=SENT} means the provider ACCEPTED the send, not that WhatsApp delivered it. The
      * {@code providerMsgId} on this line is the only join key that lets the delivery status Gupshup and
-     * Meta later report back to Glific be matched to this officer — losing it breaks reconciliation
+     * Meta later report back to the provider be matched to this officer — losing it breaks reconciliation
      * silently, so it is asserted rather than assumed.
      */
     @Test
@@ -1554,10 +1554,10 @@ class NotificationEventRouterTest {
 
     /**
      * The 20 Aug 2026 incident collapsed every cause into one FAILED_DELIVERY token. The stage says
-     * which half of the handoff broke, and Glific's own error key comes with it.
+     * which half of the handoff broke, and the provider's own error key comes with it.
      */
     @Test
-    void handleDailyReport_failedDeliveryLineCarriesTheStageAndGlificErrorKey() throws Exception {
+    void handleDailyReport_failedDeliveryLineCarriesTheStageAndProviderErrorKey() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
@@ -1576,7 +1576,7 @@ class NotificationEventRouterTest {
     }
 
     /**
-     * A {@code CONFIG} failure never reached Glific: the template id, contact id or MinIO URL prefix is
+     * A {@code CONFIG} failure never reached the provider: the template id, contact id or MinIO URL prefix is
      * wrong on our side. It is a definite rejection — so it keeps {@code result=FAILED_DELIVERY} — but
      * one no retry can repair, so redriving it only stalls the partition until someone changes
      * configuration. Terminal, not rethrown.
@@ -1632,7 +1632,7 @@ class NotificationEventRouterTest {
     }
 
     /**
-     * A {@code block()} timeout is the one failure a retry makes worse: Glific may already have created
+     * A {@code block()} timeout is the one failure a retry makes worse: the provider may already have created
      * and sent the message, so re-driving the event delivers the officer a second copy of the same
      * report. It is recorded for reconciliation and swallowed, not rethrown for the Kafka container.
      */
@@ -1660,7 +1660,7 @@ class NotificationEventRouterTest {
     }
 
     /**
-     * The same ambiguity, reached the other way: Glific reported no errors but returned no
+     * The same ambiguity, reached the other way: the provider reported no errors but returned no
      * {@code message.id}, so it holds a message we can never match a status to. A retry is a guaranteed
      * duplicate, which is why this stage joins TIMEOUT rather than being rethrown.
      */
@@ -1673,7 +1673,7 @@ class NotificationEventRouterTest {
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(ReportSendOutcome.failed(WhatsAppSendStage.SEND_NO_MESSAGE_ID, null,
-                        "Glific accepted sendHsmMessage but returned no message.id"));
+                        "provider accepted sendHsmMessage but returned no message.id"));
 
         List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
 
@@ -1776,7 +1776,7 @@ class NotificationEventRouterTest {
     }
 
     /**
-     * A successful Glific acceptance, carrying the message id the router now logs. Glific returns
+     * A successful provider acceptance, carrying the message id the router now logs. The provider returns
      * {@code message { id }} on every send and the router puts it on the {@code result=SENT} line —
      * it is the join key the delivery-status reconciliation matches back to this officer.
      */

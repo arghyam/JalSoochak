@@ -67,7 +67,7 @@ class MediaFetchWiringTest {
             GlificMediaFetcher mediaFetcher = context.getBean(GlificMediaFetcher.class);
             assertThat(ReflectionTestUtils.getField(mediaFetcher, "restTemplate")).isSameAs(shared);
 
-            // FlowVision may legitimately sit on an internal address, so it must keep the unguarded
+            // The OCR provider may legitimately sit on an internal address, so it must keep the unguarded
             // client it has always had.
             FlowVisionOcrExtractor flowVisionOcrExtractor = context.getBean(FlowVisionOcrExtractor.class);
             assertThat(ReflectionTestUtils.getField(flowVisionOcrExtractor, "restTemplate")).isSameAs(shared);

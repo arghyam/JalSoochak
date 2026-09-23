@@ -18,7 +18,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * The resilient path must dispatch to the tenant-resolved provider (not the built-in FlowVision service)
+ * The resilient path must dispatch to the tenant-resolved provider (not the built-in OCR provider)
  * when {@link OcrProviderSettings} are supplied.
  */
 class OcrReadingsRetryServiceProviderRoutingTest {

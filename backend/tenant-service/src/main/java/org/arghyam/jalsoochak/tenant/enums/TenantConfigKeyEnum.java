@@ -85,10 +85,10 @@ public enum TenantConfigKeyEnum implements ConfigKey {
     LOCATION_CHECK_REQUIRED(ConfigType.GENERIC, SimpleConfigValueDTO.class, false, false, true),
 
     /**
-     * Glific WhatsApp message templates configuration.
+     * WhatsApp chatbot message templates configuration.
      * Defines all screens, prompts, options, messages, and reasons for the conversation flow.
      * Includes multilingual support (all Indian official languages).
-     * Provides a hierarchical and maintainable structure for all Glific conversation templates.
+     * Provides a hierarchical and maintainable structure for all chatbot conversation templates.
      */
     WHATSAPP_MESSAGE_TEMPLATES(ConfigType.GENERIC, WhatsAppMessagesConfigDTO.class, false, false, false),
 
@@ -102,7 +102,7 @@ public enum TenantConfigKeyEnum implements ConfigKey {
     GLIFIC_MESSAGE_TEMPLATES(WHATSAPP_MESSAGE_TEMPLATES),
 
     /**
-     * Glific Connection Settings.
+     * WhatsApp provider connection settings.
      * Contains API credentials and endpoints for WhatsApp integration.
      */
     MESSAGE_BROKER_CONNECTION_SETTINGS(ConfigType.GENERIC, MessageBrokerConfigDTO.class, false, true, false),
@@ -315,7 +315,7 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * The SMS account this tenant's own messages are sent through, including the sender id, the DLT
      * registrations and the OTP text. Credentials are NOT here — see EMAIL_PROVIDER_SETTINGS.
      * <p>
-     * A WHATSAPP_PROVIDER_SETTINGS key is deliberately absent: every tenant shares one Glific
+     * A WHATSAPP_PROVIDER_SETTINGS key is deliberately absent: every tenant shares one WhatsApp provider
      * organisation today, so there is nothing per-tenant to store.
      */
     SMS_PROVIDER_SETTINGS(ConfigType.GENERIC, SmsProviderConfigDTO.class, false, true, false);

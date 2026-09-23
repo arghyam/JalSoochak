@@ -48,7 +48,7 @@ class LocationAffinityServiceTest {
     private static final Long OPERATOR = 9L;
     private static final Long SCHEME = 7L;
     private static final Long READING = 4242L;
-    private static final String SUBMISSION_CORRELATION = "glific-abc-123";
+    private static final String SUBMISSION_CORRELATION = "submission-abc-123";
     private static final LocalDate DAY = LocalDate.of(2026, 9, 21);
 
     private static final double SCHEME_LAT = 26.1445d;

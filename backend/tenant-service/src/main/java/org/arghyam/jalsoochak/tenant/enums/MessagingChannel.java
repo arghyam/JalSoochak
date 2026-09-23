@@ -11,7 +11,7 @@ import java.util.Set;
  * {@link #getSecretNames()} before anything is written. A caller can therefore never
  * reach a location outside its own tenant and channel.
  *
- * <p>{@code WHATSAPP} is deliberately absent. Every tenant shares one Glific
+ * <p>{@code WHATSAPP} is deliberately absent. Every tenant shares one WhatsApp provider
  * organisation today, so a per-tenant WhatsApp credential has nothing to point at; the
  * string is reserved in the {@code channel} column but is not addressable through the
  * API until that changes.

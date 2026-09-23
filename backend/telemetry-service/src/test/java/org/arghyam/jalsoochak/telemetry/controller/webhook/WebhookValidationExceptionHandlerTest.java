@@ -23,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * The 255-character cap reaching the wire as a {@code 400} in the Glific {@code {success,message}}
+ * The 255-character cap reaching the wire as a {@code 400} in the chatbot {@code {success,message}}
  * envelope, and the paths that must NOT become a {@code 400}.
  *
  * <p>Driven through {@code standaloneSetup} rather than {@code @WebMvcTest} — this service has no
@@ -68,7 +68,7 @@ class WebhookValidationExceptionHandlerTest {
     @ValueSource(strings = {"issueReason", "reason", "issue", "results", "message"})
     void noJsonAliasIsAWayAroundTheCap(String alias) throws Exception {
         // The DTO binds five names for this field. A cap enforced on only the canonical one would
-        // be trivially bypassed, and "results" is the name Glific actually sends.
+        // be trivially bypassed, and "results" is the name the chatbot actually sends.
         mockMvc().perform(post(SUBMIT)
                         .contentType("application/json")
                         .content(body(alias, "a".repeat(256))))
@@ -128,7 +128,7 @@ class WebhookValidationExceptionHandlerTest {
     @Test
     void aReasonWithDisallowedCharactersIsNotA400BecauseThatCheckStaysInTheService() throws Exception {
         // Character validation deliberately does not come through this advice — it must stay a
-        // localised 200 so a real operator typo does not stall the Glific flow.
+        // localised 200 so a real operator typo does not stall the chatbot flow.
         when(meterWorkflowService.issueReportSubmitMessage(any()))
                 .thenReturn(IntroResponse.builder()
                         .success(false)

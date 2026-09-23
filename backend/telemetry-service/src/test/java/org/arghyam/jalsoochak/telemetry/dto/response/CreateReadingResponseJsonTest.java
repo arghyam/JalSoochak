@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The wire shape of {@link CreateReadingResponse}, which is shared by two very different consumers:
- * the Glific flow's webhooks and the state IT system's {@code POST /api/v1/telemetry/readings}.
+ * the chatbot flow's webhooks and the state IT system's {@code POST /api/v1/telemetry/readings}.
  *
  * <p>These tests exist because that sharing makes the class easy to break in one direction while
  * fixing the other. It carries no {@code @JsonInclude(NON_NULL)} and the service sets no global

@@ -5,13 +5,13 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * The exact set of Glific webhook routes protected by {@link WebhookAuthFilter}.
+ * The exact set of chatbot webhook routes protected by {@link WebhookAuthFilter}.
  *
  * <p><b>Why a closed allowlist rather than a prefix rule on {@code /api/v1/telemetry/**}.</b>
  * That prefix is shared with the vendor ingestion endpoints on {@code ReadingIngestController}
  * and {@code MultiFormatReadingController}, which authenticate with a different credential
  * ({@code X-Api-Key}, issued per tenant to state IT departments). {@code /readings} and
- * {@code /schemes} are each shared prefixes across both families — {@code POST /schemes} is a Glific
+ * {@code /schemes} are each shared prefixes across both families — {@code POST /schemes} is a chatbot
  * webhook while {@code PATCH /schemes/{id}/yesterday-final-reading} is an ingestion route. A prefix
  * rule would therefore reject vendor traffic that carries the correct credential for its own family.
  *
@@ -60,7 +60,7 @@ public final class WebhookRoutes {
             "/update-previous-reading"
     );
 
-    /** Every Glific route is a POST; nothing else on a webhook controller is mapped. */
+    /** Every chatbot route is a POST; nothing else on a webhook controller is mapped. */
     private static final String METHOD = "POST";
 
     private static final Set<String> ABSOLUTE_PATHS = buildAbsolutePaths();
@@ -90,7 +90,7 @@ public final class WebhookRoutes {
      * @param method HTTP method as reported by the container
      * @param normalizedPath request path with the context path removed and normalized by
      *                       {@link WebhookAuthFilter}
-     * @return whether this request targets a Glific webhook and must therefore carry a webhook token
+     * @return whether this request targets a chatbot webhook and must therefore carry a webhook token
      */
     public static boolean isProtected(String method, String normalizedPath) {
         if (method == null || normalizedPath == null) {

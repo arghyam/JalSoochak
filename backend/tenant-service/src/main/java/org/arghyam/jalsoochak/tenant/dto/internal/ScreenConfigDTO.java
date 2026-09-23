@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 import java.util.Map;
 
 /**
- * DTO for a single screen configuration in the Glific conversation flow.
+ * DTO for a single screen configuration in the chatbot conversation flow.
  * 
  * A screen represents a single interaction point in the WhatsApp conversation.
  * Examples: LANGUAGE_SELECTION, CHANNEL_SELECTION, INTRO_MESSAGE, ISSUE_REPORT, etc.

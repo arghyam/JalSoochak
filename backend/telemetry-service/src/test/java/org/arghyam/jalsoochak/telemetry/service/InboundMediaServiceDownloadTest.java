@@ -246,8 +246,8 @@ class InboundMediaServiceDownloadTest {
 
             verify(mediaUrlValidator).validate(MEDIA_URL);
             // A caller-supplied destination must never reach the provider's fetcher, which goes out
-            // on the client shared with FlowVision, Glific and MinIO, whose hosts are allowed to be
-            // internal.
+            // on the client shared with the OCR provider, the WhatsApp provider and object storage,
+            // whose hosts are allowed to be internal.
             verifyNoInteractions(inboundMediaFetcher);
         }
 

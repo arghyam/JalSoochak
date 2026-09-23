@@ -55,7 +55,7 @@ public class OcrReadingsRetryService {
                 circuitBreakerRegistry.circuitBreaker(INSTANCE_NAME));
     }
 
-    /** Resilient extraction against the global-default FlowVision endpoint. */
+    /** Resilient extraction against the global-default OCR endpoint. */
     public OcrReadingResult extractReading(String readingUrl) {
         return extractReading(readingUrl, null);
     }
@@ -67,8 +67,9 @@ public class OcrReadingsRetryService {
      */
     public OcrReadingResult extractReading(String readingUrl, OcrProviderSettings settings) {
         // Resolve the extractor once so the resilience instance follows the provider that actually serves
-        // the call: an unknown/mis-typed id degrades to FlowVision in the registry, and must then use the
-        // default breaker rather than spawning a phantom instance named after a provider that never runs.
+        // the call: an unknown/mis-typed id degrades to the built-in provider in the registry, and must
+        // then use the default breaker rather than spawning a phantom instance named after a provider that
+        // never runs.
         MeterReadingExtractor extractor = resolveExtractor(settings);
         ResilienceBundle bundle = bundleFor(extractor);
         Supplier<OcrReadingResult> supplier = () -> invokeExtractor(extractor, readingUrl, settings);
@@ -93,7 +94,7 @@ public class OcrReadingsRetryService {
 
     /**
      * The provider that will actually serve the call: {@code null} settings (or a null registry, as in
-     * some unit tests) use the built-in FlowVision service; otherwise the registry resolves the configured
+     * some unit tests) use the built-in OCR provider; otherwise the registry resolves the configured
      * id, degrading to the default provider for an unknown id.
      */
     private MeterReadingExtractor resolveExtractor(OcrProviderSettings settings) {
@@ -104,7 +105,7 @@ public class OcrReadingsRetryService {
     }
 
     /**
-     * The resilience bundle keyed on the RESOLVED provider. The built-in {@code flowvision} provider —
+     * The resilience bundle keyed on the RESOLVED provider. The built-in provider —
      * where unknown/mis-typed ids also degrade — uses the shared, tuned {@value #INSTANCE_NAME} instances;
      * any other registered provider gets its own derived instances so its failures cannot open the default
      * breaker (and a typo cannot spawn a phantom breaker that never matches a real backend).

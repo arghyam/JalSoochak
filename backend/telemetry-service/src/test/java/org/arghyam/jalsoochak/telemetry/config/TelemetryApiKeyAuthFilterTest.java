@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The filter is the single fail-closed gate in front of the server-to-server reading routes.
  * These tests pin the two properties that matter: everything under the protected prefixes needs a
- * key unless it is on the explicit Glific webhook allowlist, and a rejected request never reaches
+ * key unless it is on the explicit chatbot webhook allowlist, and a rejected request never reaches
  * the handler.
  */
 class TelemetryApiKeyAuthFilterTest {

@@ -29,14 +29,16 @@ import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /**
- * Asks Glific what actually happened to the situation reports we sent, and writes the answer to the
- * log. Both the daily and the weekly report are covered, each labelled with {@code report=}.
+ * Asks the WhatsApp provider what actually happened to the situation reports we sent, and writes the
+ * answer to the log. Both the daily and the weekly report are covered, each labelled with
+ * {@code report=}.
  *
- * <p>{@code result=SENT} only ever meant "Glific accepted our API call". Gupshup and Meta act after
- * that call returns and report delivery status back to Glific alone, so a report sent to a number with
- * no WhatsApp account was counted as sent exactly like one that arrived. This job closes that gap: it
- * pulls a rolling window of messages from Glific, maps each recipient back to an officer, and emits
- * per-message, per-tenant and platform-wide lines under the {@code [WhatsAppStatus]} prefix.</p>
+ * <p>{@code result=SENT} only ever meant "the provider accepted our API call". Gupshup and Meta act
+ * after that call returns and report delivery status back to the provider alone, so a report sent to a
+ * number with no WhatsApp account was counted as sent exactly like one that arrived. This job closes
+ * that gap: it pulls a rolling window of messages from the provider, maps each recipient back to an
+ * officer, and emits per-message, per-tenant and platform-wide lines under the
+ * {@code [WhatsAppStatus]} prefix.</p>
  *
  * <h2>Shape of a pass</h2>
  * <ol>
@@ -45,7 +47,7 @@ import java.util.stream.Collectors;
  *   <li>Discard anything that is not an outbound HSM on one of our report templates —
  *       {@code MessageFilter} cannot do this server-side.</li>
  *   <li>Label each survivor {@code DAILY} or {@code WEEKLY} from its template id.</li>
- *   <li>Resolve each remaining Glific contact id to an officer, one batched query per tenant.</li>
+ *   <li>Resolve each remaining WhatsApp contact id to an officer, one batched query per tenant.</li>
  *   <li>Tally by role, by report and by failure code; log.</li>
  * </ol>
  *
@@ -64,7 +66,7 @@ import java.util.stream.Collectors;
 public class WhatsAppDeliveryReconciliationService {
 
     /**
-     * The statuses worth pulling. Every outbound state Glific can report is here: omitting one would
+     * The statuses worth pulling. Every outbound state the provider can report is here: omitting one would
      * silently drop those messages from the counts rather than showing them as anything.
      * {@code RECEIVED} and {@code DELETED} are excluded — inbound and removed, neither is a delivery.
      */
@@ -75,9 +77,9 @@ public class WhatsAppDeliveryReconciliationService {
     private static final String UNKNOWN_ROLE = "UNKNOWN";
 
     /**
-     * Which report a matched message carries, resolved from its Glific template id.
+     * Which report a matched message carries, resolved from its WhatsApp template id.
      *
-     * <p>Both reports go out on the same Glific account, and a Section Officer receives both, so
+     * <p>Both reports go out on the same WhatsApp provider account, and a Section Officer receives both, so
      * without this every {@code [WhatsAppStatus]} line and every per-role tally silently mixed them:
      * {@code deliveredByRole={SECTION_OFFICER=271}} was daily plus weekly, and a week in which no
      * weekly report was delivered at all was invisible behind the daily traffic. {@code UNKNOWN} is for
@@ -130,7 +132,7 @@ public class WhatsAppDeliveryReconciliationService {
     @Value("${whatsapp.template.daily-report-sdo-link-id:}")
     private String dailyReportSdoLinkTemplateId;
 
-    // The weekly templates too. Without them a weekly report would be sent, accepted by Glific, and
+    // The weekly templates too. Without them a weekly report would be sent, accepted by the provider, and
     // then never reconciled — so a week of undelivered reports would look exactly like a quiet week.
     @Value("${whatsapp.template.weekly-report-so-link-id:}")
     private String weeklyReportSoLinkTemplateId;
@@ -141,7 +143,7 @@ public class WhatsAppDeliveryReconciliationService {
     /**
      * Runs a reconciliation pass over the trailing window.
      *
-     * <p>Off by default: it costs Glific calls that share the 500 ms throttle with live sends, so a
+     * <p>Off by default: it costs provider calls that share the 500 ms throttle with live sends, so a
      * deployment opts in once the window and interval suit its volume.</p>
      */
     @Scheduled(fixedDelayString = "${whatsapp.status.reconcile.interval-ms:1800000}",
@@ -156,7 +158,7 @@ public class WhatsAppDeliveryReconciliationService {
 
     /**
      * Reconciles one explicit window. Separate from the scheduled entry point so an operator can drive
-     * a past window (for a retro-check against Glific's console) without waiting for the timer.
+     * a past window (for a retro-check against the provider's console) without waiting for the timer.
      */
     public void reconcile(Instant from, Instant to) {
         long startNanos = System.nanoTime();
@@ -217,7 +219,7 @@ public class WhatsAppDeliveryReconciliationService {
     // ── Window scan ────────────────────────────────────────────────────────────
 
     /**
-     * What one pass pulled from Glific.
+     * What one pass pulled from the provider.
      *
      * @param matched                 outbound HSMs on one of our daily- or weekly-report templates
      * @param windowScanned           every message returned across the statuses we query — the sanity
@@ -286,7 +288,7 @@ public class WhatsAppDeliveryReconciliationService {
 
     // ── Officer resolution ─────────────────────────────────────────────────────
 
-    /** An officer identified from a Glific contact id, with just enough context to log a line. */
+    /** An officer identified from a WhatsApp contact id, with just enough context to log a line. */
     private record OfficerRef(int tenantId, String tenantSchema, long officerUserId, String role) {
         String tenantKey() {
             return tenantId + "|" + tenantSchema;
@@ -304,10 +306,10 @@ public class WhatsAppDeliveryReconciliationService {
     }
 
     /**
-     * Maps Glific contact ids to officers, one batched query per active tenant.
+     * Maps WhatsApp contact ids to officers, one batched query per active tenant.
      *
-     * <p>Resolution runs contact-id-first because Glific's window carries no tenant context. Glific
-     * contact ids are globally unique, so the first tenant that claims one wins; two tenants claiming
+     * <p>Resolution runs contact-id-first because the provider's window carries no tenant context.
+     * Contact ids are globally unique, so the first tenant that claims one wins; two tenants claiming
      * the same id means a stale {@code whatsapp_connection_id} somewhere and is warned about rather
      * than silently resolved.</p>
      */

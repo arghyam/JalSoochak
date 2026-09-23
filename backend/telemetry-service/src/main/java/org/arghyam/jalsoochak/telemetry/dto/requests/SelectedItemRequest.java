@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
 public class SelectedItemRequest {
     private String contactId;
 
-    // Glific payload currently sends selected value in "channel".
+    // The chatbot payload currently sends selected value in "channel".
     @JsonAlias({"item"})
     private String channel;
 }

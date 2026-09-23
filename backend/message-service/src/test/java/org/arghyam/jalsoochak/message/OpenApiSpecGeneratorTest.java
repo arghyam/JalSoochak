@@ -54,11 +54,11 @@ class OpenApiSpecGeneratorTest {
         registry.add("spring.datasource.password", postgres::getPassword);
     }
 
-    /** Suppress @PostConstruct login() which makes a live HTTP call to Glific. */
+    /** Suppress @PostConstruct login() which makes a live HTTP call to the WhatsApp provider. */
     @MockBean
     GlificAuthService glificAuthService;
 
-    /** Suppress @PostConstruct validateTemplates() to avoid needing all Glific env vars. */
+    /** Suppress @PostConstruct validateTemplates() to avoid needing all WhatsApp env vars. */
     @MockBean
     WhatsAppSender whatsAppSender;
 

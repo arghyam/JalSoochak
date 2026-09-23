@@ -17,9 +17,9 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Resolves FlowVision rollover-digit ambiguity for a meter reading before it is confirmed.
+ * Resolves OCR rollover-digit ambiguity for a meter reading before it is confirmed.
  *
- * <p>A mechanical digit wheel caught mid-turn is ambiguous between two adjacent values. FlowVision
+ * <p>A mechanical digit wheel caught mid-turn is ambiguous between two adjacent values. The OCR provider
  * reports a higher-confidence {@code selectedDigit} (already used to build {@code meterReading}) and a
  * runner-up {@code alternateDigit} per ambiguous position. The confidence gap is usually tiny and thus
  * weak evidence, so this service cross-checks each candidate reading against the scheme's own recent
@@ -42,7 +42,7 @@ public class RolloverResolutionService {
     public static final int SOURCE_MANUAL = 2;
     /**
      * READING-PROVENANCE: {@code confirmed_reading_source} value for a value supplied by an integrating
-     * system through {@code confirmed_reading} — no meter photo was submitted and FlowVision never ran.
+     * system through {@code confirmed_reading} — no meter photo was submitted and OCR never ran.
      * Submitting a value instead of an image is a supported part of the server-to-server contract; this
      * marker only records <em>how</em> the number arrived. {@code extracted_reading} on such a row holds
      * the supplied number (the column is NOT NULL), so without this marker an API-supplied value is
@@ -71,7 +71,7 @@ public class RolloverResolutionService {
     static final double MARGIN_THRESHOLD = 1.0;
     /** MAD → σ normalisation constant (consistency factor for a normal distribution). */
     private static final double MAD_SCALE = 1.4826;
-    /** Confidence used when FlowVision omits a per-digit confidence. */
+    /** Confidence used when the OCR provider omits a per-digit confidence. */
     private static final double DEFAULT_CONFIDENCE = 0.5;
     /** Floor on confidence before taking a logarithm (avoids ln(0) = -∞). */
     private static final double MIN_CONFIDENCE = 1e-6;
@@ -111,7 +111,7 @@ public class RolloverResolutionService {
     }
 
     /**
-     * @param ocr               the FlowVision result (model pick + rollover metadata).
+     * @param ocr               the OCR result (model pick + rollover metadata).
      * @param history           one confirmed reading per calendar day over the trailing window,
      *                          most-recent-first (as returned by
      *                          {@code findRecentDailyConfirmedReadings}).

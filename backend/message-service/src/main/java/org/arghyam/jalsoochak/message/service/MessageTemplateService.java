@@ -13,7 +13,7 @@ import java.util.Optional;
  * Fetches localized nudge and escalation message templates from
  * {@code common_schema.tenant_config_master_table}.
  *
- * <p>Language resolution mirrors {@code GlificWebhookService.normalizeLanguageKey()}
+ * <p>Language resolution mirrors {@code ConversationLocalizationService.normalizeLanguageKey()}
  * in telemetry-service: {@code user_table.language_id} (int) → {@code language_N}
  * config key → language name → normalized key.</p>
  *

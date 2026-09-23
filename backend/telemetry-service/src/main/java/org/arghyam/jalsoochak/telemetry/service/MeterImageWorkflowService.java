@@ -190,10 +190,10 @@ public class MeterImageWorkflowService {
                     .readingUrl(request.getReadingUrl())
                     .readingValue(request.getConfirmedReading())
                     // READING-PROVENANCE: records that this number came from the caller rather than from
-                    // FlowVision. Marker only — the submission is processed exactly as before.
+                    // the OCR provider. Marker only — the submission is processed exactly as before.
                     .externallyAsserted(request.getConfirmedReading() != null)
                     // SUPPLY-PLAUSIBILITY: opt this endpoint into the implausible-daily-supply check.
-                    // Set here and nowhere else — createReading is shared with the Glific/WhatsApp
+                    // Set here and nowhere else — createReading is shared with the WhatsApp
                     // image path, which stays byte-identical because the flag defaults to false
                     // there. A rejection inside a live WhatsApp conversation has no correction path;
                     // an API caller gets a 400 and can resubmit.
@@ -494,7 +494,7 @@ public class MeterImageWorkflowService {
     }
 
     /**
-     * LENIENT-INGEST: resolves the scheme for an Assam reading. Prefers a scheme the operator is
+     * LENIENT-INGEST: resolves the scheme for a canonical reading. Prefers a scheme the operator is
      * actually mapped to (normal path, bits=0). When that fails and lenient ingestion is enabled it
      * records against the existing (unmapped) scheme, or auto-provisions a placeholder scheme when the
      * scheme id is unknown — tagging each case so it can be filtered later. When lenient ingestion is

@@ -188,7 +188,7 @@ class BfmReadingServiceAssertedReadingTest {
         stubPersistence();
 
         // 140 is the scheme's last confirmed reading (see setUp): a genuine zero-consumption day.
-        // The duplicate-image guard compares what FlowVision read off the photo, and FlowVision never
+        // The duplicate-image guard compares what the OCR provider read off the photo, and OCR never
         // ran here, so it must not fire even though an image URL rode along with the submission.
         CreateReadingResponse response = service.createReading(
                 CreateReadingRequest.builder()

@@ -23,7 +23,7 @@ public class OcrReadingResult {
     private String rejectionReason;
 
     /**
-     * Raw {@code data.meterReading} string (built from FlowVision's {@code selectedDigit}s), before the
+     * Raw {@code data.meterReading} string (built from the OCR provider's {@code selectedDigit}s), before the
      * red-last-digit decimal shift. Preserves digit count and leading zeros for rollover candidate
      * enumeration. {@code null} when the reading could not be parsed.
      */

@@ -15,7 +15,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Configuration for the Glific webhook shared-secret credential.
+ * Configuration for the chatbot webhook shared-secret credential.
  *
  * <p>Hashes, never plaintext, are configured — matching the precedent already set by
  * {@code tenant_master_table.api_key_hash} and {@code TelemetryApiKeyService}. That buys a

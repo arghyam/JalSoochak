@@ -257,7 +257,7 @@ class ConversationLocalizationServiceTest {
                     Arguments.of("HMAC-SHA256 failed"),
                     Arguments.of("SHA-256 not available"),
                     // Serialization internals
-                    Arguments.of("Failed to serialize Glific resume result payload"),
+                    Arguments.of("Failed to serialize resume result payload"),
                     // Deployment configuration
                     Arguments.of("API key service not configured")
             );

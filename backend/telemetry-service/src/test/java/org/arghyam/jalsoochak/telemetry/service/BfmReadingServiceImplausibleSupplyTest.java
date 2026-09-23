@@ -351,7 +351,7 @@ class BfmReadingServiceImplausibleSupplyTest {
     class Scope {
 
         @Test
-        @DisplayName("a caller that did not opt in is never checked, so the Glific path is untouched")
+        @DisplayName("a caller that did not opt in is never checked, so the chatbot path is untouched")
         void unopposedCallerIsNotChecked() {
             // No checkableScheme(): under strict stubs, consulting the scheme's counts would fail.
             CreateReadingResponse response = submit(SupplyPlausibilityProperties.Mode.ENFORCE, "1100", false);

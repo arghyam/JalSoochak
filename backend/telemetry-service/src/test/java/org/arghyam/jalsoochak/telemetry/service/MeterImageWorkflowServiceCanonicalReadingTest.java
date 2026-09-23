@@ -298,7 +298,7 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
     @Test
     void processCanonicalReadingOptsIntoTheSupplyPlausibilityCheck() {
         // SUPPLY-PLAUSIBILITY: this endpoint is the only caller that turns the check on.
-        // createReading is shared with the Glific/WhatsApp image path, which must stay untouched, so
+        // createReading is shared with the WhatsApp image path, which must stay untouched, so
         // the flag is an opt-in set here and nowhere else.
         CanonicalReadingRequest request = CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")

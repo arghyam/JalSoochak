@@ -15,7 +15,7 @@
     <artifactId>message-service</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <name>Message Service</name>
-    <description>Notification microservice – Webhook, Email (SendGrid), WhatsApp (Gliffic)</description>
+    <description>Notification microservice – Webhook, Email (SendGrid), WhatsApp</description>
 
     <properties>
         <java.version>21</java.version>
@@ -123,7 +123,7 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
-        <!-- WebClient for outbound HTTP calls (webhooks, SendGrid, Gliffic) -->
+        <!-- WebClient for outbound HTTP calls (webhooks, SendGrid, WhatsApp provider) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>

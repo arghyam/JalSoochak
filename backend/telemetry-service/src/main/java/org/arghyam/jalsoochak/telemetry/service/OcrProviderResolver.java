@@ -22,7 +22,7 @@ import java.util.Optional;
  * </ul>
  *
  * <p>When a tenant sets <em>none</em> of these keys, {@link #resolve(Integer)} returns {@code null},
- * meaning "use the built-in FlowVision provider exactly as before" — so untouched tenants are byte-for-byte
+ * meaning "use the built-in OCR provider exactly as before" — so untouched tenants are byte-for-byte
  * unchanged. When any key is set, unspecified fields fall back to the global {@code ocr.*} defaults.
  */
 @Service
@@ -75,7 +75,7 @@ public class OcrProviderResolver {
         }
 
         String resolvedUrl = url.orElse(defaultEndpointUrl);
-        // Only inherit the global FlowVision key when the endpoint is still the default one; a tenant that
+        // Only inherit the global OCR key when the endpoint is still the default one; a tenant that
         // points at a custom endpoint without its own ocr_api_key must NOT have the default key sent there.
         boolean endpointIsDefault = resolvedUrl.equals(defaultEndpointUrl);
         String rawApiKey = apiKey.orElseGet(() -> endpointIsDefault ? blankToNull(defaultApiKey) : null);

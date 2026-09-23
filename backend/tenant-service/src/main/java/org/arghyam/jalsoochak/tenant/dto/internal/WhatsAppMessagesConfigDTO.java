@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 import java.util.Map;
 
 /**
- * DTO for Glific WhatsApp conversation flow configuration.
+ * DTO for the WhatsApp chatbot conversation flow configuration.
  * 
  * Defines all screens, prompts, options, messages, and reasons for the conversation flow.
  * Includes multilingual support (all Indian official languages).

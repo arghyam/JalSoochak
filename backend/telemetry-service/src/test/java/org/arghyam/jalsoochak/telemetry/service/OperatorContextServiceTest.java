@@ -29,7 +29,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Resolution of a Glific contact id — which may arrive as a plain phone number, an HMAC phone hash,
+ * Resolution of a WhatsApp contact id — which may arrive as a plain phone number, an HMAC phone hash,
  * or an encrypted blob — to the tenant schema and operator behind it, plus the language fallback
  * chain used to localise replies.
  */

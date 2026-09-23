@@ -35,7 +35,7 @@ import static org.mockito.Mockito.when;
  * The operator's "update previous day's reading" flow is a manual correction: it must move
  * {@code confirmed_reading} only. It used to go through {@code updateReadingValues}, which also
  * overwrote {@code extracted_reading} with the hand-typed number, destroying the only record of what
- * FlowVision actually read off that day's photo.
+ * the OCR provider actually read off that day's photo.
  */
 @ExtendWith(MockitoExtension.class)
 class MeterReadingConversationServiceUpdatePreviousReadingTest {

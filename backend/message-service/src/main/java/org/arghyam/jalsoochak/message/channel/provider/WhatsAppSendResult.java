@@ -1,18 +1,18 @@
 package org.arghyam.jalsoochak.message.channel.provider;
 
 /**
- * What Glific gave back when it accepted a send.
+ * What the WhatsApp provider gave back when it accepted a send.
  *
- * <p>The {@code messageId} is the reason this type exists. Glific's {@code sendHsmMessage} and
+ * <p>The {@code messageId} is the reason this type exists. The provider's {@code sendHsmMessage} and
  * {@code createAndSendMessage} both return {@code message { id }} and the service used to parse it
  * and throw it away — yet it is the <em>only</em> handle that ties a report we sent to the delivery
- * status Gupshup and Meta report back to Glific later. Without it, no reconciliation is possible,
- * manual or automated.</p>
+ * status Gupshup and Meta report back to the provider later. Without it, no reconciliation is
+ * possible, manual or automated.</p>
  *
- * <p>Acceptance is not delivery: a populated {@code messageId} means Glific created the message row
- * and queued it to its BSP worker, nothing more.</p>
+ * <p>Acceptance is not delivery: a populated {@code messageId} means the provider created the message
+ * row and queued it to its BSP worker, nothing more.</p>
  *
- * @param messageId  Glific {@code Message.id}, or {@code null} when the send was suppressed by a
+ * @param messageId  the provider's {@code Message.id}, or {@code null} when the send was suppressed by a
  *                   dry-run flag. Never a placeholder — a fake id would be indistinguishable from a
  *                   real one during reconciliation
  * @param templateId the HSM template actually used. Worth carrying because
@@ -30,7 +30,7 @@ public record WhatsAppSendResult(String messageId, String templateId, ReportDeli
         return new WhatsAppSendResult(null, null, mode);
     }
 
-    /** True when Glific returned a usable message id — i.e. a real send that can be reconciled later. */
+    /** True when the provider returned a usable message id — a real send that can be reconciled later. */
     public boolean hasMessageId() {
         return messageId != null && !messageId.isBlank();
     }
@@ -39,7 +39,7 @@ public record WhatsAppSendResult(String messageId, String templateId, ReportDeli
      * True when nothing was sent because a dry-run flag suppressed it.
      *
      * <p>Equivalent to "no message id" only because a live send that came back without one is now
-     * refused outright ({@code GlificMissingMessageIdException}) instead of returning a result. That
+     * refused outright by the adapter instead of returning a result. That
      * makes {@link #suppressed} the sole way to build an accepted result with no id, and lets a caller
      * log a suppressed report as itself rather than as a send with a missing join key.</p>
      */
