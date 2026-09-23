@@ -62,7 +62,7 @@ public class WelcomeMessageTriggerService {
                         .contactId(null)
                         .name(info.name)
                         .state(stateName)
-                        .message("Failed to create Glific contact via opt-in")
+                        .message("Failed to create WhatsApp contact via opt-in")
                         .build();
             }
         }

@@ -148,7 +148,7 @@ public class NotificationEventRouter {
     void validateBaseUrl() {
         if (baseUrl.contains("localhost") || baseUrl.contains("127.0.0.1")) {
             log.warn("[Router] app.base-url is set to a local address ('{}')."
-                    + " PDF links embedded in escalation WhatsApp messages will be unreachable by Glific."
+                    + " PDF links embedded in escalation WhatsApp messages will be unreachable by the WhatsApp provider."
                     + " Set the 'app.base-url' property to a publicly reachable URL"
                     + " (e.g., 'APP_BASE_URL=https://<id>.ngrok.io' for demos,"
                     + " or your server's public hostname in production) before sending escalation reports.",
@@ -968,7 +968,7 @@ public class NotificationEventRouter {
         long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
         if (contactId <= 0 && whatsAppSender.isDailyReportDeliveryEnabled()) {
             log.error("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_CONTACT_ID role={} tenant={} officer={}"
-                            + " — Glific opt-in returned no contact id (non-retryable)",
+                            + " — WhatsApp opt-in returned no contact id (non-retryable)",
                     corr, role, tenantId, officerUserId);
             return;
         }
@@ -1071,7 +1071,7 @@ public class NotificationEventRouter {
         long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
         if (contactId <= 0 && whatsAppSender.isWeeklyReportDeliveryEnabled()) {
             log.error("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_NO_CONTACT_ID role={} tenant={} officer={}"
-                            + " — Glific opt-in returned no contact id (non-retryable)",
+                            + " — WhatsApp opt-in returned no contact id (non-retryable)",
                     corr, role, tenantId, officerUserId);
             return;
         }
@@ -1206,24 +1206,24 @@ public class NotificationEventRouter {
     private void reportFailedDelivery(ReportLogCtx ctx, ReportSendOutcome.Failure failure,
                                       LocalDate period, String loggableUrl) {
         String tag = ctx.kind().tag();
-        // stage= and glificErrorKey= are appended *after* officer= on every branch below.
+        // stage= and providerErrorKey= are appended *after* officer= on every branch below.
         if (isAmbiguousDelivery(failure.stage())) {
             log.warn("[Router/{}] corr={} result=DELIVERY_UNCONFIRMED role={} tenant={} officer={}"
-                            + " stage={} glificErrorKey={} {}={} (non-retryable) — Glific may already"
+                            + " stage={} providerErrorKey={} {}={} (non-retryable) — the provider may already"
                             + " have sent this report, so the event is not retried. Settle it against"
-                            + " Glific's own delivery status for this officer; see"
+                            + " the provider's own delivery status for this officer; see"
                             + " WhatsAppDeliveryReconciliationService ({})",
                     tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
                     failure.stage(), failure.errorKeyForLog(), ctx.kind().periodField(), period, loggableUrl);
             return;
         }
         log.error("[Router/{}] corr={} result=FAILED_DELIVERY role={} tenant={} officer={}"
-                        + " stage={} glificErrorKey={}",
+                        + " stage={} providerErrorKey={}",
                 tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
                 failure.stage(), failure.errorKeyForLog());
         if (failure.stage() == WhatsAppSendStage.CONFIG) {
             log.error("[Router/{}] corr={} stage=CONFIG {}={} (non-retryable) — the send"
-                            + " never reached Glific because our own template id, contact id or MinIO URL"
+                            + " never reached the provider because our own template id, contact id or MinIO URL"
                             + " prefix is wrong. A retry cannot repair that, so the event is not redriven:"
                             + " fix the configuration, then replay this officer's report ({})",
                     tag, ctx.corr(), ctx.kind().periodField(), period, loggableUrl);
@@ -1235,7 +1235,7 @@ public class NotificationEventRouter {
 
     /**
      * Logs an accepted send — or a suppressed one, which is not the same event and no longer shares a
-     * line with it. A dry-run reached no Glific mutation at all: it has no {@code GLIFIC_ACCEPTED}
+     * line with it. A dry-run reached no Glific mutation at all: it has no {@code PROVIDER_ACCEPTED}
      * stage, no message id and nothing for reconciliation to match, so counting it as {@code SENT}
      * reported a muted deployment as a delivering one.
      *
@@ -1254,11 +1254,11 @@ public class NotificationEventRouter {
             return;
         }
         // result=SENT means Glific ACCEPTED the send — it is not a WhatsApp delivery confirmation.
-        // glificMsgId is what lets the delivery status Gupshup and Meta later report to Glific be
+        // providerMsgId is what lets the delivery status Gupshup and Meta later report to Glific be
         // matched back to this officer; see WhatsAppDeliveryReconciliationService. Every new field goes after officer= to preserve
         // the field adjacency the log-counting recipes rely on.
         log.info("[Router/{}] corr={} result=SENT role={} tenant={} officer={}"
-                        + " stage=GLIFIC_ACCEPTED glificMsgId={} glificContactId={} mode={} templateId={}"
+                        + " stage=PROVIDER_ACCEPTED providerMsgId={} providerContactId={} mode={} templateId={}"
                         + " noSupplyRows={} tookMs={} ({})",
                 tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
                 sendResult.messageIdForLog(), contactId, sendResult.modeForLog(), sendResult.templateIdForLog(),

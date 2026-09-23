@@ -175,6 +175,8 @@ class ReadingWebhookControllerTest {
                     .as("an entrypoint log for the image webhook, with no raw contactId at INFO")
                     .anyMatch(line -> line.contains("readings/whatsapp received") && line.contains("hasMediaId=true"))
                     .anyMatch(line -> line.contains("reading_submission api=/api/v1/telemetry/readings/whatsapp "))
+                    .anyMatch(line -> line.startsWith("readings_whatsapp queued "))
+                    .anyMatch(line -> line.startsWith("readings_whatsapp ack_response "))
                     .noneMatch(line -> line.contains("readings/glific"))
                     .noneMatch(line -> line.contains("919999912345"));
             assertThat(events)

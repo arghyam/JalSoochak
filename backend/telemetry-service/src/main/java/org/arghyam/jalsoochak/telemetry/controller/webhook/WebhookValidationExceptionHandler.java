@@ -50,7 +50,7 @@ public class WebhookValidationExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<IntroResponse> handleValidation(MethodArgumentNotValidException ex) {
         String message = validationMessage(ex);
-        log.warn("Glific webhook request rejected by validation: {}", sanitizeLogMessage(message));
+        log.warn("WhatsApp webhook request rejected by validation: {}", sanitizeLogMessage(message));
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
                 IntroResponse.builder()
                         .success(false)

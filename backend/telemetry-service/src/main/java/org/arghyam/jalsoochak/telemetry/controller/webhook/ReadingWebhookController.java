@@ -104,14 +104,14 @@ public class ReadingWebhookController {
             String message = "Reading request accepted for asynchronous processing.";
             if (readingsAsyncService != null) {
                 readingsAsyncService.enqueueProcessAndResume(meterImageWebhookRequest, jobId);
-                log.info("readings_glific queued jobId={} contact={} responseMode=async",
+                log.info("readings_whatsapp queued jobId={} contact={} responseMode=async",
                         jobId,
                         maskPhone(meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null));
             } else {
                 CreateReadingResponse response = imageWorkflowService.processImage(meterImageWebhookRequest);
                 status = isSuccessful(response) ? "SUCCESS" : "FAILED";
                 message = response != null ? response.getMessage() : "Reading request processed.";
-                log.info("readings_glific processed jobId={} contact={} response={}",
+                log.info("readings_whatsapp processed jobId={} contact={} response={}",
                         jobId,
                         maskPhone(meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null),
                         summarizeCreateReadingResponse(response));
@@ -129,7 +129,7 @@ public class ReadingWebhookController {
                     .jobId(jobId)
                     .message("Reading request accepted for asynchronous processing.")
                     .build();
-            log.info("readings_glific ack_response contact={} response={}",
+            log.info("readings_whatsapp ack_response contact={} response={}",
                     maskPhone(meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null),
                     summarizeReadingWebhookAckResponse(ackResponse));
 
@@ -146,7 +146,7 @@ public class ReadingWebhookController {
                     .jobId(null)
                     .message("Unable to accept webhook request.")
                     .build();
-            log.info("readings_glific error_response contact={} response={}",
+            log.info("readings_whatsapp error_response contact={} response={}",
                     maskPhone(safeContactId),
                     summarizeReadingWebhookAckResponse(errorResponse));
 

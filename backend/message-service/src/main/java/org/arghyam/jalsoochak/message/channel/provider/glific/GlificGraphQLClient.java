@@ -92,7 +92,7 @@ public class GlificGraphQLClient {
                 long baseWait = RATE_LIMIT_BASE_WAIT_MS * (1L << attempt); // 5s → 10s → 20s
                 long jitter = ThreadLocalRandom.current().nextLong(-JITTER_MS, JITTER_MS + 1);
                 long waitMs = Math.max(0, baseWait + jitter);
-                log.warn("[Glific] Rate limited (429), waiting {}ms before retry {}/{}",
+                log.warn("[WhatsApp] Rate limited (429), waiting {}ms before retry {}/{}",
                          waitMs, attempt + 1, MAX_RATE_LIMIT_RETRIES);
                 try { Thread.sleep(waitMs); }
                 catch (InterruptedException ie) {
@@ -137,7 +137,7 @@ public class GlificGraphQLClient {
         long elapsed = now - last;
         if (elapsed < requestIntervalMs) {
             long sleepMs = requestIntervalMs - elapsed;
-            log.debug("[Glific] Throttling: sleeping {}ms before next request", sleepMs);
+            log.debug("[WhatsApp] Throttling: sleeping {}ms before next request", sleepMs);
             try {
                 Thread.sleep(sleepMs);
             } catch (InterruptedException ie) {

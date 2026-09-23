@@ -217,7 +217,7 @@ public class MeterImageWorkflowService {
 
             if (lenient) {
                 // Canonical, greppable audit line for every leniently-recorded submission.
-                log.info("assam_reading_lenient_recorded ingestionSource={} unknownScheme={} unknownOperator={} operatorNotMapped={} phoneAbsent={} operatorId={} schemeId={} submittedStateSchemeId={} submittedCentreSchemeId={} submittedPhone={}",
+                log.info("reading_lenient_recorded ingestionSource={} unknownScheme={} unknownOperator={} operatorNotMapped={} phoneAbsent={} operatorId={} schemeId={} submittedStateSchemeId={} submittedCentreSchemeId={} submittedPhone={}",
                         ingestionSource,
                         IngestionSource.has(ingestionSource, IngestionSource.UNKNOWN_SCHEME),
                         IngestionSource.has(ingestionSource, IngestionSource.UNKNOWN_OPERATOR),
@@ -248,12 +248,12 @@ public class MeterImageWorkflowService {
             response.setMessage(localizationService.localizeMessage(response.getMessage(), languageKey));
             return response;
         } catch (Exception e) {
-            log.error("Unexpected error processing Assam reading for contactId {}: {}", maskPhone(safeContactId), e.getMessage(), e);
+            log.error("Unexpected error processing reading for contactId {}: {}", maskPhone(safeContactId), e.getMessage(), e);
             if (log.isDebugEnabled()) {
-                log.debug("Unexpected error processing Assam reading rawContactId={}: {}", safeContactId, e.getMessage());
+                log.debug("Unexpected error processing reading rawContactId={}: {}", safeContactId, e.getMessage());
             }
             String languageKey = localizationService.resolveLanguageKeyForContact(safeContactId);
-            String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Assam reading could not be processed.", languageKey);
+            String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Reading could not be processed.", languageKey);
             return CreateReadingResponse.builder()
                     .success(false)
                     .message(descriptiveMessage)
@@ -323,10 +323,10 @@ public class MeterImageWorkflowService {
             ingestionSource |= IngestionSource.UNKNOWN_OPERATOR;
             submittedPhoneHash = telemetryTenantRepository.hashSubmittedPhone(contactId);
             // Scheme ids / user ids are not PII; the raw phone stays at DEBUG only.
-            log.info("assam_reading_lenient reason=\"operator_not_found\" sentinelUserId={} submittedPhone={}",
+            log.info("reading_lenient reason=\"operator_not_found\" sentinelUserId={} submittedPhone={}",
                     operatorWithSchema.operator().id(), maskPhone(contactId));
             if (log.isDebugEnabled()) {
-                log.debug("assam_reading_lenient reason=\"operator_not_found\" rawContactId={}", contactId);
+                log.debug("reading_lenient reason=\"operator_not_found\" rawContactId={}", contactId);
             }
         } else {
             // Flag disabled: reproduce the original throwing behaviour (and its message).
@@ -366,7 +366,7 @@ public class MeterImageWorkflowService {
         Optional<TelemetryOperator> mappedOperator = telemetryTenantRepository
                 .findFirstPumpOperatorForScheme(schemaName, schemeResolution.schemeId());
         if (mappedOperator.isPresent()) {
-            log.info("assam_reading_phone_absent reason=\"operator_inferred_from_scheme\" operatorId={} schemeId={}",
+            log.info("reading_phone_absent reason=\"operator_inferred_from_scheme\" operatorId={} schemeId={}",
                     mappedOperator.get().id(), schemeResolution.schemeId());
             return new SubmissionContext(
                     new TelemetryOperatorWithSchema(schemaName, mappedOperator.get()),
@@ -376,7 +376,7 @@ public class MeterImageWorkflowService {
         }
 
         if (!lenientIngestionEnabled) {
-            log.info("Assam reading rejected reason=\"no_operator_mapped_to_scheme\" phoneAbsent=true schemeId={} stateSchemeId={} centreSchemeId={}",
+            log.info("Reading rejected reason=\"no_operator_mapped_to_scheme\" phoneAbsent=true schemeId={} stateSchemeId={} centreSchemeId={}",
                     schemeResolution.schemeId(),
                     sanitizeSchemeId(request.getStateSchemeId()),
                     sanitizeSchemeId(request.getCentreSchemeId()));
@@ -384,7 +384,7 @@ public class MeterImageWorkflowService {
         }
 
         TelemetryOperatorWithSchema sentinel = resolveSentinelOperator(schemaName, preferredTenantId);
-        log.info("assam_reading_phone_absent reason=\"no_operator_mapped_to_scheme\" sentinelUserId={} schemeId={}",
+        log.info("reading_phone_absent reason=\"no_operator_mapped_to_scheme\" sentinelUserId={} schemeId={}",
                 sentinel.operator().id(), schemeResolution.schemeId());
         return new SubmissionContext(
                 sentinel,
@@ -417,7 +417,7 @@ public class MeterImageWorkflowService {
         }
 
         if (!lenientIngestionEnabled) {
-            log.info("Assam reading rejected reason=\"scheme_not_found\" phoneAbsent=true stateSchemeId={} centreSchemeId={}",
+            log.info("Reading rejected reason=\"scheme_not_found\" phoneAbsent=true stateSchemeId={} centreSchemeId={}",
                     sanitizeSchemeId(stateSchemeId),
                     sanitizeSchemeId(centreSchemeId));
             throw new IllegalStateException("Scheme not found for the provided state or centre scheme id");
@@ -484,7 +484,7 @@ public class MeterImageWorkflowService {
                                                         Long operatorId) {
         Long placeholderSchemeId = telemetryTenantRepository.getOrCreatePlaceholderScheme(
                 schemaName, stateSchemeId, centreSchemeId);
-        log.info("assam_reading_lenient reason=\"scheme_not_found\" auto_provisioned_scheme_id={} operatorId={} phoneAbsent={} stateSchemeId={} centreSchemeId={}",
+        log.info("reading_lenient reason=\"scheme_not_found\" auto_provisioned_scheme_id={} operatorId={} phoneAbsent={} stateSchemeId={} centreSchemeId={}",
                 placeholderSchemeId,
                 operatorId,
                 operatorId == null,
@@ -517,7 +517,7 @@ public class MeterImageWorkflowService {
         if (!lenientIngestionEnabled) {
             // Original behaviour: reject when nothing resolves-and-maps.
             String rejectionReason = schemeExistsButNotMapped ? "operator_not_mapped_to_scheme" : "scheme_not_found";
-            log.info("Assam reading rejected reason=\"{}\" operatorId={} stateSchemeId={} stateSchemeFound={} centreSchemeId={} centreSchemeFound={}",
+            log.info("Reading rejected reason=\"{}\" operatorId={} stateSchemeId={} stateSchemeFound={} centreSchemeId={} centreSchemeFound={}",
                     rejectionReason,
                     operatorId,
                     sanitizeSchemeId(stateSchemeId),
@@ -533,7 +533,7 @@ public class MeterImageWorkflowService {
             // Only flag OPERATOR_NOT_MAPPED for a real operator; a sentinel operator is already flagged
             // via UNKNOWN_OPERATOR and is never expected to be mapped to anything.
             int bits = operatorIsSentinel ? IngestionSource.NORMAL : IngestionSource.OPERATOR_NOT_MAPPED;
-            log.info("assam_reading_lenient reason=\"operator_not_mapped_to_scheme\" operatorId={} schemeId={} stateSchemeId={} stateSchemeFound={} centreSchemeId={} centreSchemeFound={}",
+            log.info("reading_lenient reason=\"operator_not_mapped_to_scheme\" operatorId={} schemeId={} stateSchemeId={} stateSchemeFound={} centreSchemeId={} centreSchemeFound={}",
                     operatorId,
                     existingSchemeId,
                     sanitizeSchemeId(stateSchemeId),

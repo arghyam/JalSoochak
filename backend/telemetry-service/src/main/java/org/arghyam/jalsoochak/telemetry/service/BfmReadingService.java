@@ -125,7 +125,7 @@ public class BfmReadingService {
                 OcrProviderSettings ocrSettings =
                         ocrProviderResolver == null ? null : ocrProviderResolver.resolve(tenantId);
                 ocrResult = extractReading(request.getReadingUrl(), ocrSettings, ocrRetryMode);
-                log.info("readings_glific flowvision_result operatorId={} schemeId={} imageUrlHash={} result={}",
+                log.info("readings_ocr ocr_result operatorId={} schemeId={} imageUrlHash={} result={}",
                         operatorInRequest.id(),
                         request.getSchemeId(),
                         imageUrlHash(request.getReadingUrl()),
@@ -167,7 +167,7 @@ public class BfmReadingService {
                 }
                 finalReading = ocrResult.getAdjustedReading();
                 confidenceLevel = ocrResult.getQualityConfidence();
-                log.info("readings_glific ocr_accepted operatorId={} schemeId={} correlationId={} adjustedReading={} confidence={} qualityStatus={}",
+                log.info("readings_ocr ocr_accepted operatorId={} schemeId={} correlationId={} adjustedReading={} confidence={} qualityStatus={}",
                         operatorInRequest.id(),
                         request.getSchemeId(),
                         sanitizeLogValue(ocrResult.getCorrelationId()),
@@ -175,7 +175,7 @@ public class BfmReadingService {
                         confidenceLevel,
                         sanitizeLogValue(ocrResult.getQualityStatus()));
             } catch (OcrReadingsUnavailableException ex) {
-                log.warn("FlowVision OCR temporarily unavailable for imageUrlHash={}: {}",
+                log.warn("OCR temporarily unavailable for imageUrlHash={}: {}",
                         imageUrlHash(request.getReadingUrl()),
                         ex.getMessage());
                 return CreateReadingResponse.builder()
@@ -185,9 +185,9 @@ public class BfmReadingService {
                         .qualityStatus("RETRY")
                         .build();
             } catch (Exception ex) {
-                log.error("FlowVision OCR failed for imageUrlHash={}: {}", imageUrlHash(request.getReadingUrl()), ex.getMessage(), ex);
+                log.error("OCR failed for imageUrlHash={}: {}", imageUrlHash(request.getReadingUrl()), ex.getMessage(), ex);
                 if (log.isDebugEnabled()) {
-                    log.debug("FlowVision OCR failed for URL: {}", request.getReadingUrl());
+                    log.debug("OCR failed for URL: {}", request.getReadingUrl());
                 }
                 String anomalyCorrelationId = buildImageAnomalyCorrelationId(
                         AnomalyConstants.TYPE_UNREADABLE_IMAGE,
@@ -772,7 +772,7 @@ public class BfmReadingService {
                     : ocrReadingsRetryService.extractReading(readingUrl, settings);
         }
         if (ocrRetryMode == OcrRetryMode.RESILIENT) {
-            log.warn("FlowVision readings retry service is not available; using direct OCR path");
+            log.warn("OCR readings retry service is not available; using direct OCR path");
         }
         if (settings == null) {
             return defaultOcrExtractor.extractReading(readingUrl, null);

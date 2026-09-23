@@ -155,7 +155,7 @@ class InboundMediaServiceDownloadTest {
 
             assertThatThrownBy(() -> service().downloadImage("media-1", null))
                     .isInstanceOf(IOException.class)
-                    .hasMessageContaining("Failed to download image from Glific");
+                    .hasMessageContaining("Failed to download image from the WhatsApp provider");
         }
 
         @Test

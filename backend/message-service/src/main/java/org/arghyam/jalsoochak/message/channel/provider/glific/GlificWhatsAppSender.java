@@ -113,14 +113,14 @@ public class GlificWhatsAppSender implements WhatsAppSender {
     @PostConstruct
     void validateTemplates() {
         if (isAllDryRun()) {
-            log.warn("[Glific] DRY-RUN mode active — all Glific API calls will be suppressed."
+            log.warn("[WhatsApp] DRY-RUN mode active — all Glific API calls will be suppressed."
                     + " Set NOTIFICATIONS_WHATSAPP_DRY_RUN=false for production.");
             return;
         }
         GlificWhatsAppSettings.DryRun dryRun = settings.dryRun();
         if (dryRun.nudge() || dryRun.escalation() || dryRun.dailyReport() || dryRun.weeklyReport()
                 || dryRun.whatsapp()) {
-            log.warn("[Glific] Partial DRY-RUN — nudge={}, escalation={}, daily-report={},"
+            log.warn("[WhatsApp] Partial DRY-RUN — nudge={}, escalation={}, daily-report={},"
                             + " weekly-report={}, account-ops(OTP/welcome/language)={}. Contact opt-in stays"
                             + " live because at least one delivery purpose is enabled.",
                     dryRun.nudge(), dryRun.escalation(), dryRun.dailyReport(), dryRun.weeklyReport(),
@@ -229,7 +229,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
     private void validateLinkButtonBaseUrl() {
         String expected = mediaUrlPrefix();
         if (isBlank(settings.linkButtonBaseUrl())) {
-            log.warn("[Glific] daily-report.link.button-base-url is not set. Button links will be built as"
+            log.warn("[WhatsApp] daily-report.link.button-base-url is not set. Button links will be built as"
                             + " '{}<bucket>/<file>.pdf' — confirm that prefix is exactly the one frozen into"
                             + " the approved LINK template, because a mismatch is only visible to the officer"
                             + " tapping the button. Set DAILY_REPORT_LINK_BUTTON_BASE_URL to have this"
@@ -297,7 +297,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
 
     private boolean isDryRun(boolean flag, String operation) {
         if (flag) {
-            log.info("[Glific] DRY-RUN: suppressing {} — no message sent", operation);
+            log.info("[WhatsApp] DRY-RUN: suppressing {} — no message sent", operation);
             return true;
         }
         return false;
@@ -368,7 +368,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
                 "receiverId", contactId,
                 "parameters", List.of(otp)));
         checkErrors(response, "sendHsmMessage");
-        log.debug("[Glific] Login OTP HSM sent to contactId={}", contactId);
+        log.debug("[WhatsApp] Login OTP HSM sent to contactId={}", contactId);
     }
 
     /**
@@ -378,7 +378,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
     @Override
     public Long optIn(String phone) {
         if (isDryRun(isOptInDryRun(), "optIn")) return 0L;
-        log.debug("[Glific] Opting in contact");
+        log.debug("[WhatsApp] Opting in contact");
         JsonNode response = client.execute(OPTIN_MUTATION, Map.of("phone", phone));
         checkErrors(response, "optinContact");
         return response.path("optinContact").path("contact").path("id").asLong();
@@ -397,7 +397,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
                 "receiverId", contactId,
                 "parameters", List.of(operatorName, date)));
         checkErrors(response, "sendHsmMessage");
-        log.debug("[Glific] Nudge HSM sent to contactId={}", contactId);
+        log.debug("[WhatsApp] Nudge HSM sent to contactId={}", contactId);
     }
 
     /**
@@ -420,7 +420,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
                     + ". Meta downloads this URL from the public internet — set MINIO_BASE_URL to the"
                     + " public MinIO address.");
         }
-        log.debug("[Glific] Uploading media");
+        log.debug("[WhatsApp] Uploading media");
         JsonNode response = client.execute(CREATE_MESSAGE_MEDIA_MUTATION, Map.of(
                         "input", Map.of(
                                 "url", publicUrl,
@@ -430,7 +430,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
                                 "isTemplateMedia", true)));
         checkErrors(response, "createMessageMedia");
         String mediaId = response.path("createMessageMedia").path("messageMedia").path("id").asText();
-        log.info("[Glific] Media uploaded, mediaId={}", mediaId);
+        log.info("[WhatsApp] Media uploaded, mediaId={}", mediaId);
         return mediaId;
     }
 
@@ -493,7 +493,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         JsonNode response = client.execute(CREATE_AND_SEND_MESSAGE_MUTATION, Map.of("input", input));
         checkErrors(response, "createAndSendMessage");
         String messageId = extractMessageId(response, "createAndSendMessage");
-        log.debug("[Glific] Daily report HSM sent to contactId={} glificMsgId={}", contactId, messageId);
+        log.debug("[WhatsApp] Daily report HSM sent to contactId={} providerMsgId={}", contactId, messageId);
         return new WhatsAppSendResult(messageId, templateId, ReportDeliveryMode.DOCUMENT);
     }
 
@@ -531,9 +531,9 @@ public class GlificWhatsAppSender implements WhatsAppSender {
                 "parameters", List.of(name, reportDate.format(DOCUMENT_NAME_DATE), urlSuffix)));
         checkErrors(response, "sendHsmMessage");
         String messageId = extractMessageId(response, "sendHsmMessage");
-        log.info("[Glific] Daily report HSM sent mode=LINK role={} glificMsgId={} templateId={}",
+        log.info("[WhatsApp] Daily report HSM sent mode=LINK role={} providerMsgId={} templateId={}",
                 role, messageId, templateId);
-        log.debug("[Glific] Daily report link HSM sent to contactId={} suffix={}", contactId, urlSuffix);
+        log.debug("[WhatsApp] Daily report link HSM sent to contactId={} suffix={}", contactId, urlSuffix);
         return new WhatsAppSendResult(messageId, templateId, ReportDeliveryMode.LINK);
     }
 
@@ -596,7 +596,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         try {
             return deliveryMode();
         } catch (IllegalStateException e) {
-            log.warn("[Glific] Suppressed daily report: delivery-mode '{}' is not DOCUMENT or LINK;"
+            log.warn("[WhatsApp] Suppressed daily report: delivery-mode '{}' is not DOCUMENT or LINK;"
                     + " reporting mode as unknown", settings.dailyReportDeliveryMode());
             return null;
         }
@@ -692,9 +692,9 @@ public class GlificWhatsAppSender implements WhatsAppSender {
                 "parameters", List.of(name, weekStart.format(DOCUMENT_NAME_DATE), urlSuffix)));
         checkErrors(response, "sendHsmMessage");
         String messageId = extractMessageId(response, "sendHsmMessage");
-        log.info("[Glific] Weekly report HSM sent mode=LINK role={} glificMsgId={} templateId={}",
+        log.info("[WhatsApp] Weekly report HSM sent mode=LINK role={} providerMsgId={} templateId={}",
                 role, messageId, templateId);
-        log.debug("[Glific] Weekly report link HSM sent to contactId={} suffix={}", contactId, urlSuffix);
+        log.debug("[WhatsApp] Weekly report link HSM sent to contactId={} suffix={}", contactId, urlSuffix);
         return new WhatsAppSendResult(messageId, templateId, ReportDeliveryMode.LINK);
     }
 
@@ -750,7 +750,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         );
         checkErrors(response, "createAndSendMessage");
 
-        log.debug("[Glific] Escalation HSM sent to contactId={}", contactId);
+        log.debug("[WhatsApp] Escalation HSM sent to contactId={}", contactId);
     }
 
     /**
@@ -801,7 +801,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         if (!success) {
             throw new RuntimeException("Glific startContactFlow returned success=false for contactId=" + contactId);
         }
-        log.debug("[Glific] Nudge flow started for contactId={}", contactId);
+        log.debug("[WhatsApp] Nudge flow started for contactId={}", contactId);
     }
 
     /**
@@ -846,7 +846,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         if (!success) {
             throw new RuntimeException("Glific startContactFlow returned success=false for contactId=" + contactId);
         }
-        log.debug("[Glific] Welcome flow started for contactId={}", contactId);
+        log.debug("[WhatsApp] Welcome flow started for contactId={}", contactId);
     }
 
     /**
@@ -862,7 +862,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
                 "id", contactId,
                 "input", Map.of("language_id", glificLanguageId)));
         checkErrors(response, "updateContact");
-        log.debug("[Glific] Contact language updated contactId={} languageId={}", contactId, glificLanguageId);
+        log.debug("[WhatsApp] Contact language updated contactId={} languageId={}", contactId, glificLanguageId);
     }
 
     /**
@@ -882,7 +882,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         JsonNode errors = mutationNode.path("errors");
         if (errors.isArray() && !errors.isEmpty()) {
             String msg = errors.toString();
-            log.error("[Glific] GraphQL errors in {}: {}", mutationKey, msg);
+            log.error("[WhatsApp] GraphQL errors in {}: {}", mutationKey, msg);
             throw new GlificMutationException(mutationKey, errors.path(0).path("key").asText(null),
                     "Glific GraphQL error in " + mutationKey + ": " + msg);
         }

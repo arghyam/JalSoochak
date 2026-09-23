@@ -112,6 +112,7 @@ class WelcomeMessageTriggerServiceTest {
         verifyNoMoreInteractions(whatsAppSender);
         assertThat(response.isSuccess()).isFalse();
         assertThat(response.getContactId()).isNull();
+        assertThat(response.getMessage()).isEqualTo("Failed to create WhatsApp contact via opt-in");
     }
 
     /** Answers the hashed-phone lookup with one row, run through the service's own row mapper. */

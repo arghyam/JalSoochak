@@ -116,12 +116,12 @@ public class WebhookAuthFilter extends OncePerRequestFilter {
         // The token value is never logged, at any level. requestId comes from the MDC set by
         // RequestCorrelationFilter, which is ordered ahead of this filter.
         if (properties.getResolvedMode() == WebhookAuthProperties.Mode.AUDIT) {
-            log.warn("Glific webhook auth {} — serving anyway (mode=AUDIT) path={}", result, path);
+            log.warn("WhatsApp webhook auth {} — serving anyway (mode=AUDIT) path={}", result, path);
             filterChain.doFilter(request, response);
             return;
         }
 
-        log.warn("Glific webhook auth {} — rejected (mode=ENFORCE) path={}", result, path);
+        log.warn("WhatsApp webhook auth {} — rejected (mode=ENFORCE) path={}", result, path);
         reject(response);
     }
 

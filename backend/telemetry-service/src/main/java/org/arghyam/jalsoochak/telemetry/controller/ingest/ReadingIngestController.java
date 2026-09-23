@@ -283,8 +283,8 @@ public class ReadingIngestController {
             );
         } catch (Exception e) {
             String safeContactId = request != null ? request.getPhoneNumber() : null;
-            log.error("Error processing Assam reading: {}", e.getMessage(), e);
-            log.debug("Error processing Assam reading for phoneNumber {}: {}", safeContactId, e.getMessage());
+            log.error("Error processing reading: {}", e.getMessage(), e);
+            log.debug("Error processing reading for phoneNumber {}: {}", safeContactId, e.getMessage());
             log.info("POST /api/v1/telemetry/readings failed tenantId={} reason=\"{}\" request={}",
                     tenantId,
                     sanitizeLogMessage(e.getMessage()),

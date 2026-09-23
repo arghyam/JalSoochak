@@ -623,7 +623,8 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
                 "Reading should be tagged UNKNOWN_SCHEME");
         assertEquals("99999999", captured.getSubmittedStateSchemeId());
         // Scheme ids are not PII and must be logged so the auto-provisioning can be traced.
-        assertTrue(infoLogged(appender, "reason=\"scheme_not_found\""));
+        assertTrue(infoLineStartsWith(appender, "reading_lenient reason=\"scheme_not_found\""));
+        assertTrue(infoLineStartsWith(appender, "reading_lenient_recorded "));
         assertTrue(infoLogged(appender, "auto_provisioned_scheme_id=55555"));
     }
 
@@ -684,7 +685,7 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
         assertNotNull(captured.getIngestionSource());
         assertTrue((captured.getIngestionSource() & IngestionSource.OPERATOR_NOT_MAPPED) != 0,
                 "Reading should be tagged OPERATOR_NOT_MAPPED");
-        assertTrue(infoLogged(appender, "reason=\"operator_not_mapped_to_scheme\""));
+        assertTrue(infoLineStartsWith(appender, "reading_lenient reason=\"operator_not_mapped_to_scheme\""));
         assertFalse(infoLogged(appender, "scheme_not_found"),
                 "Should not log scheme_not_found when the scheme exists");
         assertTrue(infoLogged(appender, "stateSchemeFound=true"));
@@ -866,7 +867,7 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
         assertNull(captured.getSubmittedPhoneHash());
         // Nothing was submitted to hash.
         verify(telemetryTenantRepository, never()).hashSubmittedPhone(anyString());
-        assertTrue(infoLogged(appender, "reason=\"operator_inferred_from_scheme\""));
+        assertTrue(infoLineStartsWith(appender, "reading_phone_absent reason=\"operator_inferred_from_scheme\""));
     }
 
     @Test
@@ -964,7 +965,7 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
         assertEquals(999L, captured.getOperatorId());
         assertEquals(IngestionSource.PHONE_ABSENT | IngestionSource.UNKNOWN_OPERATOR, captured.getIngestionSource());
         assertNull(captured.getSubmittedPhoneHash());
-        assertTrue(infoLogged(appender, "reason=\"no_operator_mapped_to_scheme\""));
+        assertTrue(infoLineStartsWith(appender, "reading_phone_absent reason=\"no_operator_mapped_to_scheme\""));
         assertTrue(infoLogged(appender, "phoneAbsent=true"));
     }
 
@@ -1053,6 +1054,7 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
         assertEquals("REJECTED", response.getQualityStatus());
         assertEquals(TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME, response.getErrorCode());
         verify(telemetryTenantRepository, never()).getOrCreateUnknownOperatorUserId(anyString(), any());
+        verify(localizationService).resolveUserFacingErrorMessage(any(), eq("Reading could not be processed."), eq("english"));
         verify(bfmReadingService, never()).createReading(any(), anyString(), any(), nullable(String.class), anyBoolean(), any(OcrRetryMode.class));
     }
 
@@ -1111,6 +1113,13 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
         return appender.list.stream()
                 .filter(event -> event.getLevel() == Level.INFO)
                 .anyMatch(event -> event.getFormattedMessage().contains(fragment));
+    }
+
+    /** Log tokens lead the line, and a prefixed token would still contain the bare one. */
+    private boolean infoLineStartsWith(ListAppender<ILoggingEvent> appender, String prefix) {
+        return appender.list.stream()
+                .filter(event -> event.getLevel() == Level.INFO)
+                .anyMatch(event -> event.getFormattedMessage().startsWith(prefix));
     }
 
     @Test

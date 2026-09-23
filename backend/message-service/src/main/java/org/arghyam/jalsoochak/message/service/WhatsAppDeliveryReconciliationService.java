@@ -36,7 +36,7 @@ import java.util.stream.Collectors;
  * that call returns and report delivery status back to Glific alone, so a report sent to a number with
  * no WhatsApp account was counted as sent exactly like one that arrived. This job closes that gap: it
  * pulls a rolling window of messages from Glific, maps each recipient back to an officer, and emits
- * per-message, per-tenant and platform-wide lines under the {@code [GlificStatus]} prefix.</p>
+ * per-message, per-tenant and platform-wide lines under the {@code [WhatsAppStatus]} prefix.</p>
  *
  * <h2>Shape of a pass</h2>
  * <ol>
@@ -78,7 +78,7 @@ public class WhatsAppDeliveryReconciliationService {
      * Which report a matched message carries, resolved from its Glific template id.
      *
      * <p>Both reports go out on the same Glific account, and a Section Officer receives both, so
-     * without this every {@code [GlificStatus]} line and every per-role tally silently mixed them:
+     * without this every {@code [WhatsAppStatus]} line and every per-role tally silently mixed them:
      * {@code deliveredByRole={SECTION_OFFICER=271}} was daily plus weekly, and a week in which no
      * weekly report was delivered at all was invisible behind the daily traffic. {@code UNKNOWN} is for
      * an id supplied only through the {@code template-ids} override, where nothing says which report it
@@ -162,7 +162,7 @@ public class WhatsAppDeliveryReconciliationService {
         long startNanos = System.nanoTime();
         TemplateKinds templates = resolveTemplateKinds();
         if (!templates.conflicts().isEmpty()) {
-            log.error("[GlificStatus] Template id(s) {} are configured for more than one report. Every"
+            log.error("[WhatsAppStatus] Template id(s) {} are configured for more than one report. Every"
                             + " delivery on such an id would be filed under whichever property happened to"
                             + " be read first, so neither the daily nor the weekly tally can be trusted."
                             + " Fix the whatsapp.template.daily-report-* / whatsapp.template.weekly-report-*"
@@ -172,7 +172,7 @@ public class WhatsAppDeliveryReconciliationService {
         }
         Map<Integer, ReportKind> templateKinds = templates.kinds();
         if (templateKinds.isEmpty()) {
-            log.warn("[GlificStatus] No report template ids configured — every message in the window"
+            log.warn("[WhatsAppStatus] No report template ids configured — every message in the window"
                     + " would be discarded. Set WHATSAPP_STATUS_RECONCILE_TEMPLATE_IDS or the"
                     + " whatsapp.template.daily-report-* / whatsapp.template.weekly-report-* properties."
                     + " Skipping this pass.");
@@ -318,7 +318,7 @@ public class WhatsAppDeliveryReconciliationService {
         }
         for (TenantSchemaRef tenant : activeTenants()) {
             if (!tenant.schema().matches(SCHEMA_PATTERN)) {
-                log.warn("[GlificStatus] Skipping tenant={} — schema '{}' is not a valid identifier",
+                log.warn("[WhatsAppStatus] Skipping tenant={} — schema '{}' is not a valid identifier",
                         tenant.id(), tenant.schema());
                 continue;
             }
@@ -326,7 +326,7 @@ public class WhatsAppDeliveryReconciliationService {
                 OfficerRef existing = byContactId.putIfAbsent(row.contactId(),
                         new OfficerRef(tenant.id(), tenant.schema(), row.userId(), row.role()));
                 if (existing != null) {
-                    log.warn("[GlificStatus] Glific contactId={} is claimed by both tenant={} and tenant={}"
+                    log.warn("[WhatsAppStatus] providerContactId={} is claimed by both tenant={} and tenant={}"
                                     + " — keeping the first. A stale whatsapp_connection_id is the usual cause.",
                             row.contactId(), existing.tenantId(), tenant.id());
                 }
@@ -376,7 +376,7 @@ public class WhatsAppDeliveryReconciliationService {
                     contactIds.toArray());
         } catch (Exception e) {
             // One tenant's schema being absent or mid-migration must not abort the whole pass.
-            log.warn("[GlificStatus] Could not resolve officers in tenant={} schema={}: {}",
+            log.warn("[WhatsAppStatus] Could not resolve officers in tenant={} schema={}: {}",
                     tenant.id(), tenant.schema(), e.getMessage());
             return List.of();
         }
@@ -450,8 +450,8 @@ public class WhatsAppDeliveryReconciliationService {
             // already redacts what it extracts. The reason text originates with Gupshup and is the one field
             // here that can carry a phone number; a second pass costs nothing and means a future code
             // path that builds a WhatsAppMessageStatus some other way cannot leak one through this line.
-            log.warn("[GlificStatus] result=DELIVERY_FAILED role={} tenant={} officer={} report={}"
-                            + " glificMsgId={} glificContactId={} templateId={} bspStatus={} errorCode={}"
+            log.warn("[WhatsAppStatus] result=DELIVERY_FAILED role={} tenant={} officer={} report={}"
+                            + " providerMsgId={} providerContactId={} templateId={} bspStatus={} errorCode={}"
                             + " reason=\"{}\"",
                     officer.role(), officer.tenantId(), officer.officerUserId(), report, message.messageId(),
                     message.receiverContactId(), message.templateId(), message.bspStatus(),
@@ -459,8 +459,8 @@ public class WhatsAppDeliveryReconciliationService {
                     message.errorReason() == null ? "" : PhoneRedactor.redact(message.errorReason()));
             return;
         }
-        log.info("[GlificStatus] result={} role={} tenant={} officer={} report={} glificMsgId={}"
-                        + " glificContactId={} templateId={} bspStatus={}",
+        log.info("[WhatsAppStatus] result={} role={} tenant={} officer={} report={} providerMsgId={}"
+                        + " providerContactId={} templateId={} bspStatus={}",
                 message.outcome(), officer.role(), officer.tenantId(), officer.officerUserId(), report,
                 message.messageId(), message.receiverContactId(), message.templateId(), message.bspStatus());
     }
@@ -470,7 +470,7 @@ public class WhatsAppDeliveryReconciliationService {
      * than dropped: it usually means a stale {@code whatsapp_connection_id}, which is worth fixing.
      */
     private void logUnmapped(WhatsAppMessageStatus message, ReportKind report) {
-        log.warn("[GlificStatus] result=UNMAPPED_CONTACT report={} glificMsgId={} glificContactId={}"
+        log.warn("[WhatsAppStatus] result=UNMAPPED_CONTACT report={} providerMsgId={} providerContactId={}"
                         + " templateId={} bspStatus={} — no officer in any active tenant has this"
                         + " whatsapp_connection_id",
                 report, message.messageId(), message.receiverContactId(), message.templateId(),
@@ -478,7 +478,7 @@ public class WhatsAppDeliveryReconciliationService {
     }
 
     private void logTenantSummary(Instant from, Instant to, String tenantKey, Tally tally) {
-        log.info("[GlificStatus] summary: window={}→{} tenant={} matched={} deliveredByRole={}"
+        log.info("[WhatsAppStatus] summary: window={}→{} tenant={} matched={} deliveredByRole={}"
                         + " readByRole={} failedByRole={} failedByCode={} matchedByReport={}"
                         + " deliveredByReport={} readByReport={} failedByReport={} pending={}"
                         + " unknownStatus={}",
@@ -502,7 +502,7 @@ public class WhatsAppDeliveryReconciliationService {
                 Collectors.mapping(FailedEntry::officerUserId, Collectors.toList())));
         grouped.forEach((key, officers) -> {
             String[] parts = key.split("\\|", 3);
-            log.warn("[GlificStatus] failedOfficers: window={}→{} tenant={} report={} role={} errorCode={}"
+            log.warn("[WhatsAppStatus] failedOfficers: window={}→{} tenant={} report={} role={} errorCode={}"
                             + " count={} officers={}",
                     from, to, tenantIdOf(tenantKey), parts[0], parts[1], parts[2], officers.size(), officers);
         });
@@ -510,7 +510,7 @@ public class WhatsAppDeliveryReconciliationService {
 
     private void logTotal(Instant from, Instant to, int tenants, Tally total, WindowScan scan,
                           int unmappedContacts, long tookMs) {
-        log.info("[GlificStatus] summaryTotal: window={}→{} tenants={} matched={} windowScanned={}"
+        log.info("[WhatsAppStatus] summaryTotal: window={}→{} tenants={} matched={} windowScanned={}"
                         + " discardedInbound={} discardedOtherTemplates={} discardedAccountLevel={}"
                         + " unmappedContacts={} deliveredByRole={} readByRole={} failedByRole={}"
                         + " failedByCode={} matchedByReport={} deliveredByReport={} readByReport={}"
@@ -532,7 +532,7 @@ public class WhatsAppDeliveryReconciliationService {
             return;
         }
         scan.accountLevelFailures().forEach((code, count) ->
-                log.error("[GlificStatus] ACCOUNT-LEVEL FAILURE: errorCode={} affected={} message(s) in the"
+                log.error("[WhatsAppStatus] ACCOUNT-LEVEL FAILURE: errorCode={} affected={} message(s) in the"
                                 + " window — this is a Gupshup account condition (e.g. low balance), not an"
                                 + " officer or recipient problem. Messages counted here include ones outside"
                                 + " the daily-report templates, and are excluded from every per-officer and"
@@ -620,7 +620,7 @@ public class WhatsAppDeliveryReconciliationService {
         try {
             return Optional.of(Integer.parseInt(value.trim()));
         } catch (NumberFormatException e) {
-            log.warn("[GlificStatus] Ignoring non-numeric report template id '{}'", value);
+            log.warn("[WhatsAppStatus] Ignoring non-numeric report template id '{}'", value);
             return Optional.empty();
         }
     }

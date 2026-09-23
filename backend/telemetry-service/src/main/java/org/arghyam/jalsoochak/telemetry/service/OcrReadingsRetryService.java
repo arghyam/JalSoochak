@@ -81,11 +81,11 @@ public class OcrReadingsRetryService {
             return resilientSupplier.get();
         } catch (Exception ex) {
             if (OcrTransientFailures.isServiceUnavailable(ex)) {
-                log.warn("FlowVision /readings retry exhausted provider={} imageUrlHash={} reason={}",
+                log.warn("OCR readings retry exhausted provider={} imageUrlHash={} reason={}",
                         providerLabel(extractor),
                         imageUrlHash(readingUrl),
                         sanitizeLogValue(ex.getMessage()));
-                throw new OcrReadingsUnavailableException("FlowVision readings service is temporarily unavailable", ex);
+                throw new OcrReadingsUnavailableException("OCR readings service is temporarily unavailable", ex);
             }
             throw ex;
         }

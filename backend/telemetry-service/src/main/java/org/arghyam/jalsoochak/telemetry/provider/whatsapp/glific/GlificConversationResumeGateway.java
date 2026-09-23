@@ -114,7 +114,7 @@ public class GlificConversationResumeGateway implements ConversationResumeGatewa
                 return;
             }
 
-            log.info("Calling Glific resumeContactFlow (flowId={}, phone={}, glificContactId={}, jobId={})",
+            log.info("Calling Glific resumeContactFlow (flowId={}, phone={}, providerContactId={}, jobId={})",
                     flowId, contactId, glificContactId, jobId);
             Map<String, Object> responseBody = executeResumeMutation(accessToken, glificContactId, jobId, result);
             if (responseBody == null) {

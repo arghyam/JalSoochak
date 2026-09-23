@@ -179,7 +179,7 @@ class ConversationLocalizationServiceTest {
                             "Operator could not be resolved for this contact."),
                     Arguments.of("Invalid media id supplied",
                             "Invalid media. Please submit a clear meter image."),
-                    Arguments.of("Failed to download image from Glific",
+                    Arguments.of("Failed to download image from the WhatsApp provider",
                             "Image could not be processed. Please try again"),
                     Arguments.of("issueReason contains invalid characters",
                             "Issue reason can only contain letters, numbers, and spaces."),

@@ -55,10 +55,10 @@ public class GlificAuthService {
                         + " resolved empty. Set them, or suppress every purpose (NOTIFICATIONS_*_DRY_RUN=true)"
                         + " to run without a WhatsApp provider account.");
             }
-            log.warn("[GlificAuth] Credentials are not configured; WhatsApp/Glific flows will remain disabled");
+            log.warn("[WhatsAppAuth] Credentials are not configured; WhatsApp/Glific flows will remain disabled");
             return;
         }
-        log.info("[GlificAuth] Logging in to Glific...");
+        log.info("[WhatsAppAuth] Logging in to Glific...");
         try {
             JsonNode data = webClient.post()
                     .uri(authUrl)
@@ -69,21 +69,21 @@ public class GlificAuthService {
                     .block(Duration.ofSeconds(30));
 
             if (data == null || !data.has("data")) {
-                throw new RuntimeException("[GlificAuth] Login failed: null or unexpected response");
+                throw new RuntimeException("[WhatsAppAuth] Login failed: null or unexpected response");
             }
             JsonNode tokenData = data.path("data");
             accessToken = requireNonBlankToken(tokenData, "access_token", "login");
             renewalToken = requireNonBlankToken(tokenData, "renewal_token", "login");
-            log.info("[GlificAuth] Login successful, access token acquired");
+            log.info("[WhatsAppAuth] Login successful, access token acquired");
         } catch (Exception e) {
-            log.error("[GlificAuth] Login failed; verify Glific credentials. WhatsApp flows will remain disabled. Error: {}", e.getMessage());
+            log.error("[WhatsAppAuth] Login failed; verify Glific credentials. WhatsApp flows will remain disabled. Error: {}", e.getMessage());
             // Do not rethrow; let the context initialization finish.
         }
     }
 
     public String getAccessToken() {
         if (accessToken == null || accessToken.isBlank()) {
-            throw new IllegalStateException("[GlificAuth] Access token unavailable; verify Glific credentials/login");
+            throw new IllegalStateException("[WhatsAppAuth] Access token unavailable; verify Glific credentials/login");
         }
         return accessToken;
     }
@@ -102,7 +102,7 @@ public class GlificAuthService {
     /** Refreshes tokens using the renewal token (PUT /api/v1/session/renew).
      *  Falls back to a full re-login if the renewal token itself is rejected (401). */
     public synchronized void refresh() {
-        log.info("[GlificAuth] Refreshing access token...");
+        log.info("[WhatsAppAuth] Refreshing access token...");
         String renewUrl = authUrl + "/renew";
         JsonNode data;
         try {
@@ -114,18 +114,18 @@ public class GlificAuthService {
                     .bodyToMono(JsonNode.class)
                     .block(Duration.ofSeconds(30));
         } catch (org.springframework.web.reactive.function.client.WebClientResponseException.Unauthorized e) {
-            log.warn("[GlificAuth] Renewal token rejected (401); falling back to full re-login");
+            log.warn("[WhatsAppAuth] Renewal token rejected (401); falling back to full re-login");
             login();
             return;
         }
 
         if (data == null || !data.has("data")) {
-            throw new RuntimeException("[GlificAuth] Token refresh failed");
+            throw new RuntimeException("[WhatsAppAuth] Token refresh failed");
         }
         JsonNode tokenData = data.path("data");
         accessToken = requireNonBlankToken(tokenData, "access_token", "refresh");
         renewalToken = requireNonBlankToken(tokenData, "renewal_token", "refresh");
-        log.info("[GlificAuth] Token refreshed successfully");
+        log.info("[WhatsAppAuth] Token refreshed successfully");
     }
 
     private List<String> missingConnectionSettings() {
@@ -145,7 +145,7 @@ public class GlificAuthService {
     private String requireNonBlankToken(JsonNode tokenData, String key, String flow) {
         String token = tokenData.path(key).asText("");
         if (token.isBlank()) {
-            throw new RuntimeException("[GlificAuth] " + flow + " failed: missing " + key);
+            throw new RuntimeException("[WhatsAppAuth] " + flow + " failed: missing " + key);
         }
         return token;
     }

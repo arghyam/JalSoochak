@@ -98,8 +98,8 @@ public class InboundMediaService {
     private byte[] downloadImageFromProvider(String mediaId) throws IOException {
         return executeDownloadWithRetry(
                 () -> inboundMediaFetcher.fetch(mediaId),
-                "glific:" + mediaId,
-                "Failed to download image from Glific"
+                "media:" + mediaId,
+                "Failed to download image from the WhatsApp provider"
         );
     }
 

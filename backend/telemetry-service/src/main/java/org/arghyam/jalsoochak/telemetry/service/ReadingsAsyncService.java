@@ -35,7 +35,7 @@ public class ReadingsAsyncService {
 
         try {
             result = imageWorkflowService.processImage(request);
-            log.info("readings_glific async_processed jobId={} contact={} result={}",
+            log.info("readings_whatsapp async_processed jobId={} contact={} result={}",
                     jobId,
                     maskPhone(contactId),
                     summarizeCreateReadingResponse(result));
@@ -52,7 +52,7 @@ public class ReadingsAsyncService {
                     .qualityStatus("REJECTED")
                     .correlationId(contactId)
                     .build();
-            log.info("readings_glific async_error_response jobId={} contact={} result={}",
+            log.info("readings_whatsapp async_error_response jobId={} contact={} result={}",
                     jobId,
                     maskPhone(contactId),
                     summarizeCreateReadingResponse(result));

@@ -110,7 +110,7 @@ public class WhatsAppChannel implements NotificationChannel {
         long contactId = whatsAppSender.optIn(phone);
         whatsAppSender.updateContactLanguage(contactId, providerLanguageId);
         whatsAppSender.startWelcomeFlow(contactId, null, null);
-        log.info("[WHATSAPP] Operator onboarded to Glific");
+        log.info("[WHATSAPP] Operator onboarded");
         String phoneSuffix = phone != null && phone.length() >= 4
                 ? phone.substring(phone.length() - 4)
                 : "unknown";
@@ -182,7 +182,7 @@ public class WhatsAppChannel implements NotificationChannel {
             // Send with the same token that is logged, so the template picked matches the counted role.
             WhatsAppSendResult result = whatsAppSender.sendDailyReportHsm(
                     contactId, documentUrl, role, reportDate, officerName);
-            log.info("[WHATSAPP] Daily report HSM sent role={} glificMsgId={}", role, result.messageIdForLog());
+            log.info("[WHATSAPP] Daily report HSM sent role={} providerMsgId={}", role, result.messageIdForLog());
             log.debug("[WHATSAPP] Daily report HSM sent role={} contactId={}", role, contactId);
             return ReportSendOutcome.accepted(result);
         } catch (Exception ex) {
@@ -206,7 +206,7 @@ public class WhatsAppChannel implements NotificationChannel {
         try {
             WhatsAppSendResult result = whatsAppSender.sendWeeklyReportHsm(
                     contactId, documentUrl, role, weekStart, officerName);
-            log.info("[WHATSAPP] Weekly report HSM sent role={} glificMsgId={}", role, result.messageIdForLog());
+            log.info("[WHATSAPP] Weekly report HSM sent role={} providerMsgId={}", role, result.messageIdForLog());
             log.debug("[WHATSAPP] Weekly report HSM sent role={} contactId={}", role, contactId);
             return ReportSendOutcome.accepted(result);
         } catch (Exception ex) {

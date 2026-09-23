@@ -119,7 +119,7 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
                 return all;
             }
         }
-        log.warn("[GlificStatus] Hit the {}-page cap for bspStatus={} in window {}→{}; results are"
+        log.warn("[WhatsAppStatus] Hit the {}-page cap for bspStatus={} in window {}→{}; results are"
                         + " TRUNCATED and the counts below understate reality. Raise"
                         + " whatsapp.status.reconcile.max-pages or narrow window-hours.",
                 maxPages, bspStatus, from, to);
@@ -199,7 +199,7 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
             parsed = errorsNode.isTextual() ? objectMapper.readTree(errorsNode.asText()) : errorsNode;
         } catch (Exception e) {
             // Never log the blob itself — it carries the recipient's number.
-            log.debug("[GlificStatus] Could not parse the errors payload ({}); falling back to bspStatus",
+            log.debug("[WhatsAppStatus] Could not parse the errors payload ({}); falling back to bspStatus",
                     e.getMessage());
             return defaultFailureFor(bspStatus);
         }

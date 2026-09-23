@@ -66,11 +66,11 @@ public class WebhookAuthProperties {
             throw new IllegalStateException(
                     "telemetry.webhook.auth.mode=ENFORCE requires at least one entry in "
                             + "telemetry.webhook.auth.token-hashes (set TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES). "
-                            + "Refusing to start rather than reject every Glific webhook call.");
+                            + "Refusing to start rather than reject every WhatsApp webhook call.");
         }
 
         // Count only — never the hashes themselves.
-        log.info("Glific webhook auth initialised: mode={} header={} configuredTokens={}",
+        log.info("WhatsApp webhook auth initialised: mode={} header={} configuredTokens={}",
                 resolvedMode, headerName, resolvedTokenHashes.size());
     }
 

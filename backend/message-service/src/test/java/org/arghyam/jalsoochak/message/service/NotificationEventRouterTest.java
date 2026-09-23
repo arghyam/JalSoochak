@@ -1508,12 +1508,12 @@ class NotificationEventRouterTest {
 
     /**
      * {@code result=SENT} means Glific ACCEPTED the send, not that WhatsApp delivered it. The
-     * {@code glificMsgId} on this line is the only join key that lets the delivery status Gupshup and
+     * {@code providerMsgId} on this line is the only join key that lets the delivery status Gupshup and
      * Meta later report back to Glific be matched to this officer — losing it breaks reconciliation
      * silently, so it is asserted rather than assumed.
      */
     @Test
-    void handleDailyReport_sentLineCarriesTheGlificJoinKeys() throws Exception {
+    void handleDailyReport_sentLineCarriesTheProviderJoinKeys() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
@@ -1525,11 +1525,11 @@ class NotificationEventRouterTest {
         String sent = captureRouterLog(DAILY_REPORT_JSON, "result=SENT");
 
         assertThat(sent)
-                .contains("glificMsgId=241952654")
-                .contains("glificContactId=12345")
+                .contains("providerMsgId=241952654")
+                .contains("providerContactId=12345")
                 .contains("mode=LINK")
                 .contains("templateId=880557")
-                .contains("stage=GLIFIC_ACCEPTED");
+                .contains("stage=PROVIDER_ACCEPTED");
     }
 
     /**
@@ -1572,7 +1572,7 @@ class NotificationEventRouterTest {
         assertThat(failed)
                 .containsPattern("result=FAILED_DELIVERY role=SECTION_OFFICER tenant=1 officer=500")
                 .contains("stage=MEDIA_REGISTER")
-                .contains("glificErrorKey=media");
+                .contains("providerErrorKey=media");
     }
 
     /**
@@ -1607,7 +1607,7 @@ class NotificationEventRouterTest {
     /**
      * A dry-run is accepted but nothing was sent, so it gets its own result token. Sharing
      * {@code result=SENT} with a real send meant a fully muted deployment counted as one that delivered
-     * reports — and the line carried a {@code stage=GLIFIC_ACCEPTED} that never happened.
+     * reports — and the line carried a {@code stage=PROVIDER_ACCEPTED} that never happened.
      */
     @Test
     void handleDailyReport_suppressedSendIsNotCountedAsSent() throws Exception {
@@ -1627,8 +1627,8 @@ class NotificationEventRouterTest {
                 .satisfies(line -> assertThat(line)
                         .containsPattern("result=SUPPRESSED role=SECTION_OFFICER tenant=1 officer=500")
                         .contains("mode=LINK")
-                        .doesNotContain("stage=GLIFIC_ACCEPTED")
-                        .doesNotContain("glificMsgId="));
+                        .doesNotContain("stage=PROVIDER_ACCEPTED")
+                        .doesNotContain("providerMsgId="));
     }
 
     /**
@@ -1940,7 +1940,7 @@ class NotificationEventRouterTest {
                 .satisfies(line -> assertThat(line)
                         .startsWith("[Router/WEEKLY_REPORT]")
                         .containsPattern("result=SENT role=SECTION_OFFICER tenant=1 officer=500")
-                        .contains("glificMsgId=241952654"));
+                        .contains("providerMsgId=241952654"));
         // GENERATED and SENT have to share a prefix, or the run cannot be reconciled per report.
         assertThat(lines).filteredOn(l -> l.contains("result=GENERATED")).singleElement()
                 .satisfies(line -> assertThat(line).startsWith("[Router/WEEKLY_REPORT]"));
@@ -1975,7 +1975,7 @@ class NotificationEventRouterTest {
                 .startsWith("[Router/WEEKLY_REPORT]")
                 .containsPattern("result=FAILED_DELIVERY role=SECTION_OFFICER tenant=1 officer=500")
                 .contains("stage=SEND")
-                .contains("glificErrorKey=receiver");
+                .contains("providerErrorKey=receiver");
         // The exception reaches the Kafka container's error handler, so it has to say which report
         // stalled the partition.
         assertThatThrownBy(() -> router.route(WEEKLY_SO_JSON))
