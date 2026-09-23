@@ -1,11 +1,11 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.provider.whatsapp.InboundMediaFetcher;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlNotAllowedException;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -26,51 +26,43 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 
+/**
+ * Retrieves a meter image that came in on a webhook and stores it. The image arrives either as a
+ * media id, which the WhatsApp provider resolves through {@link InboundMediaFetcher}, or as a URL the
+ * caller chose, which goes out on the guarded client under a byte ceiling. Both sources share one
+ * retry policy.
+ */
 @Slf4j
 @Service
-public class GlificMediaService {
-
-    /**
-     * A Glific media id is appended to the configured media base URL, so it has to stay a single
-     * path segment — otherwise a crafted id walks the path to another endpoint on that host.
-     */
-    private static final Pattern MEDIA_ID_PATTERN = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
+public class InboundMediaService {
 
     /** Far deeper than any wrapping the HTTP client and {@code RestTemplate} apply; a cycle guard only. */
     private static final int MAX_CAUSE_CHAIN_DEPTH = 16;
 
     private final MinioService minioService;
-    private final RestTemplate restTemplate;
+    private final InboundMediaFetcher inboundMediaFetcher;
     private final RestTemplate mediaFetchRestTemplate;
     private final MediaUrlValidator mediaUrlValidator;
-    private final String glificApiToken;
-    private final String glificMediaBaseUrl;
     private final int mediaDownloadRetryMaxAttempts;
     private final long mediaDownloadRetryInitialBackoffMs;
     private final long mediaDownloadRetryMaxBackoffMs;
     private final long mediaDownloadRetryMaxTotalBackoffMs;
     private final long mediaDownloadMaxBytes;
 
-    public GlificMediaService(MinioService minioService,
-                              RestTemplate restTemplate,
-                              @Qualifier("mediaFetchRestTemplate") RestTemplate mediaFetchRestTemplate,
-                              MediaUrlValidator mediaUrlValidator,
-                              @Value("${glific.media-base-url:https://api.glific.org/v1/media}") String glificMediaBaseUrl,
-                              @Value("${media-download.retry.max-attempts:3}") int mediaDownloadRetryMaxAttempts,
-                              @Value("${media-download.retry.initial-backoff-ms:300}") long mediaDownloadRetryInitialBackoffMs,
-                              @Value("${media-download.retry.max-backoff-ms:200}") long mediaDownloadRetryMaxBackoffMs,
-                              @Value("${media-download.retry.max-total-backoff-ms:400}") long mediaDownloadRetryMaxTotalBackoffMs,
-                              @Value("${media-download.max-bytes:20971520}") long mediaDownloadMaxBytes,
-                              @Value("${glific.api-token:}") String glificApiToken) {
+    public InboundMediaService(MinioService minioService,
+                               InboundMediaFetcher inboundMediaFetcher,
+                               @Qualifier("mediaFetchRestTemplate") RestTemplate mediaFetchRestTemplate,
+                               MediaUrlValidator mediaUrlValidator,
+                               @Value("${media-download.retry.max-attempts:3}") int mediaDownloadRetryMaxAttempts,
+                               @Value("${media-download.retry.initial-backoff-ms:300}") long mediaDownloadRetryInitialBackoffMs,
+                               @Value("${media-download.retry.max-backoff-ms:200}") long mediaDownloadRetryMaxBackoffMs,
+                               @Value("${media-download.retry.max-total-backoff-ms:400}") long mediaDownloadRetryMaxTotalBackoffMs,
+                               @Value("${media-download.max-bytes:20971520}") long mediaDownloadMaxBytes) {
         this.minioService = minioService;
-        this.restTemplate = restTemplate;
+        this.inboundMediaFetcher = inboundMediaFetcher;
         this.mediaFetchRestTemplate = mediaFetchRestTemplate;
         this.mediaUrlValidator = mediaUrlValidator;
-        this.glificMediaBaseUrl = glificMediaBaseUrl.endsWith("/")
-                ? glificMediaBaseUrl.substring(0, glificMediaBaseUrl.length() - 1)
-                : glificMediaBaseUrl;
         this.mediaDownloadRetryMaxAttempts = Math.max(1, mediaDownloadRetryMaxAttempts);
         this.mediaDownloadRetryInitialBackoffMs = Math.max(0L, mediaDownloadRetryInitialBackoffMs);
         this.mediaDownloadRetryMaxBackoffMs = Math.max(0L, mediaDownloadRetryMaxBackoffMs);
@@ -83,7 +75,6 @@ public class GlificMediaService {
                     "media-download.max-bytes must be greater than 0 but was " + mediaDownloadMaxBytes);
         }
         this.mediaDownloadMaxBytes = mediaDownloadMaxBytes;
-        this.glificApiToken = glificApiToken;
     }
 
     public byte[] downloadImage(String mediaId, String mediaUrl) throws IOException {
@@ -92,7 +83,7 @@ public class GlificMediaService {
             throw new IllegalStateException("Invalid media. Please send a clear meter image.");
         }
         return mediaId != null && !mediaId.isBlank()
-                ? downloadImageFromGlific(mediaId)
+                ? downloadImageFromProvider(mediaId)
                 : downloadImageFromUrl(mediaUrl);
     }
 
@@ -104,21 +95,9 @@ public class GlificMediaService {
         return imageStorageUrl;
     }
 
-    private byte[] downloadImageFromGlific(String mediaId) throws IOException {
-        if (!MEDIA_ID_PATTERN.matcher(mediaId).matches()) {
-            log.warn("media_id_rejected reason=\"unexpected characters\"");
-            throw new IllegalStateException("Invalid media. Please send a clear meter image.");
-        }
-
-        HttpHeaders headers = new HttpHeaders();
-        if (glificApiToken != null && !glificApiToken.isBlank()) {
-            headers.setBearerAuth(glificApiToken);
-        }
-        headers.set(HttpHeaders.USER_AGENT, "WaterSupplyBot/1.0");
-        HttpEntity<Void> entity = new HttpEntity<>(headers);
-
+    private byte[] downloadImageFromProvider(String mediaId) throws IOException {
         return executeDownloadWithRetry(
-                () -> restTemplate.exchange(glificMediaBaseUrl + "/" + mediaId, HttpMethod.GET, entity, byte[].class),
+                () -> inboundMediaFetcher.fetch(mediaId),
                 "glific:" + mediaId,
                 "Failed to download image from Glific"
         );

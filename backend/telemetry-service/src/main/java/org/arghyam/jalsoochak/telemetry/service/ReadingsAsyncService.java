@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import org.arghyam.jalsoochak.telemetry.provider.whatsapp.ConversationResumeGateway;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
@@ -13,14 +14,14 @@ import java.util.concurrent.Executor;
 public class ReadingsAsyncService {
 
     private final MeterImageWorkflowService imageWorkflowService;
-    private final GlificFlowResumeService glificFlowResumeService;
+    private final ConversationResumeGateway conversationResumeGateway;
     private final Executor whatsAppSyncExecutor;
 
     public ReadingsAsyncService(MeterImageWorkflowService imageWorkflowService,
-                                GlificFlowResumeService glificFlowResumeService,
+                                ConversationResumeGateway conversationResumeGateway,
                                 @Qualifier("whatsAppSyncExecutor") Executor whatsAppSyncExecutor) {
         this.imageWorkflowService = imageWorkflowService;
-        this.glificFlowResumeService = glificFlowResumeService;
+        this.conversationResumeGateway = conversationResumeGateway;
         this.whatsAppSyncExecutor = whatsAppSyncExecutor;
     }
 
@@ -57,7 +58,7 @@ public class ReadingsAsyncService {
                     summarizeCreateReadingResponse(result));
         }
 
-        glificFlowResumeService.resumeReadingsFlow(contactId, jobId, result);
+        conversationResumeGateway.resumeReadingsFlow(contactId, jobId, result);
     }
 
     private String summarizeCreateReadingResponse(CreateReadingResponse response) {

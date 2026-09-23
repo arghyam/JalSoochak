@@ -1,15 +1,16 @@
-package org.arghyam.jalsoochak.telemetry.service;
+package org.arghyam.jalsoochak.telemetry.provider.whatsapp.glific;
 
-import lombok.extern.slf4j.Slf4j;
-import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import org.arghyam.jalsoochak.telemetry.provider.whatsapp.ConversationResumeGateway;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
@@ -19,9 +20,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-@Service
+@Component
 @Slf4j
-public class GlificFlowResumeService {
+public class GlificConversationResumeGateway implements ConversationResumeGateway {
 
     private static final String SESSION_PATH = "/api/v1/session";
     private static final String GRAPHQL_PATH = "/api";
@@ -44,11 +45,12 @@ public class GlificFlowResumeService {
     @Value("${glific.resume.flow-id:37172}")
     private String flowId;
 
-    public GlificFlowResumeService(RestTemplate restTemplate, ObjectMapper objectMapper) {
+    public GlificConversationResumeGateway(RestTemplate restTemplate, ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
     }
 
+    @Override
     public void resumeReadingsFlow(String contactId, String jobId, CreateReadingResponse result) {
         if (!resumeEnabled) {
             log.debug("Glific flow resume is disabled; skipping (jobId={})", jobId);

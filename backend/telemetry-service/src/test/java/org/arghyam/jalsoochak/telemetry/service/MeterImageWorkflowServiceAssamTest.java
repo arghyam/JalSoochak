@@ -49,7 +49,7 @@ import static org.mockito.Mockito.when;
 class MeterImageWorkflowServiceAssamTest {
 
     @Mock
-    private GlificMediaService glificMediaService;
+    private InboundMediaService inboundMediaService;
 
     @Mock
     private BfmReadingService bfmReadingService;
@@ -88,8 +88,8 @@ class MeterImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(glificMediaService.downloadImage("media-1", "https://example.com/meter.jpg")).thenReturn(new byte[]{1, 2, 3});
-        when(glificMediaService.uploadImage("919876543210", new byte[]{1, 2, 3})).thenReturn("https://cdn.example.com/meter.jpg");
+        when(inboundMediaService.downloadImage("media-1", "https://example.com/meter.jpg")).thenReturn(new byte[]{1, 2, 3});
+        when(inboundMediaService.uploadImage("919876543210", new byte[]{1, 2, 3})).thenReturn("https://cdn.example.com/meter.jpg");
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
@@ -133,8 +133,8 @@ class MeterImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(glificMediaService.downloadImage("media-1", "https://example.com/meter.jpg")).thenReturn(new byte[]{1, 2, 3});
-        when(glificMediaService.uploadImage("919876543210", new byte[]{1, 2, 3})).thenReturn("https://cdn.example.com/meter.jpg");
+        when(inboundMediaService.downloadImage("media-1", "https://example.com/meter.jpg")).thenReturn(new byte[]{1, 2, 3});
+        when(inboundMediaService.uploadImage("919876543210", new byte[]{1, 2, 3})).thenReturn("https://cdn.example.com/meter.jpg");
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");

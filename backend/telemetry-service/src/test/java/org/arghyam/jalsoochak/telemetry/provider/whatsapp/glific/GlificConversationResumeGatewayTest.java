@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.telemetry.service;
+package org.arghyam.jalsoochak.telemetry.provider.whatsapp.glific;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,8 +41,8 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("GlificFlowResumeService")
-class GlificFlowResumeServiceTest {
+@DisplayName("GlificConversationResumeGateway")
+class GlificConversationResumeGatewayTest {
 
     private static final String CONTACT = "919999900001";
     private static final String JOB_ID = "job-1";
@@ -53,11 +53,11 @@ class GlificFlowResumeServiceTest {
     @Mock
     private RestTemplate restTemplate;
 
-    private GlificFlowResumeService service;
+    private GlificConversationResumeGateway service;
 
     @BeforeEach
     void setUp() {
-        service = new GlificFlowResumeService(restTemplate, new ObjectMapper());
+        service = new GlificConversationResumeGateway(restTemplate, new ObjectMapper());
         configure(true, BASE_URL, "919000000000", "password", "37172");
     }
 

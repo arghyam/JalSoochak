@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.telemetry.service;
+package org.arghyam.jalsoochak.telemetry.provider.whatsapp.glific;
 
 import org.arghyam.jalsoochak.telemetry.repository.LanguageCatalogRepository;
 import org.junit.jupiter.api.Test;
@@ -11,9 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-class GlificContactSyncServiceLanguageTest {
+class GlificContactDirectoryLanguageTest {
 
-    private final GlificContactSyncService service = new GlificContactSyncService(null, null);
+    private final GlificContactDirectory service = new GlificContactDirectory(null, null);
 
     private void withCatalog(LanguageCatalogRepository repo) {
         ReflectionTestUtils.setField(service, "languageCatalogRepository", repo);

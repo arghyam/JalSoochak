@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
+import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -41,7 +42,7 @@ class ConversationSelectionServiceSelectedChannelTest {
     @Mock
     private UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     @Mock
-    private GlificContactSyncService glificContactSyncService;
+    private WhatsAppContactDirectory whatsAppContactDirectory;
 
     @Test
     void selectedChannelMessageSavesResolvedChannelLabelToUserPreference() {
@@ -53,7 +54,7 @@ class ConversationSelectionServiceSelectedChannelTest {
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
-                glificContactSyncService,
+                whatsAppContactDirectory,
                 new ObjectMapper()
         );
 

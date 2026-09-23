@@ -1,6 +1,7 @@
-package org.arghyam.jalsoochak.telemetry.service;
+package org.arghyam.jalsoochak.telemetry.provider.whatsapp.glific;
 
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
 import org.arghyam.jalsoochak.telemetry.repository.LanguageCatalogRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -9,7 +10,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.HashMap;
@@ -18,9 +19,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Executor;
 
-@Service
+@Component
 @Slf4j
-public class GlificContactSyncService {
+public class GlificContactDirectory implements WhatsAppContactDirectory {
 
     private static final String GRAPHQL_PATH = "/api";
     private static final String SESSION_PATH = "/api/v1/session";
@@ -48,12 +49,13 @@ public class GlificContactSyncService {
     @Value("${glific.sync.user.password:}")
     private String glificUserPassword;
 
-    public GlificContactSyncService(RestTemplate restTemplate,
-                                    @Qualifier("whatsAppSyncExecutor") Executor whatsAppSyncExecutor) {
+    public GlificContactDirectory(RestTemplate restTemplate,
+                                  @Qualifier("whatsAppSyncExecutor") Executor whatsAppSyncExecutor) {
         this.restTemplate = restTemplate;
         this.whatsAppSyncExecutor = whatsAppSyncExecutor;
     }
 
+    @Override
     public void syncContactLanguageAsync(String contactPhone, String selectedLanguage) {
         if (!glificSyncEnabled) {
             return;

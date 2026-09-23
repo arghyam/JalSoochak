@@ -33,7 +33,7 @@ public class MeterImageWorkflowService {
     private static final String SCHEME_TOKEN = "scheme";
     private static final String NOT_FOUND_TOKEN = "not found";
 
-    private final GlificMediaService glificMediaService;
+    private final InboundMediaService inboundMediaService;
     private final BfmReadingService bfmReadingService;
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final OperatorContextService operatorContextService;
@@ -47,7 +47,7 @@ public class MeterImageWorkflowService {
     @Value("${telemetry.lenient-ingestion.enabled:true}")
     private boolean lenientIngestionEnabled = true;
 
-    public MeterImageWorkflowService(GlificMediaService glificMediaService,
+    public MeterImageWorkflowService(InboundMediaService inboundMediaService,
                                      BfmReadingService bfmReadingService,
                                      TelemetryTenantRepository telemetryTenantRepository,
                                      OperatorContextService operatorContextService,
@@ -55,7 +55,7 @@ public class MeterImageWorkflowService {
                                      TenantConfigRepository tenantConfigRepository,
                                      UserChannelPreferenceRepository userChannelPreferenceRepository,
                                      ObjectMapper objectMapper) {
-        this.glificMediaService = glificMediaService;
+        this.inboundMediaService = inboundMediaService;
         this.bfmReadingService = bfmReadingService;
         this.telemetryTenantRepository = telemetryTenantRepository;
         this.operatorContextService = operatorContextService;
@@ -96,10 +96,10 @@ public class MeterImageWorkflowService {
             // Doing either earlier meant every rejected submission still made this service dial a
             // caller-supplied URL, and still wrote an object — unreferenced by any row, under a
             // caller-chosen key, on an anonymously readable bucket.
-            byte[] imageBytes = glificMediaService.downloadImage(mediaId, mediaUrl);
+            byte[] imageBytes = inboundMediaService.downloadImage(mediaId, mediaUrl);
             log.debug("Downloaded image for contactId {} (bytes={})", contactId, imageBytes.length);
 
-            String imageStorageUrl = glificMediaService.uploadImage(contactId, imageBytes);
+            String imageStorageUrl = inboundMediaService.uploadImage(contactId, imageBytes);
 
             CreateReadingRequest createReadingRequest = CreateReadingRequest.builder()
                     .schemeId(schemeId)

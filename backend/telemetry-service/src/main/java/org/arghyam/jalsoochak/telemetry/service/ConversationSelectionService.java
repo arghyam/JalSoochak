@@ -1,8 +1,8 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
-import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
@@ -10,10 +10,11 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
-import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeOption;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserLanguagePreferenceRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
@@ -44,7 +45,7 @@ public class ConversationSelectionService {
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final UserLanguagePreferenceRepository userLanguagePreferenceRepository;
-    private final GlificContactSyncService glificContactSyncService;
+    private final WhatsAppContactDirectory whatsAppContactDirectory;
     private final ObjectMapper objectMapper;
 
     public ConversationSelectionService(OperatorContextService operatorContextService,
@@ -54,7 +55,7 @@ public class ConversationSelectionService {
                                         TelemetryTenantRepository telemetryTenantRepository,
                                         UserChannelPreferenceRepository userChannelPreferenceRepository,
                                         UserLanguagePreferenceRepository userLanguagePreferenceRepository,
-                                        GlificContactSyncService glificContactSyncService,
+                                        WhatsAppContactDirectory whatsAppContactDirectory,
                                         ObjectMapper objectMapper) {
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
@@ -63,7 +64,7 @@ public class ConversationSelectionService {
         this.telemetryTenantRepository = telemetryTenantRepository;
         this.userChannelPreferenceRepository = userChannelPreferenceRepository;
         this.userLanguagePreferenceRepository = userLanguagePreferenceRepository;
-        this.glificContactSyncService = glificContactSyncService;
+        this.whatsAppContactDirectory = whatsAppContactDirectory;
         this.objectMapper = objectMapper;
     }
 
@@ -175,7 +176,7 @@ public class ConversationSelectionService {
                     selectedLanguageId
             );
             userLanguagePreferenceRepository.upsert(tenantId, request.getContactId(), selectedLanguage);
-            glificContactSyncService.syncContactLanguageAsync(request.getContactId(), selectedLanguage);
+            whatsAppContactDirectory.syncContactLanguageAsync(request.getContactId(), selectedLanguage);
 
             String confirmationTemplate = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "LANGUAGE_SELECTION", selectedLanguageKey)

@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
+import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -40,7 +41,7 @@ class ConversationSelectionServiceSelectedItemTest {
     @Mock
     private UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     @Mock
-    private GlificContactSyncService glificContactSyncService;
+    private WhatsAppContactDirectory whatsAppContactDirectory;
 
     @Test
     void selectedItemReadingSubmissionReturnsNormalCodeOnlyWhenLocationCheckIsYesAndSchemeHasCoordinates() {
@@ -52,7 +53,7 @@ class ConversationSelectionServiceSelectedItemTest {
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
-                glificContactSyncService,
+                whatsAppContactDirectory,
                 new ObjectMapper()
         );
 
@@ -109,7 +110,7 @@ class ConversationSelectionServiceSelectedItemTest {
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
-                glificContactSyncService,
+                whatsAppContactDirectory,
                 new ObjectMapper()
         );
 

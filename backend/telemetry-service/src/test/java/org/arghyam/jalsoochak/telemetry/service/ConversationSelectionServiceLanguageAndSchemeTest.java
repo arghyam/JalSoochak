@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
+import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeOption;
@@ -70,7 +71,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
     @Mock
     private UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     @Mock
-    private GlificContactSyncService glificContactSyncService;
+    private WhatsAppContactDirectory whatsAppContactDirectory;
 
     private ConversationSelectionService service;
 
@@ -79,7 +80,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
         service = new ConversationSelectionService(
                 operatorContextService, localizationService, tenantConfigRepository, templatesService,
                 telemetryTenantRepository, userChannelPreferenceRepository, userLanguagePreferenceRepository,
-                glificContactSyncService, new ObjectMapper());
+                whatsAppContactDirectory, new ObjectMapper());
 
         when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(TENANT));
         when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("English");
@@ -220,7 +221,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
             assertThat(response.isSuccess()).isTrue();
             verify(telemetryTenantRepository).updateUserLanguageId(SCHEMA, 11L, 2);
             verify(userLanguagePreferenceRepository).upsert(TENANT, CONTACT, "Hindi");
-            verify(glificContactSyncService).syncContactLanguageAsync(CONTACT, "Hindi");
+            verify(whatsAppContactDirectory).syncContactLanguageAsync(CONTACT, "Hindi");
         }
 
         @Test
@@ -302,7 +303,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
             var response = service.selectedLanguageMessage(languageRequest(CONTACT, "2"));
 
             assertThat(response.isSuccess()).isFalse();
-            verify(glificContactSyncService, never()).syncContactLanguageAsync(anyString(), anyString());
+            verify(whatsAppContactDirectory, never()).syncContactLanguageAsync(anyString(), anyString());
         }
     }
 

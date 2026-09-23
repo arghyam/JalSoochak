@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import org.arghyam.jalsoochak.telemetry.provider.whatsapp.InboundMediaFetcher;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,7 +30,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class GlificMediaServiceTest {
+class InboundMediaServiceTest {
 
     private static final String IMAGE_URL = "https://example.com/image.jpg";
 
@@ -37,7 +38,7 @@ class GlificMediaServiceTest {
     private MinioService minioService;
 
     @Mock
-    private RestTemplate restTemplate;
+    private InboundMediaFetcher inboundMediaFetcher;
 
     @Mock
     private RestTemplate mediaFetchRestTemplate;
@@ -45,24 +46,22 @@ class GlificMediaServiceTest {
     @Mock
     private MediaUrlValidator mediaUrlValidator;
 
-    private GlificMediaService service;
+    private InboundMediaService service;
 
     @BeforeEach
     void setUp() {
         when(mediaUrlValidator.validate(anyString()))
                 .thenAnswer(invocation -> URI.create(invocation.getArgument(0)));
-        service = new GlificMediaService(
+        service = new InboundMediaService(
                 minioService,
-                restTemplate,
+                inboundMediaFetcher,
                 mediaFetchRestTemplate,
                 mediaUrlValidator,
-                "https://api.glific.org/v1/media",
                 3,
                 0,
                 200,
                 400,
-                20_971_520L,
-                "token"
+                20_971_520L
         );
     }
 

@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import org.arghyam.jalsoochak.telemetry.provider.whatsapp.ConversationResumeGateway;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,13 +38,13 @@ class ReadingsAsyncServiceTest {
     @Mock
     private MeterImageWorkflowService imageWorkflowService;
     @Mock
-    private GlificFlowResumeService glificFlowResumeService;
+    private ConversationResumeGateway conversationResumeGateway;
 
     /** Runs submitted work inline so the test observes the completed side effects. */
     private final Executor inlineExecutor = Runnable::run;
 
     private ReadingsAsyncService service() {
-        return new ReadingsAsyncService(imageWorkflowService, glificFlowResumeService, inlineExecutor);
+        return new ReadingsAsyncService(imageWorkflowService, conversationResumeGateway, inlineExecutor);
     }
 
     private static MeterImageWebhookRequest request() {
@@ -55,7 +56,7 @@ class ReadingsAsyncServiceTest {
     @Test
     void submitsTheWorkToTheConfiguredExecutorRatherThanRunningItInline() {
         Executor neverRuns = command -> { /* deliberately drops the task */ };
-        new ReadingsAsyncService(imageWorkflowService, glificFlowResumeService, neverRuns)
+        new ReadingsAsyncService(imageWorkflowService, conversationResumeGateway, neverRuns)
                 .enqueueProcessAndResume(request(), JOB_ID);
 
         verify(imageWorkflowService, org.mockito.Mockito.never()).processImage(any());
@@ -74,7 +75,7 @@ class ReadingsAsyncServiceTest {
 
         service().enqueueProcessAndResume(request(), JOB_ID);
 
-        verify(glificFlowResumeService).resumeReadingsFlow(CONTACT, JOB_ID, processed);
+        verify(conversationResumeGateway).resumeReadingsFlow(CONTACT, JOB_ID, processed);
     }
 
     @Test
@@ -84,7 +85,7 @@ class ReadingsAsyncServiceTest {
         service().enqueueProcessAndResume(request(), JOB_ID);
 
         ArgumentCaptor<CreateReadingResponse> resumed = ArgumentCaptor.forClass(CreateReadingResponse.class);
-        verify(glificFlowResumeService).resumeReadingsFlow(eq(CONTACT), eq(JOB_ID), resumed.capture());
+        verify(conversationResumeGateway).resumeReadingsFlow(eq(CONTACT), eq(JOB_ID), resumed.capture());
 
         CreateReadingResponse fallback = resumed.getValue();
         assertThat(fallback.isSuccess()).isFalse();
@@ -99,7 +100,7 @@ class ReadingsAsyncServiceTest {
 
         service().enqueueProcessAndResume(request(), JOB_ID);
 
-        verify(glificFlowResumeService).resumeReadingsFlow(eq(CONTACT), eq(JOB_ID), isNull());
+        verify(conversationResumeGateway).resumeReadingsFlow(eq(CONTACT), eq(JOB_ID), isNull());
     }
 
     @Test
@@ -108,7 +109,7 @@ class ReadingsAsyncServiceTest {
 
         service().enqueueProcessAndResume(null, JOB_ID);
 
-        verify(glificFlowResumeService).resumeReadingsFlow(isNull(), eq(JOB_ID), isNull());
+        verify(conversationResumeGateway).resumeReadingsFlow(isNull(), eq(JOB_ID), isNull());
     }
 
     @Test
@@ -118,7 +119,7 @@ class ReadingsAsyncServiceTest {
         service().enqueueProcessAndResume(null, JOB_ID);
 
         ArgumentCaptor<CreateReadingResponse> resumed = ArgumentCaptor.forClass(CreateReadingResponse.class);
-        verify(glificFlowResumeService).resumeReadingsFlow(isNull(), eq(JOB_ID), resumed.capture());
+        verify(conversationResumeGateway).resumeReadingsFlow(isNull(), eq(JOB_ID), resumed.capture());
         assertThat(resumed.getValue().isSuccess()).isFalse();
     }
 
@@ -130,7 +131,7 @@ class ReadingsAsyncServiceTest {
 
         service().enqueueProcessAndResume(request(), JOB_ID);
 
-        verify(glificFlowResumeService).resumeReadingsFlow(eq(CONTACT), eq(JOB_ID), any());
+        verify(conversationResumeGateway).resumeReadingsFlow(eq(CONTACT), eq(JOB_ID), any());
     }
 
     @Test
@@ -145,6 +146,6 @@ class ReadingsAsyncServiceTest {
 
         service().enqueueProcessAndResume(request(), JOB_ID);
 
-        verify(glificFlowResumeService).resumeReadingsFlow(eq(CONTACT), eq(JOB_ID), any());
+        verify(conversationResumeGateway).resumeReadingsFlow(eq(CONTACT), eq(JOB_ID), any());
     }
 }

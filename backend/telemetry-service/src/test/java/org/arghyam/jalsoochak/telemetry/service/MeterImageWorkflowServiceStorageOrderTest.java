@@ -49,7 +49,7 @@ class MeterImageWorkflowServiceStorageOrderTest {
     private static final byte[] IMAGE = {1, 2, 3};
 
     @Mock
-    private GlificMediaService glificMediaService;
+    private InboundMediaService inboundMediaService;
     @Mock
     private BfmReadingService bfmReadingService;
     @Mock
@@ -82,7 +82,7 @@ class MeterImageWorkflowServiceStorageOrderTest {
     }
 
     private void imageDownloads() throws Exception {
-        when(glificMediaService.downloadImage(null, "https://media.glific.example/meter.jpg")).thenReturn(IMAGE);
+        when(inboundMediaService.downloadImage(null, "https://media.glific.example/meter.jpg")).thenReturn(IMAGE);
         when(localizationService.resolveLanguageKeyForContact(anyString())).thenReturn("english");
         when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
                 .thenReturn("Image could not be processed.");
@@ -97,8 +97,8 @@ class MeterImageWorkflowServiceStorageOrderTest {
         CreateReadingResponse response = service.processImage(submission());
 
         assertThat(response.isSuccess()).isFalse();
-        verify(glificMediaService, never()).downloadImage(any(), any());
-        verify(glificMediaService, never()).uploadImage(anyString(), any());
+        verify(inboundMediaService, never()).downloadImage(any(), any());
+        verify(inboundMediaService, never()).uploadImage(anyString(), any());
     }
 
     @Test
@@ -114,8 +114,8 @@ class MeterImageWorkflowServiceStorageOrderTest {
         CreateReadingResponse response = service.processImage(submission());
 
         assertThat(response.isSuccess()).isFalse();
-        verify(glificMediaService, never()).downloadImage(any(), any());
-        verify(glificMediaService, never()).uploadImage(anyString(), any());
+        verify(inboundMediaService, never()).downloadImage(any(), any());
+        verify(inboundMediaService, never()).uploadImage(anyString(), any());
     }
 
     @Test
@@ -127,7 +127,7 @@ class MeterImageWorkflowServiceStorageOrderTest {
         when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(anyString(), any(), any(LocalDate.class)))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser(anyString(), any())).thenReturn(Optional.of(101L));
-        when(glificMediaService.uploadImage(CONTACT_ID, IMAGE)).thenReturn("https://minio/bfm/x.jpg");
+        when(inboundMediaService.uploadImage(CONTACT_ID, IMAGE)).thenReturn("https://minio/bfm/x.jpg");
         when(bfmReadingService.createReading(any(), anyString(), any(), anyString(), anyBoolean(), any()))
                 .thenReturn(CreateReadingResponse.builder().success(true).message("ok").build());
         when(localizationService.localizeMessage("ok", "english")).thenReturn("ok");
@@ -135,8 +135,8 @@ class MeterImageWorkflowServiceStorageOrderTest {
         CreateReadingResponse response = service.processImage(submission());
 
         assertThat(response.isSuccess()).isTrue();
-        verify(glificMediaService).downloadImage(null, "https://media.glific.example/meter.jpg");
-        verify(glificMediaService).uploadImage(CONTACT_ID, IMAGE);
+        verify(inboundMediaService).downloadImage(null, "https://media.glific.example/meter.jpg");
+        verify(inboundMediaService).uploadImage(CONTACT_ID, IMAGE);
 
         ArgumentCaptor<CreateReadingRequest> captor = ArgumentCaptor.forClass(CreateReadingRequest.class);
         verify(bfmReadingService).createReading(captor.capture(), anyString(), any(), anyString(), anyBoolean(), any());

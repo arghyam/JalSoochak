@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.arghyam.jalsoochak.telemetry.config.MediaFetchRestTemplateConfig;
+import org.arghyam.jalsoochak.telemetry.provider.whatsapp.InboundMediaFetcher;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
 import org.arghyam.jalsoochak.telemetry.security.SsrfAddressPolicy;
 import org.junit.jupiter.api.AfterEach;
@@ -12,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -28,15 +28,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * move the limit onto the heap.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("GlificMediaService — bounded download from a caller-supplied URL")
-class GlificMediaServiceBoundedDownloadTest {
+@DisplayName("InboundMediaService — bounded download from a caller-supplied URL")
+class InboundMediaServiceBoundedDownloadTest {
 
     private static final int LIMIT_BYTES = 4096;
 
     @Mock
     private MinioService minioService;
     @Mock
-    private RestTemplate sharedRestTemplate;
+    private InboundMediaFetcher inboundMediaFetcher;
 
     private HttpServer server;
     private String baseUrl;
@@ -75,20 +75,20 @@ class GlificMediaServiceBoundedDownloadTest {
         }
     }
 
-    private GlificMediaService service() {
+    private InboundMediaService service() {
         return service(LIMIT_BYTES);
     }
 
-    private GlificMediaService service(long maxBytes) {
+    private InboundMediaService service(long maxBytes) {
         // Internal addresses are allowed so the loopback fixture is reachable; the size ceiling under
         // test is independent of the address policy.
         MediaFetchRestTemplateConfig config = new MediaFetchRestTemplateConfig(
                 true, false, true, "", 3, 2000, 2000);
         SsrfAddressPolicy addressPolicy = new SsrfAddressPolicy(true);
         MediaUrlValidator validator = config.mediaUrlValidator(addressPolicy);
-        return new GlificMediaService(minioService, sharedRestTemplate,
+        return new InboundMediaService(minioService, inboundMediaFetcher,
                 config.mediaFetchRestTemplate(addressPolicy, validator), validator,
-                "https://api.glific.org/v1/media", 1, 0L, 0L, 0L, maxBytes, "token");
+                1, 0L, 0L, 0L, maxBytes);
     }
 
     @Test
@@ -100,19 +100,19 @@ class GlificMediaServiceBoundedDownloadTest {
 
     @Test
     void refusesAResponseThatDeclaresItselfTooLarge() {
-        GlificMediaService service = service();
+        InboundMediaService service = service();
 
         assertThatThrownBy(() -> service.downloadImage(null, baseUrl + "/declared-huge.jpg"))
-                .isInstanceOf(GlificMediaService.MediaTooLargeException.class);
+                .isInstanceOf(InboundMediaService.MediaTooLargeException.class);
     }
 
     @Test
     void refusesAResponseThatOnlyTurnsOutToBeTooLargeWhileReading() {
-        GlificMediaService service = service();
+        InboundMediaService service = service();
 
         // A chunked response declares no length, so the ceiling has to hold during the read itself.
         assertThatThrownBy(() -> service.downloadImage(null, baseUrl + "/chunked-huge.jpg"))
-                .isInstanceOf(GlificMediaService.MediaTooLargeException.class);
+                .isInstanceOf(InboundMediaService.MediaTooLargeException.class);
     }
 
     @Test
@@ -131,7 +131,7 @@ class GlificMediaServiceBoundedDownloadTest {
         // The refusal reaches the retry loop wrapped as a ResourceAccessException, which on its face
         // looks like a transient network fault. It is not: the policy's verdict is about where the
         // URL points, so three attempts must still cost the origin exactly one request.
-        GlificMediaService service = allowlistedService();
+        InboundMediaService service = allowlistedService();
 
         assertThatThrownBy(() -> service.downloadImage(null, baseUrl + "/redirect-off-allowlist.jpg"))
                 .isInstanceOf(IOException.class)
@@ -141,13 +141,13 @@ class GlificMediaServiceBoundedDownloadTest {
     }
 
     /** The same fixture with an allowlist, so a redirect can step outside it and be refused. */
-    private GlificMediaService allowlistedService() {
+    private InboundMediaService allowlistedService() {
         MediaFetchRestTemplateConfig config = new MediaFetchRestTemplateConfig(
                 true, false, true, "127.0.0.1", 3, 2000, 2000);
         SsrfAddressPolicy addressPolicy = new SsrfAddressPolicy(true);
         MediaUrlValidator validator = config.mediaUrlValidator(addressPolicy);
-        return new GlificMediaService(minioService, sharedRestTemplate,
+        return new InboundMediaService(minioService, inboundMediaFetcher,
                 config.mediaFetchRestTemplate(addressPolicy, validator), validator,
-                "https://api.glific.org/v1/media", 3, 0L, 0L, 0L, LIMIT_BYTES, "token");
+                3, 0L, 0L, 0L, LIMIT_BYTES);
     }
 }

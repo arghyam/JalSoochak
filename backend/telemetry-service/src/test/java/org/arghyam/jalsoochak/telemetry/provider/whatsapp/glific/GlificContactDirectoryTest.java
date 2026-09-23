@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.telemetry.service;
+package org.arghyam.jalsoochak.telemetry.provider.whatsapp.glific;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -42,8 +42,8 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("GlificContactSyncService")
-class GlificContactSyncServiceTest {
+@DisplayName("GlificContactDirectory")
+class GlificContactDirectoryTest {
 
     private static final String PHONE = "919999900001";
     private static final String BASE_URL = "https://api.arghyam.glific.com";
@@ -56,11 +56,11 @@ class GlificContactSyncServiceTest {
     /** Runs submitted work inline so the test observes the completed sync. */
     private final Executor inlineExecutor = Runnable::run;
 
-    private GlificContactSyncService service;
+    private GlificContactDirectory service;
 
     @BeforeEach
     void setUp() {
-        service = new GlificContactSyncService(restTemplate, inlineExecutor);
+        service = new GlificContactDirectory(restTemplate, inlineExecutor);
         configure(true, "919000000000", "password");
     }
 
@@ -339,7 +339,7 @@ class GlificContactSyncServiceTest {
 
         @Test
         void submitsTheWorkToTheConfiguredExecutor() {
-            var neverRuns = new GlificContactSyncService(restTemplate, command -> { /* dropped */ });
+            var neverRuns = new GlificContactDirectory(restTemplate, command -> { /* dropped */ });
             ReflectionTestUtils.setField(neverRuns, "glificSyncEnabled", true);
             ReflectionTestUtils.setField(neverRuns, "glificBaseUrl", BASE_URL);
             ReflectionTestUtils.setField(neverRuns, "glificUserPhone", "919000000000");
