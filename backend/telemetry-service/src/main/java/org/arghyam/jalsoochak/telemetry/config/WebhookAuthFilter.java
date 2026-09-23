@@ -35,8 +35,8 @@ import java.util.Deque;
  *
  * <p><b>Relationship to {@link TelemetryApiKeyAuthFilter}.</b> That filter guards the partner
  * ingestion routes under {@code /readings**} and {@code /schemes/*} with a per-tenant key, and exempts
- * {@code /readings/glific} and {@code /schemes} because those two are Glific webhooks. This filter is
- * what authenticates them. {@code WebhookRouteCoverageTest} asserts that handoff in both
+ * {@code /readings/whatsapp}, its alias {@code /readings/glific}, and {@code /schemes} because those
+ * are Glific webhooks. This filter is what authenticates them. {@code WebhookRouteCoverageTest} asserts that handoff in both
  * directions, so neither gate can be narrowed without the other noticing.
  *
  * <p><b>Why a filter rather than a {@code HandlerInterceptor}.</b> An interceptor runs after handler
@@ -55,8 +55,8 @@ public class WebhookAuthFilter extends OncePerRequestFilter {
      * {@link DisallowedHttpMethodFilter} (15) and {@link TelemetryApiKeyAuthFilter} (20) — the last
      * purely to keep the chain in a stable, documented order. The two credential gates never contend:
      * this filter's allowlist and that filter's protected prefixes are disjoint, apart from
-     * {@code /readings/glific} and {@code /schemes}, which the API-key filter exempts precisely so
-     * the webhook token can authenticate them here.
+     * {@code /readings/whatsapp}, {@code /readings/glific} and {@code /schemes}, which the API-key
+     * filter exempts precisely so the webhook token can authenticate them here.
      */
     public static final int ORDER = 30;
 

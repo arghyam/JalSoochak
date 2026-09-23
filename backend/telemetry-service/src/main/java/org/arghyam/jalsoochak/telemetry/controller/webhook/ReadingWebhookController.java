@@ -37,6 +37,10 @@ import java.util.UUID;
 @RequestMapping("/api/v1/telemetry")
 public class ReadingWebhookController {
     private static final Logger log = LoggerFactory.getLogger(ReadingWebhookController.class);
+    private static final String BASE_PATH = "/api/v1/telemetry";
+    private static final String READINGS_WEBHOOK_PATH = "/readings/whatsapp";
+    /** Served until the chatbot flow's webhook node is repointed at {@link #READINGS_WEBHOOK_PATH}. */
+    private static final String LEGACY_READINGS_WEBHOOK_PATH = "/readings/glific";
     private final MeterImageWorkflowService imageWorkflowService;
     private final MeterReadingConversationService meterWorkflowService;
     private final ReadingsAsyncService readingsAsyncService;
@@ -65,15 +69,35 @@ public class ReadingWebhookController {
     }
 
     @PostMapping(
-            value = "/readings/glific",
+            value = READINGS_WEBHOOK_PATH,
             consumes = "application/json",
             produces = "application/json"
     )
     public ResponseEntity<ReadingWebhookAckResponse> receive(@RequestBody MeterImageWebhookRequest meterImageWebhookRequest) {
-        log.info("POST /api/v1/telemetry/readings/glific received request={}",
-                summarizeMeterImageWebhookRequest(meterImageWebhookRequest));
-        logRawContactIdAtDebug("/api/v1/telemetry/readings/glific",
-                meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null);
+        return acceptMeterImage(BASE_PATH + READINGS_WEBHOOK_PATH, meterImageWebhookRequest);
+    }
+
+    /**
+     * The path the chatbot flow's webhook node calls today, kept so repointing the flow is not a
+     * lockstep deploy. Logs its own path so its remaining traffic is visible.
+     *
+     * @deprecated use {@link #receive} ({@code POST /readings/whatsapp}); removed once this path
+     *             shows no traffic
+     */
+    @Deprecated(forRemoval = true)
+    @PostMapping(
+            value = LEGACY_READINGS_WEBHOOK_PATH,
+            consumes = "application/json",
+            produces = "application/json"
+    )
+    public ResponseEntity<ReadingWebhookAckResponse> receiveLegacy(@RequestBody MeterImageWebhookRequest meterImageWebhookRequest) {
+        return acceptMeterImage(BASE_PATH + LEGACY_READINGS_WEBHOOK_PATH, meterImageWebhookRequest);
+    }
+
+    private ResponseEntity<ReadingWebhookAckResponse> acceptMeterImage(String api,
+                                                                        MeterImageWebhookRequest meterImageWebhookRequest) {
+        log.info("POST {} received request={}", api, summarizeMeterImageWebhookRequest(meterImageWebhookRequest));
+        logRawContactIdAtDebug(api, meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null);
         try {
             String jobId = UUID.randomUUID().toString();
             String status = "ACCEPTED";
@@ -93,7 +117,7 @@ public class ReadingWebhookController {
                         summarizeCreateReadingResponse(response));
             }
             logReadingSubmission(
-                    "/api/v1/telemetry/readings/glific",
+                    api,
                     meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null,
                     status,
                     message
@@ -114,7 +138,7 @@ public class ReadingWebhookController {
             String safeContactId = meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null;
             log.error("Error processing webhook: {}", e.getMessage(), e);
             log.debug("Error processing webhook for contactId {}: {}", safeContactId, e.getMessage());
-            logReadingSubmission("/api/v1/telemetry/readings/glific", safeContactId, "FAILED", e.getMessage());
+            logReadingSubmission(api, safeContactId, "FAILED", e.getMessage());
 
             ReadingWebhookAckResponse errorResponse = ReadingWebhookAckResponse.builder()
                     .success(false)

@@ -194,7 +194,7 @@ media-download:
     connect-timeout-ms: ${MEDIA_DOWNLOAD_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${MEDIA_DOWNLOAD_READ_TIMEOUT_MS:10000}
   # One policy for both caller-supplied meter-image URLs: the `mediaUrl` this service fetches for
-  # readings/glific, and the `reading_url` submitted to POST /readings, which this service does not
+  # readings/whatsapp, and the `reading_url` submitted to POST /readings, which this service does not
   # fetch but hands to FlowVision as `imageURL`. FlowVision, Glific and MinIO calls of our own go out
   # on the shared client and are unaffected.
   ssrf-guard:

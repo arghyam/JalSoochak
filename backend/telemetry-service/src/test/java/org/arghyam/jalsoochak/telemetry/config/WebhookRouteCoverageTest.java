@@ -79,12 +79,14 @@ class WebhookRouteCoverageTest {
     }
 
     @Test
-    @DisplayName("the audit reported 12 endpoints; the webhook surface actually has 26")
+    @DisplayName("the audit reported 12 endpoints; the webhook surface actually has 27 paths")
     void protectsEveryEndpointNotJustTheReportedOnes() {
         // The security audit listed 12 paths. Pinning the real count keeps that discrepancy visible:
-        // if this number changes, the Glific flow webhook nodes need updating too.
-        assertThat(WebhookRoutes.relativePaths()).hasSize(26);
-        assertThat(WebhookRoutes.absolutePaths()).hasSize(26);
+        // if this number changes, the Glific flow webhook nodes need updating too. 26 endpoints, one
+        // of them served on two paths while /readings/glific remains an alias of /readings/whatsapp;
+        // both are live, so both must be protected. Back to 26 when the alias is removed.
+        assertThat(WebhookRoutes.relativePaths()).hasSize(27);
+        assertThat(WebhookRoutes.absolutePaths()).hasSize(27);
     }
 
     /**

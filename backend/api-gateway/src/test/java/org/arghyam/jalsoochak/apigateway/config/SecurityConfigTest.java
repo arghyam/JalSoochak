@@ -76,6 +76,8 @@ class SecurityConfigTest {
             "/user/api/v1/state-admin/pump-operators/upload",
             "/api/v1/state-admin/user-scheme-mappings/upload",
             // telemetry-service: Glific webhooks (X-Webhook-Token) and vendor ingestion (X-Api-Key)
+            "/api/v1/telemetry/readings/whatsapp",
+            "/telemetry/api/v1/telemetry/readings/whatsapp",
             "/api/v1/telemetry/readings/glific",
             "/telemetry/api/v1/telemetry/readings/glific",
             "/api/v1/telemetry/intro",

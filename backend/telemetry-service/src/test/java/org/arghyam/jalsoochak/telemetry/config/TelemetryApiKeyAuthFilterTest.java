@@ -103,7 +103,8 @@ class TelemetryApiKeyAuthFilterTest {
     void webhookRoutesStayUnauthenticated() throws Exception {
         // These are the WhatsApp webhook routes; they are unauthenticated by design today and are
         // tracked as a separate finding. Enforcing a key here would break the live bot.
-        for (String path : new String[]{"/api/v1/telemetry/readings/glific", "/api/v1/telemetry/schemes",
+        for (String path : new String[]{"/api/v1/telemetry/readings/whatsapp",
+                "/api/v1/telemetry/readings/glific", "/api/v1/telemetry/schemes",
                 "/api/v1/telemetry/manual-reading", "/api/v1/telemetry/intro"}) {
             MockFilterChain chain = new MockFilterChain();
             MockHttpServletResponse response = new MockHttpServletResponse();

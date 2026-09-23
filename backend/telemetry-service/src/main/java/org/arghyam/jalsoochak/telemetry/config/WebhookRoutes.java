@@ -17,8 +17,8 @@ import java.util.Set;
  *
  * <p><b>The allowlist's weakness, and how it is closed.</b> A newly added webhook would be silently
  * unprotected. {@code WebhookRouteCoverageTest} asserts this set is exactly equal to the routes
- * declared across every {@link WebhookRoute} controller, so adding a 27th endpoint without listing it
- * here fails the build — whichever webhook controller it lands on.
+ * declared across every {@link WebhookRoute} controller, so adding a webhook without listing it here
+ * fails the build — whichever webhook controller it lands on.
  */
 public final class WebhookRoutes {
 
@@ -30,6 +30,8 @@ public final class WebhookRoutes {
      * Kept relative so the coverage test can compare against the annotation values directly.
      */
     private static final Set<String> RELATIVE_PATHS = Set.of(
+            "/readings/whatsapp",
+            // Deprecated alias of /readings/whatsapp; protected for as long as it is served.
             "/readings/glific",
             "/intro",
             "/closing",
