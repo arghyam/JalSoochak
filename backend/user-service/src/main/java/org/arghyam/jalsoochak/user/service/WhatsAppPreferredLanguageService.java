@@ -13,16 +13,21 @@ import java.util.Optional;
 
 /**
  * Resolves the default/preferred language_id for a tenant based on the consolidated
- * {@code GLIFIC_MESSAGE_TEMPLATES} tenant config JSON.
+ * {@code WHATSAPP_MESSAGE_TEMPLATES} tenant config JSON.
  *
  * <p>Fallback: returns {@code 1} if the config is missing/invalid.</p>
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class GlificPreferredLanguageService {
+public class WhatsAppPreferredLanguageService {
 
-    public static final String CONFIG_KEY = "GLIFIC_MESSAGE_TEMPLATES";
+    public static final String CONFIG_KEY = "WHATSAPP_MESSAGE_TEMPLATES";
+    /**
+     * The key's previous name, read only when {@link #CONFIG_KEY} is absent. tenant-service renames
+     * stored rows in a migration, and this service cannot know whether that migration has run yet.
+     */
+    static final String LEGACY_CONFIG_KEY = "GLIFIC_MESSAGE_TEMPLATES";
     private static final int FALLBACK_LANGUAGE_ID = 1;
 
     private final TenantConfigRepository tenantConfigRepository;
@@ -33,7 +38,8 @@ public class GlificPreferredLanguageService {
             return FALLBACK_LANGUAGE_ID;
         }
 
-        Optional<String> rawOpt = tenantConfigRepository.findConfigValue(tenantId, CONFIG_KEY);
+        Optional<String> rawOpt = tenantConfigRepository.findConfigValue(tenantId, CONFIG_KEY)
+                .or(() -> tenantConfigRepository.findConfigValue(tenantId, LEGACY_CONFIG_KEY));
         if (rawOpt.isEmpty() || rawOpt.get() == null || rawOpt.get().isBlank()) {
             return FALLBACK_LANGUAGE_ID;
         }

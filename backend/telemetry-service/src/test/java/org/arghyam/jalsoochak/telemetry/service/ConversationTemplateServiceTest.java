@@ -24,12 +24,13 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Glific screen copy resolved from the consolidated {@code GLIFIC_MESSAGE_TEMPLATES} JSON blob.
+ * Glific screen copy resolved from the consolidated {@code WHATSAPP_MESSAGE_TEMPLATES} JSON blob.
  *
  * <p>Resolution always degrades rather than fails: a missing language falls back to English, then to
  * whatever translation exists, then to empty so the caller can use the legacy per-key configs.</p>
@@ -118,6 +119,26 @@ class ConversationTemplateServiceTest {
         @Test
         void parsesTheConfiguredJson() {
             assertThat(service.loadTemplates(TENANT)).isPresent();
+        }
+
+        @Test
+        void readsTheCanonicalKeyAndNotTheLegacyOneWhenTheCanonicalOneIsSet() {
+            when(tenantConfigRepository.findConfigValue(TENANT, "WHATSAPP_MESSAGE_TEMPLATES"))
+                    .thenReturn(Optional.of(TEMPLATES_JSON));
+
+            assertThat(service.loadTemplates(TENANT)).isPresent();
+            verify(tenantConfigRepository, never()).findConfigValue(TENANT, "GLIFIC_MESSAGE_TEMPLATES");
+        }
+
+        @Test
+        void fallsBackToTheLegacyKeyWhenTheCanonicalOneIsAbsent() {
+            when(tenantConfigRepository.findConfigValue(TENANT, "WHATSAPP_MESSAGE_TEMPLATES"))
+                    .thenReturn(Optional.empty());
+            when(tenantConfigRepository.findConfigValue(TENANT, "GLIFIC_MESSAGE_TEMPLATES"))
+                    .thenReturn(Optional.of(TEMPLATES_JSON));
+
+            assertThat(service.resolveScreenMessage(TENANT, "INTRO_MESSAGE", "hindi"))
+                    .contains("नमस्ते {name}");
         }
     }
 

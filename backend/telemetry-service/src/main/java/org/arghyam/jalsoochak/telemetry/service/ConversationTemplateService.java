@@ -19,14 +19,19 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Resolves Glific UI messages/options from the consolidated tenant config:
- * config_key = GLIFIC_MESSAGE_TEMPLATES, config_value = JSON.
+ * config_key = WHATSAPP_MESSAGE_TEMPLATES, config_value = JSON.
  *
  * Falls back to empty results if the config is missing/invalid; callers can then use legacy per-key configs.
  */
 @Service
 @Slf4j
 public class ConversationTemplateService {
-    public static final String CONFIG_KEY = "GLIFIC_MESSAGE_TEMPLATES";
+    public static final String CONFIG_KEY = "WHATSAPP_MESSAGE_TEMPLATES";
+    /**
+     * The key's previous name, read only when {@link #CONFIG_KEY} is absent. tenant-service renames
+     * stored rows in a migration, and this service cannot know whether that migration has run yet.
+     */
+    static final String LEGACY_CONFIG_KEY = "GLIFIC_MESSAGE_TEMPLATES";
 
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
@@ -249,6 +254,7 @@ public class ConversationTemplateService {
 
     private Optional<JsonNode> loadTemplatesFromRepository(Integer tenantId) {
         return tenantConfigRepository.findConfigValue(tenantId, CONFIG_KEY)
+                .or(() -> tenantConfigRepository.findConfigValue(tenantId, LEGACY_CONFIG_KEY))
                 .flatMap(raw -> {
                     try {
                         JsonNode root = objectMapper.readTree(raw);

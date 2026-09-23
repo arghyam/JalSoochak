@@ -17,7 +17,7 @@ import java.util.Map;
  * Defines all screens, prompts, options, messages, and reasons for the conversation flow.
  * Includes multilingual support (all Indian official languages).
  * 
- * This is a single configuration key (GLIFIC_MESSAGE_TEMPLATES) that replaces multiple
+ * This is a single configuration key (WHATSAPP_MESSAGE_TEMPLATES) that replaces multiple
  * individual message keys, providing a hierarchical and maintainable structure.
  * 
  * Example structure:
@@ -42,7 +42,7 @@ import java.util.Map;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-public final class GlificMessagesConfigDTO implements ConfigValueDTO {
+public final class WhatsAppMessagesConfigDTO implements ConfigValueDTO {
     /**
      * Schema version for future compatibility and migrations.
      * Increment when the structure changes in a breaking way.

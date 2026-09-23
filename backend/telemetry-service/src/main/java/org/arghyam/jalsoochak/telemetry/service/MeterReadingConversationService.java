@@ -98,7 +98,7 @@ public class MeterReadingConversationService {
     private static final String DEFAULT_METER_CHANGE_PROMPT_HINDI =
             "कृपया नंबर टाइप करके सबमिशन न होने के कारण चुनें";
 
-    /** LOCATION-AFFINITY: {@code GLIFIC_MESSAGE_TEMPLATES} screen holding the boundary warning. */
+    /** LOCATION-AFFINITY: {@code WHATSAPP_MESSAGE_TEMPLATES} screen holding the boundary warning. */
     private static final String LOCATION_BOUNDARY_SCREEN = "LOCATION_BOUNDARY";
     /** Legacy per-language config key, suffixed with the normalized language name. */
     private static final String LOCATION_BOUNDARY_CONFIG_KEY = "location_boundary_warning";
@@ -1649,7 +1649,7 @@ public class MeterReadingConversationService {
      * boundary, in their own language.
      *
      * <p>Resolved the same way as every other operator-facing screen — the tenant's
-     * {@code GLIFIC_MESSAGE_TEMPLATES} JSON first, then the legacy per-key config rows, then the
+     * {@code WHATSAPP_MESSAGE_TEMPLATES} JSON first, then the legacy per-key config rows, then the
      * English floor — so a tenant that configures nothing still gets a usable sentence.
      *
      * <p>The {@code Yes | No} choices are deliberately absent. They are Glific quick-reply buttons
