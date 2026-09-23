@@ -13,17 +13,17 @@ import java.util.Optional;
 
 @Service
 @Slf4j
-public class GlificMessageService {
+public class ConversationMessageService {
 
-    private final GlificOperatorContextService operatorContextService;
-    private final GlificLocalizationService localizationService;
+    private final OperatorContextService operatorContextService;
+    private final ConversationLocalizationService localizationService;
     private final TenantConfigRepository tenantConfigRepository;
-    private final GlificMessageTemplatesService templatesService;
+    private final ConversationTemplateService templatesService;
 
-    public GlificMessageService(GlificOperatorContextService operatorContextService,
-                                GlificLocalizationService localizationService,
-                                TenantConfigRepository tenantConfigRepository,
-                                GlificMessageTemplatesService templatesService) {
+    public ConversationMessageService(OperatorContextService operatorContextService,
+                                      ConversationLocalizationService localizationService,
+                                      TenantConfigRepository tenantConfigRepository,
+                                      ConversationTemplateService templatesService) {
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
         this.tenantConfigRepository = tenantConfigRepository;

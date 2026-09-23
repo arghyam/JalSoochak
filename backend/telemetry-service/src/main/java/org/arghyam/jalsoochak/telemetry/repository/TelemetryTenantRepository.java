@@ -473,7 +473,7 @@ public class TelemetryTenantRepository {
      * submitted from.
      *
      * <p>Deliberately separate from {@link #schemeHasLatitudeAndLongitude}, which answers a
-     * different question for a different caller — {@code GlificSelectionService} uses that boolean
+     * different question for a different caller — {@code ConversationSelectionService} uses that boolean
      * to decide whether the flow asks for a location at all, and folding the two together would
      * couple the prompt decision to the distance check.
      *

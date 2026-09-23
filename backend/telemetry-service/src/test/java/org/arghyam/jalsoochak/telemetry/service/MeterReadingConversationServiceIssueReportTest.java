@@ -29,19 +29,19 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class GlificMeterWorkflowServiceIssueReportTest {
+class MeterReadingConversationServiceIssueReportTest {
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
-    private GlificLocalizationService localizationService;
+    private ConversationLocalizationService localizationService;
 
     @Mock
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
-    private GlificMessageTemplatesService templatesService;
+    private ConversationTemplateService templatesService;
 
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
@@ -56,7 +56,7 @@ class GlificMeterWorkflowServiceIssueReportTest {
     private com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     @InjectMocks
-    private GlificMeterWorkflowService service;
+    private MeterReadingConversationService service;
 
     @Test
     void issueReportSubmitStoresReason2AsAnomalyAndNotInFlowReading() {
@@ -225,11 +225,11 @@ class GlificMeterWorkflowServiceIssueReportTest {
         when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        List<GlificMessageTemplatesService.TemplateOption> templateReasons = List.of(
-                new GlificMessageTemplatesService.TemplateOption("REASON_1", 1, java.util.Map.of("en", "Meter Replaced")),
-                new GlificMessageTemplatesService.TemplateOption("REASON_2", 2, java.util.Map.of("en", "Incorrect Reading Entered Previously")),
-                new GlificMessageTemplatesService.TemplateOption("REASON_3", 3, java.util.Map.of("en", "No Reading Submission")),
-                new GlificMessageTemplatesService.TemplateOption("REASON_4", 4, java.util.Map.of("en", "No Water Supply"))
+        List<ConversationTemplateService.TemplateOption> templateReasons = List.of(
+                new ConversationTemplateService.TemplateOption("REASON_1", 1, java.util.Map.of("en", "Meter Replaced")),
+                new ConversationTemplateService.TemplateOption("REASON_2", 2, java.util.Map.of("en", "Incorrect Reading Entered Previously")),
+                new ConversationTemplateService.TemplateOption("REASON_3", 3, java.util.Map.of("en", "No Reading Submission")),
+                new ConversationTemplateService.TemplateOption("REASON_4", 4, java.util.Map.of("en", "No Water Supply"))
         );
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(templateReasons);

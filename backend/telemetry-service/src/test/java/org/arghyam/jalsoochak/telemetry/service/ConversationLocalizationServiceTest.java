@@ -32,17 +32,17 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("GlificLocalizationService")
-class GlificLocalizationServiceTest {
+@DisplayName("ConversationLocalizationService")
+class ConversationLocalizationServiceTest {
 
     private static final String CONTACT = "919999900001";
     private static final String HINDI = "hindi";
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
 
     @InjectMocks
-    private GlificLocalizationService service;
+    private ConversationLocalizationService service;
 
     @Nested
     @DisplayName("normalizeLanguageKey")

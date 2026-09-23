@@ -66,7 +66,7 @@ class BfmReadingServiceRolloverTest {
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private ReadingChannelResolver readingChannelResolver;
 
@@ -82,7 +82,7 @@ class BfmReadingServiceRolloverTest {
                 telemetryEventPublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
-                glificOperatorContextService,
+                operatorContextService,
                 null,
                 readingChannelResolver,
                 new RolloverResolutionService(true, new ObjectMapper()),

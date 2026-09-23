@@ -42,7 +42,7 @@ import java.util.regex.Pattern;
 
 @Service
 @Slf4j
-public class GlificMeterWorkflowService {
+public class MeterReadingConversationService {
     /**
      * Allowlist for operator-supplied free-text issue reasons.
      *
@@ -66,7 +66,7 @@ public class GlificMeterWorkflowService {
      *
      * <p>Deliberately admits <strong>no punctuation</strong> — not even a comma — which is a
      * knowing trade-off: it keeps the rule identical across every free-text reason path, and the
-     * localised operator-facing copy at {@code GlificLocalizationService} ("Issue reason can only
+     * localised operator-facing copy at {@code ConversationLocalizationService} ("Issue reason can only
      * contain letters, numbers, and spaces.") states this rule verbatim. <strong>Widening this
      * pattern to punctuation means rewriting that copy in every configured language</strong>; the
      * two must change together. Combining marks need no copy change — a reader sees them as part
@@ -166,25 +166,25 @@ public class GlificMeterWorkflowService {
             "others"
     );
 
-    private final GlificOperatorContextService operatorContextService;
-    private final GlificLocalizationService localizationService;
+    private final OperatorContextService operatorContextService;
+    private final ConversationLocalizationService localizationService;
     private final TenantConfigRepository tenantConfigRepository;
-    private final GlificMessageTemplatesService templatesService;
+    private final ConversationTemplateService templatesService;
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final ObjectMapper objectMapper;
     private final LocationAffinityService locationAffinityService;
 
-    public GlificMeterWorkflowService(GlificOperatorContextService operatorContextService,
-                                      GlificLocalizationService localizationService,
-                                      TenantConfigRepository tenantConfigRepository,
-                                      GlificMessageTemplatesService templatesService,
-                                      TelemetryTenantRepository telemetryTenantRepository,
-                                      UserChannelPreferenceRepository userChannelPreferenceRepository,
-                                      TelemetryEventPublisher telemetryEventPublisher,
-                                      ObjectMapper objectMapper,
-                                      LocationAffinityService locationAffinityService) {
+    public MeterReadingConversationService(OperatorContextService operatorContextService,
+                                           ConversationLocalizationService localizationService,
+                                           TenantConfigRepository tenantConfigRepository,
+                                           ConversationTemplateService templatesService,
+                                           TelemetryTenantRepository telemetryTenantRepository,
+                                           UserChannelPreferenceRepository userChannelPreferenceRepository,
+                                           TelemetryEventPublisher telemetryEventPublisher,
+                                           ObjectMapper objectMapper,
+                                           LocationAffinityService locationAffinityService) {
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
         this.tenantConfigRepository = tenantConfigRepository;
@@ -329,7 +329,7 @@ public class GlificMeterWorkflowService {
                         .orElse(defaultPrompt);
             }
 
-            List<GlificMessageTemplatesService.TemplateOption> templateReasons =
+            List<ConversationTemplateService.TemplateOption> templateReasons =
                     templatesService.resolveScreenReasons(tenantId, "ISSUE_REPORT");
             List<String> reasons;
             if (!templateReasons.isEmpty()) {
@@ -596,13 +596,13 @@ public class GlificMeterWorkflowService {
             );
             String rawIssueReason = request.getIssueReason().trim();
 
-            List<GlificMessageTemplatesService.TemplateOption> templateReasons =
+            List<ConversationTemplateService.TemplateOption> templateReasons =
                     templatesService.resolveScreenReasons(tenantId, "ISSUE_REPORT");
             List<String> reasons;
             List<String> selectionKeys;
             if (!templateReasons.isEmpty()) {
                 reasons = templateReasons.stream().map(r -> r.labelForLanguageKey(languageKey)).toList();
-                selectionKeys = templateReasons.stream().map(GlificMessageTemplatesService.TemplateOption::key).toList();
+                selectionKeys = templateReasons.stream().map(ConversationTemplateService.TemplateOption::key).toList();
             } else {
                 reasons = tenantConfigRepository.findIssueReportReasons(tenantId, languageKey);
                 if (reasons.isEmpty()) {
@@ -621,11 +621,11 @@ public class GlificMeterWorkflowService {
             boolean matchedConfiguredReason = false;
             if (!templateReasons.isEmpty()) {
                 Integer index = parseSelectionIndex(rawIssueReason, templateReasons.size());
-                GlificMessageTemplatesService.TemplateOption matched = null;
+                ConversationTemplateService.TemplateOption matched = null;
                 if (index != null) {
                     matched = templateReasons.get(index);
                 } else {
-                    for (GlificMessageTemplatesService.TemplateOption option : templateReasons) {
+                    for (ConversationTemplateService.TemplateOption option : templateReasons) {
                         if (option.matchesAnyLabel(rawIssueReason)) {
                             matched = option;
                             break;

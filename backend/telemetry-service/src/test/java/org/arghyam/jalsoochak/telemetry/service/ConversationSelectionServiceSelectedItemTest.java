@@ -23,16 +23,16 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class GlificSelectionServiceSelectedItemTest {
+class ConversationSelectionServiceSelectedItemTest {
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
-    private GlificLocalizationService localizationService;
+    private ConversationLocalizationService localizationService;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificMessageTemplatesService templatesService;
+    private ConversationTemplateService templatesService;
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
     @Mock
@@ -44,7 +44,7 @@ class GlificSelectionServiceSelectedItemTest {
 
     @Test
     void selectedItemReadingSubmissionReturnsNormalCodeOnlyWhenLocationCheckIsYesAndSchemeHasCoordinates() {
-        GlificSelectionService service = new GlificSelectionService(
+        ConversationSelectionService service = new ConversationSelectionService(
                 operatorContextService,
                 localizationService,
                 tenantConfigRepository,
@@ -101,7 +101,7 @@ class GlificSelectionServiceSelectedItemTest {
 
     @Test
     void selectedItemReadingSubmissionReturnsLocationNotSelectedWhenSchemeIsMissingCoordinates() {
-        GlificSelectionService service = new GlificSelectionService(
+        ConversationSelectionService service = new ConversationSelectionService(
                 operatorContextService,
                 localizationService,
                 tenantConfigRepository,

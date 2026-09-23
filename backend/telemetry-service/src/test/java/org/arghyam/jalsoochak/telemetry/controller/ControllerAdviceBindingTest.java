@@ -19,10 +19,10 @@ import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.ingest.CanonicalReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapperRegistry;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
-import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
-import org.arghyam.jalsoochak.telemetry.service.GlificMessageService;
-import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
-import org.arghyam.jalsoochak.telemetry.service.GlificSelectionService;
+import org.arghyam.jalsoochak.telemetry.service.ConversationMessageService;
+import org.arghyam.jalsoochak.telemetry.service.ConversationSelectionService;
+import org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.MeterReadingConversationService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.arghyam.jalsoochak.telemetry.service.WelcomeMessageService;
@@ -98,13 +98,13 @@ class ControllerAdviceBindingTest {
     private static List<ControllerAdviceBean> adviceBeans;
 
     @Mock
-    private GlificImageWorkflowService imageWorkflowService;
+    private MeterImageWorkflowService imageWorkflowService;
     @Mock
-    private GlificMeterWorkflowService meterWorkflowService;
+    private MeterReadingConversationService meterWorkflowService;
     @Mock
-    private GlificSelectionService selectionService;
+    private ConversationSelectionService selectionService;
     @Mock
-    private GlificMessageService messageService;
+    private ConversationMessageService messageService;
     @Mock
     private TelemetryApiKeyService apiKeyService;
     @Mock

@@ -2,7 +2,7 @@ package org.arghyam.jalsoochak.telemetry.controller.webhook;
 
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
-import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.MeterReadingConversationService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -40,7 +40,7 @@ class WebhookValidationExceptionHandlerTest {
     private static final String OTHERS_SUBMIT = "/api/v1/telemetry/others/submitted";
 
     @Mock
-    private GlificMeterWorkflowService meterWorkflowService;
+    private MeterReadingConversationService meterWorkflowService;
 
     private MockMvc mockMvc() {
         return MockMvcBuilders.standaloneSetup(new IssueReportWebhookController(meterWorkflowService))

@@ -11,7 +11,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapperRegistry;
-import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,12 +50,12 @@ public class MultiFormatReadingController {
 
     private final ReadingRequestMapperRegistry mapperRegistry;
     private final TelemetryApiKeyService telemetryApiKeyService;
-    private final GlificImageWorkflowService imageWorkflowService;
+    private final MeterImageWorkflowService imageWorkflowService;
     private final Validator validator;
 
     public MultiFormatReadingController(ReadingRequestMapperRegistry mapperRegistry,
                                         TelemetryApiKeyService telemetryApiKeyService,
-                                        GlificImageWorkflowService imageWorkflowService,
+                                        MeterImageWorkflowService imageWorkflowService,
                                         Validator validator) {
         this.mapperRegistry = mapperRegistry;
         this.telemetryApiKeyService = telemetryApiKeyService;

@@ -39,7 +39,7 @@ class TelemetrySubmissionAuditServiceTest {
     private static final String PHONE = "919999900001";
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
 

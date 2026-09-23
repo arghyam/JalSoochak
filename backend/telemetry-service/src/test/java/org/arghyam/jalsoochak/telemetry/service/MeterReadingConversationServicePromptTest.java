@@ -44,21 +44,21 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("GlificMeterWorkflowService — prompts")
-class GlificMeterWorkflowServicePromptTest {
+@DisplayName("MeterReadingConversationService — prompts")
+class MeterReadingConversationServicePromptTest {
 
     private static final String CONTACT = "919999900001";
     private static final String SCHEMA = "tenant_as";
     private static final int TENANT = 17;
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
-    private GlificLocalizationService localizationService;
+    private ConversationLocalizationService localizationService;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificMessageTemplatesService templatesService;
+    private ConversationTemplateService templatesService;
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
     @Mock
@@ -69,7 +69,7 @@ class GlificMeterWorkflowServicePromptTest {
     private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks
-    private GlificMeterWorkflowService service;
+    private MeterReadingConversationService service;
 
     private static TelemetryOperatorWithSchema operator(Integer tenantId) {
         return new TelemetryOperatorWithSchema(SCHEMA,
@@ -291,9 +291,9 @@ class GlificMeterWorkflowServicePromptTest {
         @Test
         void issueReportPromptPrefersTemplateReasonsOverTheLegacyKeys() {
             when(templatesService.resolveScreenReasons(TENANT, "ISSUE_REPORT")).thenReturn(List.of(
-                    new GlificMessageTemplatesService.TemplateOption("POWER", 1,
+                    new ConversationTemplateService.TemplateOption("POWER", 1,
                             java.util.Map.of("en", "No electricity")),
-                    new GlificMessageTemplatesService.TemplateOption("PUMP", 2,
+                    new ConversationTemplateService.TemplateOption("PUMP", 2,
                             java.util.Map.of("en", "Pump failure"))));
 
             assertThat(service.issueReportPromptMessage(introRequest(CONTACT)).getMessage())

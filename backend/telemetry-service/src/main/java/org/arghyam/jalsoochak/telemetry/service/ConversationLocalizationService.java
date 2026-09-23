@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 
 @Service
 @Slf4j
-public class GlificLocalizationService {
+public class ConversationLocalizationService {
     private static final Pattern SUBMITTED_PREVIOUS_PATTERN = Pattern.compile(
             "(?i)submitted\\s+reading:\\s*([^\\.]+)\\.\\s*previous\\s+reading:\\s*([^\\.]+)\\.?"
     );
@@ -19,9 +19,9 @@ public class GlificLocalizationService {
             "(?i)extracted\\s+reading:\\s*([^\\.]+)"
     );
 
-    private final GlificOperatorContextService operatorContextService;
+    private final OperatorContextService operatorContextService;
 
-    public GlificLocalizationService(GlificOperatorContextService operatorContextService) {
+    public ConversationLocalizationService(OperatorContextService operatorContextService) {
         this.operatorContextService = operatorContextService;
     }
 

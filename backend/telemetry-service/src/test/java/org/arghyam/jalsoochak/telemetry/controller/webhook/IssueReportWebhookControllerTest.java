@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.telemetry.controller.webhook;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
-import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.MeterReadingConversationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,7 +29,7 @@ class IssueReportWebhookControllerTest {
     private static final RuntimeException BOOM = new IllegalStateException("downstream failure");
 
     @Mock
-    private GlificMeterWorkflowService meterWorkflowService;
+    private MeterReadingConversationService meterWorkflowService;
 
     private IssueReportWebhookController controller;
 

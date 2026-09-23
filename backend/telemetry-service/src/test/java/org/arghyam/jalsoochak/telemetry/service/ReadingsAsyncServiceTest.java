@@ -28,22 +28,22 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("GlificReadingsAsyncService")
-class GlificReadingsAsyncServiceTest {
+@DisplayName("ReadingsAsyncService")
+class ReadingsAsyncServiceTest {
 
     private static final String CONTACT = "919999900001";
     private static final String JOB_ID = "job-1";
 
     @Mock
-    private GlificImageWorkflowService imageWorkflowService;
+    private MeterImageWorkflowService imageWorkflowService;
     @Mock
     private GlificFlowResumeService glificFlowResumeService;
 
     /** Runs submitted work inline so the test observes the completed side effects. */
     private final Executor inlineExecutor = Runnable::run;
 
-    private GlificReadingsAsyncService service() {
-        return new GlificReadingsAsyncService(imageWorkflowService, glificFlowResumeService, inlineExecutor);
+    private ReadingsAsyncService service() {
+        return new ReadingsAsyncService(imageWorkflowService, glificFlowResumeService, inlineExecutor);
     }
 
     private static GlificWebhookRequest request() {
@@ -55,7 +55,7 @@ class GlificReadingsAsyncServiceTest {
     @Test
     void submitsTheWorkToTheConfiguredExecutorRatherThanRunningItInline() {
         Executor neverRuns = command -> { /* deliberately drops the task */ };
-        new GlificReadingsAsyncService(imageWorkflowService, glificFlowResumeService, neverRuns)
+        new ReadingsAsyncService(imageWorkflowService, glificFlowResumeService, neverRuns)
                 .enqueueProcessAndResume(request(), JOB_ID);
 
         verify(imageWorkflowService, org.mockito.Mockito.never()).processImage(any());

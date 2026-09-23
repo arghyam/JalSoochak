@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class TelemetrySubmissionAuditService {
 
-    private final GlificOperatorContextService operatorContextService;
+    private final OperatorContextService operatorContextService;
     private final TelemetryTenantRepository telemetryTenantRepository;
 
     private final Map<LocalDate, Set<String>> dailyUniqueSubmitters = new ConcurrentHashMap<>();

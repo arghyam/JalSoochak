@@ -11,9 +11,9 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
-import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
-import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
-import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
+import org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.MeterReadingConversationService;
+import org.arghyam.jalsoochak.telemetry.service.ReadingsAsyncService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -54,11 +54,11 @@ class ReadingWebhookControllerTest {
     private static final RuntimeException BOOM = new IllegalStateException("downstream failure");
 
     @Mock
-    private GlificImageWorkflowService imageWorkflowService;
+    private MeterImageWorkflowService imageWorkflowService;
     @Mock
-    private GlificMeterWorkflowService meterWorkflowService;
+    private MeterReadingConversationService meterWorkflowService;
     @Mock
-    private GlificReadingsAsyncService glificReadingsAsyncService;
+    private ReadingsAsyncService readingsAsyncService;
     @Mock
     private TelemetrySubmissionAuditService auditService;
 
@@ -71,7 +71,7 @@ class ReadingWebhookControllerTest {
     @BeforeEach
     void setUp() {
         controller = new ReadingWebhookController(
-                imageWorkflowService, meterWorkflowService, glificReadingsAsyncService, auditService);
+                imageWorkflowService, meterWorkflowService, readingsAsyncService, auditService);
         // any() rather than anyString(): the controller passes a null contactId straight through when
         // the webhook body is missing, and the real audit service handles that.
         when(auditService.captureForContact(any()))
@@ -99,7 +99,7 @@ class ReadingWebhookControllerTest {
             assertThat(response.getBody().isSuccess()).isTrue();
             assertThat(response.getBody().getStatus()).isEqualTo("accepted");
             assertThat(response.getBody().getJobId()).isNotBlank();
-            verify(glificReadingsAsyncService)
+            verify(readingsAsyncService)
                     .enqueueProcessAndResume(same(request), eq(response.getBody().getJobId()));
             verify(imageWorkflowService, never()).processImage(any());
         }
@@ -135,7 +135,7 @@ class ReadingWebhookControllerTest {
         @Test
         void returnsAnErrorAckWhenEnqueueingFails() {
             org.mockito.Mockito.doThrow(BOOM)
-                    .when(glificReadingsAsyncService).enqueueProcessAndResume(any(), anyString());
+                    .when(readingsAsyncService).enqueueProcessAndResume(any(), anyString());
 
             var response = controller.receive(request());
 
@@ -155,7 +155,7 @@ class ReadingWebhookControllerTest {
         @Test
         void worksWithoutAnAuditService() {
             var noAudit = new ReadingWebhookController(
-                    imageWorkflowService, meterWorkflowService, glificReadingsAsyncService);
+                    imageWorkflowService, meterWorkflowService, readingsAsyncService);
 
             assertThat(noAudit.receive(request()).getStatusCode()).isEqualTo(HttpStatus.OK);
         }

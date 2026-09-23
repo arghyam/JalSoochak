@@ -53,7 +53,7 @@ class BfmReadingServiceAnomalyDedupTest {
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
     private ReadingChannelResolver readingChannelResolver;
@@ -68,7 +68,7 @@ class BfmReadingServiceAnomalyDedupTest {
                 telemetryEventPublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
-                glificOperatorContextService,
+                operatorContextService,
                 null,
                 readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),

@@ -10,15 +10,15 @@ import java.util.concurrent.Executor;
 
 @Service
 @Slf4j
-public class GlificReadingsAsyncService {
+public class ReadingsAsyncService {
 
-    private final GlificImageWorkflowService imageWorkflowService;
+    private final MeterImageWorkflowService imageWorkflowService;
     private final GlificFlowResumeService glificFlowResumeService;
     private final Executor glificSyncExecutor;
 
-    public GlificReadingsAsyncService(GlificImageWorkflowService imageWorkflowService,
-                                      GlificFlowResumeService glificFlowResumeService,
-                                      @Qualifier("glificSyncExecutor") Executor glificSyncExecutor) {
+    public ReadingsAsyncService(MeterImageWorkflowService imageWorkflowService,
+                                GlificFlowResumeService glificFlowResumeService,
+                                @Qualifier("glificSyncExecutor") Executor glificSyncExecutor) {
         this.imageWorkflowService = imageWorkflowService;
         this.glificFlowResumeService = glificFlowResumeService;
         this.glificSyncExecutor = glificSyncExecutor;

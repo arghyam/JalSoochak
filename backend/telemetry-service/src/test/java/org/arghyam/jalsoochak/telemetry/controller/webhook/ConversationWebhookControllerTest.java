@@ -5,7 +5,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.TriggerWelcomeMessageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.ClosingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
-import org.arghyam.jalsoochak.telemetry.service.GlificMessageService;
+import org.arghyam.jalsoochak.telemetry.service.ConversationMessageService;
 import org.arghyam.jalsoochak.telemetry.service.WelcomeMessageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -37,7 +37,7 @@ class ConversationWebhookControllerTest {
     private static final RuntimeException BOOM = new IllegalStateException("downstream failure");
 
     @Mock
-    private GlificMessageService messageService;
+    private ConversationMessageService messageService;
     @Mock
     private WelcomeMessageService welcomeMessageService;
 

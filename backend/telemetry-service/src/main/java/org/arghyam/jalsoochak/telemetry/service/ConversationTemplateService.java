@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Service
 @Slf4j
-public class GlificMessageTemplatesService {
+public class ConversationTemplateService {
     public static final String CONFIG_KEY = "GLIFIC_MESSAGE_TEMPLATES";
 
     private final TenantConfigRepository tenantConfigRepository;
@@ -36,7 +36,7 @@ public class GlificMessageTemplatesService {
     private long templatesCacheTtlMs = 120_000L;
     private final Map<Integer, TimedCacheValue<Optional<JsonNode>>> templatesCache = new ConcurrentHashMap<>();
 
-    public GlificMessageTemplatesService(TenantConfigRepository tenantConfigRepository, ObjectMapper objectMapper) {
+    public ConversationTemplateService(TenantConfigRepository tenantConfigRepository, ObjectMapper objectMapper) {
         this.tenantConfigRepository = tenantConfigRepository;
         this.objectMapper = objectMapper;
     }

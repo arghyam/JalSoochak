@@ -9,9 +9,9 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ManualReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
-import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
-import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
-import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
+import org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.MeterReadingConversationService;
+import org.arghyam.jalsoochak.telemetry.service.ReadingsAsyncService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import jakarta.validation.Valid;
@@ -37,30 +37,30 @@ import java.util.UUID;
 @RequestMapping("/api/v1/telemetry")
 public class ReadingWebhookController {
     private static final Logger log = LoggerFactory.getLogger(ReadingWebhookController.class);
-    private final GlificImageWorkflowService imageWorkflowService;
-    private final GlificMeterWorkflowService meterWorkflowService;
-    private final GlificReadingsAsyncService glificReadingsAsyncService;
+    private final MeterImageWorkflowService imageWorkflowService;
+    private final MeterReadingConversationService meterWorkflowService;
+    private final ReadingsAsyncService readingsAsyncService;
     private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
 
-    public ReadingWebhookController(GlificImageWorkflowService imageWorkflowService,
-                                    GlificMeterWorkflowService meterWorkflowService) {
+    public ReadingWebhookController(MeterImageWorkflowService imageWorkflowService,
+                                    MeterReadingConversationService meterWorkflowService) {
         this(imageWorkflowService, meterWorkflowService, null, null);
     }
 
-    public ReadingWebhookController(GlificImageWorkflowService imageWorkflowService,
-                                    GlificMeterWorkflowService meterWorkflowService,
-                                    GlificReadingsAsyncService glificReadingsAsyncService) {
-        this(imageWorkflowService, meterWorkflowService, glificReadingsAsyncService, null);
+    public ReadingWebhookController(MeterImageWorkflowService imageWorkflowService,
+                                    MeterReadingConversationService meterWorkflowService,
+                                    ReadingsAsyncService readingsAsyncService) {
+        this(imageWorkflowService, meterWorkflowService, readingsAsyncService, null);
     }
 
     @Autowired
-    public ReadingWebhookController(GlificImageWorkflowService imageWorkflowService,
-                                    GlificMeterWorkflowService meterWorkflowService,
-                                    GlificReadingsAsyncService glificReadingsAsyncService,
+    public ReadingWebhookController(MeterImageWorkflowService imageWorkflowService,
+                                    MeterReadingConversationService meterWorkflowService,
+                                    ReadingsAsyncService readingsAsyncService,
                                     TelemetrySubmissionAuditService telemetrySubmissionAuditService) {
         this.imageWorkflowService = imageWorkflowService;
         this.meterWorkflowService = meterWorkflowService;
-        this.glificReadingsAsyncService = glificReadingsAsyncService;
+        this.readingsAsyncService = readingsAsyncService;
         this.telemetrySubmissionAuditService = telemetrySubmissionAuditService;
     }
 
@@ -78,8 +78,8 @@ public class ReadingWebhookController {
             String jobId = UUID.randomUUID().toString();
             String status = "ACCEPTED";
             String message = "Reading request accepted for asynchronous processing.";
-            if (glificReadingsAsyncService != null) {
-                glificReadingsAsyncService.enqueueProcessAndResume(glificWebhookRequest, jobId);
+            if (readingsAsyncService != null) {
+                readingsAsyncService.enqueueProcessAndResume(glificWebhookRequest, jobId);
                 log.info("readings_glific queued jobId={} contact={} responseMode=async",
                         jobId,
                         maskPhone(glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null));

@@ -55,7 +55,7 @@ class BfmReadingServicePlaceholderRowTest {
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
     private FlowVisionReadingsRetryService flowVisionReadingsRetryService;
@@ -215,7 +215,7 @@ class BfmReadingServicePlaceholderRowTest {
                 0
         );
 
-        when(glificOperatorContextService.resolveOperatorWithSchema("919999999999"))
+        when(operatorContextService.resolveOperatorWithSchema("919999999999"))
                 .thenReturn(new TelemetryOperatorWithSchema(schemaName, operator));
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(schemaName, 1L))
                 .thenReturn(Optional.of(latestReading));

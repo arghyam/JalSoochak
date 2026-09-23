@@ -15,7 +15,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.dto.response.UpdateYesterdayFinalReadingBySchemeResponse;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
-import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySchemeReadingService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
@@ -51,20 +51,20 @@ public class ReadingIngestController {
     private static final String SCHEME_TOKEN = "scheme";
     private static final String OPERATOR_TOKEN = "operator";
 
-    private final GlificImageWorkflowService imageWorkflowService;
+    private final MeterImageWorkflowService imageWorkflowService;
     private final TelemetryApiKeyService telemetryApiKeyService;
     private final BfmReadingService bfmReadingService;
     private final TelemetrySchemeReadingService telemetrySchemeReadingService;
     private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
 
-    public ReadingIngestController(GlificImageWorkflowService imageWorkflowService,
+    public ReadingIngestController(MeterImageWorkflowService imageWorkflowService,
                                    TelemetryApiKeyService telemetryApiKeyService,
                                    BfmReadingService bfmReadingService) {
         this(imageWorkflowService, telemetryApiKeyService, bfmReadingService, null, null);
     }
 
     @Autowired
-    public ReadingIngestController(GlificImageWorkflowService imageWorkflowService,
+    public ReadingIngestController(MeterImageWorkflowService imageWorkflowService,
                                    TelemetryApiKeyService telemetryApiKeyService,
                                    BfmReadingService bfmReadingService,
                                    TelemetrySchemeReadingService telemetrySchemeReadingService,
@@ -615,7 +615,7 @@ public class ReadingIngestController {
         // A 404 must not describe itself as BAD_REQUEST: the status line and the body would disagree,
         // and an integrator reading only the body cannot tell "not found" from "malformed request".
         // Keyed on the reason the same way the api-key check above is, and the same way
-        // GlificImageWorkflowService classifies its own failures. The operator miss deliberately maps
+        // MeterImageWorkflowService classifies its own failures. The operator miss deliberately maps
         // to one code for both "no such contact" and "contact belongs to another tenant" — the two
         // share a single reason string precisely so neither confirms the contact exists elsewhere,
         // and a code that separated them would undo that.

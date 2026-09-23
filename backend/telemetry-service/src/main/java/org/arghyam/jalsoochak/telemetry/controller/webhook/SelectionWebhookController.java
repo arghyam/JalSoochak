@@ -8,7 +8,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
-import org.arghyam.jalsoochak.telemetry.service.GlificSelectionService;
+import org.arghyam.jalsoochak.telemetry.service.ConversationSelectionService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,9 +27,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/telemetry")
 public class SelectionWebhookController {
     private static final Logger log = LoggerFactory.getLogger(SelectionWebhookController.class);
-    private final GlificSelectionService selectionService;
+    private final ConversationSelectionService selectionService;
 
-    public SelectionWebhookController(GlificSelectionService selectionService) {
+    public SelectionWebhookController(ConversationSelectionService selectionService) {
         this.selectionService = selectionService;
     }
 

@@ -6,7 +6,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ClosingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.TriggerWelcomeMessageRequest;
-import org.arghyam.jalsoochak.telemetry.service.GlificMessageService;
+import org.arghyam.jalsoochak.telemetry.service.ConversationMessageService;
 import org.arghyam.jalsoochak.telemetry.service.WelcomeMessageService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -26,10 +26,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/telemetry")
 public class ConversationWebhookController {
     private static final Logger log = LoggerFactory.getLogger(ConversationWebhookController.class);
-    private final GlificMessageService messageService;
+    private final ConversationMessageService messageService;
     private final WelcomeMessageService welcomeMessageService;
 
-    public ConversationWebhookController(GlificMessageService messageService,
+    public ConversationWebhookController(ConversationMessageService messageService,
                                          WelcomeMessageService welcomeMessageService) {
         this.messageService = messageService;
         this.welcomeMessageService = welcomeMessageService;

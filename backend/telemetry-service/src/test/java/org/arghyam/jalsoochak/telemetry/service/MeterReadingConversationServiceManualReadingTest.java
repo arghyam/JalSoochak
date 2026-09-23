@@ -39,19 +39,19 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class GlificMeterWorkflowServiceManualReadingTest {
+class MeterReadingConversationServiceManualReadingTest {
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
-    private GlificLocalizationService localizationService;
+    private ConversationLocalizationService localizationService;
 
     @Mock
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
-    private GlificMessageTemplatesService templatesService;
+    private ConversationTemplateService templatesService;
 
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
@@ -73,7 +73,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
     private com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     @InjectMocks
-    private GlificMeterWorkflowService service;
+    private MeterReadingConversationService service;
 
     @Test
     void manualReadingUpdatesTodaysReadingByUpdatingConfirmedOnly() {

@@ -26,7 +26,7 @@ import java.util.Optional;
 
 @Service
 @Slf4j
-public class GlificSelectionService {
+public class ConversationSelectionService {
 
     private static final String[] SMALL_NUMBERS = {
             "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
@@ -37,25 +37,25 @@ public class GlificSelectionService {
             "", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"
     };
 
-    private final GlificOperatorContextService operatorContextService;
-    private final GlificLocalizationService localizationService;
+    private final OperatorContextService operatorContextService;
+    private final ConversationLocalizationService localizationService;
     private final TenantConfigRepository tenantConfigRepository;
-    private final GlificMessageTemplatesService templatesService;
+    private final ConversationTemplateService templatesService;
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     private final GlificContactSyncService glificContactSyncService;
     private final ObjectMapper objectMapper;
 
-    public GlificSelectionService(GlificOperatorContextService operatorContextService,
-                                  GlificLocalizationService localizationService,
-                                  TenantConfigRepository tenantConfigRepository,
-                                  GlificMessageTemplatesService templatesService,
-                                  TelemetryTenantRepository telemetryTenantRepository,
-                                  UserChannelPreferenceRepository userChannelPreferenceRepository,
-                                  UserLanguagePreferenceRepository userLanguagePreferenceRepository,
-                                  GlificContactSyncService glificContactSyncService,
-                                  ObjectMapper objectMapper) {
+    public ConversationSelectionService(OperatorContextService operatorContextService,
+                                        ConversationLocalizationService localizationService,
+                                        TenantConfigRepository tenantConfigRepository,
+                                        ConversationTemplateService templatesService,
+                                        TelemetryTenantRepository telemetryTenantRepository,
+                                        UserChannelPreferenceRepository userChannelPreferenceRepository,
+                                        UserLanguagePreferenceRepository userLanguagePreferenceRepository,
+                                        GlificContactSyncService glificContactSyncService,
+                                        ObjectMapper objectMapper) {
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
         this.tenantConfigRepository = tenantConfigRepository;
@@ -86,7 +86,7 @@ public class GlificSelectionService {
                     .or(() -> tenantConfigRepository.findLanguageSelectionPrompt(tenantId, languageKey))
                     .orElseThrow(() -> new IllegalStateException("language_selection_prompt is not configured"));
 
-            List<GlificMessageTemplatesService.TemplateOption> languageTemplateOptions =
+            List<ConversationTemplateService.TemplateOption> languageTemplateOptions =
                     templatesService.resolveScreenOptions(tenantId, "LANGUAGE_SELECTION");
             List<String> languageOptions;
             if (!languageTemplateOptions.isEmpty()) {
@@ -142,7 +142,7 @@ public class GlificSelectionService {
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
 
-            List<GlificMessageTemplatesService.TemplateOption> languageTemplateOptions =
+            List<ConversationTemplateService.TemplateOption> languageTemplateOptions =
                     templatesService.resolveScreenOptions(tenantId, "LANGUAGE_SELECTION");
             String selectedLanguage;
             int selectedLanguageId;
@@ -151,7 +151,7 @@ public class GlificSelectionService {
             if (!languageTemplateOptions.isEmpty()) {
                 int selectedIndex = resolveTemplateSelectionIndex(request.getLanguage(), languageTemplateOptions, currentLanguageKey)
                         .orElseThrow(() -> new IllegalStateException("Invalid language selection"));
-                GlificMessageTemplatesService.TemplateOption selectedOpt = languageTemplateOptions.get(selectedIndex);
+                ConversationTemplateService.TemplateOption selectedOpt = languageTemplateOptions.get(selectedIndex);
                 selectedLanguageId = selectedOpt.order() > 0 ? selectedOpt.order() : (selectedIndex + 1);
                 // Persist a canonical label (prefer English) so downstream normalization/sync keeps working.
                 selectedLanguage = selectedOpt.canonicalLabel();
@@ -432,7 +432,7 @@ public class GlificSelectionService {
                     .or(() -> tenantConfigRepository.findItemSelectionPrompt(tenantId, languageKey))
                     .orElse("Please select what you want to do:");
 
-            List<GlificMessageTemplatesService.TemplateOption> itemTemplateOptions =
+            List<ConversationTemplateService.TemplateOption> itemTemplateOptions =
                     templatesService.resolveScreenOptions(tenantId, "ITEM_SELECTION");
             List<VisibleItemOption> visibleItemOptions;
             if (!itemTemplateOptions.isEmpty()) {
@@ -489,7 +489,7 @@ public class GlificSelectionService {
 
             String languageKey = localizationService.normalizeLanguageKey(operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
 
-            List<GlificMessageTemplatesService.TemplateOption> itemTemplateOptions =
+            List<ConversationTemplateService.TemplateOption> itemTemplateOptions =
                     templatesService.resolveScreenOptions(tenantId, "ITEM_SELECTION");
             List<VisibleItemOption> visibleItemOptions;
             if (!itemTemplateOptions.isEmpty()) {
@@ -727,7 +727,7 @@ public class GlificSelectionService {
     }
 
     private Optional<Integer> resolveTemplateSelectionIndex(String rawSelection,
-                                                           List<GlificMessageTemplatesService.TemplateOption> options,
+                                                           List<ConversationTemplateService.TemplateOption> options,
                                                            String languageKeyForDisplay) {
         if (rawSelection == null || rawSelection.isBlank()) {
             return Optional.empty();
@@ -762,7 +762,7 @@ public class GlificSelectionService {
 
     private List<String> resolveSupportedChannelOptions(Integer tenantId,
                                                         String languageKey,
-                                                        List<GlificMessageTemplatesService.TemplateOption> channelTemplateOptions) {
+                                                        List<ConversationTemplateService.TemplateOption> channelTemplateOptions) {
         List<String> supportedChannels = resolveTenantSupportedChannels(tenantId);
         if (!supportedChannels.isEmpty()) {
             return supportedChannels;
@@ -819,8 +819,8 @@ public class GlificSelectionService {
 
     private List<VisibleItemOption> buildVisibleItemOptionsFromTemplates(Integer tenantId,
                                                                          String languageKey,
-                                                                         List<GlificMessageTemplatesService.TemplateOption> itemOptions) {
-        List<GlificMessageTemplatesService.TemplateOption> channelTemplateOptions =
+                                                                         List<ConversationTemplateService.TemplateOption> itemOptions) {
+        List<ConversationTemplateService.TemplateOption> channelTemplateOptions =
                 templatesService.resolveScreenOptions(tenantId, "CHANNEL_SELECTION");
         int channelCount = resolveSupportedChannelOptions(tenantId, languageKey, channelTemplateOptions).size();
         if (channelCount == 0) {
@@ -830,7 +830,7 @@ public class GlificSelectionService {
         }
         boolean showChannelChange = channelCount > 1;
 
-        List<GlificMessageTemplatesService.TemplateOption> languageOptions =
+        List<ConversationTemplateService.TemplateOption> languageOptions =
                 templatesService.resolveScreenOptions(tenantId, "LANGUAGE_SELECTION");
         int languageCount = !languageOptions.isEmpty()
                 ? languageOptions.size()
@@ -839,7 +839,7 @@ public class GlificSelectionService {
 
         List<VisibleItemOption> filtered = new ArrayList<>();
         for (int i = 0; i < itemOptions.size(); i++) {
-            GlificMessageTemplatesService.TemplateOption opt = itemOptions.get(i);
+            ConversationTemplateService.TemplateOption opt = itemOptions.get(i);
             String itemCode = toItemCode(opt, itemOptions, i);
             if ("channelChange".equals(itemCode) && !showChannelChange) {
                 continue;
@@ -856,7 +856,7 @@ public class GlificSelectionService {
         if (filtered.isEmpty()) {
             List<VisibleItemOption> fallback = new ArrayList<>();
             for (int i = 0; i < itemOptions.size(); i++) {
-                GlificMessageTemplatesService.TemplateOption opt = itemOptions.get(i);
+                ConversationTemplateService.TemplateOption opt = itemOptions.get(i);
                 fallback.add(new VisibleItemOption(opt.labelForLanguageKey(languageKey), toItemCode(opt, itemOptions, i)));
             }
             return fallback;
@@ -864,8 +864,8 @@ public class GlificSelectionService {
         return filtered;
     }
 
-    private String toItemCode(GlificMessageTemplatesService.TemplateOption opt,
-                              List<GlificMessageTemplatesService.TemplateOption> all,
+    private String toItemCode(ConversationTemplateService.TemplateOption opt,
+                              List<ConversationTemplateService.TemplateOption> all,
                               int index) {
         String canonical = opt == null ? null : opt.canonicalLabel();
         String normalized = canonical == null

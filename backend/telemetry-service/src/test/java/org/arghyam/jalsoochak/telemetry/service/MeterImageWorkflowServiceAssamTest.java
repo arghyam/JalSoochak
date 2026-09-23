@@ -46,7 +46,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class GlificImageWorkflowServiceAssamTest {
+class MeterImageWorkflowServiceAssamTest {
 
     @Mock
     private GlificMediaService glificMediaService;
@@ -58,10 +58,10 @@ class GlificImageWorkflowServiceAssamTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
-    private GlificLocalizationService localizationService;
+    private ConversationLocalizationService localizationService;
 
     @Mock
     private TenantConfigRepository tenantConfigRepository;
@@ -73,7 +73,7 @@ class GlificImageWorkflowServiceAssamTest {
     private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks
-    private GlificImageWorkflowService service;
+    private MeterImageWorkflowService service;
 
     @Test
     void processImageDoesNotRequireSelectedChannel() throws Exception {
@@ -730,7 +730,7 @@ class GlificImageWorkflowServiceAssamTest {
                 .thenReturn("Reading created successfully");
 
         ch.qos.logback.classic.Logger logger =
-                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(GlificImageWorkflowService.class);
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(MeterImageWorkflowService.class);
         Level originalLevel = logger.getLevel();
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
@@ -1094,7 +1094,7 @@ class GlificImageWorkflowServiceAssamTest {
 
     private ListAppender<ILoggingEvent> attachAppender() {
         ch.qos.logback.classic.Logger logger =
-                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(GlificImageWorkflowService.class);
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(MeterImageWorkflowService.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
@@ -1103,7 +1103,7 @@ class GlificImageWorkflowServiceAssamTest {
 
     private void detachAppender(ListAppender<ILoggingEvent> appender) {
         ch.qos.logback.classic.Logger logger =
-                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(GlificImageWorkflowService.class);
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(MeterImageWorkflowService.class);
         logger.detachAppender(appender);
     }
 

@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.telemetry.controller.ingest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateYesterdayFinalReadingBySchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.UpdateYesterdayFinalReadingBySchemeResponse;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
-import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySchemeReadingService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
@@ -56,7 +56,7 @@ class ReadingIngestControllerPatchAuthTest {
     private static final int TENANT_ID = 22;
 
     @Mock
-    private GlificImageWorkflowService imageWorkflowService;
+    private MeterImageWorkflowService imageWorkflowService;
     @Mock
     private BfmReadingService bfmReadingService;
     @Mock

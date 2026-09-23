@@ -40,9 +40,9 @@ class WelcomeMessageServiceTest {
     private static final String SCHEMA = "tenant_as";
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
-    private GlificLocalizationService localizationService;
+    private ConversationLocalizationService localizationService;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
 

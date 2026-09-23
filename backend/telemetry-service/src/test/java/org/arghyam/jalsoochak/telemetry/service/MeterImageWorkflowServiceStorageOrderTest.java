@@ -42,8 +42,8 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("GlificImageWorkflowService — when the image is fetched and stored")
-class GlificImageWorkflowServiceStorageOrderTest {
+@DisplayName("MeterImageWorkflowService — when the image is fetched and stored")
+class MeterImageWorkflowServiceStorageOrderTest {
 
     private static final String CONTACT_ID = "919876543210";
     private static final byte[] IMAGE = {1, 2, 3};
@@ -55,9 +55,9 @@ class GlificImageWorkflowServiceStorageOrderTest {
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
-    private GlificLocalizationService localizationService;
+    private ConversationLocalizationService localizationService;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
@@ -66,7 +66,7 @@ class GlificImageWorkflowServiceStorageOrderTest {
     private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks
-    private GlificImageWorkflowService service;
+    private MeterImageWorkflowService service;
 
     private static GlificWebhookRequest submission() {
         return GlificWebhookRequest.builder()

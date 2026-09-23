@@ -10,7 +10,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
-import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.arghyam.jalsoochak.telemetry.validation.ReadingUrlTestValidation;
 import org.junit.jupiter.api.Test;
@@ -1061,7 +1061,7 @@ class ReadingIngestControllerUnitTest {
         assertEquals(TelemetryErrorCode.PROCESSING_FAILED, response.getBody().getData().getErrorCode());
     }
 
-    private static final class StubImageWorkflowService extends GlificImageWorkflowService {
+    private static final class StubImageWorkflowService extends MeterImageWorkflowService {
         private final boolean rejected;
         private int processAssamReadingCount;
 
@@ -1094,7 +1094,7 @@ class ReadingIngestControllerUnitTest {
         }
     }
 
-    private static final class ThrowingImageWorkflowService extends GlificImageWorkflowService {
+    private static final class ThrowingImageWorkflowService extends MeterImageWorkflowService {
         private final ResponseStatusException failure;
 
         private ThrowingImageWorkflowService(ResponseStatusException failure) {
@@ -1108,7 +1108,7 @@ class ReadingIngestControllerUnitTest {
         }
     }
 
-    private static final class RetryImageWorkflowService extends GlificImageWorkflowService {
+    private static final class RetryImageWorkflowService extends MeterImageWorkflowService {
         private RetryImageWorkflowService() {
             super(null, null, null, null, null, null, null, null);
         }

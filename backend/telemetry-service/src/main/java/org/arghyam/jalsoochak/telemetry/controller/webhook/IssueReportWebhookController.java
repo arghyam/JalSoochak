@@ -4,7 +4,7 @@ import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
-import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.MeterReadingConversationService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,9 +24,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/telemetry")
 public class IssueReportWebhookController {
     private static final Logger log = LoggerFactory.getLogger(IssueReportWebhookController.class);
-    private final GlificMeterWorkflowService meterWorkflowService;
+    private final MeterReadingConversationService meterWorkflowService;
 
-    public IssueReportWebhookController(GlificMeterWorkflowService meterWorkflowService) {
+    public IssueReportWebhookController(MeterReadingConversationService meterWorkflowService) {
         this.meterWorkflowService = meterWorkflowService;
     }
 

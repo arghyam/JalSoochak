@@ -11,7 +11,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.ingest.CanonicalReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapperRegistry;
-import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.arghyam.jalsoochak.telemetry.validation.ReadingUrlTestValidation;
 import org.junit.jupiter.api.Test;
@@ -56,7 +56,7 @@ class MultiFormatReadingControllerTest {
             """;
 
     @Mock
-    private GlificImageWorkflowService imageWorkflowService;
+    private MeterImageWorkflowService imageWorkflowService;
     @Mock
     private TelemetryApiKeyService apiKeyService;
 

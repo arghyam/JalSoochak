@@ -28,7 +28,7 @@ import java.util.function.Predicate;
 
 @Service
 @Slf4j
-public class GlificImageWorkflowService {
+public class MeterImageWorkflowService {
     private static final String OPERATOR_TOKEN = "operator";
     private static final String SCHEME_TOKEN = "scheme";
     private static final String NOT_FOUND_TOKEN = "not found";
@@ -36,8 +36,8 @@ public class GlificImageWorkflowService {
     private final GlificMediaService glificMediaService;
     private final BfmReadingService bfmReadingService;
     private final TelemetryTenantRepository telemetryTenantRepository;
-    private final GlificOperatorContextService operatorContextService;
-    private final GlificLocalizationService localizationService;
+    private final OperatorContextService operatorContextService;
+    private final ConversationLocalizationService localizationService;
     private final TenantConfigRepository tenantConfigRepository;
     private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final ObjectMapper objectMapper;
@@ -47,14 +47,14 @@ public class GlificImageWorkflowService {
     @Value("${telemetry.lenient-ingestion.enabled:true}")
     private boolean lenientIngestionEnabled = true;
 
-    public GlificImageWorkflowService(GlificMediaService glificMediaService,
-                                      BfmReadingService bfmReadingService,
-                                      TelemetryTenantRepository telemetryTenantRepository,
-                                      GlificOperatorContextService operatorContextService,
-                                      GlificLocalizationService localizationService,
-                                      TenantConfigRepository tenantConfigRepository,
-                                      UserChannelPreferenceRepository userChannelPreferenceRepository,
-                                      ObjectMapper objectMapper) {
+    public MeterImageWorkflowService(GlificMediaService glificMediaService,
+                                     BfmReadingService bfmReadingService,
+                                     TelemetryTenantRepository telemetryTenantRepository,
+                                     OperatorContextService operatorContextService,
+                                     ConversationLocalizationService localizationService,
+                                     TenantConfigRepository tenantConfigRepository,
+                                     UserChannelPreferenceRepository userChannelPreferenceRepository,
+                                     ObjectMapper objectMapper) {
         this.glificMediaService = glificMediaService;
         this.bfmReadingService = bfmReadingService;
         this.telemetryTenantRepository = telemetryTenantRepository;
@@ -210,7 +210,7 @@ public class GlificImageWorkflowService {
                     .declaredChannel(ReadingChannel.parseStrict(request.getChannel()).orElse(null))
                     // LOCATION-AFFINITY: GeoJSON orders coordinates [longitude, latitude] — the
                     // opposite of how they read aloud, and the single easiest thing here to get
-                    // backwards. Pinned by GlificImageWorkflowServiceAssamTest.
+                    // backwards. Pinned by MeterImageWorkflowServiceAssamTest.
                     .latitude(geolocationCoordinate(request.getGeolocation(), 1))
                     .longitude(geolocationCoordinate(request.getGeolocation(), 0))
                     .build();

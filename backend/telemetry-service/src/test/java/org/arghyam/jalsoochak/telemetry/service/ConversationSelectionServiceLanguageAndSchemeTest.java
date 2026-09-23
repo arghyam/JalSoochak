@@ -48,21 +48,21 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("GlificSelectionService — language and scheme steps")
-class GlificSelectionServiceLanguageAndSchemeTest {
+@DisplayName("ConversationSelectionService — language and scheme steps")
+class ConversationSelectionServiceLanguageAndSchemeTest {
 
     private static final String CONTACT = "919999900001";
     private static final String SCHEMA = "tenant_as";
     private static final int TENANT = 17;
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
-    private GlificLocalizationService localizationService;
+    private ConversationLocalizationService localizationService;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificMessageTemplatesService templatesService;
+    private ConversationTemplateService templatesService;
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
     @Mock
@@ -72,11 +72,11 @@ class GlificSelectionServiceLanguageAndSchemeTest {
     @Mock
     private GlificContactSyncService glificContactSyncService;
 
-    private GlificSelectionService service;
+    private ConversationSelectionService service;
 
     @BeforeEach
     void setUp() {
-        service = new GlificSelectionService(
+        service = new ConversationSelectionService(
                 operatorContextService, localizationService, tenantConfigRepository, templatesService,
                 telemetryTenantRepository, userChannelPreferenceRepository, userLanguagePreferenceRepository,
                 glificContactSyncService, new ObjectMapper());
@@ -156,8 +156,8 @@ class GlificSelectionServiceLanguageAndSchemeTest {
             when(templatesService.resolveScreenPrompt(TENANT, "LANGUAGE_SELECTION", "english"))
                     .thenReturn(Optional.of("Pick a language:"));
             when(templatesService.resolveScreenOptions(TENANT, "LANGUAGE_SELECTION")).thenReturn(List.of(
-                    new GlificMessageTemplatesService.TemplateOption("EN", 1, Map.of("en", "English")),
-                    new GlificMessageTemplatesService.TemplateOption("HI", 2, Map.of("en", "Hindi"))));
+                    new ConversationTemplateService.TemplateOption("EN", 1, Map.of("en", "English")),
+                    new ConversationTemplateService.TemplateOption("HI", 2, Map.of("en", "Hindi"))));
 
             var response = service.languageSelectionMessage(introRequest(CONTACT));
 
@@ -250,8 +250,8 @@ class GlificSelectionServiceLanguageAndSchemeTest {
         @Test
         void usesTemplateOptionsWhenConfiguredAndPersistsTheCanonicalLabel() {
             when(templatesService.resolveScreenOptions(TENANT, "LANGUAGE_SELECTION")).thenReturn(List.of(
-                    new GlificMessageTemplatesService.TemplateOption("EN", 1, Map.of("en", "English")),
-                    new GlificMessageTemplatesService.TemplateOption("HI", 2,
+                    new ConversationTemplateService.TemplateOption("EN", 1, Map.of("en", "English")),
+                    new ConversationTemplateService.TemplateOption("HI", 2,
                             Map.of("en", "Hindi", "hi", "हिंदी"))));
 
             service.selectedLanguageMessage(languageRequest(CONTACT, "2"));

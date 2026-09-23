@@ -41,7 +41,7 @@ public class AssamReadingRequest {
 
     // PHONE-OPTIONAL: submissions may omit the phone number entirely. The operator is then inferred from
     // the resolved scheme (first mapped pump operator, else the tenant sentinel) — see
-    // GlificImageWorkflowService#resolveOperatorFromScheme. A blank phone is treated the same as absent.
+    // MeterImageWorkflowService#resolveOperatorFromScheme. A blank phone is treated the same as absent.
     @JsonProperty("phone_number")
     private String phoneNumber;
 

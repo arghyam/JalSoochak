@@ -50,7 +50,7 @@ public class BfmReadingService {
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
-    private final GlificOperatorContextService glificOperatorContextService;
+    private final OperatorContextService operatorContextService;
     private final FlowVisionReadingsRetryService flowVisionReadingsRetryService;
     private final ReadingChannelResolver readingChannelResolver;
     private final RolloverResolutionService rolloverResolutionService;
@@ -828,7 +828,7 @@ public class BfmReadingService {
         // tenantId is null only for the in-process overloads that have no authenticated caller.
         TelemetryOperatorWithSchema operatorWithSchema = tenantId != null
                 ? resolveOperatorInTenant(phoneNumber, tenantId)
-                : glificOperatorContextService.resolveOperatorWithSchema(phoneNumber);
+                : operatorContextService.resolveOperatorWithSchema(phoneNumber);
         String schemaName = operatorWithSchema.schemaName();
         TelemetryOperator operator = operatorWithSchema.operator();
 
@@ -1225,7 +1225,7 @@ public class BfmReadingService {
     private TelemetryOperatorWithSchema resolveOperatorInTenant(String phoneNumber, Integer tenantId) {
         TelemetryOperatorWithSchema operatorWithSchema;
         try {
-            operatorWithSchema = glificOperatorContextService.resolveOperatorWithSchema(phoneNumber, tenantId);
+            operatorWithSchema = operatorContextService.resolveOperatorWithSchema(phoneNumber, tenantId);
         } catch (IllegalStateException notFound) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, OPERATOR_LOOKUP_MISS);
         }

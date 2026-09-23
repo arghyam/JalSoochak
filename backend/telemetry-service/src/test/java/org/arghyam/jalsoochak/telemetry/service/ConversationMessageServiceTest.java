@@ -32,24 +32,24 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("GlificMessageService")
-class GlificMessageServiceTest {
+@DisplayName("ConversationMessageService")
+class ConversationMessageServiceTest {
 
     private static final String CONTACT = "919999900001";
     private static final String SCHEMA = "tenant_as";
     private static final String FALLBACK = "Something went wrong. Please try again.";
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
-    private GlificLocalizationService localizationService;
+    private ConversationLocalizationService localizationService;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificMessageTemplatesService templatesService;
+    private ConversationTemplateService templatesService;
 
     @InjectMocks
-    private GlificMessageService service;
+    private ConversationMessageService service;
 
     private static TelemetryOperatorWithSchema operator(Integer tenantId, String title) {
         return new TelemetryOperatorWithSchema(SCHEMA,

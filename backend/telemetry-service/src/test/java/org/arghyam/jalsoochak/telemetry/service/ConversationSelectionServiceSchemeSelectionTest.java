@@ -23,16 +23,16 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class GlificSelectionServiceSchemeSelectionTest {
+class ConversationSelectionServiceSchemeSelectionTest {
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
-    private GlificLocalizationService localizationService;
+    private ConversationLocalizationService localizationService;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificMessageTemplatesService templatesService;
+    private ConversationTemplateService templatesService;
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
     @Mock
@@ -44,7 +44,7 @@ class GlificSelectionServiceSchemeSelectionTest {
 
     @Test
     void schemeSelectionMessageReturnsFalseWhenSingleSchemeExists() {
-        GlificSelectionService service = new GlificSelectionService(
+        ConversationSelectionService service = new ConversationSelectionService(
                 operatorContextService,
                 localizationService,
                 tenantConfigRepository,
@@ -73,7 +73,7 @@ class GlificSelectionServiceSchemeSelectionTest {
 
     @Test
     void schemeSelectionMessageReturnsTrueWhenMoreThanOneSchemeExists() {
-        GlificSelectionService service = new GlificSelectionService(
+        ConversationSelectionService service = new ConversationSelectionService(
                 operatorContextService,
                 localizationService,
                 tenantConfigRepository,

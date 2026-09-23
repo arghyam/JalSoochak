@@ -73,7 +73,7 @@ class BfmReadingServiceImplausibleSupplyTest {
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private ReadingChannelResolver readingChannelResolver;
 
@@ -105,7 +105,7 @@ class BfmReadingServiceImplausibleSupplyTest {
     private BfmReadingService service(SupplyPlausibilityProperties.Mode mode) {
         return new BfmReadingService(
                 repo, flowVisionService, telemetryEventPublisher, tenantConfigRepository,
-                new ObjectMapper(), glificOperatorContextService, null, readingChannelResolver,
+                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
                 null,

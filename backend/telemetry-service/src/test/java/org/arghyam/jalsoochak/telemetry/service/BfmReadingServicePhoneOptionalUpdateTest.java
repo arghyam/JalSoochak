@@ -60,7 +60,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
     private FlowVisionReadingsRetryService flowVisionReadingsRetryService;

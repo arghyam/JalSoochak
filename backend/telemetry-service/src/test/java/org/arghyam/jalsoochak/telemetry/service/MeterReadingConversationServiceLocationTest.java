@@ -45,8 +45,8 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("GlificMeterWorkflowService — /location")
-class GlificMeterWorkflowServiceLocationTest {
+@DisplayName("MeterReadingConversationService — /location")
+class MeterReadingConversationServiceLocationTest {
 
     private static final String SCHEMA = "tenant_test";
     private static final String PHONE = "919999999999";
@@ -59,13 +59,13 @@ class GlificMeterWorkflowServiceLocationTest {
     private static final BigDecimal LNG = new BigDecimal("91.7362");
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
-    private GlificLocalizationService localizationService;
+    private ConversationLocalizationService localizationService;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificMessageTemplatesService templatesService;
+    private ConversationTemplateService templatesService;
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
     @Mock
@@ -79,7 +79,7 @@ class GlificMeterWorkflowServiceLocationTest {
     private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks
-    private GlificMeterWorkflowService service;
+    private MeterReadingConversationService service;
 
     @BeforeEach
     void setUp() {

@@ -10,17 +10,17 @@ import java.util.List;
 import java.util.Optional;
 
 @Service
-public class GlificOperatorContextService {
+public class OperatorContextService {
 
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     private final TenantConfigRepository tenantConfigRepository;
     private final PiiEncryptionService piiEncryptionService;
 
-    public GlificOperatorContextService(TelemetryTenantRepository telemetryTenantRepository,
-                                        UserLanguagePreferenceRepository userLanguagePreferenceRepository,
-                                        TenantConfigRepository tenantConfigRepository,
-                                        PiiEncryptionService piiEncryptionService) {
+    public OperatorContextService(TelemetryTenantRepository telemetryTenantRepository,
+                                  UserLanguagePreferenceRepository userLanguagePreferenceRepository,
+                                  TenantConfigRepository tenantConfigRepository,
+                                  PiiEncryptionService piiEncryptionService) {
         this.telemetryTenantRepository = telemetryTenantRepository;
         this.userLanguagePreferenceRepository = userLanguagePreferenceRepository;
         this.tenantConfigRepository = tenantConfigRepository;

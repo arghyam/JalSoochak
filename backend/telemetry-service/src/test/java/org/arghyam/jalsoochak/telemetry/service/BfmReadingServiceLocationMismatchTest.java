@@ -80,7 +80,7 @@ class BfmReadingServiceLocationMismatchTest {
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private ReadingChannelResolver readingChannelResolver;
     @Mock
@@ -116,7 +116,7 @@ class BfmReadingServiceLocationMismatchTest {
 
         service = new BfmReadingService(
                 repo, flowVisionService, telemetryEventPublisher, tenantConfigRepository,
-                new ObjectMapper(), glificOperatorContextService, null, readingChannelResolver,
+                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
@@ -267,7 +267,7 @@ class BfmReadingServiceLocationMismatchTest {
         // boundary check may pass null, and the reading must still go through.
         BfmReadingService withoutCheck = new BfmReadingService(
                 repo, flowVisionService, telemetryEventPublisher, tenantConfigRepository,
-                new ObjectMapper(), glificOperatorContextService, null, readingChannelResolver,
+                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),

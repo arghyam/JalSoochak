@@ -36,8 +36,8 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("GlificMessageTemplatesService")
-class GlificMessageTemplatesServiceTest {
+@DisplayName("ConversationTemplateService")
+class ConversationTemplateServiceTest {
 
     private static final int TENANT = 17;
 
@@ -73,14 +73,14 @@ class GlificMessageTemplatesServiceTest {
     @Mock
     private TenantConfigRepository tenantConfigRepository;
 
-    private GlificMessageTemplatesService service;
+    private ConversationTemplateService service;
 
     @BeforeEach
     void setUp() {
-        service = new GlificMessageTemplatesService(tenantConfigRepository, new ObjectMapper());
+        service = new ConversationTemplateService(tenantConfigRepository, new ObjectMapper());
         ReflectionTestUtils.setField(service, "templatesCacheEnabled", true);
         ReflectionTestUtils.setField(service, "templatesCacheTtlMs", 120_000L);
-        when(tenantConfigRepository.findConfigValue(TENANT, GlificMessageTemplatesService.CONFIG_KEY))
+        when(tenantConfigRepository.findConfigValue(TENANT, ConversationTemplateService.CONFIG_KEY))
                 .thenReturn(Optional.of(TEMPLATES_JSON));
     }
 
@@ -131,7 +131,7 @@ class GlificMessageTemplatesServiceTest {
             service.loadTemplates(TENANT);
 
             verify(tenantConfigRepository, times(1))
-                    .findConfigValue(TENANT, GlificMessageTemplatesService.CONFIG_KEY);
+                    .findConfigValue(TENANT, ConversationTemplateService.CONFIG_KEY);
         }
 
         @Test
@@ -141,7 +141,7 @@ class GlificMessageTemplatesServiceTest {
             service.loadTemplates(TENANT);
 
             verify(tenantConfigRepository, times(2))
-                    .findConfigValue(TENANT, GlificMessageTemplatesService.CONFIG_KEY);
+                    .findConfigValue(TENANT, ConversationTemplateService.CONFIG_KEY);
         }
 
         @Test
@@ -151,7 +151,7 @@ class GlificMessageTemplatesServiceTest {
             service.loadTemplates(TENANT);
 
             verify(tenantConfigRepository, times(2))
-                    .findConfigValue(TENANT, GlificMessageTemplatesService.CONFIG_KEY);
+                    .findConfigValue(TENANT, ConversationTemplateService.CONFIG_KEY);
         }
 
         @Test
@@ -161,7 +161,7 @@ class GlificMessageTemplatesServiceTest {
             service.loadTemplates(TENANT);
 
             verify(tenantConfigRepository, times(1))
-                    .findConfigValue(TENANT, GlificMessageTemplatesService.CONFIG_KEY);
+                    .findConfigValue(TENANT, ConversationTemplateService.CONFIG_KEY);
         }
 
         @Test
@@ -172,7 +172,7 @@ class GlificMessageTemplatesServiceTest {
             service.loadTemplates(TENANT);
 
             verify(tenantConfigRepository, times(2))
-                    .findConfigValue(TENANT, GlificMessageTemplatesService.CONFIG_KEY);
+                    .findConfigValue(TENANT, ConversationTemplateService.CONFIG_KEY);
         }
 
         @Test
@@ -183,7 +183,7 @@ class GlificMessageTemplatesServiceTest {
             service.loadTemplates(TENANT);
 
             verify(tenantConfigRepository, times(2))
-                    .findConfigValue(TENANT, GlificMessageTemplatesService.CONFIG_KEY);
+                    .findConfigValue(TENANT, ConversationTemplateService.CONFIG_KEY);
         }
     }
 
@@ -254,19 +254,19 @@ class GlificMessageTemplatesServiceTest {
 
         @Test
         void returnsOptionsInDeclaredOrder() {
-            List<GlificMessageTemplatesService.TemplateOption> options =
+            List<ConversationTemplateService.TemplateOption> options =
                     service.resolveScreenOptions(TENANT, "ITEM_SELECTION");
 
-            assertThat(options).extracting(GlificMessageTemplatesService.TemplateOption::key)
+            assertThat(options).extracting(ConversationTemplateService.TemplateOption::key)
                     .containsExactly("REPORT", "SUBMIT", "UNLABELLED");
         }
 
         @Test
         void breaksAnOrderTieByKeyCaseInsensitively() {
-            List<GlificMessageTemplatesService.TemplateOption> reasons =
+            List<ConversationTemplateService.TemplateOption> reasons =
                     service.resolveScreenReasons(TENANT, "ISSUE_REPORT");
 
-            assertThat(reasons).extracting(GlificMessageTemplatesService.TemplateOption::key)
+            assertThat(reasons).extracting(ConversationTemplateService.TemplateOption::key)
                     .containsExactly("POWER", "PUMP");
         }
 
@@ -297,8 +297,8 @@ class GlificMessageTemplatesServiceTest {
     @DisplayName("TemplateOption")
     class TemplateOptionBehaviour {
 
-        private GlificMessageTemplatesService.TemplateOption option(Map<String, String> labels) {
-            return new GlificMessageTemplatesService.TemplateOption("KEY", 1, labels);
+        private ConversationTemplateService.TemplateOption option(Map<String, String> labels) {
+            return new ConversationTemplateService.TemplateOption("KEY", 1, labels);
         }
 
         @Test
@@ -367,12 +367,12 @@ class GlificMessageTemplatesServiceTest {
                 "'',en"
         })
         void mapsNormalizedLanguageKeysToTemplateCodes(String languageKey, String expected) {
-            assertThat(GlificMessageTemplatesService.toTemplateLanguageCode(languageKey)).isEqualTo(expected);
+            assertThat(ConversationTemplateService.toTemplateLanguageCode(languageKey)).isEqualTo(expected);
         }
 
         @Test
         void defaultsToEnglishForANullKey() {
-            assertThat(GlificMessageTemplatesService.toTemplateLanguageCode(null)).isEqualTo("en");
+            assertThat(ConversationTemplateService.toTemplateLanguageCode(null)).isEqualTo("en");
         }
     }
 }

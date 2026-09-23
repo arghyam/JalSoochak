@@ -38,16 +38,16 @@ import static org.mockito.Mockito.when;
  * FlowVision actually read off that day's photo.
  */
 @ExtendWith(MockitoExtension.class)
-class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
+class MeterReadingConversationServiceUpdatePreviousReadingTest {
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
-    private GlificLocalizationService localizationService;
+    private ConversationLocalizationService localizationService;
 
     @Mock
-    private GlificMessageTemplatesService templatesService;
+    private ConversationTemplateService templatesService;
 
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
@@ -62,7 +62,7 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
     private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks
-    private GlificMeterWorkflowService service;
+    private MeterReadingConversationService service;
 
     @Test
     void updatePreviousReadingUpdatesWhenNoThresholdsConfigured() {

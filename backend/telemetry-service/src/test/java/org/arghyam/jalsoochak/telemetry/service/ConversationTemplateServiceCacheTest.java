@@ -18,16 +18,16 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class GlificMessageTemplatesServiceCacheTest {
+class ConversationTemplateServiceCacheTest {
 
     @Mock
     private TenantConfigRepository tenantConfigRepository;
 
-    private GlificMessageTemplatesService service;
+    private ConversationTemplateService service;
 
     @BeforeEach
     void setUp() {
-        service = new GlificMessageTemplatesService(tenantConfigRepository, new ObjectMapper());
+        service = new ConversationTemplateService(tenantConfigRepository, new ObjectMapper());
         ReflectionTestUtils.setField(service, "templatesCacheEnabled", true);
         ReflectionTestUtils.setField(service, "templatesCacheTtlMs", 120_000L);
     }
@@ -37,7 +37,7 @@ class GlificMessageTemplatesServiceCacheTest {
         String rawJson = """
                 {"screens":{"LANGUAGE_SELECTION":{"prompt":{"en":"Choose"}}}}
                 """;
-        when(tenantConfigRepository.findConfigValue(5, GlificMessageTemplatesService.CONFIG_KEY))
+        when(tenantConfigRepository.findConfigValue(5, ConversationTemplateService.CONFIG_KEY))
                 .thenReturn(Optional.of(rawJson));
 
         Optional<com.fasterxml.jackson.databind.JsonNode> first = service.loadTemplates(5);
@@ -46,18 +46,18 @@ class GlificMessageTemplatesServiceCacheTest {
         assertTrue(first.isPresent());
         assertTrue(second.isPresent());
         assertEquals("Choose", first.get().path("screens").path("LANGUAGE_SELECTION").path("prompt").path("en").asText());
-        verify(tenantConfigRepository, times(1)).findConfigValue(5, GlificMessageTemplatesService.CONFIG_KEY);
+        verify(tenantConfigRepository, times(1)).findConfigValue(5, ConversationTemplateService.CONFIG_KEY);
     }
 
     @Test
     void invalidateTemplatesCacheForcesReload() {
-        when(tenantConfigRepository.findConfigValue(6, GlificMessageTemplatesService.CONFIG_KEY))
+        when(tenantConfigRepository.findConfigValue(6, ConversationTemplateService.CONFIG_KEY))
                 .thenReturn(Optional.of("{\"screens\":{}}"));
 
         service.loadTemplates(6);
         service.invalidateTemplatesCache(6);
         service.loadTemplates(6);
 
-        verify(tenantConfigRepository, times(2)).findConfigValue(6, GlificMessageTemplatesService.CONFIG_KEY);
+        verify(tenantConfigRepository, times(2)).findConfigValue(6, ConversationTemplateService.CONFIG_KEY);
     }
 }

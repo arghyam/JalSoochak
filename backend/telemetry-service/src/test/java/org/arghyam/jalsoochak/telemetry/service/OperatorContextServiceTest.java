@@ -35,8 +35,8 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("GlificOperatorContextService")
-class GlificOperatorContextServiceTest {
+@DisplayName("OperatorContextService")
+class OperatorContextServiceTest {
 
     private static final String PHONE = "919999900001";
     private static final String SCHEMA = "tenant_as";
@@ -51,7 +51,7 @@ class GlificOperatorContextServiceTest {
     private PiiEncryptionService piiEncryptionService;
 
     @InjectMocks
-    private GlificOperatorContextService service;
+    private OperatorContextService service;
 
     private static TelemetryOperatorWithSchema operator(Integer languageId) {
         return new TelemetryOperatorWithSchema(SCHEMA,

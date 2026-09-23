@@ -7,7 +7,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
-import org.arghyam.jalsoochak.telemetry.service.GlificSelectionService;
+import org.arghyam.jalsoochak.telemetry.service.ConversationSelectionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,7 +32,7 @@ class SelectionWebhookControllerTest {
     private static final RuntimeException BOOM = new IllegalStateException("downstream failure");
 
     @Mock
-    private GlificSelectionService selectionService;
+    private ConversationSelectionService selectionService;
 
     private SelectionWebhookController controller;
 
