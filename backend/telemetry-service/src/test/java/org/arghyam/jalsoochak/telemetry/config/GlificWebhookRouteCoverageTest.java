@@ -34,15 +34,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("GlificWebhookRoutes — coverage of the webhook controllers")
 class GlificWebhookRouteCoverageTest {
 
-    /**
-     * Routes deliberately served outside both credential gates. {@code ApiController} is Initializr
-     * scaffolding due for deletion; these entries go with it, and the test fails until they do.
-     */
-    private static final Set<String> UNGATED_ROUTES = Set.of(
-            "GET /api/v1/telemetry",
-            "POST /api/v1/publish"
-    );
-
     @Test
     @DisplayName("every @PostMapping on a webhook controller is in the protected set, and vice versa")
     void protectedSetMatchesWebhookControllersExactly() {
@@ -141,8 +132,7 @@ class GlificWebhookRouteCoverageTest {
      * Closes the gap the allowlist cannot see: a controller that should have carried
      * {@link WebhookRoute} but does not. Its routes would be in no allowlist and, outside the
      * {@code /readings} and {@code /schemes/*} prefixes, behind no gate at all. Every route the
-     * service maps must therefore be authenticated by exactly one of the two gates, or be listed in
-     * {@link #UNGATED_ROUTES}.
+     * service maps must therefore be authenticated by exactly one of the two gates.
      */
     @Test
     @DisplayName("every route the service maps is behind exactly one credential gate")
@@ -150,7 +140,6 @@ class GlificWebhookRouteCoverageTest {
         List<Route> routes = ControllerRoutes.routes();
 
         List<String> misgated = routes.stream()
-                .filter(route -> !UNGATED_ROUTES.contains(route.key()))
                 .filter(route -> {
                     boolean webhookGate = GlificWebhookRoutes.isProtected(route.method(), route.path());
                     boolean apiKeyGate = TelemetryApiKeyAuthFilter.requiresApiKey(route.path());
@@ -165,9 +154,6 @@ class GlificWebhookRouteCoverageTest {
                         + "@WebhookRoute and an allowlist entry; anything else must sit under the "
                         + "API-key prefixes.")
                 .isEmpty();
-        assertThat(routes.stream().map(Route::key).collect(Collectors.toSet()))
-                .as("UNGATED_ROUTES entries that no controller maps any more — remove them")
-                .containsAll(UNGATED_ROUTES);
     }
 
     private static Set<Class<?>> webhookControllers() {

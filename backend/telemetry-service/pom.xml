@@ -41,7 +41,6 @@
             **/org/arghyam/jalsoochak/telemetry/config/WebConfig.java,
             **/org/arghyam/jalsoochak/telemetry/service/AnomalyConstants.java,
             **/org/arghyam/jalsoochak/telemetry/service/BfmReadingService.java,
-            **/org/arghyam/jalsoochak/telemetry/service/BusinessService.java,
             **/org/arghyam/jalsoochak/telemetry/service/GlificContactSyncService.java,
             **/org/arghyam/jalsoochak/telemetry/service/GlificImageWorkflowService.java,
             **/org/arghyam/jalsoochak/telemetry/service/GlificLocalizationService.java,

@@ -62,10 +62,7 @@ class RouteParityTest {
             "PUT /api/v1/telemetry/readings/",
             "POST /api/v1/telemetry/readings/reset-latest",
             "PATCH /api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading",
-            "POST /api/v1/telemetry/readings/formats/{format}",
-            // Initializr scaffolding, due for deletion
-            "GET /api/v1/telemetry",
-            "POST /api/v1/publish"
+            "POST /api/v1/telemetry/readings/formats/{format}"
     );
 
     @Test
