@@ -1,19 +1,21 @@
-package org.arghyam.jalsoochak.message.channel.glific;
+package org.arghyam.jalsoochak.message.channel.provider.glific;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.channel.provider.ReportDeliveryMode;
+import org.arghyam.jalsoochak.message.channel.provider.ReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendException;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -27,42 +29,92 @@ import org.mockito.InOrder;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for {@link GlificWhatsAppService}.
+ * Unit tests for {@link GlificWhatsAppSender}.
  *
- * <p>Focuses on the two-step escalation flow:
- * <ol>
- *   <li>{@code uploadMedia} – calls {@code createMessageMedia} and extracts the media ID.</li>
- *   <li>{@code sendEscalationHsm} – uploads media first, then calls
- *       {@code createAndSendMessage} with the returned media ID.</li>
- * </ol>
- * Also covers opt-in and nudge HSM delegation.
+ * <p>Focuses on the two-step escalation flow: {@code sendEscalationHsm} registers the document with
+ * {@code createMessageMedia} first, then calls {@code createAndSendMessage} with the returned media ID.
+ * Also covers opt-in and nudge HSM delegation, and the failure stage each Glific failure carries.
  */
 @ExtendWith(MockitoExtension.class)
-class GlificWhatsAppServiceTest {
+class GlificWhatsAppSenderTest {
 
     @Mock
     private GlificGraphQLClient client;
 
-    @InjectMocks
-    private GlificWhatsAppService service;
-
     private final ObjectMapper mapper = new ObjectMapper();
+
+    private final SettingsFixture settings = new SettingsFixture();
+
+    /**
+     * The adapter's settings as mutable fields, named after the adapter's former {@code @Value} fields,
+     * so a test can change one before calling {@link #sender()}. Anything left unset is null or false,
+     * as it was when these tests wrote those fields directly.
+     */
+    private static final class SettingsFixture {
+        boolean whatsappDryRun;
+        boolean nudgeDryRun;
+        boolean escalationDryRun;
+        boolean dailyReportDryRun;
+        boolean weeklyReportDryRun;
+        String nudgeTemplateId;
+        String escalationTemplateId;
+        String loginOtpTemplateId;
+        String dailyReportSoTemplateId;
+        String dailyReportSdoTemplateId;
+        String dailyReportSoLinkTemplateId;
+        String dailyReportSdoLinkTemplateId;
+        String weeklyReportSoLinkTemplateId;
+        String weeklyReportSdoLinkTemplateId;
+        String nudgeFlowId;
+        String welcomeFlowId;
+        String mediaBaseUrl;
+        String escalationCaption;
+        String escalationThumbnail;
+        String dailyReportCaption;
+        String dailyReportDeliveryMode;
+        String dailyReportLinkButtonBaseUrl;
+
+        GlificWhatsAppSettings toSettings() {
+            return new GlificWhatsAppSettings(
+                    new GlificWhatsAppSettings.DryRun(whatsappDryRun, nudgeDryRun, escalationDryRun,
+                            dailyReportDryRun, weeklyReportDryRun),
+                    new GlificWhatsAppSettings.Templates(
+                            nudgeTemplateId,
+                            escalationTemplateId,
+                            loginOtpTemplateId,
+                            dailyReportSoTemplateId,
+                            dailyReportSdoTemplateId,
+                            dailyReportSoLinkTemplateId,
+                            dailyReportSdoLinkTemplateId,
+                            weeklyReportSoLinkTemplateId,
+                            weeklyReportSdoLinkTemplateId),
+                    new GlificWhatsAppSettings.Flows(nudgeFlowId, welcomeFlowId),
+                    new GlificWhatsAppSettings.Media(
+                            mediaBaseUrl, escalationCaption, escalationThumbnail, dailyReportCaption),
+                    dailyReportDeliveryMode,
+                    dailyReportLinkButtonBaseUrl);
+        }
+    }
+
+    /** A sender built from the current {@link #settings}. Stateless, so a fresh one per call is equivalent. */
+    private GlificWhatsAppSender sender() {
+        return new GlificWhatsAppSender(client, mapper, settings.toSettings());
+    }
 
     @BeforeEach
     void setUp() {
-        ReflectionTestUtils.setField(service, "objectMapper", mapper);
-        ReflectionTestUtils.setField(service, "nudgeTemplateId", "nudge-tmpl-1");
-        ReflectionTestUtils.setField(service, "nudgeFlowId", "flow-123");
-        ReflectionTestUtils.setField(service, "welcomeFlowId", "welcome-flow-456");
-        ReflectionTestUtils.setField(service, "escalationTemplateId", "2");   // must be numeric for Integer.parseInt
-        ReflectionTestUtils.setField(service, "escalationCaption", "Escalations");
-        ReflectionTestUtils.setField(service, "escalationThumbnail", "");
+        settings.nudgeTemplateId = "nudge-tmpl-1";
+        settings.nudgeFlowId = "flow-123";
+        settings.welcomeFlowId = "welcome-flow-456";
+        settings.escalationTemplateId = "2";   // must be numeric for Integer.parseInt
+        settings.escalationCaption = "Escalations";
+        settings.escalationThumbnail = "";
         // Glific hands media URLs to Meta, which fetches them from the public internet, so every
         // sending path now requires a publicly reachable prefix.
-        ReflectionTestUtils.setField(service, "mediaBaseUrl", "https://jalsoochak.jjmbrain.in/minio");
+        settings.mediaBaseUrl = "https://jalsoochak.jjmbrain.in/minio";
         // Weekly reports ship suppressed until their Meta templates are approved, which is also the
         // production default. Tests that exercise weekly delivery turn it on explicitly.
-        ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
+        settings.weeklyReportDryRun = true;
     }
 
     // ──────────────────────────── optIn ────────────────────────────────────────
@@ -75,7 +127,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("optinContact"), anyMap())).thenReturn(response);
 
-        Long contactId = service.optIn("919876543210");
+        Long contactId = sender().optIn("919876543210");
 
         assertThat(contactId).isEqualTo(42L);
         verify(client).execute(contains("optinContact"), argThat(vars ->
@@ -91,7 +143,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(response);
 
-        service.sendNudgeHsm(99L, "Ramesh", "02 March 2026");
+        sender().sendNudgeHsm(99L, "Ramesh", "02 March 2026");
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
         verify(client).execute(contains("sendHsmMessage"), varsCaptor.capture());
@@ -102,18 +154,18 @@ class GlificWhatsAppServiceTest {
         assertThat(vars.get("parameters")).isEqualTo(List.of("Ramesh", "02 March 2026"));
     }
 
-    // ──────────────────────── uploadMedia ──────────────────────────────────────
+    // ──────────────────────── sendEscalationHsm ────────────────────────────────
 
     @Test
-    void uploadMedia_callsCreateMessageMediaMutation_withUrlAndSourceUrl() throws Exception {
-        JsonNode response = mapper.readTree("""
+    void sendEscalationHsm_registersTheDocumentUrlAsTemplateMedia() throws Exception {
+        when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree("""
                 {"createMessageMedia":{"messageMedia":{"id":"777","url":"https://example.com/r.pdf"},"errors":[]}}
-                """);
-        when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(response);
+                """));
+        when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(mapper.readTree("""
+                {"createAndSendMessage":{"message":{"id":2,"body":"body","isHsm":true},"errors":[]}}
+                """));
 
-        String mediaId = service.uploadMedia("https://example.com/r.pdf");
-
-        assertThat(mediaId).isEqualTo("777");
+        sender().sendEscalationHsm(55L, "https://example.com/r.pdf");
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
         verify(client).execute(contains("createMessageMedia"), varsCaptor.capture());
@@ -122,20 +174,9 @@ class GlificWhatsAppServiceTest {
         Map<String, Object> input = (Map<String, Object>) varsCaptor.getValue().get("input");
         assertThat(input.get("url")).isEqualTo("https://example.com/r.pdf");
         assertThat(input.get("source_url")).isEqualTo("https://example.com/r.pdf");
+        assertThat(input.get("caption")).isEqualTo("Escalations");
         assertThat(input.get("isTemplateMedia")).isEqualTo(true);
     }
-
-    @Test
-    void uploadMedia_throwsException_whenClientFails() {
-        when(client.execute(contains("createMessageMedia"), anyMap()))
-                .thenThrow(new RuntimeException("Glific media upload failed"));
-
-        assertThatThrownBy(() -> service.uploadMedia("https://example.com/r.pdf"))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Glific media upload failed");
-    }
-
-    // ──────────────────────── sendEscalationHsm ────────────────────────────────
 
     @Test
     void sendEscalationHsm_uploadsMediaFirst_thenCallsCreateAndSendMessage() throws Exception {
@@ -149,7 +190,7 @@ class GlificWhatsAppServiceTest {
         when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(uploadResponse);
         when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(sendResponse);
 
-        service.sendEscalationHsm(55L, "https://minio.example.com/r.pdf");
+        sender().sendEscalationHsm(55L, "https://minio.example.com/r.pdf");
 
         InOrder inOrder = inOrder(client);
         inOrder.verify(client).execute(contains("createMessageMedia"), anyMap());
@@ -168,7 +209,7 @@ class GlificWhatsAppServiceTest {
         when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(uploadResponse);
         when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(sendResponse);
 
-        service.sendEscalationHsm(77L, "https://minio.example.com/report.pdf");
+        sender().sendEscalationHsm(77L, "https://minio.example.com/report.pdf");
 
         ArgumentCaptor<Map<String, Object>> sendVarsCaptor = varsCaptor();
         verify(client).execute(contains("createAndSendMessage"), sendVarsCaptor.capture());
@@ -187,7 +228,7 @@ class GlificWhatsAppServiceTest {
                 .thenThrow(new RuntimeException("MinIO URL unreachable"));
 
         assertThatThrownBy(() ->
-                service.sendEscalationHsm(88L, "https://minio.example.com/r.pdf"))
+                sender().sendEscalationHsm(88L, "https://minio.example.com/r.pdf"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("MinIO URL unreachable");
 
@@ -205,7 +246,7 @@ class GlificWhatsAppServiceTest {
         when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(uploadResponse);
         when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(sendResponse);
 
-        service.sendEscalationHsm(11L, "https://minio.example.com/r.pdf");
+        sender().sendEscalationHsm(11L, "https://minio.example.com/r.pdf");
 
         ArgumentCaptor<Map<String, Object>> captor = varsCaptor();
         verify(client).execute(contains("createAndSendMessage"), captor.capture());
@@ -226,7 +267,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
 
-        service.startNudgeFlow(42L, "Ramesh", "06 March 2026");
+        sender().startNudgeFlow(42L, "Ramesh", "06 March 2026");
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
         verify(client).execute(contains("startContactFlow"), varsCaptor.capture());
@@ -243,7 +284,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
 
-        service.startNudgeFlow(42L, "Ramesh", "06 March 2026");
+        sender().startNudgeFlow(42L, "Ramesh", "06 March 2026");
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
         verify(client).execute(contains("startContactFlow"), varsCaptor.capture());
@@ -256,9 +297,9 @@ class GlificWhatsAppServiceTest {
 
     @Test
     void startNudgeFlow_throwsIllegalState_whenFlowIdNotConfigured() {
-        ReflectionTestUtils.setField(service, "nudgeFlowId", "");
+        settings.nudgeFlowId = "";
 
-        assertThatThrownBy(() -> service.startNudgeFlow(42L, "Ramesh", "06 March 2026"))
+        assertThatThrownBy(() -> sender().startNudgeFlow(42L, "Ramesh", "06 March 2026"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("glific.flow.nudge-id");
     }
@@ -270,7 +311,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
 
-        assertThatThrownBy(() -> service.startNudgeFlow(42L, "Ramesh", "06 March 2026"))
+        assertThatThrownBy(() -> sender().startNudgeFlow(42L, "Ramesh", "06 March 2026"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("startContactFlow");
     }
@@ -282,7 +323,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
 
-        assertThatThrownBy(() -> service.startNudgeFlow(42L, "Ramesh", "06 March 2026"))
+        assertThatThrownBy(() -> sender().startNudgeFlow(42L, "Ramesh", "06 March 2026"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("success=false");
     }
@@ -296,7 +337,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("optinContact"), anyMap())).thenReturn(response);
 
-        assertThatThrownBy(() -> service.optIn("91invalid"))
+        assertThatThrownBy(() -> sender().optIn("91invalid"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("optinContact");
     }
@@ -308,21 +349,25 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(response);
 
-        assertThatThrownBy(() -> service.sendNudgeHsm(1L, "Ramesh", "04 March 2026"))
+        assertThatThrownBy(() -> sender().sendNudgeHsm(1L, "Ramesh", "04 March 2026"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("sendHsmMessage");
     }
 
     @Test
-    void uploadMedia_throwsException_whenGraphQLErrorsReturned() throws Exception {
+    void sendEscalationHsm_failsAtMediaRegistration_whenGlificRejectsTheMedia() throws Exception {
         JsonNode response = mapper.readTree("""
                 {"createMessageMedia":{"messageMedia":null,"errors":[{"key":"url","message":"unreachable"}]}}
                 """);
         when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(response);
 
-        assertThatThrownBy(() -> service.uploadMedia("https://example.com/r.pdf"))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("createMessageMedia");
+        assertThatThrownBy(() -> sender().sendEscalationHsm(22L, "https://example.com/r.pdf"))
+                .isInstanceOfSatisfying(WhatsAppSendException.class, e -> {
+                    assertThat(e).hasMessageContaining("createMessageMedia");
+                    assertThat(e.getStage()).isEqualTo(WhatsAppSendStage.MEDIA_REGISTER);
+                    assertThat(e.getErrorKey()).isEqualTo("url");
+                });
+        verify(client, never()).execute(contains("createAndSendMessage"), anyMap());
     }
 
     @Test
@@ -337,7 +382,7 @@ class GlificWhatsAppServiceTest {
         when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(sendResponse);
 
         assertThatThrownBy(() ->
-                service.sendEscalationHsm(22L, "https://minio.example.com/r.pdf"))
+                sender().sendEscalationHsm(22L, "https://minio.example.com/r.pdf"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("createAndSendMessage");
     }
@@ -351,7 +396,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
 
-        service.startWelcomeFlow(55L, "Ramesh Kumar", "Madhya Pradesh");
+        sender().startWelcomeFlow(55L, "Ramesh Kumar", "Madhya Pradesh");
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
         verify(client).execute(contains("startContactFlow"), varsCaptor.capture());
@@ -368,7 +413,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
 
-        service.startWelcomeFlow(55L, "welcome-flow-456", "Ramesh Kumar", "Madhya Pradesh");
+        sender().startWelcomeFlow(55L, "welcome-flow-456", "Ramesh Kumar", "Madhya Pradesh");
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
         verify(client).execute(contains("startContactFlow"), varsCaptor.capture());
@@ -386,7 +431,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
 
-        service.startWelcomeFlow(55L, "welcome-flow-456", null, null);
+        sender().startWelcomeFlow(55L, "welcome-flow-456", null, null);
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
         verify(client).execute(contains("startContactFlow"), varsCaptor.capture());
@@ -404,7 +449,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
 
-        assertThatThrownBy(() -> service.startWelcomeFlow(55L, "Ramesh", "MP"))
+        assertThatThrownBy(() -> sender().startWelcomeFlow(55L, "Ramesh", "MP"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("startContactFlow");
     }
@@ -416,7 +461,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
 
-        assertThatThrownBy(() -> service.startWelcomeFlow(55L, "Ramesh", "MP"))
+        assertThatThrownBy(() -> sender().startWelcomeFlow(55L, "Ramesh", "MP"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("success=false");
     }
@@ -430,7 +475,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("updateContact"), anyMap())).thenReturn(response);
 
-        service.updateContactLanguage(42L, 2);
+        sender().updateContactLanguage(42L, 2);
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
         verify(client).execute(contains("updateContact"), varsCaptor.capture());
@@ -449,7 +494,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("updateContact"), anyMap())).thenReturn(response);
 
-        assertThatThrownBy(() -> service.updateContactLanguage(99L, 3))
+        assertThatThrownBy(() -> sender().updateContactLanguage(99L, 3))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("updateContact");
     }
@@ -458,13 +503,13 @@ class GlificWhatsAppServiceTest {
 
     @Test
     void sendLoginOtpHsm_callsSendHsmMutation_withOtpParameter() throws Exception {
-        ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
+        settings.loginOtpTemplateId = "otp-tmpl-1";
         JsonNode response = mapper.readTree("""
                 {"sendHsmMessage":{"message":{"id":5,"body":"otp","isHSM":true},"errors":[]}}
                 """);
         when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(response);
 
-        service.sendLoginOtpHsm(11L, "654321");
+        sender().sendLoginOtpHsm(11L, "654321");
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
         verify(client).execute(contains("sendHsmMessage"), varsCaptor.capture());
@@ -476,22 +521,22 @@ class GlificWhatsAppServiceTest {
 
     @Test
     void sendLoginOtpHsm_throwsException_whenTemplateIdNotConfigured() {
-        ReflectionTestUtils.setField(service, "loginOtpTemplateId", "");
+        settings.loginOtpTemplateId = "";
 
-        assertThatThrownBy(() -> service.sendLoginOtpHsm(11L, "000000"))
+        assertThatThrownBy(() -> sender().sendLoginOtpHsm(11L, "000000"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("login-otp-id");
     }
 
     @Test
     void sendLoginOtpHsm_throwsException_whenGraphQLErrorsReturned() throws Exception {
-        ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
+        settings.loginOtpTemplateId = "otp-tmpl-1";
         JsonNode response = mapper.readTree("""
                 {"sendHsmMessage":{"message":null,"errors":[{"key":"contact","message":"blocked"}]}}
                 """);
         when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(response);
 
-        assertThatThrownBy(() -> service.sendLoginOtpHsm(11L, "654321"))
+        assertThatThrownBy(() -> sender().sendLoginOtpHsm(11L, "654321"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("sendHsmMessage");
     }
@@ -502,21 +547,21 @@ class GlificWhatsAppServiceTest {
     void validateTemplates_throwsWhenDailyReportSoTemplateIdNotNumeric() {
         // Delivery enabled (no dry-run) and the SO template id is present but non-numeric —
         // sendDailyReportHsm would fail at Integer.parseInt, so we must fail fast at startup.
-        ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
-        ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "not-a-number");
+        settings.loginOtpTemplateId = "otp-tmpl-1";
+        settings.dailyReportSoTemplateId = "not-a-number";
 
-        assertThatThrownBy(() -> service.validateTemplates())
+        assertThatThrownBy(() -> sender().validateTemplates())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("daily-report-so-id");
     }
 
     @Test
     void validateTemplates_throwsWhenDailyReportSdoTemplateIdNotNumeric() {
-        ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
-        ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
-        ReflectionTestUtils.setField(service, "dailyReportSdoTemplateId", "abc");
+        settings.loginOtpTemplateId = "otp-tmpl-1";
+        settings.dailyReportSoTemplateId = "42";
+        settings.dailyReportSdoTemplateId = "abc";
 
-        assertThatThrownBy(() -> service.validateTemplates())
+        assertThatThrownBy(() -> sender().validateTemplates())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("daily-report-sdo-id");
     }
@@ -525,24 +570,24 @@ class GlificWhatsAppServiceTest {
     void validateTemplates_throwsWhenDailyReportLiveButSoTemplateIdMissing_evenIfEveryOtherPurposeIsDry() {
         // The all-dry short circuit used to ignore the daily-report flag, so this configuration
         // started up without ever validating the template that the live purpose needs.
-        ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-        ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-        ReflectionTestUtils.setField(service, "escalationDryRun", true);
-        ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
-        ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "");
+        settings.whatsappDryRun = true;
+        settings.nudgeDryRun = true;
+        settings.escalationDryRun = true;
+        settings.dailyReportDryRun = false;
+        settings.dailyReportSoTemplateId = "";
 
-        assertThatThrownBy(() -> service.validateTemplates())
+        assertThatThrownBy(() -> sender().validateTemplates())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("daily-report-so-id");
     }
 
     @Test
     void validateTemplates_passesWhenDailyReportTemplateIdsAreNumeric() {
-        ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
-        ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
-        ReflectionTestUtils.setField(service, "dailyReportSdoTemplateId", "43");
+        settings.loginOtpTemplateId = "otp-tmpl-1";
+        settings.dailyReportSoTemplateId = "42";
+        settings.dailyReportSdoTemplateId = "43";
 
-        assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+        assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
     }
 
     // ────────────────────────────── helpers ────────────────────────────────────
@@ -556,21 +601,21 @@ class GlificWhatsAppServiceTest {
 
     @Test
     void dailyReportDocumentName_appendsTheReportDataDate() {
-        ReflectionTestUtils.setField(service, "dailyReportCaption", "Daily Water Service Situation Report");
+        settings.dailyReportCaption = "Daily Water Service Situation Report";
 
         // A report delivered on 14 Aug covers 13 Aug, and is named for the day it describes.
-        assertThat(service.dailyReportDocumentName(LocalDate.of(2026, 8, 13)))
+        assertThat(sender().dailyReportDocumentName(LocalDate.of(2026, 8, 13)))
                 .isEqualTo("Daily Water Service Situation Report 13-08-2026");
         // Single-digit day and month stay zero-padded.
-        assertThat(service.dailyReportDocumentName(LocalDate.of(2026, 1, 5)))
+        assertThat(sender().dailyReportDocumentName(LocalDate.of(2026, 1, 5)))
                 .isEqualTo("Daily Water Service Situation Report 05-01-2026");
     }
 
     @Test
     void dailyReportDocumentName_withoutADate_fallsBackToTheBareCaption() {
-        ReflectionTestUtils.setField(service, "dailyReportCaption", "Daily Water Service Situation Report");
+        settings.dailyReportCaption = "Daily Water Service Situation Report";
 
-        assertThat(service.dailyReportDocumentName(null))
+        assertThat(sender().dailyReportDocumentName(null))
                 .isEqualTo("Daily Water Service Situation Report");
     }
 
@@ -578,15 +623,15 @@ class GlificWhatsAppServiceTest {
     void sendDailyReportHsm_uploadsMediaUnderTheDatedDocumentName() throws Exception {
         // The createMessageMedia caption is what Glific surfaces as the document's filename in
         // WhatsApp, so this is the assertion that pins the recipient-visible name.
-        ReflectionTestUtils.setField(service, "dailyReportCaption", "Daily Water Service Situation Report");
-        ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
-        ReflectionTestUtils.setField(service, "escalationThumbnail", "");
+        settings.dailyReportCaption = "Daily Water Service Situation Report";
+        settings.dailyReportSoTemplateId = "42";
+        settings.escalationThumbnail = "";
         when(client.execute(contains("createMessageMedia"), anyMap()))
                 .thenReturn(mapper.readTree("{\"createMessageMedia\":{\"messageMedia\":{\"id\":\"77\"}}}"));
         when(client.execute(contains("createAndSendMessage"), anyMap()))
                 .thenReturn(mapper.readTree("{\"createAndSendMessage\":{\"message\":{\"id\":\"1\"}}}"));
 
-        service.sendDailyReportHsm(555L, "https://minio.example.com/report.pdf", "SECTION_OFFICER",
+        sender().sendDailyReportHsm(555L, "https://minio.example.com/report.pdf", "SECTION_OFFICER",
                 LocalDate.of(2026, 8, 13), "Ramesh Kumar");
 
         ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
@@ -605,16 +650,16 @@ class GlificWhatsAppServiceTest {
         @BeforeEach
         void enableDryRun() {
             // Master + every purpose flag on → every Glific call suppressed, opt-in included.
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
-            ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = true;
+            settings.weeklyReportDryRun = true;
         }
 
         @Test
         void optIn_returnsZero_andDoesNotCallClient() {
-            Long result = service.optIn("919876543210");
+            Long result = sender().optIn("919876543210");
 
             assertThat(result).isEqualTo(0L);
             verifyNoInteractions(client);
@@ -622,59 +667,51 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void sendNudgeHsm_isNoOp() {
-            service.sendNudgeHsm(42L, "Ramesh", "22 March 2026");
+            sender().sendNudgeHsm(42L, "Ramesh", "22 March 2026");
 
-            verifyNoInteractions(client);
-        }
-
-        @Test
-        void uploadMedia_returnsDryRunId_andDoesNotCallClient() {
-            String mediaId = service.uploadMedia("https://minio.example.com/r.pdf");
-
-            assertThat(mediaId).isEqualTo("dry-run-media-id");
             verifyNoInteractions(client);
         }
 
         @Test
         void sendEscalationHsm_isNoOp() {
-            service.sendEscalationHsm(55L, "https://minio.example.com/r.pdf");
+            sender().sendEscalationHsm(55L, "https://minio.example.com/r.pdf");
 
             verifyNoInteractions(client);
         }
 
         @Test
         void startNudgeFlow_isNoOp() {
-            service.startNudgeFlow(42L, "Ramesh", "22 March 2026");
+            sender().startNudgeFlow(42L, "Ramesh", "22 March 2026");
 
             verifyNoInteractions(client);
         }
 
         @Test
         void startWelcomeFlow_isNoOp() {
-            service.startWelcomeFlow(55L, "Ramesh", "MP");
+            sender().startWelcomeFlow(55L, "Ramesh", "MP");
 
             verifyNoInteractions(client);
         }
 
         @Test
         void updateContactLanguage_isNoOp() {
-            service.updateContactLanguage(42L, 2);
+            sender().updateContactLanguage(42L, 2);
 
             verifyNoInteractions(client);
         }
 
         @Test
         void sendLoginOtpHsm_isNoOp() {
-            ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
+            settings.loginOtpTemplateId = "otp-tmpl-1";
 
-            service.sendLoginOtpHsm(99L, "123456");
+            sender().sendLoginOtpHsm(99L, "123456");
 
             verifyNoInteractions(client);
         }
 
         @Test
         void sendDailyReportHsm_isNoOp() {
-            service.sendDailyReportHsm(0L, "https://minio.example.com/daily.pdf", "SECTION_OFFICER",
+            sender().sendDailyReportHsm(0L, "https://minio.example.com/daily.pdf", "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             verifyNoInteractions(client);
@@ -682,12 +719,12 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void validateTemplates_doesNotThrowWhenTemplateIdsBlank() {
-            ReflectionTestUtils.setField(service, "nudgeFlowId", "");
-            ReflectionTestUtils.setField(service, "escalationTemplateId", "");
-            ReflectionTestUtils.setField(service, "welcomeFlowId", "");
-            ReflectionTestUtils.setField(service, "loginOtpTemplateId", "");
+            settings.nudgeFlowId = "";
+            settings.escalationTemplateId = "";
+            settings.welcomeFlowId = "";
+            settings.loginOtpTemplateId = "";
 
-            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+            assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
         }
     }
 
@@ -703,9 +740,9 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void nudgeMuted_escalationStillDelivered() throws Exception {
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", false);
-            ReflectionTestUtils.setField(service, "whatsappDryRun", false);
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = false;
+            settings.whatsappDryRun = false;
             when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
                     """
                     {"createMessageMedia":{"messageMedia":{"id":"777","url":"https://x/r.pdf"},"errors":[]}}
@@ -715,9 +752,9 @@ class GlificWhatsAppServiceTest {
                     {"createAndSendMessage":{"message":{"id":1,"body":"b","isHsm":true},"errors":[]}}
                     """));
 
-            service.sendNudgeHsm(1L, "Ramesh", "02 March 2026");
-            service.startNudgeFlow(1L, "Ramesh", "02 March 2026");
-            service.sendEscalationHsm(55L, "https://minio.example.com/r.pdf");
+            sender().sendNudgeHsm(1L, "Ramesh", "02 March 2026");
+            sender().startNudgeFlow(1L, "Ramesh", "02 March 2026");
+            sender().sendEscalationHsm(55L, "https://minio.example.com/r.pdf");
 
             verify(client, never()).execute(contains("sendHsmMessage"), anyMap());
             verify(client, never()).execute(contains("startContactFlow"), anyMap());
@@ -726,19 +763,17 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void escalationMuted_nudgeStillDelivered() throws Exception {
-            ReflectionTestUtils.setField(service, "nudgeDryRun", false);
-            ReflectionTestUtils.setField(service, "escalationDryRun", true);
-            ReflectionTestUtils.setField(service, "whatsappDryRun", false);
+            settings.nudgeDryRun = false;
+            settings.escalationDryRun = true;
+            settings.whatsappDryRun = false;
             when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree(
                     """
                     {"sendHsmMessage":{"message":{"id":1,"body":"Hi","isHSM":true},"errors":[]}}
                     """));
 
-            service.sendNudgeHsm(1L, "Ramesh", "02 March 2026");
-            String mediaId = service.uploadMedia("https://minio.example.com/r.pdf");
-            service.sendEscalationHsm(55L, "https://minio.example.com/r.pdf");
+            sender().sendNudgeHsm(1L, "Ramesh", "02 March 2026");
+            sender().sendEscalationHsm(55L, "https://minio.example.com/r.pdf");
 
-            assertThat(mediaId).isEqualTo("dry-run-media-id");
             verify(client).execute(contains("sendHsmMessage"), anyMap());
             verify(client, never()).execute(contains("createMessageMedia"), anyMap());
             verify(client, never()).execute(contains("createAndSendMessage"), anyMap());
@@ -748,16 +783,16 @@ class GlificWhatsAppServiceTest {
         void optIn_staysLive_whenEscalationDeliveryIsEnabled() throws Exception {
             // Opt-in is the prerequisite for delivery, not a message: muting the account operations
             // must not strip the contact id out from under an escalation that is switched live.
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", false);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = false;
+            settings.dailyReportDryRun = true;
+            settings.whatsappDryRun = true;
             when(client.execute(contains("optinContact"), anyMap())).thenReturn(mapper.readTree(
                     """
                     {"optinContact":{"contact":{"id":42},"errors":[]}}
                     """));
 
-            assertThat(service.optIn("919876543210")).isEqualTo(42L);
+            assertThat(sender().optIn("919876543210")).isEqualTo(42L);
         }
 
         /**
@@ -767,26 +802,26 @@ class GlificWhatsAppServiceTest {
          */
         @Test
         void optIn_staysLive_whenOnlyDailyReportDeliveryIsEnabled() throws Exception {
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = false;
             when(client.execute(contains("optinContact"), anyMap())).thenReturn(mapper.readTree(
                     """
                     {"optinContact":{"contact":{"id":16363},"errors":[]}}
                     """));
 
-            assertThat(service.optIn("919876543210")).isEqualTo(16363L);
+            assertThat(sender().optIn("919876543210")).isEqualTo(16363L);
         }
 
         @Test
         void optIn_isMuted_onlyWhenEveryPurposeIsDry() {
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = true;
 
-            assertThat(service.optIn("919876543210")).isEqualTo(0L);
+            assertThat(sender().optIn("919876543210")).isEqualTo(0L);
             verifyNoInteractions(client);
         }
     }
@@ -803,9 +838,9 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void sendDailyReportHsm_refusesZeroContactId_withoutUploadingMedia() {
-            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
+            settings.dailyReportSoTemplateId = "42";
 
-            assertThatThrownBy(() -> service.sendDailyReportHsm(0L, "https://minio.example.com/daily.pdf",
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(0L, "https://minio.example.com/daily.pdf",
                     "SECTION_OFFICER", LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("sendDailyReportHsm");
@@ -815,7 +850,7 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void sendEscalationHsm_refusesNullContactId_withoutUploadingMedia() {
-            assertThatThrownBy(() -> service.sendEscalationHsm(null, "https://minio.example.com/escalation.pdf"))
+            assertThatThrownBy(() -> sender().sendEscalationHsm(null, "https://minio.example.com/escalation.pdf"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("sendEscalationHsm");
 
@@ -824,9 +859,9 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void sendLoginOtpHsm_refusesZeroContactId() {
-            ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
+            settings.loginOtpTemplateId = "otp-tmpl-1";
 
-            assertThatThrownBy(() -> service.sendLoginOtpHsm(0L, "654321"))
+            assertThatThrownBy(() -> sender().sendLoginOtpHsm(0L, "654321"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("sendLoginOtpHsm");
 
@@ -835,7 +870,7 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void sendNudgeHsm_refusesZeroContactId() {
-            assertThatThrownBy(() -> service.sendNudgeHsm(0L, "Ramesh", "19 August 2026"))
+            assertThatThrownBy(() -> sender().sendNudgeHsm(0L, "Ramesh", "19 August 2026"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("sendNudgeHsm");
 
@@ -844,7 +879,7 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void sendNudgeHsm_refusesNullContactId() {
-            assertThatThrownBy(() -> service.sendNudgeHsm(null, "Ramesh", "19 August 2026"))
+            assertThatThrownBy(() -> sender().sendNudgeHsm(null, "Ramesh", "19 August 2026"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("sendNudgeHsm");
 
@@ -858,7 +893,7 @@ class GlificWhatsAppServiceTest {
          */
         @Test
         void startNudgeFlow_refusesZeroContactId() {
-            assertThatThrownBy(() -> service.startNudgeFlow(0L, "Ramesh", "19 August 2026"))
+            assertThatThrownBy(() -> sender().startNudgeFlow(0L, "Ramesh", "19 August 2026"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("startNudgeFlow");
 
@@ -867,7 +902,7 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void startNudgeFlow_refusesNullContactId() {
-            assertThatThrownBy(() -> service.startNudgeFlow(null, "Ramesh", "19 August 2026"))
+            assertThatThrownBy(() -> sender().startNudgeFlow(null, "Ramesh", "19 August 2026"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("startNudgeFlow");
 
@@ -876,7 +911,7 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void startWelcomeFlow_refusesZeroContactId() {
-            assertThatThrownBy(() -> service.startWelcomeFlow(0L, "Ramesh Kumar", "Madhya Pradesh"))
+            assertThatThrownBy(() -> sender().startWelcomeFlow(0L, "Ramesh Kumar", "Madhya Pradesh"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("startWelcomeFlow");
 
@@ -885,7 +920,7 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void startWelcomeFlow_refusesNullContactId_onTheFlowIdOverride() {
-            assertThatThrownBy(() -> service.startWelcomeFlow(null, "welcome-flow-456", "Ramesh Kumar", "MP"))
+            assertThatThrownBy(() -> sender().startWelcomeFlow(null, "welcome-flow-456", "Ramesh Kumar", "MP"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("startWelcomeFlow");
 
@@ -902,9 +937,9 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void sendNudgeHsm_isNoOp_withNoContactId() {
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            settings.nudgeDryRun = true;
 
-            assertThatCode(() -> service.sendNudgeHsm(0L, "Ramesh", "19 August 2026"))
+            assertThatCode(() -> sender().sendNudgeHsm(0L, "Ramesh", "19 August 2026"))
                     .doesNotThrowAnyException();
 
             verifyNoInteractions(client);
@@ -912,9 +947,9 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void startNudgeFlow_isNoOp_withNoContactId() {
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            settings.nudgeDryRun = true;
 
-            assertThatCode(() -> service.startNudgeFlow(null, "Ramesh", "19 August 2026"))
+            assertThatCode(() -> sender().startNudgeFlow(null, "Ramesh", "19 August 2026"))
                     .doesNotThrowAnyException();
 
             verifyNoInteractions(client);
@@ -922,9 +957,9 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void startWelcomeFlow_isNoOp_withNoContactId() {
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            settings.whatsappDryRun = true;
 
-            assertThatCode(() -> service.startWelcomeFlow(0L, "Ramesh Kumar", "MP"))
+            assertThatCode(() -> sender().startWelcomeFlow(0L, "Ramesh Kumar", "MP"))
                     .doesNotThrowAnyException();
 
             verifyNoInteractions(client);
@@ -944,14 +979,14 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void validateTemplates_failsFast_whenDailyReportIsLiveButMediaBaseUrlIsInternal() {
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
-            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
-            ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://192.168.20.143:9000");
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = false;
+            settings.dailyReportSoTemplateId = "42";
+            settings.mediaBaseUrl = "http://192.168.20.143:9000";
 
-            assertThatThrownBy(() -> service.validateTemplates())
+            assertThatThrownBy(() -> sender().validateTemplates())
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("minio.base-url")
                     .hasMessageContaining("MINIO_BASE_URL");
@@ -959,27 +994,27 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void validateTemplates_failsFast_whenEscalationIsLiveButMediaBaseUrlIsInternal() {
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", false);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
-            ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://localhost:9000");
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = false;
+            settings.dailyReportDryRun = true;
+            settings.mediaBaseUrl = "http://localhost:9000";
 
-            assertThatThrownBy(() -> service.validateTemplates())
+            assertThatThrownBy(() -> sender().validateTemplates())
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("minio.base-url");
         }
 
         @Test
         void validateTemplates_passes_withThePublicProductionBaseUrl() {
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
-            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
-            ReflectionTestUtils.setField(service, "mediaBaseUrl", "https://jalsoochak.jjmbrain.in/minio");
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = false;
+            settings.dailyReportSoTemplateId = "42";
+            settings.mediaBaseUrl = "https://jalsoochak.jjmbrain.in/minio";
 
-            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+            assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
         }
 
         @Test
@@ -988,15 +1023,15 @@ class GlificWhatsAppServiceTest {
             // is what the officer's phone opens and what is frozen into the approved template. The
             // gate used to consult only the daily and escalation flags, so a weekly-only deployment
             // started happily and delivered buttons that lead nowhere.
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
-            ReflectionTestUtils.setField(service, "weeklyReportDryRun", false);
-            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "77");
-            ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://192.168.20.143:9000");
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = true;
+            settings.weeklyReportDryRun = false;
+            settings.weeklyReportSoLinkTemplateId = "77";
+            settings.mediaBaseUrl = "http://192.168.20.143:9000";
 
-            assertThatThrownBy(() -> service.validateTemplates())
+            assertThatThrownBy(() -> sender().validateTemplates())
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("minio.base-url")
                     .hasMessageContaining("MINIO_BASE_URL");
@@ -1004,35 +1039,35 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void validateTemplates_passes_whenOnlyTheWeeklyReportIsLiveAndTheBaseUrlIsPublic() {
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
-            ReflectionTestUtils.setField(service, "weeklyReportDryRun", false);
-            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "77");
-            ReflectionTestUtils.setField(service, "mediaBaseUrl", "https://jalsoochak.jjmbrain.in/minio");
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = true;
+            settings.weeklyReportDryRun = false;
+            settings.weeklyReportSoLinkTemplateId = "77";
+            settings.mediaBaseUrl = "https://jalsoochak.jjmbrain.in/minio";
 
-            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+            assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
         }
 
         /** A localhost MinIO is normal for local and CI runs, where nothing is delivered. */
         @Test
         void validateTemplates_toleratesAnInternalBaseUrl_whenNoDocumentIsEverSent() {
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
-            ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
-            ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://localhost:9000");
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = true;
+            settings.weeklyReportDryRun = true;
+            settings.mediaBaseUrl = "http://localhost:9000";
 
-            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+            assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
         }
 
         @Test
         void sendDailyReportHsm_refusesAnInternalUrl_withoutCallingGlific() {
-            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
+            settings.dailyReportSoTemplateId = "42";
 
-            assertThatThrownBy(() -> service.sendDailyReportHsm(16363L,
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(16363L,
                     "http://192.168.20.143:9000/escalation-reports/daily_report.pdf",
                     "SECTION_OFFICER", LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
                     .isInstanceOf(IllegalStateException.class)
@@ -1043,7 +1078,7 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void sendEscalationHsm_refusesAnInternalUrl_withoutCallingGlific() {
-            assertThatThrownBy(() -> service.sendEscalationHsm(55L,
+            assertThatThrownBy(() -> sender().sendEscalationHsm(55L,
                     "http://minio:9000/escalation-reports/escalation.pdf"))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("MINIO_BASE_URL");
@@ -1053,8 +1088,8 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void sendDailyReportHsm_registersThePublicUrl_andSends() throws Exception {
-            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
-            ReflectionTestUtils.setField(service, "dailyReportCaption", "Daily Water Service Situation Report");
+            settings.dailyReportSoTemplateId = "42";
+            settings.dailyReportCaption = "Daily Water Service Situation Report";
             String publicUrl = "https://jalsoochak.jjmbrain.in/minio/escalation-reports/"
                     + "daily_report_SECTION_OFFICER_16743_2026-08-19.pdf";
             when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
@@ -1066,7 +1101,7 @@ class GlificWhatsAppServiceTest {
                     {"createAndSendMessage":{"message":{"id":1,"body":"b","isHsm":true},"errors":[]}}
                     """));
 
-            service.sendDailyReportHsm(16743L, publicUrl, "SECTION_OFFICER", LocalDate.of(2026, 8, 19),
+            sender().sendDailyReportHsm(16743L, publicUrl, "SECTION_OFFICER", LocalDate.of(2026, 8, 19),
                     "Ramesh Kumar");
 
             ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
@@ -1098,9 +1133,9 @@ class GlificWhatsAppServiceTest {
 
         @BeforeEach
         void enableWeeklyDelivery() {
-            ReflectionTestUtils.setField(service, "weeklyReportDryRun", false);
-            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "7001");
-            ReflectionTestUtils.setField(service, "mediaBaseUrl", PUBLIC_BASE);
+            settings.weeklyReportDryRun = false;
+            settings.weeklyReportSoLinkTemplateId = "7001";
+            settings.mediaBaseUrl = PUBLIC_BASE;
         }
 
         private void stubSendHsm() throws Exception {
@@ -1115,7 +1150,7 @@ class GlificWhatsAppServiceTest {
             // India-only firewall, which is the failure the link mode exists to avoid.
             stubSendHsm();
 
-            service.sendWeeklyReportHsm(21343L, PUBLIC_URL, "SECTION_OFFICER", WEEK_START, "Binod Nimoli");
+            sender().sendWeeklyReportHsm(21343L, PUBLIC_URL, "SECTION_OFFICER", WEEK_START, "Binod Nimoli");
 
             verify(client).execute(contains("sendHsmMessage"), anyMap());
             verify(client, never()).execute(contains("createMessageMedia"), anyMap());
@@ -1129,7 +1164,7 @@ class GlificWhatsAppServiceTest {
             // suffix last. Reordering them sends the officer a message addressed to a date.
             stubSendHsm();
 
-            service.sendWeeklyReportHsm(21343L, PUBLIC_URL, "SECTION_OFFICER", WEEK_START, "Binod Nimoli");
+            sender().sendWeeklyReportHsm(21343L, PUBLIC_URL, "SECTION_OFFICER", WEEK_START, "Binod Nimoli");
 
             ArgumentCaptor<Map<String, Object>> vars = ArgumentCaptor.forClass(Map.class);
             verify(client).execute(contains("sendHsmMessage"), vars.capture());
@@ -1140,9 +1175,9 @@ class GlificWhatsAppServiceTest {
         @Test
         void prefersTheSdoTemplateWhenOneIsConfigured() throws Exception {
             stubSendHsm();
-            ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "7002");
+            settings.weeklyReportSdoLinkTemplateId = "7002";
 
-            WhatsAppSendResult result = service.sendWeeklyReportHsm(5521L, PUBLIC_URL,
+            WhatsAppSendResult result = sender().sendWeeklyReportHsm(5521L, PUBLIC_URL,
                     "SUB_DIVISIONAL_OFFICER", WEEK_START, "Bharat Sharma");
 
             assertThat(result.templateId()).isEqualTo("7002");
@@ -1151,9 +1186,9 @@ class GlificWhatsAppServiceTest {
         @Test
         void fallsBackToTheSoTemplateWhenNoSdoTemplateIsApproved() throws Exception {
             stubSendHsm();
-            ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "");
+            settings.weeklyReportSdoLinkTemplateId = "";
 
-            WhatsAppSendResult result = service.sendWeeklyReportHsm(5521L, PUBLIC_URL,
+            WhatsAppSendResult result = sender().sendWeeklyReportHsm(5521L, PUBLIC_URL,
                     "SUB_DIVISIONAL_OFFICER", WEEK_START, "Bharat Sharma");
 
             assertThat(result.templateId()).isEqualTo("7001");
@@ -1163,7 +1198,7 @@ class GlificWhatsAppServiceTest {
         void refusesAUrlFromSomeOtherHostRatherThanSendingADeadButton() throws Exception {
             // Meta appends the remainder to the template's frozen prefix verbatim, so a foreign URL
             // yields a button pointing nowhere — and Glific would accept the send regardless.
-            assertThatThrownBy(() -> service.sendWeeklyReportHsm(21343L,
+            assertThatThrownBy(() -> sender().sendWeeklyReportHsm(21343L,
                     "https://elsewhere.example.com/x.pdf", "SECTION_OFFICER", WEEK_START, "Binod"))
                     .isInstanceOf(IllegalStateException.class);
 
@@ -1172,20 +1207,20 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void requiresTheWeekStartSinceItIsATemplateVariable() {
-            assertThatThrownBy(() -> service.sendWeeklyReportHsm(21343L, PUBLIC_URL,
+            assertThatThrownBy(() -> sender().sendWeeklyReportHsm(21343L, PUBLIC_URL,
                     "SECTION_OFFICER", null, "Binod"))
                     .isInstanceOf(IllegalArgumentException.class);
         }
 
         @Test
         void suppressesTheSendWhileInDryRun() {
-            ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
+            settings.weeklyReportDryRun = true;
 
-            WhatsAppSendResult result = service.sendWeeklyReportHsm(21343L, PUBLIC_URL,
+            WhatsAppSendResult result = sender().sendWeeklyReportHsm(21343L, PUBLIC_URL,
                     "SECTION_OFFICER", WEEK_START, "Binod");
 
             assertThat(result.messageId()).isNull();
-            assertThat(service.isWeeklyReportDeliveryEnabled()).isFalse();
+            assertThat(sender().isWeeklyReportDeliveryEnabled()).isFalse();
             verifyNoInteractions(client);
         }
 
@@ -1193,21 +1228,21 @@ class GlificWhatsAppServiceTest {
         void startupFailsWhenDeliveryIsLiveButNoTemplateIsConfigured() {
             // Otherwise the job runs every Monday, builds and uploads a PDF, then fails per message —
             // discovered from the logs rather than at deploy, with officers receiving nothing.
-            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "");
-            ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-1");
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            settings.weeklyReportSoLinkTemplateId = "";
+            settings.loginOtpTemplateId = "otp-1";
+            settings.dailyReportDryRun = true;
 
-            assertThatThrownBy(() -> service.validateTemplates())
+            assertThatThrownBy(() -> sender().validateTemplates())
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("weekly-report-so-link-id");
         }
 
         @Test
         void startupPassesWhenTheTemplateIsConfigured() {
-            ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-1");
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            settings.loginOtpTemplateId = "otp-1";
+            settings.dailyReportDryRun = true;
 
-            service.validateTemplates();
+            sender().validateTemplates();
         }
     }
 
@@ -1221,9 +1256,9 @@ class GlificWhatsAppServiceTest {
 
         @BeforeEach
         void enableLinkMode() {
-            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
-            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "9101");
-            ReflectionTestUtils.setField(service, "mediaBaseUrl", PUBLIC_BASE);
+            settings.dailyReportDeliveryMode = "LINK";
+            settings.dailyReportSoLinkTemplateId = "9101";
+            settings.mediaBaseUrl = PUBLIC_BASE;
         }
 
         private void stubSendHsm() throws Exception {
@@ -1236,7 +1271,7 @@ class GlificWhatsAppServiceTest {
         void sendsOneHsm_andNeverRegistersMedia() throws Exception {
             stubSendHsm();
 
-            service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             verify(client).execute(contains("sendHsmMessage"), anyMap());
@@ -1248,7 +1283,7 @@ class GlificWhatsAppServiceTest {
         void passesNameThenDateThenUrlSuffix_inThatOrder() throws Exception {
             stubSendHsm();
 
-            service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
@@ -1263,14 +1298,14 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void suffixExcludesTheTemplatesFrozenPrefix_evenWhenBaseUrlHasATrailingSlash() {
-            ReflectionTestUtils.setField(service, "mediaBaseUrl", PUBLIC_BASE + "/");
+            settings.mediaBaseUrl = PUBLIC_BASE + "/";
 
-            assertThat(service.linkSuffix(PUBLIC_URL)).isEqualTo(OBJECT_PATH);
+            assertThat(sender().linkSuffix(PUBLIC_URL)).isEqualTo(OBJECT_PATH);
         }
 
         @Test
         void refusesAUrlFromAnotherHost_withoutCallingGlific() {
-            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L,
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(16714L,
                     "https://some-other-host.example.com/minio/" + OBJECT_PATH,
                     "SECTION_OFFICER", LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
                     .isInstanceOf(IllegalStateException.class)
@@ -1281,7 +1316,7 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void refusesTheBarePrefixWithNoObjectPath() {
-            assertThatThrownBy(() -> service.linkSuffix(PUBLIC_BASE + "/"))
+            assertThatThrownBy(() -> sender().linkSuffix(PUBLIC_BASE + "/"))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("no object path");
         }
@@ -1290,7 +1325,7 @@ class GlificWhatsAppServiceTest {
         void blankOfficerNameDegradesToOfficer_ratherThanFailingTheSend() throws Exception {
             stubSendHsm();
 
-            service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "   ");
 
             ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
@@ -1301,7 +1336,7 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void refusesAMissingReportDate_becauseItIsATemplateVariable() {
-            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     null, "Ramesh Kumar"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("report date");
@@ -1311,10 +1346,10 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void sdoUsesItsOwnLinkTemplate_whenConfigured() throws Exception {
-            ReflectionTestUtils.setField(service, "dailyReportSdoLinkTemplateId", "9102");
+            settings.dailyReportSdoLinkTemplateId = "9102";
             stubSendHsm();
 
-            service.sendDailyReportHsm(16714L, PUBLIC_URL, "SUB_DIVISIONAL_OFFICER",
+            sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SUB_DIVISIONAL_OFFICER",
                     LocalDate.of(2026, 8, 19), "SDO Kumar");
 
             ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
@@ -1326,7 +1361,7 @@ class GlificWhatsAppServiceTest {
         void sdoFallsBackToTheSoLinkTemplate_whenItsOwnIsBlank() throws Exception {
             stubSendHsm();
 
-            service.sendDailyReportHsm(16714L, PUBLIC_URL, "SUB_DIVISIONAL_OFFICER",
+            sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SUB_DIVISIONAL_OFFICER",
                     LocalDate.of(2026, 8, 19), "SDO Kumar");
 
             ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
@@ -1336,9 +1371,9 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void isNoOp_underDailyReportDryRun() {
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            settings.dailyReportDryRun = true;
 
-            service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             verifyNoInteractions(client);
@@ -1346,7 +1381,7 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void refusesAnUnresolvedContactId_beforeAnyGlificCall() {
-            assertThatThrownBy(() -> service.sendDailyReportHsm(0L, PUBLIC_URL, "SECTION_OFFICER",
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(0L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("sendDailyReportHsm");
@@ -1360,7 +1395,7 @@ class GlificWhatsAppServiceTest {
                     {"sendHsmMessage":{"errors":[{"key":"params","message":"wrong number of parameters"}]}}
                     """));
 
-            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
                     .isInstanceOf(RuntimeException.class)
                     .hasMessageContaining("wrong number of parameters");
@@ -1368,32 +1403,32 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void validateTemplates_requiresTheSoLinkTemplate_andNotTheDocumentIds() {
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = false;
             // No daily-report-so-id at all: LINK mode never reads it, so it must not be demanded.
-            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "");
+            settings.dailyReportSoTemplateId = "";
 
-            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+            assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
 
-            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "");
-            assertThatThrownBy(() -> service.validateTemplates())
+            settings.dailyReportSoLinkTemplateId = "";
+            assertThatThrownBy(() -> sender().validateTemplates())
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("glific.template.daily-report-so-link-id");
         }
 
         @Test
         void validateTemplates_failsWhenTheButtonBaseUrlDoesNotMatchMinioBaseUrl() {
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = false;
             // The staging template's prefix against a production MINIO_BASE_URL — the mistake this
             // guard exists for, because Glific accepts the send and only the officer sees the dead link.
-            ReflectionTestUtils.setField(service, "dailyReportLinkButtonBaseUrl", "https://jalsoochak.in/minio/");
+            settings.dailyReportLinkButtonBaseUrl = "https://jalsoochak.in/minio/";
 
-            assertThatThrownBy(() -> service.validateTemplates())
+            assertThatThrownBy(() -> sender().validateTemplates())
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("daily-report.link.button-base-url")
                     .hasMessageContaining(PUBLIC_BASE + "/");
@@ -1401,13 +1436,13 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void validateTemplates_passesWhenTheButtonBaseUrlMatches() {
-            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
-            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
-            ReflectionTestUtils.setField(service, "escalationDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
-            ReflectionTestUtils.setField(service, "dailyReportLinkButtonBaseUrl", PUBLIC_BASE + "/");
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = false;
+            settings.dailyReportLinkButtonBaseUrl = PUBLIC_BASE + "/";
 
-            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+            assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
         }
     }
 
@@ -1448,19 +1483,19 @@ class GlificWhatsAppServiceTest {
 
         @BeforeEach
         void publicBaseUrl() {
-            ReflectionTestUtils.setField(service, "mediaBaseUrl", PUBLIC_BASE);
+            settings.mediaBaseUrl = PUBLIC_BASE;
         }
 
         @Test
         void linkMode_returnsTheMessageIdTemplateIdAndMode() throws Exception {
-            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
-            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880557");
+            settings.dailyReportDeliveryMode = "LINK";
+            settings.dailyReportSoLinkTemplateId = "880557";
             when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree(
                     """
                     {"sendHsmMessage":{"message":{"id":241952654,"body":"b","isHSM":true},"errors":[]}}
                     """));
 
-            WhatsAppSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            WhatsAppSendResult result = sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             assertThat(result.messageId()).isEqualTo("241952654");
@@ -1471,8 +1506,8 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void documentMode_returnsTheMessageIdTemplateIdAndMode() throws Exception {
-            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "DOCUMENT");
-            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "880600");
+            settings.dailyReportDeliveryMode = "DOCUMENT";
+            settings.dailyReportSoTemplateId = "880600";
             when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
                     """
                     {"createMessageMedia":{"messageMedia":{"id":77,"url":"u"},"errors":[]}}
@@ -1482,7 +1517,7 @@ class GlificWhatsAppServiceTest {
                     {"createAndSendMessage":{"message":{"id":241952700,"body":"b","isHsm":true},"errors":[]}}
                     """));
 
-            WhatsAppSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            WhatsAppSendResult result = sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             assertThat(result.messageId()).isEqualTo("241952700");
@@ -1497,14 +1532,14 @@ class GlificWhatsAppServiceTest {
          */
         @Test
         void aSendThatReturnsNoIdIsRefused() throws Exception {
-            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
-            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880557");
+            settings.dailyReportDeliveryMode = "LINK";
+            settings.dailyReportSoLinkTemplateId = "880557";
             when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree(
                     """
                     {"sendHsmMessage":{"message":{},"errors":[]}}
                     """));
 
-            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
                     .isInstanceOf(GlificMissingMessageIdException.class)
                     .hasMessageContaining("returned no message.id")
@@ -1515,8 +1550,8 @@ class GlificWhatsAppServiceTest {
         /** The document path shares {@code extractMessageId}, so it must refuse a blank id too. */
         @Test
         void documentMode_refusesASendThatReturnsABlankId() throws Exception {
-            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "DOCUMENT");
-            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "880600");
+            settings.dailyReportDeliveryMode = "DOCUMENT";
+            settings.dailyReportSoTemplateId = "880600";
             when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
                     """
                     {"createMessageMedia":{"messageMedia":{"id":77,"url":"u"},"errors":[]}}
@@ -1526,7 +1561,7 @@ class GlificWhatsAppServiceTest {
                     {"createAndSendMessage":{"message":{"id":"  "},"errors":[]}}
                     """));
 
-            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
                     .isInstanceOf(GlificMissingMessageIdException.class)
                     .satisfies(e -> assertThat(((GlificMutationException) e).getMutationKey())
@@ -1536,10 +1571,10 @@ class GlificWhatsAppServiceTest {
         /** A dry-run reports the mode but never a message id — a fake one would poison reconciliation. */
         @Test
         void aDryRunReportsTheModeButNoMessageId() {
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
+            settings.dailyReportDryRun = true;
+            settings.dailyReportDeliveryMode = "LINK";
 
-            WhatsAppSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            WhatsAppSendResult result = sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             assertThat(result.hasMessageId()).isFalse();
@@ -1553,10 +1588,10 @@ class GlificWhatsAppServiceTest {
          */
         @Test
         void aDryRunToleratesAnUnparseableDeliveryMode() {
-            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
-            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "pdf");
+            settings.dailyReportDryRun = true;
+            settings.dailyReportDeliveryMode = "pdf";
 
-            WhatsAppSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            WhatsAppSendResult result = sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             assertThat(result.mode()).isNull();
@@ -1566,14 +1601,14 @@ class GlificWhatsAppServiceTest {
         /** Glific's error key is carried on the exception so the caller can tag the failure stage. */
         @Test
         void aRejectedSendCarriesTheMutationKeyAndErrorKey() throws Exception {
-            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
-            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880557");
+            settings.dailyReportDeliveryMode = "LINK";
+            settings.dailyReportSoLinkTemplateId = "880557";
             when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree(
                     """
                     {"sendHsmMessage":{"message":null,"errors":[{"key":"receiver","message":"Receiver does not exist"}]}}
                     """));
 
-            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
                     .isInstanceOf(GlificMutationException.class)
                     .hasMessageContaining("Glific GraphQL error in sendHsmMessage")
@@ -1587,18 +1622,142 @@ class GlificWhatsAppServiceTest {
         /** The 20 Aug incident's shape: the media step is what failed, and the stage must say so. */
         @Test
         void aMediaRegistrationFailureIsTaggedWithItsOwnMutationKey() throws Exception {
-            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "DOCUMENT");
-            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "880600");
+            settings.dailyReportDeliveryMode = "DOCUMENT";
+            settings.dailyReportSoTemplateId = "880600";
             when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
                     """
                     {"createMessageMedia":{"messageMedia":null,"errors":[{"key":"media","message":"(#131053) Media upload error"}]}}
                     """));
 
-            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
                     .isInstanceOf(GlificMutationException.class)
                     .satisfies(e -> assertThat(((GlificMutationException) e).getMutationKey())
                             .isEqualTo("createMessageMedia"));
+        }
+    }
+
+    /**
+     * Where a failed report send broke, as {@link WhatsAppChannel} reports it — the one logic change in
+     * putting this adapter behind the port.
+     *
+     * <p>The channel used to work the stage out by inspecting this adapter's exceptions. The adapter
+     * now assigns it, and the channel reads it off the port's {@link WhatsAppSendException}. Each test
+     * drives a real channel over a real adapter, so the stage the router logs is checked across the
+     * whole seam, and each pins a stage the old classification gave.</p>
+     */
+    @Nested
+    class FailureStage {
+
+        private static final String PUBLIC_URL = "https://jalsoochak.jjmbrain.in/minio"
+                + "/escalation-reports/daily_report_SECTION_OFFICER_16714_2026-08-19.pdf";
+        private static final LocalDate REPORT_DATE = LocalDate.of(2026, 8, 19);
+
+        @BeforeEach
+        void documentMode() {
+            settings.dailyReportDeliveryMode = "DOCUMENT";
+            settings.dailyReportSoTemplateId = "880600";
+        }
+
+        private ReportSendOutcome sendThroughTheChannel(long contactId) {
+            return new WhatsAppChannel(sender()).sendDailyReport(
+                    contactId, PUBLIC_URL, "SECTION_OFFICER", REPORT_DATE, "Ramesh Kumar");
+        }
+
+        private void stubMediaRegistered() throws Exception {
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createMessageMedia":{"messageMedia":{"id":77,"url":"u"},"errors":[]}}
+                    """));
+        }
+
+        /** The 20 Aug (#131053) incident: Meta could not fetch the PDF, so Glific refused the media. */
+        @Test
+        void aRejectedMediaRegistration_isMediaRegister() throws Exception {
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createMessageMedia":{"messageMedia":null,"errors":[{"key":"media","message":"(#131053) Media upload error"}]}}
+                    """));
+
+            ReportSendOutcome outcome = sendThroughTheChannel(16714L);
+
+            assertThat(outcome.failure().stage()).isEqualTo(WhatsAppSendStage.MEDIA_REGISTER);
+            assertThat(outcome.failure().errorKey()).isEqualTo("media");
+            verify(client, never()).execute(contains("createAndSendMessage"), anyMap());
+        }
+
+        /**
+         * Glific accepted the send but returned no id. Classed as a plain {@code SEND} it would be
+         * retried, sending the officer a second copy of a report Glific already holds.
+         */
+        @Test
+        void anAcceptedSendWithoutAMessageId_isSendNoMessageId() throws Exception {
+            stubMediaRegistered();
+            when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createAndSendMessage":{"message":{},"errors":[]}}
+                    """));
+
+            ReportSendOutcome outcome = sendThroughTheChannel(16714L);
+
+            assertThat(outcome.failure().stage()).isEqualTo(WhatsAppSendStage.SEND_NO_MESSAGE_ID);
+            assertThat(outcome.failure().errorKey()).isNull();
+        }
+
+        @Test
+        void aRejectedSend_isSend_withGlificsErrorKey() throws Exception {
+            stubMediaRegistered();
+            when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createAndSendMessage":{"message":null,"errors":[{"key":"receiver","message":"Receiver does not exist"}]}}
+                    """));
+
+            ReportSendOutcome outcome = sendThroughTheChannel(16714L);
+
+            assertThat(outcome.failure().stage()).isEqualTo(WhatsAppSendStage.SEND);
+            assertThat(outcome.failure().errorKey()).isEqualTo("receiver");
+        }
+
+        /**
+         * Reactor reports an expired {@code block()} as an {@link IllegalStateException}, the type our
+         * own configuration errors use. The adapter must pass it through untouched, and it must still
+         * come out as {@code TIMEOUT}: Glific may already have sent the message, so this is the one
+         * failure a retry makes worse.
+         */
+        @Test
+        void aBlockTimeout_passesThroughTheAdapter_andIsTimeoutNotConfig() {
+            IllegalStateException timeout =
+                    new IllegalStateException("Timeout on blocking read for 30000 MILLISECONDS");
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenThrow(timeout);
+
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    REPORT_DATE, "Ramesh Kumar"))
+                    .isSameAs(timeout);
+            assertThat(sendThroughTheChannel(16714L).failure().stage()).isEqualTo(WhatsAppSendStage.TIMEOUT);
+        }
+
+        /** Nothing reached Glific because the contact was never opted in, so retrying cannot help. */
+        @Test
+        void anUnresolvedContactId_isConfig() {
+            ReportSendOutcome outcome = sendThroughTheChannel(0L);
+
+            assertThat(outcome.failure().stage()).isEqualTo(WhatsAppSendStage.CONFIG);
+            assertThat(outcome.failure().errorKey()).isNull();
+            verifyNoInteractions(client);
+        }
+
+        /**
+         * The port takes a boxed {@code Long}, so a null contact id reaches the adapter and is refused
+         * as our own input error — which the channel reads as {@code CONFIG} — rather than failing to
+         * unbox before the call and being read as a send failure.
+         */
+        @Test
+        void aNullContactId_isRefusedAsOurInputError_notAsAProviderFailure() {
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(null, PUBLIC_URL, "SECTION_OFFICER",
+                    REPORT_DATE, "Ramesh Kumar"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .isNotInstanceOf(WhatsAppSendException.class);
+            verifyNoInteractions(client);
         }
     }
 }

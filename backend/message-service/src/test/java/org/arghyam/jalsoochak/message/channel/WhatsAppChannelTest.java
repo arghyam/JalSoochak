@@ -1,14 +1,15 @@
 package org.arghyam.jalsoochak.message.channel;
 
-import org.arghyam.jalsoochak.message.channel.glific.GlificMissingMessageIdException;
-import org.arghyam.jalsoochak.message.channel.glific.GlificMutationException;
 import org.arghyam.jalsoochak.message.channel.provider.ReportDeliveryMode;
 import org.arghyam.jalsoochak.message.channel.provider.ReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendException;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -242,36 +243,63 @@ class WhatsAppChannelTest {
         assertThat(outcome.failure().message()).contains("Glific unreachable");
     }
 
+    /**
+     * The adapter's stage and error key reach the router unchanged — the two fields that tell the 20 Aug
+     * media-fetch failure apart from a rejected template or receiver.
+     */
+    @Test
+    void sendDailyReport_reportsTheStageAndErrorKeyTheProviderAssigned() {
+        when(whatsAppSender.sendDailyReportHsm(anyLong(), anyString(), anyString(), any(), any()))
+                .thenThrow(new WhatsAppSendException(WhatsAppSendStage.MEDIA_REGISTER, "media",
+                        "(#131053) Media upload error"));
+
+        ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
+                42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
+
+        assertThat(outcome.accepted()).isFalse();
+        assertThat(outcome.failure().stage()).isEqualTo(WhatsAppSendStage.MEDIA_REGISTER);
+        assertThat(outcome.failure().errorKey()).isEqualTo("media");
+        assertThat(outcome.failure().message()).isEqualTo("(#131053) Media upload error");
+    }
+
+    /** Only the provider has an error key. Our own refusal must not borrow one. */
+    @Test
+    void sendDailyReport_reportsNoErrorKey_forAFailureOnOurSide() {
+        when(whatsAppSender.sendDailyReportHsm(anyLong(), anyString(), anyString(), any(), any()))
+                .thenThrow(new IllegalArgumentException("requires a resolved contact id"));
+
+        ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
+                42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
+
+        assertThat(outcome.failure().stage()).isEqualTo(WhatsAppSendStage.CONFIG);
+        assertThat(outcome.failure().errorKey()).isNull();
+    }
+
+    @Test
+    void sendWeeklyReport_reportsTheStageAndErrorKeyTheProviderAssigned() {
+        when(whatsAppSender.sendWeeklyReportHsm(anyLong(), anyString(), anyString(), any(), any()))
+                .thenThrow(new WhatsAppSendException(WhatsAppSendStage.SEND, "receiver",
+                        "Receiver does not exist"));
+
+        ReportSendOutcome outcome = whatsAppChannel.sendWeeklyReport(
+                42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 24), "Binod");
+
+        assertThat(outcome.accepted()).isFalse();
+        assertThat(outcome.failure().stage()).isEqualTo(WhatsAppSendStage.SEND);
+        assertThat(outcome.failure().errorKey()).isEqualTo("receiver");
+    }
+
     // ───────────────────── failure-stage classification ────────────────────────
 
     /**
-     * The 20 Aug 2026 incident: Meta could not fetch the MinIO PDF and {@code createMessageMedia}
-     * rejected the send. That needs a different fix from a rejected message, and used to be
-     * indistinguishable in the logs.
+     * Which provider call failed is the adapter's knowledge, so the channel takes the stage as given.
+     * The adapter tests pin which failure carries which stage.
      */
-    @Test
-    void stageOf_tagsAMediaRegistrationFailure() {
-        assertThat(WhatsAppChannel.stageOf(new GlificMutationException("createMessageMedia", "media",
-                "(#131053) Media upload error"))).isEqualTo(WhatsAppSendStage.MEDIA_REGISTER);
-    }
-
-    /**
-     * A send Glific accepted but returned no id for. It subclasses {@link GlificMutationException}, so
-     * it would otherwise be swept into {@link WhatsAppSendStage#SEND} and retried — sending the officer a
-     * second copy of a report Glific already holds.
-     */
-    @Test
-    void stageOf_tagsAnAcceptedSendThatReturnedNoMessageId() {
-        assertThat(WhatsAppChannel.stageOf(new GlificMissingMessageIdException("sendHsmMessage")))
-                .isEqualTo(WhatsAppSendStage.SEND_NO_MESSAGE_ID);
-    }
-
-    @Test
-    void stageOf_tagsARejectedSend() {
-        assertThat(WhatsAppChannel.stageOf(new GlificMutationException("sendHsmMessage", "receiver",
-                "Receiver does not exist"))).isEqualTo(WhatsAppSendStage.SEND);
-        assertThat(WhatsAppChannel.stageOf(new GlificMutationException("createAndSendMessage", null,
-                "boom"))).isEqualTo(WhatsAppSendStage.SEND);
+    @ParameterizedTest
+    @EnumSource(value = WhatsAppSendStage.class, names = {"MEDIA_REGISTER", "SEND", "SEND_NO_MESSAGE_ID"})
+    void stageOf_takesTheStageTheProviderAssigned(WhatsAppSendStage stage) {
+        assertThat(WhatsAppChannel.stageOf(new WhatsAppSendException(stage, null, "provider failure")))
+                .isEqualTo(stage);
     }
 
     /**

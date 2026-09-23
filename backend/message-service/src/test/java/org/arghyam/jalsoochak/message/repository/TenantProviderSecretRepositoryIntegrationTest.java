@@ -4,8 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
 
-import org.arghyam.jalsoochak.message.channel.glific.GlificAuthService;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
+import org.arghyam.jalsoochak.message.channel.provider.glific.GlificAuthService;
 import org.arghyam.jalsoochak.message.dto.TenantProviderSecretRow;
 import org.arghyam.jalsoochak.message.dto.TenantSecretKeyRow;
 import org.arghyam.jalsoochak.message.enums.MessagingChannel;

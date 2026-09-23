@@ -76,7 +76,7 @@ public class MinioStorageService {
     /**
      * Warns at startup when {@code minio.base-url} could not be fetched by Glific. Only a warning
      * here — this bean has no view of whether WhatsApp document delivery is switched on, and a local
-     * or CI run with a localhost MinIO is perfectly valid. {@code GlificWhatsAppService} turns the
+     * or CI run with a localhost MinIO is perfectly valid. {@code GlificWhatsAppSender} turns the
      * same check into a startup failure when a delivery purpose is actually live.
      */
     @PostConstruct

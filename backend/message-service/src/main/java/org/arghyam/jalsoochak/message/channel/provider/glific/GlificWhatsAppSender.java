@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.message.channel.glific;
+package org.arghyam.jalsoochak.message.channel.provider.glific;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -7,12 +7,12 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.message.channel.provider.ReportDeliveryMode;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendException;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.arghyam.jalsoochak.message.util.PublicUrlValidator;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -34,11 +34,16 @@ import java.util.Map;
  * <p>Daily report: either shape, chosen by {@code notifications.daily-report.delivery-mode} — see
  * {@link ReportDeliveryMode}. {@code LINK} mode is a single {@code sendHsmMessage} with
  * {{1}} = officer name, {{2}} = report date and the button's URL suffix last.</p>
+ *
+ * <p>Configured entirely through {@link GlificWhatsAppSettings}; only the GraphQL client reads its
+ * own connection properties. A mutation Glific rejects surfaces as a {@link GlificMutationException},
+ * which is the port's {@link WhatsAppSendException} with the stage already set, so no caller needs
+ * to know a mutation name.</p>
  */
-@Service
+@Component
 @RequiredArgsConstructor
 @Slf4j
-public class GlificWhatsAppService implements WhatsAppSender {
+public class GlificWhatsAppSender implements WhatsAppSender {
 
     private static final String OPTIN_MUTATION = """
             mutation optinContact($phone: String!) {
@@ -103,123 +108,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
 
     private final GlificGraphQLClient client;
     private final ObjectMapper objectMapper;
-
-    /**
-     * Master WhatsApp dry-run. Gates the shared account operations that are neither a nudge, an
-     * escalation nor a daily report: login OTP, welcome flow and language updates. The
-     * {@link #nudgeDryRun}, {@link #escalationDryRun} and {@link #dailyReportDryRun} flags below
-     * default to this value when their own properties are unset, so a single
-     * {@code NOTIFICATIONS_WHATSAPP_DRY_RUN=true} still suppresses every Glific call
-     * (backwards compatible with the previous single-flag behaviour).
-     *
-     * <p>Contact opt-in is deliberately <em>not</em> gated on this flag — see
-     * {@link #isOptInDryRun()}. It sends the recipient nothing and is the prerequisite for every
-     * delivery, so muting account operations must not break a purpose that is switched live.</p>
-     */
-    @Value("${notifications.whatsapp.dry-run:false}")
-    private boolean whatsappDryRun;
-
-    /**
-     * Suppresses only the operator nudge (flow + HSM). Defaults to {@link #whatsappDryRun}.
-     * Set {@code NOTIFICATIONS_NUDGE_DRY_RUN=true} to mute nudges while escalations stay live.
-     */
-    @Value("${notifications.nudge.dry-run:${notifications.whatsapp.dry-run:false}}")
-    private boolean nudgeDryRun;
-
-    /**
-     * Suppresses only the officer escalation document HSM (and its media upload).
-     * Defaults to {@link #whatsappDryRun}. Set {@code NOTIFICATIONS_ESCALATION_DRY_RUN=false}
-     * to deliver escalations to officers (SO/SDO) while nudges stay muted.
-     */
-    @Value("${notifications.escalation.dry-run:${notifications.whatsapp.dry-run:false}}")
-    private boolean escalationDryRun;
-
-    @Value("${glific.template.nudge-id:}")
-    private String nudgeTemplateId;
-
-    @Value("${glific.template.escalation-id:}")
-    private String escalationTemplateId;
-
-    @Value("${glific.template.login-otp-id:}")
-    private String loginOtpTemplateId;
-
-    @Value("${glific.flow.nudge-id:}")
-    private String nudgeFlowId;
-
-    @Value("${glific.flow.welcome-id:}")
-    private String welcomeFlowId;
-
-    /**
-     * Suppresses only the Daily Water Service Situation Report document HSM (and its media upload).
-     * Defaults to {@link #whatsappDryRun}. Set {@code NOTIFICATIONS_DAILY_REPORT_DRY_RUN=false} to
-     * deliver officer daily reports while nudges, escalations and account operations stay muted.
-     */
-    @Value("${notifications.daily-report.dry-run:${notifications.whatsapp.dry-run:false}}")
-    private boolean dailyReportDryRun;
-
-    /** Document HSM template id for the SECTION_OFFICER daily report. */
-    @Value("${glific.template.daily-report-so-id:}")
-    private String dailyReportSoTemplateId;
-
-    /** Document HSM template id for the SUB_DIVISIONAL_OFFICER daily report. */
-    @Value("${glific.template.daily-report-sdo-id:}")
-    private String dailyReportSdoTemplateId;
-
-    /**
-     * Chooses how the daily report reaches the officer — {@code DOCUMENT} (PDF attachment, which Meta
-     * must download itself) or {@code LINK} (dynamic-URL button, which Meta never fetches). Bound as a
-     * String and parsed on use so an unrecognised value fails loudly with the valid ones named, and so
-     * an unset property behaves exactly as before this mode existed.
-     */
-    @Value("${notifications.daily-report.delivery-mode:DOCUMENT}")
-    private String dailyReportDeliveryMode;
-
-    /** Text HSM template id (dynamic-URL button) for the SECTION_OFFICER daily report — LINK mode. */
-    @Value("${glific.template.daily-report-so-link-id:}")
-    private String dailyReportSoLinkTemplateId;
-
-    /** Text HSM template id (dynamic-URL button) for the SUB_DIVISIONAL_OFFICER daily report — LINK mode. */
-    @Value("${glific.template.daily-report-sdo-link-id:}")
-    private String dailyReportSdoLinkTemplateId;
-
-    /**
-     * Suppresses only the Weekly Water Service Situation Report. Defaults to {@link #whatsappDryRun}.
-     *
-     * <p>Ships suppressed by default in practice, because the weekly templates need their own Meta
-     * approval and until they exist there is nothing to send. A suppressed weekly report is still
-     * generated and uploaded, so the pipeline can be verified end-to-end before delivery goes live.</p>
-     */
-    @Value("${notifications.weekly-report.dry-run:${notifications.whatsapp.dry-run:false}}")
-    private boolean weeklyReportDryRun;
-
-    /** Text HSM template id (dynamic-URL button) for the SECTION_OFFICER weekly report. */
-    @Value("${glific.template.weekly-report-so-link-id:}")
-    private String weeklyReportSoLinkTemplateId;
-
-    /** Text HSM template id (dynamic-URL button) for the SUB_DIVISIONAL_OFFICER weekly report. */
-    @Value("${glific.template.weekly-report-sdo-link-id:}")
-    private String weeklyReportSdoLinkTemplateId;
-
-    /**
-     * Optional mirror of the URL prefix frozen into the approved LINK template, e.g.
-     * {@code https://jalsoochak.jjmbrain.in/minio/}. When set it must match the prefix this service
-     * strips off the MinIO URL to build the button's variable ({@link #mediaUrlPrefix()}); a mismatch
-     * fails startup. It is the only check that catches an environment deployed with another
-     * environment's template id or base URL — the send still succeeds in that case, and the officer is
-     * the one who discovers the button leads nowhere.
-     */
-    @Value("${daily-report.link.button-base-url:}")
-    private String dailyReportLinkButtonBaseUrl;
-
-    /**
-     * The prefix of every media URL handed to Glific. Read here — not only in
-     * {@code MinioStorageService} — because this is the class that owns the Glific contract and the
-     * only one that knows whether a document-sending purpose is live. Meta downloads the URL from the
-     * public internet, so an internal address must stop the service from starting rather than reach
-     * officers as an unopenable attachment.
-     */
-    @Value("${minio.base-url:}")
-    private String mediaBaseUrl;
+    private final GlificWhatsAppSettings settings;
 
     @PostConstruct
     void validateTemplates() {
@@ -228,24 +117,27 @@ public class GlificWhatsAppService implements WhatsAppSender {
                     + " Set NOTIFICATIONS_WHATSAPP_DRY_RUN=false for production.");
             return;
         }
-        if (nudgeDryRun || escalationDryRun || dailyReportDryRun || weeklyReportDryRun || whatsappDryRun) {
+        GlificWhatsAppSettings.DryRun dryRun = settings.dryRun();
+        if (dryRun.nudge() || dryRun.escalation() || dryRun.dailyReport() || dryRun.weeklyReport()
+                || dryRun.whatsapp()) {
             log.warn("[Glific] Partial DRY-RUN — nudge={}, escalation={}, daily-report={},"
                             + " weekly-report={}, account-ops(OTP/welcome/language)={}. Contact opt-in stays"
                             + " live because at least one delivery purpose is enabled.",
-                    nudgeDryRun, escalationDryRun, dailyReportDryRun, weeklyReportDryRun, whatsappDryRun);
+                    dryRun.nudge(), dryRun.escalation(), dryRun.dailyReport(), dryRun.weeklyReport(),
+                    dryRun.whatsapp());
         }
         // Validate only the templates whose delivery is enabled.
-        if (!nudgeDryRun && (nudgeFlowId == null || nudgeFlowId.isBlank())) {
+        if (!dryRun.nudge() && isBlank(settings.flows().nudge())) {
             throw new IllegalStateException(
                     "glific.flow.nudge-id must be configured when nudge delivery is enabled"
                     + " (set NOTIFICATIONS_NUDGE_DRY_RUN=true to suppress nudges)");
         }
-        if (!escalationDryRun && (escalationTemplateId == null || escalationTemplateId.isBlank())) {
+        if (!dryRun.escalation() && isBlank(settings.templates().escalation())) {
             throw new IllegalStateException(
                     "glific.template.escalation-id must be configured when escalation delivery is enabled"
                     + " (set NOTIFICATIONS_ESCALATION_DRY_RUN=true to suppress escalations)");
         }
-        if (!whatsappDryRun && (welcomeFlowId == null || welcomeFlowId.isBlank())) {
+        if (!dryRun.whatsapp() && isBlank(settings.flows().welcome())) {
             throw new IllegalStateException(
                     "glific.flow.welcome-id must be configured");
         }
@@ -253,11 +145,11 @@ public class GlificWhatsAppService implements WhatsAppSender {
     }
 
     private void validateAccountAndReportTemplates() {
-        if (!whatsappDryRun && isBlank(loginOtpTemplateId)) {
+        if (!settings.dryRun().whatsapp() && isBlank(settings.templates().loginOtp())) {
             throw new IllegalStateException(
                     "glific.template.login-otp-id must be configured — SEND_LOGIN_OTP events cannot be delivered without it");
         }
-        if (!dailyReportDryRun) {
+        if (!settings.dryRun().dailyReport()) {
             // Only the templates the configured mode actually sends are required. A LINK deployment
             // never reads the document ids and vice versa, so demanding both would force every
             // environment to carry configuration it does not use.
@@ -266,7 +158,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
                 case LINK -> validateDailyReportLinkTemplates();
             }
         }
-        if (!weeklyReportDryRun) {
+        if (!settings.dryRun().weeklyReport()) {
             validateWeeklyReportTemplates();
         }
         validateMediaBaseUrl();
@@ -280,7 +172,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
      * silently receiving nothing meanwhile.</p>
      */
     private void validateWeeklyReportTemplates() {
-        if (isBlank(weeklyReportSoLinkTemplateId)) {
+        if (isBlank(settings.templates().weeklyReportSoLink())) {
             throw new IllegalStateException(
                     "glific.template.weekly-report-so-link-id must be configured when weekly-report delivery"
                     + " is enabled (set NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN=true to generate and upload the"
@@ -290,18 +182,19 @@ public class GlificWhatsAppService implements WhatsAppSender {
     }
 
     private void validateDailyReportDocumentTemplates() {
-        if (isBlank(dailyReportSoTemplateId)) {
+        if (isBlank(settings.templates().dailyReportSo())) {
             throw new IllegalStateException(
                     "glific.template.daily-report-so-id must be configured when daily-report delivery is enabled"
                     + " (set NOTIFICATIONS_DAILY_REPORT_DRY_RUN=true to suppress daily reports)");
         }
         // sendDailyReportDocumentHsm does Integer.parseInt on the resolved template id, so fail fast at
         // startup on a non-numeric id rather than per-message (retry → DLT) at delivery time.
-        requireNumericTemplateId(dailyReportSoTemplateId, "glific.template.daily-report-so-id");
+        requireNumericTemplateId(settings.templates().dailyReportSo(), "glific.template.daily-report-so-id");
         // The SDO id is optional (resolveDailyReportTemplateId falls back to the SO template),
         // so validate it only when it has been configured.
-        if (!isBlank(dailyReportSdoTemplateId)) {
-            requireNumericTemplateId(dailyReportSdoTemplateId, "glific.template.daily-report-sdo-id");
+        if (!isBlank(settings.templates().dailyReportSdo())) {
+            requireNumericTemplateId(settings.templates().dailyReportSdo(),
+                    "glific.template.daily-report-sdo-id");
         }
     }
 
@@ -311,7 +204,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
      * exist comes back as a Glific error rather than a {@link NumberFormatException}.
      */
     private void validateDailyReportLinkTemplates() {
-        if (isBlank(dailyReportSoLinkTemplateId)) {
+        if (isBlank(settings.templates().dailyReportSoLink())) {
             throw new IllegalStateException(
                     "glific.template.daily-report-so-link-id must be configured when daily-report delivery is"
                     + " enabled and notifications.daily-report.delivery-mode=LINK"
@@ -329,7 +222,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
      */
     private void validateLinkButtonBaseUrl() {
         String expected = mediaUrlPrefix();
-        if (isBlank(dailyReportLinkButtonBaseUrl)) {
+        if (isBlank(settings.linkButtonBaseUrl())) {
             log.warn("[Glific] daily-report.link.button-base-url is not set. Button links will be built as"
                             + " '{}<bucket>/<file>.pdf' — confirm that prefix is exactly the one frozen into"
                             + " the approved LINK template, because a mismatch is only visible to the officer"
@@ -337,9 +230,9 @@ public class GlificWhatsAppService implements WhatsAppSender {
                             + " checked at startup.", expected);
             return;
         }
-        if (!expected.equals(dailyReportLinkButtonBaseUrl.trim())) {
+        if (!expected.equals(settings.linkButtonBaseUrl().trim())) {
             throw new IllegalStateException(
-                    "daily-report.link.button-base-url is '" + dailyReportLinkButtonBaseUrl.trim()
+                    "daily-report.link.button-base-url is '" + settings.linkButtonBaseUrl().trim()
                     + "' but minio.base-url yields the prefix '" + expected + "'. These must be identical:"
                     + " the first is the prefix frozen into the approved WhatsApp template, the second is"
                     + " what this service strips off the MinIO URL to build the button's variable."
@@ -363,15 +256,16 @@ public class GlificWhatsAppService implements WhatsAppSender {
      * nowhere.</p>
      */
     private void validateMediaBaseUrl() {
-        boolean handsOutMinioUrls = !dailyReportDryRun || !escalationDryRun || !weeklyReportDryRun;
+        GlificWhatsAppSettings.DryRun dryRun = settings.dryRun();
+        boolean handsOutMinioUrls = !dryRun.dailyReport() || !dryRun.escalation() || !dryRun.weeklyReport();
         if (!handsOutMinioUrls) {
             return;
         }
-        String reason = PublicUrlValidator.unreachableReason(mediaBaseUrl);
+        String reason = PublicUrlValidator.unreachableReason(settings.media().baseUrl());
         if (reason != null) {
             throw new IllegalStateException(
                     "minio.base-url must be a publicly reachable URL when WhatsApp document delivery is"
-                    + " enabled, but '" + mediaBaseUrl + "' is unusable: " + reason
+                    + " enabled, but '" + settings.media().baseUrl() + "' is unusable: " + reason
                     + ". Glific hands this URL to Meta, which downloads it from the public internet and"
                     + " rejects internal addresses with '(#131053) … blocked by a destination filter'."
                     + " Set MINIO_BASE_URL to the public URL (e.g. https://jalsoochak.jjmbrain.in/minio)"
@@ -412,7 +306,9 @@ public class GlificWhatsAppService implements WhatsAppSender {
      * "Receiver does not exist" for every message.</p>
      */
     private boolean isAllDryRun() {
-        return whatsappDryRun && nudgeDryRun && escalationDryRun && dailyReportDryRun && weeklyReportDryRun;
+        GlificWhatsAppSettings.DryRun dryRun = settings.dryRun();
+        return dryRun.whatsapp() && dryRun.nudge() && dryRun.escalation() && dryRun.dailyReport()
+                && dryRun.weeklyReport();
     }
 
     /**
@@ -420,8 +316,8 @@ public class GlificWhatsAppService implements WhatsAppSender {
      * recipient nothing, but it is the prerequisite for <em>every</em> delivery: without a real
      * contact id, {@code receiverId} is 0 and Glific rejects the send with
      * {@code "Receiver does not exist"}. It therefore follows {@link #isAllDryRun()} rather than the
-     * master {@link #whatsappDryRun} flag — muting account operations (OTP / welcome / language)
-     * must not break a purpose that is explicitly switched live, e.g.
+     * master {@link GlificWhatsAppSettings.DryRun#whatsapp() whatsapp} flag — muting account operations
+     * (OTP / welcome / language) must not break a purpose that is explicitly switched live, e.g.
      * {@code NOTIFICATIONS_WHATSAPP_DRY_RUN=true} with {@code NOTIFICATIONS_DAILY_REPORT_DRY_RUN=false}.
      * A lone {@code NOTIFICATIONS_WHATSAPP_DRY_RUN=true} still mutes opt-in, because every purpose
      * flag defaults to it.
@@ -446,15 +342,6 @@ public class GlificWhatsAppService implements WhatsAppSender {
         }
     }
 
-    @Value("${glific.media.escalation-caption:Escalations}")
-    private String escalationCaption;
-
-    @Value("${glific.media.escalation-thumbnail:}")
-    private String escalationThumbnail;
-
-    @Value("${glific.media.daily-report-caption:Daily Water Service Situation Report}")
-    private String dailyReportCaption;
-
     /** Date suffix of the recipient-visible document name, e.g. "13-08-2026". */
     private static final DateTimeFormatter DOCUMENT_NAME_DATE = DateTimeFormatter.ofPattern("dd-MM-yyyy");
 
@@ -467,13 +354,13 @@ public class GlificWhatsAppService implements WhatsAppSender {
      */
     @Override
     public void sendLoginOtpHsm(Long contactId, String otp) {
-        if (isDryRun(whatsappDryRun, "sendLoginOtpHsm")) return;
+        if (isDryRun(settings.dryRun().whatsapp(), "sendLoginOtpHsm")) return;
         requireContactId(contactId, "sendLoginOtpHsm");
-        if (loginOtpTemplateId == null || loginOtpTemplateId.isBlank()) {
+        if (isBlank(settings.templates().loginOtp())) {
             throw new IllegalStateException("glific.template.login-otp-id is not configured");
         }
         JsonNode response = client.execute(NUDGE_HSM_MUTATION, Map.of(
-                "templateId", loginOtpTemplateId,
+                "templateId", settings.templates().loginOtp(),
                 "receiverId", contactId,
                 "parameters", List.of(otp)));
         checkErrors(response, "sendHsmMessage");
@@ -499,10 +386,10 @@ public class GlificWhatsAppService implements WhatsAppSender {
      */
     @Override
     public void sendNudgeHsm(Long contactId, String operatorName, String date) {
-        if (isDryRun(nudgeDryRun, "sendNudgeHsm")) return;
+        if (isDryRun(settings.dryRun().nudge(), "sendNudgeHsm")) return;
         requireContactId(contactId, "sendNudgeHsm");
         JsonNode response = client.execute(NUDGE_HSM_MUTATION, Map.of(
-                "templateId", nudgeTemplateId,
+                "templateId", settings.templates().nudge(),
                 "receiverId", contactId,
                 "parameters", List.of(operatorName, date)));
         checkErrors(response, "sendHsmMessage");
@@ -510,17 +397,15 @@ public class GlificWhatsAppService implements WhatsAppSender {
     }
 
     /**
-     * Uploads a media file to Glific via its publicly reachable URL and returns the Glific media ID.
+     * Registers a document with Glific by its publicly reachable URL, the first step of every document
+     * template send. Not dry-run guarded: both callers return before reaching it when their purpose is
+     * suppressed.
      *
-     * @param publicUrl publicly reachable URL of the file (e.g. MinIO presigned URL or ngrok URL)
-     * @return Glific {@code messageMedia.id} to pass to {@link #sendEscalationHsm}
+     * @param publicUrl publicly reachable URL of the file
+     * @param caption   the name the recipient sees for the document
+     * @return Glific {@code messageMedia.id}, sent as the template's document header
      */
-    public String uploadMedia(String publicUrl) {
-        return uploadMediaInternal(publicUrl, escalationCaption, escalationDryRun);
-    }
-
-    private String uploadMediaInternal(String publicUrl, String caption, boolean dryRun) {
-        if (isDryRun(dryRun, "uploadMedia")) return "dry-run-media-id";
+    private String uploadMedia(String publicUrl, String caption) {
         // Last line of defence behind the startup check: a URL Meta cannot fetch produces a media id
         // and an accepted send, so the failure would otherwise surface only as an attachment the
         // officer cannot open. Refuse before the round-trip instead.
@@ -537,7 +422,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
                                 "url", publicUrl,
                                 "source_url", publicUrl,
                                 "caption", caption,
-                                "thumbnail", escalationThumbnail,
+                                "thumbnail", settings.media().escalationThumbnail(),
                                 "isTemplateMedia", true)));
         checkErrors(response, "createMessageMedia");
         String mediaId = response.path("createMessageMedia").path("messageMedia").path("id").asText();
@@ -572,7 +457,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
     @Override
     public WhatsAppSendResult sendDailyReportHsm(Long contactId, String minioUrl, String officerUserType,
                                                  LocalDate reportDate, String officerName) {
-        if (isDryRun(dailyReportDryRun, "sendDailyReportHsm")) {
+        if (isDryRun(settings.dryRun().dailyReport(), "sendDailyReportHsm")) {
             // Reported leniently: a suppressed send must not start failing because the mode property
             // has a typo, which is the behaviour before this method returned anything at all.
             return WhatsAppSendResult.suppressed(deliveryModeOrNull());
@@ -590,7 +475,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
     private WhatsAppSendResult sendDailyReportDocumentHsm(Long contactId, String minioUrl, String officerUserType,
                                                           LocalDate reportDate) {
         String templateId = resolveDailyReportTemplateId(officerUserType);
-        String mediaId = uploadMediaInternal(minioUrl, dailyReportDocumentName(reportDate), dailyReportDryRun);
+        String mediaId = uploadMedia(minioUrl, dailyReportDocumentName(reportDate));
 
         Map<String, Object> input = new HashMap<>();
         input.put("templateId", Integer.parseInt(templateId));
@@ -684,7 +569,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
      * slash on the suffix.
      */
     private String mediaUrlPrefix() {
-        String prefix = mediaBaseUrl == null ? "" : mediaBaseUrl.trim();
+        String prefix = settings.media().baseUrl() == null ? "" : settings.media().baseUrl().trim();
         while (prefix.endsWith("/")) {
             prefix = prefix.substring(0, prefix.length() - 1);
         }
@@ -693,7 +578,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
 
     /** The configured delivery mode; parsed on use so an unknown value fails loudly wherever it is read. */
     private ReportDeliveryMode deliveryMode() {
-        return ReportDeliveryMode.from(dailyReportDeliveryMode);
+        return ReportDeliveryMode.from(settings.dailyReportDeliveryMode());
     }
 
     /**
@@ -708,7 +593,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
             return deliveryMode();
         } catch (IllegalStateException e) {
             log.warn("[Glific] Suppressed daily report: delivery-mode '{}' is not DOCUMENT or LINK;"
-                    + " reporting mode as unknown", dailyReportDeliveryMode);
+                    + " reporting mode as unknown", settings.dailyReportDeliveryMode());
             return null;
         }
     }
@@ -725,8 +610,8 @@ public class GlificWhatsAppService implements WhatsAppSender {
      */
     String dailyReportDocumentName(LocalDate reportDate) {
         return reportDate == null
-                ? dailyReportCaption
-                : dailyReportCaption + " " + reportDate.format(DOCUMENT_NAME_DATE);
+                ? settings.media().dailyReportCaption()
+                : settings.media().dailyReportCaption() + " " + reportDate.format(DOCUMENT_NAME_DATE);
     }
 
     /**
@@ -736,16 +621,16 @@ public class GlificWhatsAppService implements WhatsAppSender {
      */
     @Override
     public boolean isDailyReportDeliveryEnabled() {
-        return !dailyReportDryRun;
+        return !settings.dryRun().dailyReport();
     }
 
     /** SUB_DIVISIONAL_OFFICER uses its own template when configured; otherwise falls back to the SO template. */
     private String resolveDailyReportTemplateId(String officerUserType) {
         if (officerUserType != null && officerUserType.trim().equalsIgnoreCase("SUB_DIVISIONAL_OFFICER")
-                && !isBlank(dailyReportSdoTemplateId)) {
-            return dailyReportSdoTemplateId;
+                && !isBlank(settings.templates().dailyReportSdo())) {
+            return settings.templates().dailyReportSdo();
         }
-        return dailyReportSoTemplateId;
+        return settings.templates().dailyReportSo();
     }
 
     /**
@@ -754,10 +639,10 @@ public class GlificWhatsAppService implements WhatsAppSender {
      */
     private String resolveDailyReportLinkTemplateId(String officerUserType) {
         if (officerUserType != null && officerUserType.trim().equalsIgnoreCase("SUB_DIVISIONAL_OFFICER")
-                && !isBlank(dailyReportSdoLinkTemplateId)) {
-            return dailyReportSdoLinkTemplateId;
+                && !isBlank(settings.templates().dailyReportSdoLink())) {
+            return settings.templates().dailyReportSdoLink();
         }
-        return dailyReportSoLinkTemplateId;
+        return settings.templates().dailyReportSoLink();
     }
 
     /**
@@ -777,7 +662,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
     @Override
     public WhatsAppSendResult sendWeeklyReportHsm(Long contactId, String minioUrl, String officerUserType,
                                                   LocalDate weekStart, String officerName) {
-        if (isDryRun(weeklyReportDryRun, "sendWeeklyReportHsm")) {
+        if (isDryRun(settings.dryRun().weeklyReport(), "sendWeeklyReportHsm")) {
             return WhatsAppSendResult.suppressed(ReportDeliveryMode.LINK);
         }
         requireContactId(contactId, "sendWeeklyReportHsm");
@@ -812,16 +697,16 @@ public class GlificWhatsAppService implements WhatsAppSender {
     /** SDO→SO fallback, so a deployment with only one approved weekly template still serves both roles. */
     private String resolveWeeklyReportLinkTemplateId(String officerUserType) {
         if (officerUserType != null && officerUserType.trim().equalsIgnoreCase("SUB_DIVISIONAL_OFFICER")
-                && !isBlank(weeklyReportSdoLinkTemplateId)) {
-            return weeklyReportSdoLinkTemplateId;
+                && !isBlank(settings.templates().weeklyReportSdoLink())) {
+            return settings.templates().weeklyReportSdoLink();
         }
-        return weeklyReportSoLinkTemplateId;
+        return settings.templates().weeklyReportSoLink();
     }
 
     /** Whether weekly reports are actually delivered (as opposed to generated and suppressed). */
     @Override
     public boolean isWeeklyReportDeliveryEnabled() {
-        return !weeklyReportDryRun;
+        return !settings.dryRun().weeklyReport();
     }
 
     /**
@@ -839,14 +724,14 @@ public class GlificWhatsAppService implements WhatsAppSender {
      */
     @Override
     public void sendEscalationHsm(Long contactId, String minioUrl) {
-        if (isDryRun(escalationDryRun, "sendEscalationHsm")) return;
+        if (isDryRun(settings.dryRun().escalation(), "sendEscalationHsm")) return;
         // Checked before the media upload so a missing contact id costs no Glific round-trip.
         requireContactId(contactId, "sendEscalationHsm");
 
-        String mediaId = uploadMedia(minioUrl);
+        String mediaId = uploadMedia(minioUrl, settings.media().escalationCaption());
 
         Map<String, Object> input = new HashMap<>();
-        input.put("templateId", Integer.parseInt(escalationTemplateId));
+        input.put("templateId", Integer.parseInt(settings.templates().escalation()));
         input.put("receiverId", contactId.intValue());
         input.put("isHsm", true);
         input.put("params", List.of());
@@ -886,9 +771,9 @@ public class GlificWhatsAppService implements WhatsAppSender {
      */
     @Override
     public void startNudgeFlow(Long contactId, String operatorName, String date) {
-        if (isDryRun(nudgeDryRun, "startNudgeFlow")) return;
+        if (isDryRun(settings.dryRun().nudge(), "startNudgeFlow")) return;
         requireContactId(contactId, "startNudgeFlow");
-        if (nudgeFlowId == null || nudgeFlowId.isBlank()) {
+        if (isBlank(settings.flows().nudge())) {
             throw new IllegalStateException("glific.flow.nudge-id is not configured");
         }
 
@@ -901,7 +786,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
         }
 
         JsonNode response = client.execute(START_CONTACT_FLOW_MUTATION, Map.of(
-                "flowId", nudgeFlowId,
+                "flowId", settings.flows().nudge(),
                 "contactId", contactId,
                 "defaultResults", defaultResults));
 
@@ -925,7 +810,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
      */
     @Override
     public void startWelcomeFlow(Long contactId, String name, String state) {
-        startWelcomeFlow(contactId, welcomeFlowId, name, state);
+        startWelcomeFlow(contactId, settings.flows().welcome(), name, state);
     }
 
     /**
@@ -940,7 +825,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
      */
     @Override
     public void startWelcomeFlow(Long contactId, String flowId, String name, String state) {
-        if (isDryRun(whatsappDryRun, "startWelcomeFlow")) return;
+        if (isDryRun(settings.dryRun().whatsapp(), "startWelcomeFlow")) return;
         requireContactId(contactId, "startWelcomeFlow");
         if (flowId == null || flowId.isBlank()) {
             throw new IllegalStateException("glific.flow.welcome-id is not configured");
@@ -968,7 +853,7 @@ public class GlificWhatsAppService implements WhatsAppSender {
      */
     @Override
     public void updateContactLanguage(Long contactId, int glificLanguageId) {
-        if (isDryRun(whatsappDryRun, "updateContactLanguage")) return;
+        if (isDryRun(settings.dryRun().whatsapp(), "updateContactLanguage")) return;
         JsonNode response = client.execute(UPDATE_CONTACT_MUTATION, Map.of(
                 "id", contactId,
                 "input", Map.of("language_id", glificLanguageId)));
@@ -981,8 +866,8 @@ public class GlificWhatsAppService implements WhatsAppSender {
      *
      * <p>Throws {@link GlificMutationException} rather than a bare {@link RuntimeException}, with the
      * message unchanged: callers that only catch {@code Exception} behave exactly as before, while
-     * those that need to know <em>which</em> mutation failed (to tag a
-     * {@link WhatsAppSendStage}) can read it off the exception instead of parsing the text.</p>
+     * those that need to know where the send broke read its {@link WhatsAppSendStage} off the port's
+     * {@code WhatsAppSendException} instead of parsing the text.</p>
      */
     private void checkErrors(JsonNode response, String mutationKey) {
         JsonNode mutationNode = response.path(mutationKey);

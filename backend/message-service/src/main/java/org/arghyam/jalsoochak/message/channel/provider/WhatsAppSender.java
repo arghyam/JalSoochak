@@ -19,8 +19,11 @@ import java.time.LocalDate;
  * configuration failure; a primitive {@code long} would turn a null into an unboxing
  * {@link NullPointerException} at the call site and misclassify it as a send failure.</p>
  *
- * <p>Methods block until the provider answers and throw on failure. A send suppressed by a dry-run flag
- * returns normally without contacting the provider.</p>
+ * <p>Methods block until the provider answers and throw on failure: a {@link WhatsAppSendException},
+ * carrying the {@link WhatsAppSendStage} it failed at, when the provider rejects a call; an
+ * {@link IllegalArgumentException} or {@link IllegalStateException} when our own configuration or
+ * input is wrong. Anything else — a transport error or timeout — propagates as thrown. A send
+ * suppressed by a dry-run flag returns normally without contacting the provider.</p>
  */
 public interface WhatsAppSender {
 

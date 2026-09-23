@@ -1,8 +1,7 @@
 package org.arghyam.jalsoochak.message.channel;
 
-import org.arghyam.jalsoochak.message.channel.glific.GlificMissingMessageIdException;
-import org.arghyam.jalsoochak.message.channel.glific.GlificMutationException;
 import org.arghyam.jalsoochak.message.channel.provider.ReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendException;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
@@ -188,7 +187,7 @@ public class WhatsAppChannel implements NotificationChannel {
             return ReportSendOutcome.accepted(result);
         } catch (Exception ex) {
             WhatsAppSendStage stage = stageOf(ex);
-            String errorKey = (ex instanceof GlificMutationException gme) ? gme.getErrorKey() : null;
+            String errorKey = (ex instanceof WhatsAppSendException wse) ? wse.getErrorKey() : null;
             log.error("[WHATSAPP] Failed daily report delivery role={} stage={}: {}",
                     role, stage, ex.getMessage(), ex);
             return ReportSendOutcome.failed(stage, errorKey, ex.getMessage());
@@ -212,7 +211,7 @@ public class WhatsAppChannel implements NotificationChannel {
             return ReportSendOutcome.accepted(result);
         } catch (Exception ex) {
             WhatsAppSendStage stage = stageOf(ex);
-            String errorKey = (ex instanceof GlificMutationException gme) ? gme.getErrorKey() : null;
+            String errorKey = (ex instanceof WhatsAppSendException wse) ? wse.getErrorKey() : null;
             log.error("[WHATSAPP] Failed weekly report delivery role={} stage={}: {}",
                     role, stage, ex.getMessage(), ex);
             return ReportSendOutcome.failed(stage, errorKey, ex.getMessage());
@@ -227,21 +226,16 @@ public class WhatsAppChannel implements NotificationChannel {
      * <p>Order matters. A {@code block()} timeout surfaces as an {@link IllegalStateException}, so it
      * must be recognised <em>before</em> the generic configuration branch — it is the one failure a
      * retry makes worse, because Glific may already have sent the message.</p>
+     *
+     * <p>A failure the provider reported already carries its stage: the adapter assigns it, because
+     * only the adapter knows which of its calls registers media and which sends.</p>
      */
     static WhatsAppSendStage stageOf(Throwable ex) {
         if (isBlockTimeout(ex)) {
             return WhatsAppSendStage.TIMEOUT;
         }
-        // A subclass of GlificMutationException, so it must be matched before the branch below.
-        if (ex instanceof GlificMissingMessageIdException) {
-            return WhatsAppSendStage.SEND_NO_MESSAGE_ID;
-        }
-        if (ex instanceof GlificMutationException gme) {
-            // createMessageMedia is the DOCUMENT-mode media step — the 20 Aug (#131053) failure —
-            // and needs a completely different fix from a rejected send.
-            return "createMessageMedia".equals(gme.getMutationKey())
-                    ? WhatsAppSendStage.MEDIA_REGISTER
-                    : WhatsAppSendStage.SEND;
+        if (ex instanceof WhatsAppSendException wse) {
+            return wse.getStage();
         }
         // Thrown by requireContactId, the LINK-mode linkSuffix prefix check, a blank template id and
         // the PublicUrlValidator guard — all of them our own configuration or inputs, none retryable.
