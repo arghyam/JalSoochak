@@ -17,12 +17,12 @@ import java.util.Set;
  *
  * <p><b>The allowlist's weakness, and how it is closed.</b> A newly added webhook would be silently
  * unprotected. {@code GlificWebhookRouteCoverageTest} asserts this set is exactly equal to the routes
- * declared on {@code GlificWebhookController}, so adding a 27th endpoint without listing it here
- * fails the build.
+ * declared across every {@link WebhookRoute} controller, so adding a 27th endpoint without listing it
+ * here fails the build — whichever webhook controller it lands on.
  */
 public final class GlificWebhookRoutes {
 
-    /** Class-level {@code @RequestMapping} of {@code GlificWebhookController}. */
+    /** Class-level {@code @RequestMapping} of every {@link WebhookRoute} controller. */
     public static final String BASE_PATH = "/api/v1/telemetry";
 
     /**
@@ -58,7 +58,7 @@ public final class GlificWebhookRoutes {
             "/update-previous-reading"
     );
 
-    /** Every Glific route is a POST; nothing else on this controller is mapped. */
+    /** Every Glific route is a POST; nothing else on a webhook controller is mapped. */
     private static final String METHOD = "POST";
 
     private static final Set<String> ABSOLUTE_PATHS = buildAbsolutePaths();

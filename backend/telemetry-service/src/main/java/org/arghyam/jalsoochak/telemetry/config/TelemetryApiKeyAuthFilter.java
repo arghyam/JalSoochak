@@ -128,6 +128,11 @@ public class TelemetryApiKeyAuthFilter extends OncePerRequestFilter {
         return path.startsWith(SCHEMES_PREFIX + "/");
     }
 
+    /** The exemptions, so a guard test can assert the webhook gate authenticates each one instead. */
+    static Set<String> unauthenticatedWebhookPaths() {
+        return UNAUTHENTICATED_WEBHOOK_PATHS;
+    }
+
     /**
      * Matches the path the way the dispatcher will: decoded, semicolon content stripped, duplicate
      * slashes collapsed and dot segments resolved. Without this, {@code /telemetry/./readings/...} or

@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.controller;
 
+import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
 import org.arghyam.jalsoochak.telemetry.dto.response.ClosingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
@@ -39,6 +40,7 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 @RestController
+@WebhookRoute
 @RequestMapping("/api/v1/telemetry")
 public class GlificWebhookController {
     private static final Logger log = LoggerFactory.getLogger(GlificWebhookController.class);

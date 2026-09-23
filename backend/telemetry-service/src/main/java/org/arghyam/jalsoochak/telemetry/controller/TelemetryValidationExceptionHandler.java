@@ -25,6 +25,21 @@ import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * Validation, missing-header and malformed-body failures on the State-IT ingestion endpoints,
+ * answered in the {@link ReadingsApiResponse} envelope on the readings path.
+ *
+ * <p><strong>Pinned by type, deliberately.</strong> {@code MultiFormatReadingController} shares the
+ * base path but stays out of scope: it validates manually and handles its own malformed bodies,
+ * answering every failure in its own envelope, whereas this advice answers any non-readings path
+ * with a bare {@code {"message": …}}. A package- or annotation-wide binding would sweep it in, and a
+ * later change here would then reach an endpoint it was never meant for.
+ *
+ * <p>The binding is also stateful: a validation reject on {@code POST /readings} is published as
+ * {@code submissionRejected}, which analytics counts towards the reported schemes. Losing the
+ * binding therefore undercounts a KPI rather than just changing a response body.
+ * {@code ControllerAdviceBindingTest} pins both.
+ */
 @Slf4j
 @RequiredArgsConstructor
 @RestControllerAdvice(assignableTypes = SingleTenantTelemetryController.class)

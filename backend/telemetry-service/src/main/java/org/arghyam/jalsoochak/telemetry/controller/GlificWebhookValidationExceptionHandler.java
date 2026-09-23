@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.controller;
 
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,19 +24,27 @@ import java.util.stream.Collectors;
  * {@link TelemetryValidationExceptionHandler} cannot cover this because it is scoped to
  * {@code SingleTenantTelemetryController} and answers in the readings envelope instead.
  *
- * <p><strong>Deliberately narrow.</strong> Only {@code MethodArgumentNotValidException} is handled.
- * This advice applies to all 26 endpoints on {@link GlificWebhookController}, so handling more
- * exception types here (a malformed body, say) would change the response shape on endpoints this
- * change never set out to touch. Anything else keeps its existing behaviour.
+ * <p><strong>Bound on {@link WebhookRoute}, not on a controller type.</strong> The webhook surface is
+ * meant to span several controllers. A type-pinned binding would cover only the class it names, and
+ * every other webhook endpoint would silently fall back to Boot's default error shape — no failing
+ * test, just a flow node that stops parsing the reply. Binding on the same annotation the route
+ * allowlist guard scans keeps the two from drifting apart; {@code ControllerAdviceBindingTest} pins
+ * it.
  *
- * <p>Today the only constraint that can trigger this is the 255-character cap on
- * {@code IssueReportRequest.issueReason}. Character validation for that field deliberately does
+ * <p><strong>Deliberately narrow.</strong> Only {@code MethodArgumentNotValidException} is handled.
+ * This advice applies to every webhook endpoint, so handling more exception types here (a malformed
+ * body, say) would change the response shape on endpoints this change never set out to touch.
+ * Anything else keeps its existing behaviour.
+ *
+ * <p>Today two request types carry constraints that can trigger this: the 255-character cap on
+ * {@code IssueReportRequest.issueReason}, and the required coordinates and contact phone on
+ * {@code LocationReadingRequest}. Character validation for the issue reason deliberately does
  * <em>not</em> come through here: it stays in the service layer so the operator gets a localised
  * WhatsApp reply and the flow continues, rather than a {@code 400} that stalls it. An over-length
  * reason is abuse rather than a typo, so it earns the hard status and needs no localised copy.
  */
 @Slf4j
-@RestControllerAdvice(assignableTypes = GlificWebhookController.class)
+@RestControllerAdvice(annotations = WebhookRoute.class)
 public class GlificWebhookValidationExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
