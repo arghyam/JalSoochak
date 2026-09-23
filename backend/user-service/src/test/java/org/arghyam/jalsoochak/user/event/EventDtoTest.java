@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.user.event;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -228,12 +229,12 @@ class EventDtoTest {
     class SendLoginOtpEventTests {
 
         @Test
-        @DisplayName("builder sets all fields correctly including nullable glificId")
+        @DisplayName("builder sets all fields correctly including nullable whatsappContactId")
         void builderSetsAllFields() {
             SendLoginOtpEvent event = SendLoginOtpEvent.builder()
                     .eventType("SEND_LOGIN_OTP")
                     .officerPhoneNumber("919876543210")
-                    .glificId(42L)
+                    .whatsappContactId(42L)
                     .otp("123456")
                     .expiryMinutes(5)
                     .deliveryChannel("WHATSAPP")
@@ -243,7 +244,7 @@ class EventDtoTest {
 
             assertThat(event.getEventType()).isEqualTo("SEND_LOGIN_OTP");
             assertThat(event.getOfficerPhoneNumber()).isEqualTo("919876543210");
-            assertThat(event.getGlificId()).isEqualTo(42L);
+            assertThat(event.getWhatsappContactId()).isEqualTo(42L);
             assertThat(event.getOtp()).isEqualTo("123456");
             assertThat(event.getExpiryMinutes()).isEqualTo(5);
             assertThat(event.getDeliveryChannel()).isEqualTo("WHATSAPP");
@@ -268,19 +269,53 @@ class EventDtoTest {
         }
 
         @Test
-        @DisplayName("glificId can be null for SMS delivery")
-        void glificIdNullForSms() {
+        @DisplayName("whatsappContactId can be null for SMS delivery")
+        void whatsappContactIdNullForSms() {
             SendLoginOtpEvent event = SendLoginOtpEvent.builder()
                     .eventType("SEND_LOGIN_OTP")
                     .officerPhoneNumber("919876543210")
-                    .glificId(null)
+                    .whatsappContactId(null)
                     .otp("654321")
                     .expiryMinutes(5)
                     .deliveryChannel("SMS")
                     .build();
 
-            assertThat(event.getGlificId()).isNull();
+            assertThat(event.getWhatsappContactId()).isNull();
             assertThat(event.getDeliveryChannel()).isEqualTo("SMS");
+        }
+
+        @Test
+        @DisplayName("contact id is emitted under both whatsapp_contact_id and the legacy glific_id")
+        void contactIdEmittedUnderBothKeys() {
+            SendLoginOtpEvent event = SendLoginOtpEvent.builder()
+                    .eventType("SEND_LOGIN_OTP")
+                    .officerPhoneNumber("91XXXXXXXXXX")
+                    .whatsappContactId(42L)
+                    .otp("123456")
+                    .expiryMinutes(5)
+                    .deliveryChannel("WHATSAPP")
+                    .build();
+
+            JsonNode json = new ObjectMapper().valueToTree(event);
+
+            assertThat(json.path("whatsapp_contact_id").asLong()).isEqualTo(42L);
+            assertThat(json.path("glific_id").asLong()).isEqualTo(42L);
+        }
+
+        @Test
+        @DisplayName("both contact-id keys are omitted from JSON when null")
+        void contactIdKeysOmittedFromJsonWhenNull() throws Exception {
+            SendLoginOtpEvent event = SendLoginOtpEvent.builder()
+                    .eventType("SEND_LOGIN_OTP")
+                    .officerPhoneNumber("91XXXXXXXXXX")
+                    .otp("123456")
+                    .expiryMinutes(5)
+                    .deliveryChannel("SMS")
+                    .build();
+
+            assertThat(new ObjectMapper().writeValueAsString(event))
+                    .doesNotContain("whatsapp_contact_id")
+                    .doesNotContain("glific_id");
         }
 
         @Test
@@ -405,7 +440,7 @@ class EventDtoTest {
                     .tenantCode("MP")
                     .tenantId(1)
                     .triggeredAt("2026-01-01T10:00:00.000Z")
-                    .glificLanguageId("2")
+                    .whatsappLanguageId("2")
                     .pumpOperatorPhones(List.of("919876543210", "919123456789"))
                     .build();
 
@@ -413,7 +448,7 @@ class EventDtoTest {
             assertThat(event.getTenantCode()).isEqualTo("MP");
             assertThat(event.getTenantId()).isEqualTo(1);
             assertThat(event.getTriggeredAt()).isEqualTo("2026-01-01T10:00:00.000Z");
-            assertThat(event.getGlificLanguageId()).isEqualTo("2");
+            assertThat(event.getWhatsappLanguageId()).isEqualTo("2");
             assertThat(event.getPumpOperatorPhones())
                     .containsExactly("919876543210", "919123456789");
         }
@@ -473,6 +508,32 @@ class EventDtoTest {
                     .triggeredAt("2026-01-01T10:00:00.000Z").build();
 
             assertThat(event.toString()).contains("SEND_WELCOME_MESSAGE", "MP");
+        }
+
+        @Test
+        @DisplayName("language id is emitted under both whatsappLanguageId and the legacy glificLanguageId")
+        void languageIdEmittedUnderBothKeys() {
+            PumpOperatorMessagingEvent event = PumpOperatorMessagingEvent.builder()
+                    .eventType("UPDATE_USER_LANGUAGE").tenantCode("MP").tenantId(1)
+                    .whatsappLanguageId("2").pumpOperatorPhones(List.of("91XXXXXXXXXX")).build();
+
+            JsonNode json = new ObjectMapper().valueToTree(event);
+
+            assertThat(json.path("whatsappLanguageId").asText()).isEqualTo("2");
+            assertThat(json.path("glificLanguageId").asText()).isEqualTo("2");
+        }
+
+        @Test
+        @DisplayName("neither language-id key carries a value when the language id is null")
+        void languageIdKeysCarryNoValueWhenNull() {
+            PumpOperatorMessagingEvent event = PumpOperatorMessagingEvent.builder()
+                    .eventType("SEND_WELCOME_MESSAGE").tenantCode("MP").tenantId(1)
+                    .pumpOperatorPhones(List.of("91XXXXXXXXXX")).build();
+
+            JsonNode json = new ObjectMapper().valueToTree(event);
+
+            assertThat(json.hasNonNull("whatsappLanguageId")).isFalse();
+            assertThat(json.hasNonNull("glificLanguageId")).isFalse();
         }
     }
 }

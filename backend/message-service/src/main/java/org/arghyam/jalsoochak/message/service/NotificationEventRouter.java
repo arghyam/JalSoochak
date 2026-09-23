@@ -106,6 +106,18 @@ public class NotificationEventRouter {
      */
     private static final String ACCOUNT_EMAIL_DLT_TOPIC = "account-email-dlt";
 
+    /** Event field carrying the WhatsApp contact id on {@code SEND_LOGIN_OTP}. */
+    private static final String CONTACT_ID_FIELD = "whatsapp_contact_id";
+
+    /** Legacy spelling of {@link #CONTACT_ID_FIELD}, read only when the new field is absent. */
+    private static final String LEGACY_CONTACT_ID_FIELD = "glific_id";
+
+    /** Event field carrying the WhatsApp language id on staff-sync and language-update events. */
+    private static final String LANGUAGE_ID_FIELD = "whatsappLanguageId";
+
+    /** Legacy spelling of {@link #LANGUAGE_ID_FIELD}, read only when the new field is absent. */
+    private static final String LEGACY_LANGUAGE_ID_FIELD = "glificLanguageId";
+
     private final ObjectMapper objectMapper;
     private final WhatsAppChannel whatsAppChannel;
     private final WhatsAppSender whatsAppSender;
@@ -219,15 +231,15 @@ public class NotificationEventRouter {
 
     private void handleStaffSyncCompleted(JsonNode root) {
         JsonNode operatorsNode = root.path("pumpOperators");
-        int glificLanguageId = root.path("glificLanguageId").asInt(0);
+        int whatsappLanguageId = fieldOrLegacy(root, LANGUAGE_ID_FIELD, LEGACY_LANGUAGE_ID_FIELD).asInt(0);
         String tenantSchema = root.path("tenantSchema").asText("");
 
         if (!operatorsNode.isArray() || operatorsNode.isEmpty()) {
             log.warn("[Router/STAFF_SYNC] pumpOperators is empty, skipping");
             return;
         }
-        if (glificLanguageId == 0) {
-            log.warn("[Router/STAFF_SYNC] glificLanguageId missing or zero, skipping");
+        if (whatsappLanguageId == 0) {
+            log.warn("[Router/STAFF_SYNC] whatsappLanguageId missing or zero, skipping");
             return;
         }
 
@@ -241,7 +253,7 @@ public class NotificationEventRouter {
                 continue;
             }
             try {
-                long contactId = whatsAppChannel.onboardOperator(phone, glificLanguageId);
+                long contactId = whatsAppChannel.onboardOperator(phone, whatsappLanguageId);
                 if (!tenantSchema.isBlank() && userId > 0 && contactId > 0) {
                     kafkaProducer.publishJson(COMMON_TOPIC,
                             WhatsAppContactRegisteredEvent.builder()
@@ -268,15 +280,15 @@ public class NotificationEventRouter {
 
     private void handleUpdateUserLanguage(JsonNode root) {
         String tenantCode = root.path("tenantCode").asText("").toLowerCase();
-        int glificLanguageId = root.path("glificLanguageId").asInt(0);
+        int whatsappLanguageId = fieldOrLegacy(root, LANGUAGE_ID_FIELD, LEGACY_LANGUAGE_ID_FIELD).asInt(0);
         JsonNode phonesNode = root.path("pumpOperatorPhones");
 
         if (tenantCode.isBlank() || !tenantCode.matches("[a-z0-9_]+")) {
             log.warn("[Router/UPDATE_LANGUAGE] Invalid or missing tenantCode, skipping");
             return;
         }
-        if (glificLanguageId <= 0) {
-            log.warn("[Router/UPDATE_LANGUAGE] Missing glificLanguageId, skipping");
+        if (whatsappLanguageId <= 0) {
+            log.warn("[Router/UPDATE_LANGUAGE] Missing whatsappLanguageId, skipping");
             return;
         }
         if (!phonesNode.isArray() || phonesNode.isEmpty()) {
@@ -301,7 +313,7 @@ public class NotificationEventRouter {
                     failed++;
                     continue;
                 }
-                whatsAppSender.updateContactLanguage(contactId, glificLanguageId);
+                whatsAppSender.updateContactLanguage(contactId, whatsappLanguageId);
                 success++;
             } catch (Exception e) {
                 failed++;
@@ -318,6 +330,15 @@ public class NotificationEventRouter {
             throw new IllegalStateException(
                     "[Router/UPDATE_LANGUAGE] " + failed + " update(s) failed (success=" + success + ")");
         }
+    }
+
+    /**
+     * Returns {@code field}'s node, or {@code legacyField}'s when {@code field} is absent or null.
+     * The node is chosen on presence, not value, so a zero in the new field is never overridden by
+     * the legacy one.
+     */
+    private static JsonNode fieldOrLegacy(JsonNode root, String field, String legacyField) {
+        return root.hasNonNull(field) ? root.get(field) : root.path(legacyField);
     }
 
     private void handleSendWelcomeMessage(JsonNode root) {
@@ -544,20 +565,19 @@ public class NotificationEventRouter {
                     .subscribe();
         } else if ("WHATSAPP".equals(deliveryChannel)) {
             String phone = root.path("officerPhoneNumber").asText("").strip();
-            JsonNode glificIdNode = root.path("glific_id");
-            long contactId = glificIdNode.asLong(0);
+            long contactId = fieldOrLegacy(root, CONTACT_ID_FIELD, LEGACY_CONTACT_ID_FIELD).asLong(0);
 
             if (contactId > 0) {
-                // glific_id was provided and valid
+                // whatsapp_contact_id was provided and valid
             } else if (!phone.isBlank()) {
-                log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] glific_id not provided, opting in via phone");
+                log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] whatsapp_contact_id not provided, opting in via phone");
                 contactId = whatsAppSender.optIn(phone);
                 if (contactId <= 0) {
                     log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] optIn returned invalid contactId {}, skipping", contactId);
                     return;
                 }
             } else {
-                log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither glific_id nor officerPhoneNumber provided, skipping");
+                log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither whatsapp_contact_id nor officerPhoneNumber provided, skipping");
                 return;
             }
 

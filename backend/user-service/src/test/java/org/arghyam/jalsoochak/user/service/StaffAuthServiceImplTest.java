@@ -145,6 +145,22 @@ class StaffAuthServiceImplTest {
         }
 
         @Test
+        @DisplayName("published OTP event carries the user's WhatsApp contact id for WhatsApp delivery")
+        void publishedOtpEventCarriesWhatsappContactId() {
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
+            when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
+                    .thenReturn(Optional.of(ACTIVE_USER));
+            when(otpService.requestOtp(10L, 1, OtpType.LOGIN)).thenReturn("123456");
+
+            service.requestOtp(request);
+
+            ArgumentCaptor<SendLoginOtpEvent> captor = ArgumentCaptor.forClass(SendLoginOtpEvent.class);
+            verify(eventPublisher).publishLoginOtpAfterCommit(captor.capture(), eq(10L), eq("MP"));
+            assertThat(captor.getValue().getWhatsappContactId()).isEqualTo(12345L);
+        }
+
+        @Test
         @DisplayName("CAPTCHA failure short-circuits before any DB work or OTP send")
         void captchaFailure_shortCircuits() {
             doThrow(new CaptchaVerificationException("CAPTCHA verification failed"))

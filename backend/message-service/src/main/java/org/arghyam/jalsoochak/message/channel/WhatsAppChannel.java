@@ -102,19 +102,19 @@ public class WhatsAppChannel implements NotificationChannel {
      * Opts a pump operator into Glific, sets their preferred language, and starts the welcome flow.
      * Called during staff-sync onboarding.
      *
-     * @param phone            operator phone number (E.164 format)
-     * @param glificLanguageId Glific-side language ID
+     * @param phone              operator phone number (E.164 format)
+     * @param providerLanguageId Glific-side language ID
      * @return Glific contact ID assigned to this operator
      */
-    public long onboardOperator(String phone, int glificLanguageId) {
+    public long onboardOperator(String phone, int providerLanguageId) {
         long contactId = whatsAppSender.optIn(phone);
-        whatsAppSender.updateContactLanguage(contactId, glificLanguageId);
+        whatsAppSender.updateContactLanguage(contactId, providerLanguageId);
         whatsAppSender.startWelcomeFlow(contactId, null, null);
         log.info("[WHATSAPP] Operator onboarded to Glific");
         String phoneSuffix = phone != null && phone.length() >= 4
                 ? phone.substring(phone.length() - 4)
                 : "unknown";
-        log.debug("[WHATSAPP] Operator onboarded phoneSuffix={} languageId={}", phoneSuffix, glificLanguageId);
+        log.debug("[WHATSAPP] Operator onboarded phoneSuffix={} languageId={}", phoneSuffix, providerLanguageId);
         return contactId;
     }
 

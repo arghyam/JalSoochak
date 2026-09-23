@@ -26,10 +26,10 @@ public class SendLoginOtpEvent {
     @JsonProperty("officerPhoneNumber")
     String officerPhoneNumber;
 
-    /** Glific contact ID from {@code user_table.whatsapp_connection_id}. Omitted for SMS delivery. */
+    /** WhatsApp contact ID from {@code user_table.whatsapp_connection_id}. Omitted for SMS delivery. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonProperty("glific_id")
-    Long glificId;
+    @JsonProperty("whatsapp_contact_id")
+    Long whatsappContactId;
 
     /** Plaintext OTP to deliver. Never stored in plaintext in the DB. */
     @JsonProperty("OTP")
@@ -55,4 +55,18 @@ public class SendLoginOtpEvent {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty("tenantCode")
     String tenantCode;
+
+    /**
+     * Emits {@link #whatsappContactId} under its legacy name as well, so a consumer that has not
+     * yet been upgraded still reads it.
+     *
+     * @deprecated read {@link #getWhatsappContactId()}; the legacy key is dropped once every
+     *             consumer reads {@code whatsapp_contact_id}.
+     */
+    @Deprecated(forRemoval = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty("glific_id")
+    public Long getGlificId() {
+        return whatsappContactId;
+    }
 }
