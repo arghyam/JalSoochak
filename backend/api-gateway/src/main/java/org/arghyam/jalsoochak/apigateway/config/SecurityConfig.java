@@ -67,7 +67,7 @@ public class SecurityConfig {
     /**
      * telemetry-service runs without Spring Security: every route under this prefix authenticates
      * with its own credential instead — X-Webhook-Token on the 26 Glific webhooks
-     * (GlificWebhookRoutes), X-Api-Key on the vendor ingestion routes (TelemetryApiKeyAuthFilter).
+     * (WebhookRoutes), X-Api-Key on the vendor ingestion routes (TelemetryApiKeyAuthFilter).
      * Neither credential is a JWT, so a bearer-token gate here would reject all of it and protect
      * nothing that is not already protected upstream.
      */

@@ -100,7 +100,7 @@ class TelemetryApiKeyAuthFilterTest {
     }
 
     @Test
-    void glificWebhookRoutesStayUnauthenticated() throws Exception {
+    void webhookRoutesStayUnauthenticated() throws Exception {
         // These are the WhatsApp webhook routes; they are unauthenticated by design today and are
         // tracked as a separate finding. Enforcing a key here would break the live bot.
         for (String path : new String[]{"/api/v1/telemetry/readings/glific", "/api/v1/telemetry/schemes",

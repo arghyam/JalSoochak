@@ -1,6 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
-import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,8 +46,8 @@ class ReadingsAsyncServiceTest {
         return new ReadingsAsyncService(imageWorkflowService, glificFlowResumeService, inlineExecutor);
     }
 
-    private static GlificWebhookRequest request() {
-        GlificWebhookRequest request = new GlificWebhookRequest();
+    private static MeterImageWebhookRequest request() {
+        MeterImageWebhookRequest request = new MeterImageWebhookRequest();
         request.setContactId(CONTACT);
         return request;
     }

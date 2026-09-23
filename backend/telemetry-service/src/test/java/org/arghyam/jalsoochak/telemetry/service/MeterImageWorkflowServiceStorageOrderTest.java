@@ -2,7 +2,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
-import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
@@ -68,8 +68,8 @@ class MeterImageWorkflowServiceStorageOrderTest {
     @InjectMocks
     private MeterImageWorkflowService service;
 
-    private static GlificWebhookRequest submission() {
-        return GlificWebhookRequest.builder()
+    private static MeterImageWebhookRequest submission() {
+        return MeterImageWebhookRequest.builder()
                 .contactId(CONTACT_ID)
                 .mediaUrl("https://media.glific.example/meter.jpg")
                 .build();

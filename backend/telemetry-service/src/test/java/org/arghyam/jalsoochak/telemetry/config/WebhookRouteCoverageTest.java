@@ -17,9 +17,9 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Guards the closed allowlist in {@link GlificWebhookRoutes} against drift.
+ * Guards the closed allowlist in {@link WebhookRoutes} against drift.
  *
- * <p>An allowlist is the right choice here (see {@code GlificWebhookRoutes} for why a path prefix
+ * <p>An allowlist is the right choice here (see {@code WebhookRoutes} for why a path prefix
  * would break the vendor ingestion endpoints), but it has one failure mode: a webhook added later
  * would be silently unauthenticated — a security regression that no other test would notice. This
  * test makes that a build failure.
@@ -31,8 +31,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * class. Reflecting over one class would silently cover only that class once the surface spans
  * several — and the routes on the others would ship public.
  */
-@DisplayName("GlificWebhookRoutes — coverage of the webhook controllers")
-class GlificWebhookRouteCoverageTest {
+@DisplayName("WebhookRoutes — coverage of the webhook controllers")
+class WebhookRouteCoverageTest {
 
     @Test
     @DisplayName("every @PostMapping on a webhook controller is in the protected set, and vice versa")
@@ -43,10 +43,10 @@ class GlificWebhookRouteCoverageTest {
                 .toList();
 
         assertThat(declared)
-                .as("Routes on @WebhookRoute controllers that GlificWebhookRoutes does not protect. "
-                        + "A new Glific webhook must be added to GlificWebhookRoutes, or it ships "
+                .as("Routes on @WebhookRoute controllers that WebhookRoutes does not protect. "
+                        + "A new Glific webhook must be added to WebhookRoutes, or it ships "
                         + "unauthenticated.")
-                .containsExactlyInAnyOrderElementsOf(GlificWebhookRoutes.relativePaths());
+                .containsExactlyInAnyOrderElementsOf(WebhookRoutes.relativePaths());
     }
 
     @Test
@@ -59,7 +59,7 @@ class GlificWebhookRouteCoverageTest {
                     assertThat(mapping).as("%s has no @RequestMapping", controller.getSimpleName()).isNotNull();
                     assertThat(mapping.value())
                             .as("@RequestMapping of %s", controller.getSimpleName())
-                            .containsExactly(GlificWebhookRoutes.BASE_PATH);
+                            .containsExactly(WebhookRoutes.BASE_PATH);
                 });
     }
 
@@ -73,7 +73,7 @@ class GlificWebhookRouteCoverageTest {
                 .toList();
 
         assertThat(nonPost)
-                .as("Mappings on @WebhookRoute controllers that GlificWebhookRoutes.isProtected can "
+                .as("Mappings on @WebhookRoute controllers that WebhookRoutes.isProtected can "
                         + "never match, so the webhook gate would not authenticate them")
                 .isEmpty();
     }
@@ -83,8 +83,8 @@ class GlificWebhookRouteCoverageTest {
     void protectsEveryEndpointNotJustTheReportedOnes() {
         // The security audit listed 12 paths. Pinning the real count keeps that discrepancy visible:
         // if this number changes, the Glific flow webhook nodes need updating too.
-        assertThat(GlificWebhookRoutes.relativePaths()).hasSize(26);
-        assertThat(GlificWebhookRoutes.absolutePaths()).hasSize(26);
+        assertThat(WebhookRoutes.relativePaths()).hasSize(26);
+        assertThat(WebhookRoutes.absolutePaths()).hasSize(26);
     }
 
     /**
@@ -96,7 +96,7 @@ class GlificWebhookRouteCoverageTest {
     @Test
     @DisplayName("no Glific webhook route is intercepted by the API-key gate")
     void noWebhookRouteIsBlockedByTheApiKeyGate() {
-        assertThat(GlificWebhookRoutes.absolutePaths())
+        assertThat(WebhookRoutes.absolutePaths())
                 .filteredOn(TelemetryApiKeyAuthFilter::requiresApiKey)
                 .as("Glific routes that TelemetryApiKeyAuthFilter would 401 before the webhook token "
                         + "is ever checked. Add them to its UNAUTHENTICATED_WEBHOOK_PATHS.")
@@ -105,7 +105,7 @@ class GlificWebhookRouteCoverageTest {
 
     /**
      * The mirror of the above: the paths the API-key filter deliberately lets through must be the ones
-     * this filter picks up. If a path were dropped from {@link GlificWebhookRoutes}, it would be exempt
+     * this filter picks up. If a path were dropped from {@link WebhookRoutes}, it would be exempt
      * from one gate and unknown to the other — fully public, with no test failing. Iterates the
      * exemptions themselves rather than naming them, so a new exemption is covered the moment it is
      * added.
@@ -115,7 +115,7 @@ class GlificWebhookRouteCoverageTest {
     void apiKeyExemptionsAreCoveredByTheWebhookGate() {
         assertThat(TelemetryApiKeyAuthFilter.unauthenticatedWebhookPaths())
                 .isNotEmpty()
-                .allSatisfy(path -> assertThat(GlificWebhookRoutes.isProtected("POST", path))
+                .allSatisfy(path -> assertThat(WebhookRoutes.isProtected("POST", path))
                         .as("%s is exempt from the API-key gate but not protected by the webhook gate", path)
                         .isTrue());
     }
@@ -123,8 +123,8 @@ class GlificWebhookRouteCoverageTest {
     @Test
     @DisplayName("absolute paths are the base path joined to each relative path")
     void absolutePathsAreBasePlusRelative() {
-        assertThat(GlificWebhookRoutes.absolutePaths())
-                .allSatisfy(path -> assertThat(path).startsWith(GlificWebhookRoutes.BASE_PATH + "/"))
+        assertThat(WebhookRoutes.absolutePaths())
+                .allSatisfy(path -> assertThat(path).startsWith(WebhookRoutes.BASE_PATH + "/"))
                 .contains("/api/v1/telemetry/intro", "/api/v1/telemetry/update-previous-reading");
     }
 
@@ -141,7 +141,7 @@ class GlificWebhookRouteCoverageTest {
 
         List<String> misgated = routes.stream()
                 .filter(route -> {
-                    boolean webhookGate = GlificWebhookRoutes.isProtected(route.method(), route.path());
+                    boolean webhookGate = WebhookRoutes.isProtected(route.method(), route.path());
                     boolean apiKeyGate = TelemetryApiKeyAuthFilter.requiresApiKey(route.path());
                     boolean webhookFamily = route.controller().isAnnotationPresent(WebhookRoute.class);
                     return webhookFamily ? !webhookGate || apiKeyGate : webhookGate || !apiKeyGate;

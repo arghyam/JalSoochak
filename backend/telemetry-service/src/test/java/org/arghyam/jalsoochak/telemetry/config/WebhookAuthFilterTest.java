@@ -26,8 +26,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
-@DisplayName("GlificWebhookAuthFilter")
-class GlificWebhookAuthFilterTest {
+@DisplayName("WebhookAuthFilter")
+class WebhookAuthFilterTest {
 
     private static final String TOKEN = "js_glific_webhook_token";
     private static final String TOKEN_HASH = WebhookAuthProperties.sha256Hex(TOKEN);
@@ -52,8 +52,8 @@ class GlificWebhookAuthFilterTest {
         return props;
     }
 
-    private GlificWebhookAuthFilter filter(String mode) {
-        return new GlificWebhookAuthFilter(properties(mode), meterRegistry);
+    private WebhookAuthFilter filter(String mode) {
+        return new WebhookAuthFilter(properties(mode), meterRegistry);
     }
 
     private static MockHttpServletRequest request(String method, String uri) {
@@ -135,7 +135,7 @@ class GlificWebhookAuthFilterTest {
             props.setHeaderName(HEADER);
             props.setTokenHashes(TOKEN_HASH + "," + WebhookAuthProperties.sha256Hex(next));
             props.init();
-            GlificWebhookAuthFilter rotating = new GlificWebhookAuthFilter(props, meterRegistry);
+            WebhookAuthFilter rotating = new WebhookAuthFilter(props, meterRegistry);
 
             for (String token : new String[]{TOKEN, next}) {
                 MockHttpServletRequest request = request("POST", PROTECTED_PATH);
@@ -149,9 +149,9 @@ class GlificWebhookAuthFilterTest {
         @Test
         @DisplayName("challenges every one of the 26 protected routes")
         void challengesEveryProtectedRoute() throws Exception {
-            GlificWebhookAuthFilter filter = filter("ENFORCE");
+            WebhookAuthFilter filter = filter("ENFORCE");
 
-            for (String path : GlificWebhookRoutes.absolutePaths()) {
+            for (String path : WebhookRoutes.absolutePaths()) {
                 MockHttpServletResponse response = new MockHttpServletResponse();
                 filter.doFilter(request("POST", path), response, chain);
                 assertThat(response.getStatus()).as("unprotected route %s", path).isEqualTo(401);
@@ -201,7 +201,7 @@ class GlificWebhookAuthFilterTest {
             props.setTokenHashes("");
             props.init();
 
-            new GlificWebhookAuthFilter(props, meterRegistry)
+            new WebhookAuthFilter(props, meterRegistry)
                     .doFilter(request("POST", PROTECTED_PATH), new MockHttpServletResponse(), chain);
 
             verify(chain).doFilter(any(), any());
@@ -282,9 +282,9 @@ class GlificWebhookAuthFilterTest {
         @Test
         @DisplayName("normalizes to the handler-visible path")
         void normalizesToHandlerPath() {
-            assertThat(GlificWebhookAuthFilter.normalize("/api/v1/telemetry/foo/../intro/"))
+            assertThat(WebhookAuthFilter.normalize("/api/v1/telemetry/foo/../intro/"))
                     .isEqualTo(PROTECTED_PATH);
-            assertThat(GlificWebhookAuthFilter.normalize("/api/v1/telemetry/readings/formats/assam"))
+            assertThat(WebhookAuthFilter.normalize("/api/v1/telemetry/readings/formats/assam"))
                     .isEqualTo("/api/v1/telemetry/readings/formats/assam");
         }
 
@@ -323,7 +323,7 @@ class GlificWebhookAuthFilterTest {
         @BeforeEach
         void attachAppender() {
             LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
-            logger = context.getLogger(GlificWebhookAuthFilter.class);
+            logger = context.getLogger(WebhookAuthFilter.class);
             appender = new ListAppender<>();
             appender.start();
             logger.addAppender(appender);
@@ -338,7 +338,7 @@ class GlificWebhookAuthFilterTest {
         @Test
         @DisplayName("never writes the token to the log, valid or not")
         void neverLogsTheToken() throws Exception {
-            GlificWebhookAuthFilter filter = filter("ENFORCE");
+            WebhookAuthFilter filter = filter("ENFORCE");
 
             MockHttpServletRequest valid = request("POST", PROTECTED_PATH);
             valid.addHeader(HEADER, TOKEN);

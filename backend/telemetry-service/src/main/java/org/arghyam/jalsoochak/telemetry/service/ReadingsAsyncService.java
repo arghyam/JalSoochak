@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.extern.slf4j.Slf4j;
-import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
@@ -24,11 +24,11 @@ public class ReadingsAsyncService {
         this.glificSyncExecutor = glificSyncExecutor;
     }
 
-    public void enqueueProcessAndResume(GlificWebhookRequest request, String jobId) {
+    public void enqueueProcessAndResume(MeterImageWebhookRequest request, String jobId) {
         glificSyncExecutor.execute(() -> processAndResume(request, jobId));
     }
 
-    private void processAndResume(GlificWebhookRequest request, String jobId) {
+    private void processAndResume(MeterImageWebhookRequest request, String jobId) {
         String contactId = request != null ? request.getContactId() : null;
         CreateReadingResponse result;
 

@@ -5,7 +5,7 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * The exact set of Glific webhook routes protected by {@link GlificWebhookAuthFilter}.
+ * The exact set of Glific webhook routes protected by {@link WebhookAuthFilter}.
  *
  * <p><b>Why a closed allowlist rather than a prefix rule on {@code /api/v1/telemetry/**}.</b>
  * That prefix is shared with the vendor ingestion endpoints on {@code ReadingIngestController}
@@ -16,11 +16,11 @@ import java.util.Set;
  * rule would therefore reject vendor traffic that carries the correct credential for its own family.
  *
  * <p><b>The allowlist's weakness, and how it is closed.</b> A newly added webhook would be silently
- * unprotected. {@code GlificWebhookRouteCoverageTest} asserts this set is exactly equal to the routes
+ * unprotected. {@code WebhookRouteCoverageTest} asserts this set is exactly equal to the routes
  * declared across every {@link WebhookRoute} controller, so adding a 27th endpoint without listing it
  * here fails the build — whichever webhook controller it lands on.
  */
-public final class GlificWebhookRoutes {
+public final class WebhookRoutes {
 
     /** Class-level {@code @RequestMapping} of every {@link WebhookRoute} controller. */
     public static final String BASE_PATH = "/api/v1/telemetry";
@@ -63,7 +63,7 @@ public final class GlificWebhookRoutes {
 
     private static final Set<String> ABSOLUTE_PATHS = buildAbsolutePaths();
 
-    private GlificWebhookRoutes() {
+    private WebhookRoutes() {
     }
 
     private static Set<String> buildAbsolutePaths() {
@@ -87,7 +87,7 @@ public final class GlificWebhookRoutes {
     /**
      * @param method HTTP method as reported by the container
      * @param normalizedPath request path with the context path removed and normalized by
-     *                       {@link GlificWebhookAuthFilter}
+     *                       {@link WebhookAuthFilter}
      * @return whether this request targets a Glific webhook and must therefore carry a webhook token
      */
     public static boolean isProtected(String method, String normalizedPath) {

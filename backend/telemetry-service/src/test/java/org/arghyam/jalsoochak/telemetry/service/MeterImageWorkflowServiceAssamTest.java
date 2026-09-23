@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
-import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
@@ -77,7 +77,7 @@ class MeterImageWorkflowServiceAssamTest {
 
     @Test
     void processImageDoesNotRequireSelectedChannel() throws Exception {
-        GlificWebhookRequest request = GlificWebhookRequest.builder()
+        MeterImageWebhookRequest request = MeterImageWebhookRequest.builder()
                 .contactId("919876543210")
                 .mediaId("media-1")
                 .mediaUrl("https://example.com/meter.jpg")
@@ -122,7 +122,7 @@ class MeterImageWorkflowServiceAssamTest {
 
     @Test
     void processImageContinuesWhenSelectedChannelMissingOrRemoved() throws Exception {
-        GlificWebhookRequest request = GlificWebhookRequest.builder()
+        MeterImageWebhookRequest request = MeterImageWebhookRequest.builder()
                 .contactId("919876543210")
                 .mediaId("media-1")
                 .mediaUrl("https://example.com/meter.jpg")

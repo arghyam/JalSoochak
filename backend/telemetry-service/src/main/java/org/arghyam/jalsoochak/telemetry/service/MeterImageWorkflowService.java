@@ -6,7 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
-import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
@@ -65,12 +65,12 @@ public class MeterImageWorkflowService {
         this.objectMapper = objectMapper;
     }
 
-    public CreateReadingResponse processImage(GlificWebhookRequest glificWebhookRequest) {
+    public CreateReadingResponse processImage(MeterImageWebhookRequest meterImageWebhookRequest) {
         try {
-            String contactId = glificWebhookRequest.getContactId();
-            String mediaId = glificWebhookRequest.getMediaId();
-            String mediaUrl = glificWebhookRequest.getMediaUrl();
-            boolean isMeterReplaced = Boolean.TRUE.equals(glificWebhookRequest.getIsMeterReplaced());
+            String contactId = meterImageWebhookRequest.getContactId();
+            String mediaId = meterImageWebhookRequest.getMediaId();
+            String mediaUrl = meterImageWebhookRequest.getMediaUrl();
+            boolean isMeterReplaced = Boolean.TRUE.equals(meterImageWebhookRequest.getIsMeterReplaced());
 
             TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(contactId);
             Integer tenantId = operatorWithSchema.operator().tenantId();
@@ -122,18 +122,18 @@ public class MeterImageWorkflowService {
             response.setMessage(localizationService.localizeMessage(response.getMessage(), languageKey));
             return response;
         } catch (Exception e) {
-            log.error("Unexpected error processing image for contactId {}: {}", maskPhone(glificWebhookRequest.getContactId()), e.getMessage(), e);
+            log.error("Unexpected error processing image for contactId {}: {}", maskPhone(meterImageWebhookRequest.getContactId()), e.getMessage(), e);
             if (log.isDebugEnabled()) {
-                log.debug("Unexpected error processing image rawContactId={}: {}", glificWebhookRequest.getContactId(), e.getMessage());
+                log.debug("Unexpected error processing image rawContactId={}: {}", meterImageWebhookRequest.getContactId(), e.getMessage());
             }
-            String languageKey = localizationService.resolveLanguageKeyForContact(glificWebhookRequest.getContactId());
+            String languageKey = localizationService.resolveLanguageKeyForContact(meterImageWebhookRequest.getContactId());
             String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Image could not be processed.", languageKey);
             return CreateReadingResponse.builder()
                     .success(false)
                     .message(descriptiveMessage)
                     .qualityStatus("REJECTED")
                     .errorCode(errorCodeForException(e))
-                    .correlationId(glificWebhookRequest.getContactId())
+                    .correlationId(meterImageWebhookRequest.getContactId())
                     .build();
         }
     }

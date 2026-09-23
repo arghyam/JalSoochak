@@ -36,7 +36,7 @@ import java.util.Deque;
  * <p><b>Relationship to {@link TelemetryApiKeyAuthFilter}.</b> That filter guards the partner
  * ingestion routes under {@code /readings**} and {@code /schemes/*} with a per-tenant key, and exempts
  * {@code /readings/glific} and {@code /schemes} because those two are Glific webhooks. This filter is
- * what authenticates them. {@code GlificWebhookRouteCoverageTest} asserts that handoff in both
+ * what authenticates them. {@code WebhookRouteCoverageTest} asserts that handoff in both
  * directions, so neither gate can be narrowed without the other noticing.
  *
  * <p><b>Why a filter rather than a {@code HandlerInterceptor}.</b> An interceptor runs after handler
@@ -44,11 +44,11 @@ import java.util.Deque;
  * {@code X-Tenant-Code} to {@link TenantContext}. Running as a filter means a rejected request never
  * selects a database schema, never allocates a handler and never reads the body.
  *
- * @see GlificWebhookRoutes for why the match is a closed allowlist and not a path prefix
+ * @see WebhookRoutes for why the match is a closed allowlist and not a path prefix
  */
 @Component
-@Order(GlificWebhookAuthFilter.ORDER)
-public class GlificWebhookAuthFilter extends OncePerRequestFilter {
+@Order(WebhookAuthFilter.ORDER)
+public class WebhookAuthFilter extends OncePerRequestFilter {
 
     /**
      * Runs after {@link RequestCorrelationFilter} (10) so rejections carry the request id,
@@ -60,7 +60,7 @@ public class GlificWebhookAuthFilter extends OncePerRequestFilter {
      */
     public static final int ORDER = 30;
 
-    private static final Logger log = LoggerFactory.getLogger(GlificWebhookAuthFilter.class);
+    private static final Logger log = LoggerFactory.getLogger(WebhookAuthFilter.class);
 
     private static final String METRIC_NAME = "telemetry.webhook.auth";
     private static final String RESULT_OK = "ok";
@@ -77,7 +77,7 @@ public class GlificWebhookAuthFilter extends OncePerRequestFilter {
     private final WebhookAuthProperties properties;
     private final MeterRegistry meterRegistry;
 
-    public GlificWebhookAuthFilter(WebhookAuthProperties properties, MeterRegistry meterRegistry) {
+    public WebhookAuthFilter(WebhookAuthProperties properties, MeterRegistry meterRegistry) {
         this.properties = properties;
         this.meterRegistry = meterRegistry;
     }
@@ -92,7 +92,7 @@ public class GlificWebhookAuthFilter extends OncePerRequestFilter {
         }
 
         String path = normalize(pathWithoutContext(request));
-        if (!GlificWebhookRoutes.isProtected(request.getMethod(), path)) {
+        if (!WebhookRoutes.isProtected(request.getMethod(), path)) {
             filterChain.doFilter(request, response);
             return;
         }

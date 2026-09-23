@@ -8,15 +8,15 @@ import java.lang.annotation.Target;
 
 /**
  * Declares a controller as part of the WhatsApp webhook surface: the family authenticated by the
- * {@code X-Webhook-Token} in {@link GlificWebhookAuthFilter}, not by the {@code X-Api-Key} in
+ * {@code X-Webhook-Token} in {@link WebhookAuthFilter}, not by the {@code X-Api-Key} in
  * {@link TelemetryApiKeyAuthFilter}.
  *
  * <p>The auth family is declared on the controller rather than inferred from a class name or a
  * package, so the webhook surface can span several controllers without one of them silently falling
  * out of scope. Two things key on this annotation, and must keep keying on the same one:
  * <ul>
- *   <li>{@code GlificWebhookRouteCoverageTest} asserts that the {@code @PostMapping}s across every
- *       annotated controller are exactly {@link GlificWebhookRoutes}. A webhook route missing from
+ *   <li>{@code WebhookRouteCoverageTest} asserts that the {@code @PostMapping}s across every
+ *       annotated controller are exactly {@link WebhookRoutes}. A webhook route missing from
  *       that allowlist is exempt from the API-key gate and unknown to the webhook gate — fully
  *       public.</li>
  *   <li>{@code WebhookValidationExceptionHandler} binds on it, so every annotated controller

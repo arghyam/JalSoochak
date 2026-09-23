@@ -4,10 +4,10 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ManualReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
@@ -83,15 +83,15 @@ class ReadingWebhookControllerTest {
     @DisplayName("POST /readings/glific")
     class ReadingsWebhook {
 
-        private GlificWebhookRequest request() {
-            GlificWebhookRequest request = new GlificWebhookRequest();
+        private MeterImageWebhookRequest request() {
+            MeterImageWebhookRequest request = new MeterImageWebhookRequest();
             request.setContactId(CONTACT);
             return request;
         }
 
         @Test
         void acksImmediatelyAndHandsTheWorkToTheAsyncService() {
-            GlificWebhookRequest request = request();
+            MeterImageWebhookRequest request = request();
 
             var response = controller.receive(request);
 
@@ -170,7 +170,7 @@ class ReadingWebhookControllerTest {
             logger.addAppender(appender);
 
             try {
-                controller.receive(GlificWebhookRequest.builder()
+                controller.receive(MeterImageWebhookRequest.builder()
                         .contactId("919999912345")
                         .mediaId("media-123")
                         .build());

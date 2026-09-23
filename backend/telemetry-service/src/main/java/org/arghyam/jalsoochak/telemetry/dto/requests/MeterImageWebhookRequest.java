@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GlificWebhookRequest {
+public class MeterImageWebhookRequest {
 
     private String contactId;
 

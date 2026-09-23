@@ -81,8 +81,8 @@ class DisallowedHttpMethodFilterTest {
 
         @Test
         @DisplayName("every Glific webhook path rejects OPTIONS")
-        void everyGlificWebhookPathRejectsOptions() throws Exception {
-            for (String path : GlificWebhookRoutes.absolutePaths()) {
+        void everyWebhookPathRejectsOptions() throws Exception {
+            for (String path : WebhookRoutes.absolutePaths()) {
                 MockFilterChain chain = new MockFilterChain();
                 MockHttpServletResponse response = new MockHttpServletResponse();
 
@@ -262,8 +262,8 @@ class DisallowedHttpMethodFilterTest {
 
         @Test
         @DisplayName("POST to every Glific webhook path is untouched")
-        void postToEveryGlificWebhookPathIsUntouched() throws Exception {
-            for (String path : GlificWebhookRoutes.absolutePaths()) {
+        void postToEveryWebhookPathIsUntouched() throws Exception {
+            for (String path : WebhookRoutes.absolutePaths()) {
                 MockFilterChain chain = new MockFilterChain();
                 MockHttpServletRequest request = request("POST", path);
 

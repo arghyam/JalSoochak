@@ -4,10 +4,10 @@ import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingWebhookAckResponse;
-import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ManualReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.MeterReadingConversationService;
@@ -69,32 +69,32 @@ public class ReadingWebhookController {
             consumes = "application/json",
             produces = "application/json"
     )
-    public ResponseEntity<ReadingWebhookAckResponse> receive(@RequestBody GlificWebhookRequest glificWebhookRequest) {
+    public ResponseEntity<ReadingWebhookAckResponse> receive(@RequestBody MeterImageWebhookRequest meterImageWebhookRequest) {
         log.info("POST /api/v1/telemetry/readings/glific received request={}",
-                summarizeGlificWebhookRequest(glificWebhookRequest));
+                summarizeMeterImageWebhookRequest(meterImageWebhookRequest));
         logRawContactIdAtDebug("/api/v1/telemetry/readings/glific",
-                glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null);
+                meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null);
         try {
             String jobId = UUID.randomUUID().toString();
             String status = "ACCEPTED";
             String message = "Reading request accepted for asynchronous processing.";
             if (readingsAsyncService != null) {
-                readingsAsyncService.enqueueProcessAndResume(glificWebhookRequest, jobId);
+                readingsAsyncService.enqueueProcessAndResume(meterImageWebhookRequest, jobId);
                 log.info("readings_glific queued jobId={} contact={} responseMode=async",
                         jobId,
-                        maskPhone(glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null));
+                        maskPhone(meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null));
             } else {
-                CreateReadingResponse response = imageWorkflowService.processImage(glificWebhookRequest);
+                CreateReadingResponse response = imageWorkflowService.processImage(meterImageWebhookRequest);
                 status = isSuccessful(response) ? "SUCCESS" : "FAILED";
                 message = response != null ? response.getMessage() : "Reading request processed.";
                 log.info("readings_glific processed jobId={} contact={} response={}",
                         jobId,
-                        maskPhone(glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null),
+                        maskPhone(meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null),
                         summarizeCreateReadingResponse(response));
             }
             logReadingSubmission(
                     "/api/v1/telemetry/readings/glific",
-                    glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null,
+                    meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null,
                     status,
                     message
             );
@@ -106,12 +106,12 @@ public class ReadingWebhookController {
                     .message("Reading request accepted for asynchronous processing.")
                     .build();
             log.info("readings_glific ack_response contact={} response={}",
-                    maskPhone(glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null),
+                    maskPhone(meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null),
                     summarizeReadingWebhookAckResponse(ackResponse));
 
             return ResponseEntity.ok(ackResponse);
         } catch (Exception e) {
-            String safeContactId = glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null;
+            String safeContactId = meterImageWebhookRequest != null ? meterImageWebhookRequest.getContactId() : null;
             log.error("Error processing webhook: {}", e.getMessage(), e);
             log.debug("Error processing webhook for contactId {}: {}", safeContactId, e.getMessage());
             logReadingSubmission("/api/v1/telemetry/readings/glific", safeContactId, "FAILED", e.getMessage());
@@ -258,7 +258,7 @@ public class ReadingWebhookController {
         }
     }
 
-    private String summarizeGlificWebhookRequest(GlificWebhookRequest request) {
+    private String summarizeMeterImageWebhookRequest(MeterImageWebhookRequest request) {
         if (request == null) {
             return "null";
         }
