@@ -60,7 +60,7 @@ class FlowVisionOcrExtractorProviderSettingsTest {
 
         FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, DEFAULT_URL);
 
-        service.extractReading("https://img");
+        service.extractReading("https://img", null);
 
         ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<HttpEntity> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);

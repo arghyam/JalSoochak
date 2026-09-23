@@ -32,7 +32,7 @@ class FlowVisionOcrExtractorTest {
 
         FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
 
-        OcrReadingResult result = service.extractReading("https://image-url");
+        OcrReadingResult result = service.extractReading("https://image-url", null);
 
         assertNotNull(result);
         assertNotNull(result.getRequestId());
@@ -50,7 +50,7 @@ class FlowVisionOcrExtractorTest {
 
         FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
 
-        OcrReadingResult result = service.extractReading("https://image-url");
+        OcrReadingResult result = service.extractReading("https://image-url", null);
 
         assertNotNull(result);
         assertEquals("returned-id-123", result.getRequestId());
@@ -65,7 +65,7 @@ class FlowVisionOcrExtractorTest {
 
         FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
 
-        OcrReadingResult result = service.extractReading("https://image-url");
+        OcrReadingResult result = service.extractReading("https://image-url", null);
 
         assertNotNull(result);
         assertNotNull(result.getRequestId());
@@ -81,7 +81,7 @@ class FlowVisionOcrExtractorTest {
 
         FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
 
-        OcrReadingResult result = service.extractReading("https://image-url");
+        OcrReadingResult result = service.extractReading("https://image-url", null);
 
         assertNull(result);
         assertEquals(1, restTemplate.getCallCount());
@@ -100,7 +100,7 @@ class FlowVisionOcrExtractorTest {
 
         FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
 
-        OcrReadingResult result = service.extractReading("https://image-url");
+        OcrReadingResult result = service.extractReading("https://image-url", null);
 
         assertNotNull(result);
         assertNotNull(result.getRequestId());
@@ -123,7 +123,7 @@ class FlowVisionOcrExtractorTest {
 
         FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
 
-        OcrReadingResult result = service.extractReading("https://image-url");
+        OcrReadingResult result = service.extractReading("https://image-url", null);
 
         assertNotNull(result);
         assertNull(result.getAdjustedReading());
@@ -156,7 +156,7 @@ class FlowVisionOcrExtractorTest {
 
         FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
 
-        OcrReadingResult result = service.extractReading("");
+        OcrReadingResult result = service.extractReading("", null);
 
         assertNotNull(result);
         assertNotNull(result.getRequestId());
@@ -175,7 +175,7 @@ class FlowVisionOcrExtractorTest {
 
         FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
 
-        OcrReadingResult result = service.extractReading("https://image-url");
+        OcrReadingResult result = service.extractReading("https://image-url", null);
 
         assertNotNull(result);
         assertTrue(result.isHasRollover());
@@ -199,7 +199,7 @@ class FlowVisionOcrExtractorTest {
 
         FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
 
-        OcrReadingResult result = service.extractReading("https://image-url");
+        OcrReadingResult result = service.extractReading("https://image-url", null);
 
         assertNotNull(result);
         assertFalse(result.isHasRollover());
@@ -218,7 +218,7 @@ class FlowVisionOcrExtractorTest {
 
         FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
 
-        OcrReadingResult result = service.extractReading("https://image-url");
+        OcrReadingResult result = service.extractReading("https://image-url", null);
 
         assertNotNull(result);
         assertTrue(result.isHasRollover());
@@ -240,7 +240,7 @@ class FlowVisionOcrExtractorTest {
 
         FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
 
-        OcrReadingResult result = service.extractReading("https://image-url");
+        OcrReadingResult result = service.extractReading("https://image-url", null);
 
         assertNotNull(result);
         assertTrue(result.isHasRollover());

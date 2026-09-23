@@ -12,7 +12,6 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
-import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -47,7 +46,7 @@ import java.util.UUID;
 public class BfmReadingService {
 
     private final TelemetryTenantRepository telemetryTenantRepository;
-    private final FlowVisionOcrExtractor flowVisionOcrExtractor;
+    private final MeterReadingExtractor defaultOcrExtractor;
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
@@ -776,7 +775,7 @@ public class BfmReadingService {
             log.warn("FlowVision readings retry service is not available; using direct OCR path");
         }
         if (settings == null) {
-            return flowVisionOcrExtractor.extractReading(readingUrl);
+            return defaultOcrExtractor.extractReading(readingUrl, null);
         }
         return ocrProviderRegistry.get(settings.providerId()).extractReading(readingUrl, settings);
     }

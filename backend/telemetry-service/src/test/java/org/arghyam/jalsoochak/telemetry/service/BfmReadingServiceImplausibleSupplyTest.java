@@ -9,7 +9,6 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
-import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSupplyCounts;
@@ -68,7 +67,7 @@ class BfmReadingServiceImplausibleSupplyTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private FlowVisionOcrExtractor flowVisionOcrExtractor;
+    private MeterReadingExtractor defaultOcrExtractor;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
@@ -105,7 +104,7 @@ class BfmReadingServiceImplausibleSupplyTest {
 
     private BfmReadingService service(SupplyPlausibilityProperties.Mode mode) {
         return new BfmReadingService(
-                repo, flowVisionOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
+                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
                 new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
@@ -276,7 +275,7 @@ class BfmReadingServiceImplausibleSupplyTest {
                 + "cannot land separately from the row")
         void imageSubmissionTakesTheTransactionalPath() {
             checkableScheme();
-            when(flowVisionOcrExtractor.extractReading(anyString())).thenReturn(OcrReadingResult.builder()
+            when(defaultOcrExtractor.extractReading(anyString(), isNull())).thenReturn(OcrReadingResult.builder()
                     .adjustedReading(new BigDecimal("1100"))
                     .qualityConfidence(new BigDecimal("0.95"))
                     .build());

@@ -4,7 +4,6 @@ import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryRegistry;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
-import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -35,11 +34,11 @@ class OcrReadingsRetryServiceProviderRoutingTest {
         when(visionX.providerId()).thenReturn("vision-x");
         when(visionX.extractReadingOrThrow(eq("https://img"), any(OcrProviderSettings.class))).thenReturn(expected);
 
-        FlowVisionOcrExtractor flowVisionOcrExtractor = mock(FlowVisionOcrExtractor.class);
+        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
         OcrProviderRegistry registry = new OcrProviderRegistry(List.of(visionX), "flowvision");
 
         OcrReadingsRetryService service = new OcrReadingsRetryService(
-                flowVisionOcrExtractor,
+                defaultOcrExtractor,
                 registry,
                 RetryRegistry.ofDefaults(),
                 CircuitBreakerRegistry.ofDefaults(),
@@ -52,6 +51,6 @@ class OcrReadingsRetryServiceProviderRoutingTest {
 
         assertSame(expected, actual);
         verify(visionX).extractReadingOrThrow("https://img", settings);
-        verifyNoInteractions(flowVisionOcrExtractor);
+        verifyNoInteractions(defaultOcrExtractor);
     }
 }

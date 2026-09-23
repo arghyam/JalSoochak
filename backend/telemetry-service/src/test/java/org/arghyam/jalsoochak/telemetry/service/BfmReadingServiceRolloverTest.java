@@ -10,7 +10,6 @@ import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.RolloverPosition;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
-import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
@@ -61,7 +60,7 @@ class BfmReadingServiceRolloverTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private FlowVisionOcrExtractor flowVisionOcrExtractor;
+    private MeterReadingExtractor defaultOcrExtractor;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
@@ -79,7 +78,7 @@ class BfmReadingServiceRolloverTest {
     void setUp() {
         service = new BfmReadingService(
                 repo,
-                flowVisionOcrExtractor,
+                defaultOcrExtractor,
                 telemetryEventPublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
@@ -247,7 +246,7 @@ class BfmReadingServiceRolloverTest {
         when(repo.existsSchemeById(SCHEMA, 10L)).thenReturn(true);
         when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
         when(repo.isOperatorMappedToScheme(SCHEMA, 1L, 10L)).thenReturn(true);
-        when(flowVisionOcrExtractor.extractReading(IMAGE_URL)).thenReturn(ocr);
+        when(defaultOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(ocr);
         when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, 10L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("140"),
                         ReadingTime.now().minusDays(1))));

@@ -8,7 +8,6 @@ import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
-import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.springframework.stereotype.Service;
 
 import java.util.Locale;
@@ -24,7 +23,8 @@ public class OcrReadingsRetryService {
     /** Per-provider resilience instances are named "flowvisionReadings-<providerId>" for isolation + metrics. */
     static final String PROVIDER_INSTANCE_PREFIX = INSTANCE_NAME + "-";
 
-    private final FlowVisionOcrExtractor flowVisionOcrExtractor;
+    /** The primary {@link MeterReadingExtractor}, serving tenants that set no {@code ocr_*} override. */
+    private final MeterReadingExtractor defaultOcrExtractor;
     private final OcrProviderRegistry ocrProviderRegistry;
     private final RetryRegistry retryRegistry;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
@@ -39,12 +39,12 @@ public class OcrReadingsRetryService {
      */
     private final Map<String, ResilienceBundle> providerBundles = new ConcurrentHashMap<>();
 
-    public OcrReadingsRetryService(FlowVisionOcrExtractor flowVisionOcrExtractor,
-                                          OcrProviderRegistry ocrProviderRegistry,
-                                          RetryRegistry retryRegistry,
-                                          CircuitBreakerRegistry circuitBreakerRegistry,
-                                          BulkheadRegistry bulkheadRegistry) {
-        this.flowVisionOcrExtractor = flowVisionOcrExtractor;
+    public OcrReadingsRetryService(MeterReadingExtractor defaultOcrExtractor,
+                                   OcrProviderRegistry ocrProviderRegistry,
+                                   RetryRegistry retryRegistry,
+                                   CircuitBreakerRegistry circuitBreakerRegistry,
+                                   BulkheadRegistry bulkheadRegistry) {
+        this.defaultOcrExtractor = defaultOcrExtractor;
         this.ocrProviderRegistry = ocrProviderRegistry;
         this.retryRegistry = retryRegistry;
         this.circuitBreakerRegistry = circuitBreakerRegistry;
@@ -97,7 +97,7 @@ public class OcrReadingsRetryService {
      */
     private MeterReadingExtractor resolveExtractor(OcrProviderSettings settings) {
         if (settings == null || ocrProviderRegistry == null) {
-            return flowVisionOcrExtractor;
+            return defaultOcrExtractor;
         }
         return ocrProviderRegistry.get(settings.providerId());
     }
@@ -139,7 +139,7 @@ public class OcrReadingsRetryService {
 
     private OcrReadingResult invokeExtractor(MeterReadingExtractor extractor, String readingUrl, OcrProviderSettings settings) {
         if (settings == null || ocrProviderRegistry == null) {
-            return flowVisionOcrExtractor.extractReadingOrThrow(readingUrl);
+            return defaultOcrExtractor.extractReadingOrThrow(readingUrl, null);
         }
         return extractor.extractReadingOrThrow(readingUrl, settings);
     }

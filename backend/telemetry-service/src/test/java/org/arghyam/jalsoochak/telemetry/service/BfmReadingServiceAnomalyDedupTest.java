@@ -6,7 +6,6 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
-import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
@@ -45,7 +44,7 @@ class BfmReadingServiceAnomalyDedupTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private FlowVisionOcrExtractor flowVisionOcrExtractor;
+    private MeterReadingExtractor defaultOcrExtractor;
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
@@ -65,7 +64,7 @@ class BfmReadingServiceAnomalyDedupTest {
     void setUp() {
         service = new BfmReadingService(
                 telemetryTenantRepository,
-                flowVisionOcrExtractor,
+                defaultOcrExtractor,
                 telemetryEventPublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
@@ -87,7 +86,7 @@ class BfmReadingServiceAnomalyDedupTest {
         when(telemetryTenantRepository.existsSchemeById("tenant_up", 100L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById("tenant_up", 11L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_up", 11L, 100L)).thenReturn(true);
-        when(flowVisionOcrExtractor.extractReading("https://img.example.com/a.jpg")).thenReturn(null);
+        when(defaultOcrExtractor.extractReading("https://img.example.com/a.jpg", null)).thenReturn(null);
 
         CreateReadingRequest request = CreateReadingRequest.builder()
                 .schemeId(100L)
@@ -140,7 +139,7 @@ class BfmReadingServiceAnomalyDedupTest {
         when(telemetryTenantRepository.existsSchemeById("tenant_up", 100L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById("tenant_up", 11L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_up", 11L, 100L)).thenReturn(true);
-        when(flowVisionOcrExtractor.extractReading("https://img.example.com/dup.jpg")).thenReturn(
+        when(defaultOcrExtractor.extractReading("https://img.example.com/dup.jpg", null)).thenReturn(
                 OcrReadingResult.builder()
                         .adjustedReading(new BigDecimal("123"))
                         .qualityConfidence(new BigDecimal("0.95"))

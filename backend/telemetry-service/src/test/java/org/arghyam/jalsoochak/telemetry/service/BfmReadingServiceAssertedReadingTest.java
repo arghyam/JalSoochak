@@ -8,7 +8,6 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
-import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
@@ -59,7 +58,7 @@ class BfmReadingServiceAssertedReadingTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private FlowVisionOcrExtractor flowVisionOcrExtractor;
+    private MeterReadingExtractor defaultOcrExtractor;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
@@ -77,7 +76,7 @@ class BfmReadingServiceAssertedReadingTest {
     void setUp() {
         service = new BfmReadingService(
                 repo,
-                flowVisionOcrExtractor,
+                defaultOcrExtractor,
                 telemetryEventPublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
@@ -142,7 +141,7 @@ class BfmReadingServiceAssertedReadingTest {
     @Test
     @DisplayName("an image-extracted reading keeps the untouched insert path and default provenance")
     void imagePathIsUnchanged() {
-        when(flowVisionOcrExtractor.extractReading(anyString())).thenReturn(OcrReadingResult.builder()
+        when(defaultOcrExtractor.extractReading(anyString(), isNull())).thenReturn(OcrReadingResult.builder()
                 .adjustedReading(new BigDecimal("150"))
                 .qualityConfidence(new BigDecimal("0.95"))
                 .qualityStatus("CONFIRMED")
@@ -203,7 +202,7 @@ class BfmReadingServiceAssertedReadingTest {
 
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.getErrorCode()).isNull();
-        verify(flowVisionOcrExtractor, org.mockito.Mockito.never()).extractReading(anyString());
+        verify(defaultOcrExtractor, org.mockito.Mockito.never()).extractReading(anyString(), any());
     }
 
     private static CreateReadingRequest assertedRequest(BigDecimal value) {

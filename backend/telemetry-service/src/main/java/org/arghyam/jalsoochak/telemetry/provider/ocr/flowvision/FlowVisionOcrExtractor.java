@@ -10,9 +10,10 @@ import org.arghyam.jalsoochak.telemetry.service.OcrTransientFailures;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.*;
 import org.springframework.web.client.RestClientResponseException;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
@@ -24,7 +25,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
-@Service
+/**
+ * The built-in OCR provider. It is the {@code @Primary} {@link MeterReadingExtractor}, so it serves every
+ * tenant that sets no {@code ocr_*} override.
+ */
+@Component
+@Primary
 @Slf4j
 public class FlowVisionOcrExtractor implements MeterReadingExtractor {
 
@@ -57,16 +63,6 @@ public class FlowVisionOcrExtractor implements MeterReadingExtractor {
     @Override
     public String providerId() {
         return OcrProviderSettings.DEFAULT_PROVIDER_ID;
-    }
-
-    /** Extracts a reading against the global-default FlowVision endpoint (backwards-compatible entry point). */
-    public OcrReadingResult extractReading(String readingUrl) {
-        return extractReading(readingUrl, defaultSettings);
-    }
-
-    /** Throwing variant against the global-default endpoint (backwards-compatible entry point). */
-    public OcrReadingResult extractReadingOrThrow(String readingUrl) {
-        return extractReadingOrThrow(readingUrl, defaultSettings);
     }
 
     @Override

@@ -8,7 +8,6 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryConfig;
 import io.github.resilience4j.retry.RetryRegistry;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
-import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.ResourceAccessException;
 
@@ -21,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -41,8 +41,8 @@ class OcrReadingsRetryServiceProviderIsolationTest {
                 .adjustedReading(new BigDecimal("100"))
                 .qualityStatus("GOOD")
                 .build();
-        FlowVisionOcrExtractor flowVisionOcrExtractor = mock(FlowVisionOcrExtractor.class);
-        when(flowVisionOcrExtractor.extractReadingOrThrow(anyString())).thenReturn(ok);
+        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
+        when(defaultOcrExtractor.extractReadingOrThrow(anyString(), isNull())).thenReturn(ok);
 
         // Provider "vision-x" always fails with a transient (recorded) error.
         MeterReadingExtractor visionX = mock(MeterReadingExtractor.class);
@@ -68,7 +68,7 @@ class OcrReadingsRetryServiceProviderIsolationTest {
                 .build();
 
         OcrReadingsRetryService service = new OcrReadingsRetryService(
-                flowVisionOcrExtractor,
+                defaultOcrExtractor,
                 providerRegistry,
                 RetryRegistry.of(retryConfig),
                 CircuitBreakerRegistry.of(cbConfig),
@@ -93,13 +93,13 @@ class OcrReadingsRetryServiceProviderIsolationTest {
     @Test
     void defaultProviderUsesTheSharedTunedInstance() {
         // Sanity: null settings resolve the shared "flowvisionReadings" breaker, not a per-provider one.
-        FlowVisionOcrExtractor flowVisionOcrExtractor = mock(FlowVisionOcrExtractor.class);
+        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
         OcrReadingResult ok = OcrReadingResult.builder().adjustedReading(new BigDecimal("1")).build();
-        when(flowVisionOcrExtractor.extractReadingOrThrow(anyString())).thenReturn(ok);
+        when(defaultOcrExtractor.extractReadingOrThrow(anyString(), isNull())).thenReturn(ok);
 
         CircuitBreakerRegistry cbRegistry = CircuitBreakerRegistry.ofDefaults();
         OcrReadingsRetryService service = new OcrReadingsRetryService(
-                flowVisionOcrExtractor,
+                defaultOcrExtractor,
                 new OcrProviderRegistry(List.of(), "flowvision"),
                 RetryRegistry.ofDefaults(),
                 cbRegistry,
@@ -122,7 +122,7 @@ class OcrReadingsRetryServiceProviderIsolationTest {
 
         CircuitBreakerRegistry cbRegistry = CircuitBreakerRegistry.ofDefaults();
         OcrReadingsRetryService service = new OcrReadingsRetryService(
-                mock(FlowVisionOcrExtractor.class),
+                mock(MeterReadingExtractor.class),
                 registry,
                 RetryRegistry.of(RetryConfig.custom()
                         .maxAttempts(1)

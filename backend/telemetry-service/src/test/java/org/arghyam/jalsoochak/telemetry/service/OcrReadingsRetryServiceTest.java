@@ -8,7 +8,6 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryConfig;
 import io.github.resilience4j.retry.RetryRegistry;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
-import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.HttpHeaders;
@@ -33,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -42,7 +42,7 @@ class OcrReadingsRetryServiceTest {
 
     @Test
     void retriesTimeoutsAndReturnsSuccessfulResult() {
-        FlowVisionOcrExtractor flowVisionOcrExtractor = mock(FlowVisionOcrExtractor.class);
+        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
         OcrReadingResult expected = OcrReadingResult.builder()
                 .adjustedReading(new BigDecimal("123.4"))
                 .qualityStatus("GOOD")
@@ -50,61 +50,61 @@ class OcrReadingsRetryServiceTest {
                 .correlationId("corr-1")
                 .build();
 
-        when(flowVisionOcrExtractor.extractReadingOrThrow("https://example.com/img.jpg"))
+        when(defaultOcrExtractor.extractReadingOrThrow("https://example.com/img.jpg", null))
                 .thenThrow(new ResourceAccessException("Read timed out"))
                 .thenThrow(new ResourceAccessException("Read timed out"))
                 .thenReturn(expected);
 
-        OcrReadingsRetryService service = newService(flowVisionOcrExtractor);
+        OcrReadingsRetryService service = newService(defaultOcrExtractor);
 
         OcrReadingResult actual = service.extractReading("https://example.com/img.jpg");
 
         assertEquals(expected, actual);
-        verify(flowVisionOcrExtractor, times(3)).extractReadingOrThrow("https://example.com/img.jpg");
+        verify(defaultOcrExtractor, times(3)).extractReadingOrThrow("https://example.com/img.jpg", null);
     }
 
     @Test
     void throwsServiceUnavailableAfterRetriableFailuresAreExhausted() {
-        FlowVisionOcrExtractor flowVisionOcrExtractor = mock(FlowVisionOcrExtractor.class);
-        when(flowVisionOcrExtractor.extractReadingOrThrow("https://example.com/img.jpg"))
+        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
+        when(defaultOcrExtractor.extractReadingOrThrow("https://example.com/img.jpg", null))
                 .thenThrow(new ResourceAccessException("Read timed out"));
 
-        OcrReadingsRetryService service = newService(flowVisionOcrExtractor);
+        OcrReadingsRetryService service = newService(defaultOcrExtractor);
 
         assertThrows(OcrReadingsUnavailableException.class,
                 () -> service.extractReading("https://example.com/img.jpg"));
-        verify(flowVisionOcrExtractor, times(3)).extractReadingOrThrow("https://example.com/img.jpg");
+        verify(defaultOcrExtractor, times(3)).extractReadingOrThrow("https://example.com/img.jpg", null);
     }
 
     @ParameterizedTest
     @MethodSource("retriableHttpExceptions")
     void retriesTransientHttpFailuresAndThrowsServiceUnavailable(RuntimeException transientException) {
-        FlowVisionOcrExtractor flowVisionOcrExtractor = mock(FlowVisionOcrExtractor.class);
-        when(flowVisionOcrExtractor.extractReadingOrThrow("https://example.com/img.jpg"))
+        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
+        when(defaultOcrExtractor.extractReadingOrThrow("https://example.com/img.jpg", null))
                 .thenThrow(transientException);
 
-        OcrReadingsRetryService service = newService(flowVisionOcrExtractor);
+        OcrReadingsRetryService service = newService(defaultOcrExtractor);
 
         assertThrows(OcrReadingsUnavailableException.class,
                 () -> service.extractReading("https://example.com/img.jpg"));
-        verify(flowVisionOcrExtractor, times(3)).extractReadingOrThrow("https://example.com/img.jpg");
+        verify(defaultOcrExtractor, times(3)).extractReadingOrThrow("https://example.com/img.jpg", null);
     }
 
     @Test
     void doesNotRetryNonTransientClientErrors() {
-        FlowVisionOcrExtractor flowVisionOcrExtractor = mock(FlowVisionOcrExtractor.class);
-        when(flowVisionOcrExtractor.extractReadingOrThrow("https://example.com/img.jpg"))
+        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
+        when(defaultOcrExtractor.extractReadingOrThrow("https://example.com/img.jpg", null))
                 .thenThrow(new HttpClientErrorException(HttpStatus.BAD_REQUEST, "Bad request"));
 
-        OcrReadingsRetryService service = newService(flowVisionOcrExtractor);
+        OcrReadingsRetryService service = newService(defaultOcrExtractor);
 
         assertThrows(HttpClientErrorException.class, () -> service.extractReading("https://example.com/img.jpg"));
-        verify(flowVisionOcrExtractor).extractReadingOrThrow("https://example.com/img.jpg");
+        verify(defaultOcrExtractor).extractReadingOrThrow("https://example.com/img.jpg", null);
     }
 
     @Test
     void releasesBulkheadPermitBetweenRetryAttempts() throws Exception {
-        FlowVisionOcrExtractor flowVisionOcrExtractor = mock(FlowVisionOcrExtractor.class);
+        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
         CountDownLatch firstAttemptFailed = new CountDownLatch(1);
         AtomicInteger firstCallAttempts = new AtomicInteger();
         OcrReadingResult firstResult = OcrReadingResult.builder()
@@ -116,7 +116,7 @@ class OcrReadingsRetryServiceTest {
                 .qualityStatus("GOOD")
                 .build();
 
-        when(flowVisionOcrExtractor.extractReadingOrThrow(anyString())).thenAnswer(invocation -> {
+        when(defaultOcrExtractor.extractReadingOrThrow(anyString(), isNull())).thenAnswer(invocation -> {
             String readingUrl = invocation.getArgument(0);
             if ("https://example.com/first.jpg".equals(readingUrl)
                     && firstCallAttempts.incrementAndGet() == 1) {
@@ -131,7 +131,7 @@ class OcrReadingsRetryServiceTest {
 
         BulkheadRegistry bulkheadRegistry = BulkheadRegistry.of(bulkheadConfig(1));
         OcrReadingsRetryService service = newService(
-                flowVisionOcrExtractor,
+                defaultOcrExtractor,
                 bulkheadRegistry,
                 Duration.ofMillis(300)
         );
@@ -172,11 +172,11 @@ class OcrReadingsRetryServiceTest {
         return false;
     }
 
-    private OcrReadingsRetryService newService(FlowVisionOcrExtractor flowVisionOcrExtractor) {
-        return newService(flowVisionOcrExtractor, BulkheadRegistry.of(bulkheadConfig(10)), Duration.ZERO);
+    private OcrReadingsRetryService newService(MeterReadingExtractor defaultOcrExtractor) {
+        return newService(defaultOcrExtractor, BulkheadRegistry.of(bulkheadConfig(10)), Duration.ZERO);
     }
 
-    private OcrReadingsRetryService newService(FlowVisionOcrExtractor flowVisionOcrExtractor,
+    private OcrReadingsRetryService newService(MeterReadingExtractor defaultOcrExtractor,
                                                       BulkheadRegistry bulkheadRegistry,
                                                       Duration waitDuration) {
         RetryConfig retryConfig = RetryConfig.custom()
@@ -188,9 +188,9 @@ class OcrReadingsRetryServiceTest {
                 .recordExceptions(OcrTransientFailures.retriableExceptions())
                 .build();
         // Null registry: these tests exercise the default-provider path (null settings), which the retry
-        // service routes straight to flowVisionOcrExtractor without consulting the registry.
+        // service routes straight to defaultOcrExtractor without consulting the registry.
         return new OcrReadingsRetryService(
-                flowVisionOcrExtractor,
+                defaultOcrExtractor,
                 null,
                 RetryRegistry.of(retryConfig),
                 CircuitBreakerRegistry.of(circuitBreakerConfig),

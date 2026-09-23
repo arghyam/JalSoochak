@@ -7,7 +7,6 @@ import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
-import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSupplyCounts;
@@ -75,7 +74,7 @@ class BfmReadingServiceLocationMismatchTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private FlowVisionOcrExtractor flowVisionOcrExtractor;
+    private MeterReadingExtractor defaultOcrExtractor;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
@@ -116,7 +115,7 @@ class BfmReadingServiceLocationMismatchTest {
                 .thenReturn(new LocationVerdict.Outside(1201.0d, 500.0d));
 
         service = new BfmReadingService(
-                repo, flowVisionOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
+                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
                 new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
@@ -267,7 +266,7 @@ class BfmReadingServiceLocationMismatchTest {
         // Matches how the OCR collaborators are treated: a unit test that does not exercise the
         // boundary check may pass null, and the reading must still go through.
         BfmReadingService withoutCheck = new BfmReadingService(
-                repo, flowVisionOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
+                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
                 new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
