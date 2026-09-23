@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.message.channel.glific;
 
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
+
 /**
  * A send mutation Glific <em>accepted</em> — an empty {@code errors} array — that came back with no
  * {@code message.id}.
@@ -8,7 +10,7 @@ package org.arghyam.jalsoochak.message.channel.glific;
  * message, so the officer may well receive the report and a retry would send a second copy; but we
  * have no id, so nothing can ever match a delivery status back to this send. Neither "succeeded" nor
  * "failed, retry" describes that, which is why {@link WhatsAppChannel#stageOf} maps it to
- * {@link GlificSendStage#SEND_NO_MESSAGE_ID} rather than to plain {@link GlificSendStage#SEND}.</p>
+ * {@link WhatsAppSendStage#SEND_NO_MESSAGE_ID} rather than to plain {@link WhatsAppSendStage#SEND}.</p>
  *
  * <p>Extends {@link GlificMutationException} so the existing {@code catch (Exception)} in
  * {@link WhatsAppChannel#sendDailyReport} and every caller that only reads {@code getMutationKey()}

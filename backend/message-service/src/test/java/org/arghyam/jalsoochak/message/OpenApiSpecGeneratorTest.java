@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.message;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.message.channel.glific.GlificAuthService;
-import org.arghyam.jalsoochak.message.channel.glific.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -60,7 +60,7 @@ class OpenApiSpecGeneratorTest {
 
     /** Suppress @PostConstruct validateTemplates() to avoid needing all Glific env vars. */
     @MockBean
-    GlificWhatsAppService glificWhatsAppService;
+    WhatsAppSender whatsAppSender;
 
     @LocalServerPort
     int port;

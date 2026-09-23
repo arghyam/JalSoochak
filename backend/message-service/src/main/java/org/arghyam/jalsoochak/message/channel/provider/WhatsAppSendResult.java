@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.message.channel.glific;
+package org.arghyam.jalsoochak.message.channel.provider;
 
 /**
  * What Glific gave back when it accepted a send.
@@ -20,14 +20,14 @@ package org.arghyam.jalsoochak.message.channel.glific;
  *                   template to the SO one, and nothing else in the logs reveals which was sent
  * @param mode       the delivery mode the send took, or {@code null} if it could not be determined
  */
-public record GlificSendResult(String messageId, String templateId, DailyReportDeliveryMode mode) {
+public record WhatsAppSendResult(String messageId, String templateId, ReportDeliveryMode mode) {
 
     /** Placeholder shown in logs when there is no message id, so the field is never blank or "null". */
     public static final String NO_MESSAGE_ID = "none";
 
     /** A send that a dry-run flag suppressed: accepted from the caller's view, but nothing was sent. */
-    public static GlificSendResult suppressed(DailyReportDeliveryMode mode) {
-        return new GlificSendResult(null, null, mode);
+    public static WhatsAppSendResult suppressed(ReportDeliveryMode mode) {
+        return new WhatsAppSendResult(null, null, mode);
     }
 
     /** True when Glific returned a usable message id — i.e. a real send that can be reconciled later. */

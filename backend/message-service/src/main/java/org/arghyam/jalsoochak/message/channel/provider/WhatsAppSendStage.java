@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.message.channel.glific;
+package org.arghyam.jalsoochak.message.channel.provider;
 
 /**
  * Where a Glific send failed, so a {@code result=FAILED_DELIVERY} log line says which half of the
@@ -9,7 +9,7 @@ package org.arghyam.jalsoochak.message.channel.glific;
  * MinIO URL — which is a completely different fix from a template or receiver problem at
  * {@link #SEND}. Both looked identical in the logs at the time.</p>
  */
-public enum GlificSendStage {
+public enum WhatsAppSendStage {
 
     /**
      * {@code createMessageMedia} rejected the PDF. DOCUMENT mode only: Glific validates the media URL
@@ -22,7 +22,7 @@ public enum GlificSendStage {
 
     /**
      * Glific accepted the send but returned no {@code message.id}
-     * ({@link GlificMissingMessageIdException}).
+     * ({@code GlificMissingMessageIdException}).
      *
      * <p>Ambiguous in the same way as {@link #TIMEOUT}, and for a stronger reason: the mutation
      * returned no errors, so Glific has the message and a retry sends a duplicate. What is lost is the
@@ -31,7 +31,7 @@ public enum GlificSendStage {
     SEND_NO_MESSAGE_ID,
 
     /**
-     * The 30 s {@code block()} in {@link GlificGraphQLClient} expired.
+     * The 30 s {@code block()} in {@code GlificGraphQLClient} expired.
      *
      * <p>Its own token because it is the one failure a retry makes <em>worse</em>: Glific may already
      * have created and sent the message, so re-driving the event delivers a duplicate rather than

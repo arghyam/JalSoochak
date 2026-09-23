@@ -2,6 +2,8 @@ package org.arghyam.jalsoochak.message.channel.glific;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.message.channel.provider.ReportDeliveryMode;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -1140,7 +1142,7 @@ class GlificWhatsAppServiceTest {
             stubSendHsm();
             ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "7002");
 
-            GlificSendResult result = service.sendWeeklyReportHsm(5521L, PUBLIC_URL,
+            WhatsAppSendResult result = service.sendWeeklyReportHsm(5521L, PUBLIC_URL,
                     "SUB_DIVISIONAL_OFFICER", WEEK_START, "Bharat Sharma");
 
             assertThat(result.templateId()).isEqualTo("7002");
@@ -1151,7 +1153,7 @@ class GlificWhatsAppServiceTest {
             stubSendHsm();
             ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "");
 
-            GlificSendResult result = service.sendWeeklyReportHsm(5521L, PUBLIC_URL,
+            WhatsAppSendResult result = service.sendWeeklyReportHsm(5521L, PUBLIC_URL,
                     "SUB_DIVISIONAL_OFFICER", WEEK_START, "Bharat Sharma");
 
             assertThat(result.templateId()).isEqualTo("7001");
@@ -1179,7 +1181,7 @@ class GlificWhatsAppServiceTest {
         void suppressesTheSendWhileInDryRun() {
             ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
 
-            GlificSendResult result = service.sendWeeklyReportHsm(21343L, PUBLIC_URL,
+            WhatsAppSendResult result = service.sendWeeklyReportHsm(21343L, PUBLIC_URL,
                     "SECTION_OFFICER", WEEK_START, "Binod");
 
             assertThat(result.messageId()).isNull();
@@ -1413,20 +1415,20 @@ class GlificWhatsAppServiceTest {
 
     @Test
     void deliveryMode_defaultsToDocument_soAnUnsetPropertyChangesNothing() {
-        assertThat(DailyReportDeliveryMode.from(null)).isEqualTo(DailyReportDeliveryMode.DOCUMENT);
-        assertThat(DailyReportDeliveryMode.from("  ")).isEqualTo(DailyReportDeliveryMode.DOCUMENT);
+        assertThat(ReportDeliveryMode.from(null)).isEqualTo(ReportDeliveryMode.DOCUMENT);
+        assertThat(ReportDeliveryMode.from("  ")).isEqualTo(ReportDeliveryMode.DOCUMENT);
     }
 
     @Test
     void deliveryMode_toleratesCaseAndWhitespace() {
-        assertThat(DailyReportDeliveryMode.from("link")).isEqualTo(DailyReportDeliveryMode.LINK);
-        assertThat(DailyReportDeliveryMode.from(" LINK ")).isEqualTo(DailyReportDeliveryMode.LINK);
-        assertThat(DailyReportDeliveryMode.from("Document")).isEqualTo(DailyReportDeliveryMode.DOCUMENT);
+        assertThat(ReportDeliveryMode.from("link")).isEqualTo(ReportDeliveryMode.LINK);
+        assertThat(ReportDeliveryMode.from(" LINK ")).isEqualTo(ReportDeliveryMode.LINK);
+        assertThat(ReportDeliveryMode.from("Document")).isEqualTo(ReportDeliveryMode.DOCUMENT);
     }
 
     @Test
     void deliveryMode_rejectsAnUnknownValue_namingTheValidOnes() {
-        assertThatThrownBy(() -> DailyReportDeliveryMode.from("pdf"))
+        assertThatThrownBy(() -> ReportDeliveryMode.from("pdf"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("DOCUMENT or LINK")
                 .hasMessageContaining("pdf");
@@ -1458,12 +1460,12 @@ class GlificWhatsAppServiceTest {
                     {"sendHsmMessage":{"message":{"id":241952654,"body":"b","isHSM":true},"errors":[]}}
                     """));
 
-            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            WhatsAppSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             assertThat(result.messageId()).isEqualTo("241952654");
             assertThat(result.templateId()).isEqualTo("880557");
-            assertThat(result.mode()).isEqualTo(DailyReportDeliveryMode.LINK);
+            assertThat(result.mode()).isEqualTo(ReportDeliveryMode.LINK);
             assertThat(result.hasMessageId()).isTrue();
         }
 
@@ -1480,12 +1482,12 @@ class GlificWhatsAppServiceTest {
                     {"createAndSendMessage":{"message":{"id":241952700,"body":"b","isHsm":true},"errors":[]}}
                     """));
 
-            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            WhatsAppSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             assertThat(result.messageId()).isEqualTo("241952700");
             assertThat(result.templateId()).isEqualTo("880600");
-            assertThat(result.mode()).isEqualTo(DailyReportDeliveryMode.DOCUMENT);
+            assertThat(result.mode()).isEqualTo(ReportDeliveryMode.DOCUMENT);
         }
 
         /**
@@ -1537,11 +1539,11 @@ class GlificWhatsAppServiceTest {
             ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
             ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
 
-            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            WhatsAppSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             assertThat(result.hasMessageId()).isFalse();
-            assertThat(result.mode()).isEqualTo(DailyReportDeliveryMode.LINK);
+            assertThat(result.mode()).isEqualTo(ReportDeliveryMode.LINK);
             verifyNoInteractions(client);
         }
 
@@ -1554,7 +1556,7 @@ class GlificWhatsAppServiceTest {
             ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
             ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "pdf");
 
-            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+            WhatsAppSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
                     LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             assertThat(result.mode()).isNull();

@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.message.channel.glific;
+package org.arghyam.jalsoochak.message.channel.provider;
 
 import java.util.Locale;
 
@@ -16,7 +16,7 @@ import java.util.Locale;
  * suffix travels per message, so the PDF is fetched by the officer's own phone — from inside India —
  * when they tap the button.</p>
  */
-public enum DailyReportDeliveryMode {
+public enum ReportDeliveryMode {
 
     /** PDF attachment. Meta downloads the MinIO URL itself. */
     DOCUMENT,
@@ -34,7 +34,7 @@ public enum DailyReportDeliveryMode {
      *         otherwise be silently read as the wrong mode and only surface as a whole tenant's
      *         reports arriving in the wrong shape after the next daily cron.
      */
-    public static DailyReportDeliveryMode from(String value) {
+    public static ReportDeliveryMode from(String value) {
         if (value == null || value.isBlank()) {
             return DOCUMENT;
         }

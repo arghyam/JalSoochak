@@ -23,13 +23,13 @@ import java.time.LocalDate;
 import java.sql.ResultSet;
 import java.util.List;
 
-import org.arghyam.jalsoochak.message.channel.glific.DailyReportDeliveryMode;
-import org.arghyam.jalsoochak.message.channel.glific.DailyReportSendOutcome;
-import org.arghyam.jalsoochak.message.channel.glific.GlificSendResult;
-import org.arghyam.jalsoochak.message.channel.glific.GlificSendStage;
-import org.arghyam.jalsoochak.message.channel.glific.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.provider.ReportDeliveryMode;
+import org.arghyam.jalsoochak.message.channel.provider.ReportSendOutcome;
 import org.arghyam.jalsoochak.message.channel.provider.SmsSender;
 import org.arghyam.jalsoochak.message.channel.provider.TenantChannelProviders;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.TenantRef;
@@ -64,7 +64,7 @@ class NotificationEventRouterTest {
     private WhatsAppChannel whatsAppChannel;
 
     @Mock
-    private GlificWhatsAppService glificWhatsAppService;
+    private WhatsAppSender whatsAppSender;
 
     @Mock
     private KafkaProducer kafkaProducer;
@@ -172,14 +172,14 @@ class NotificationEventRouterTest {
                 """);
 
         verify(whatsAppChannel).sendNudgeViaFlow(eq(42L), eq("Ramesh"), anyString());
-        verify(glificWhatsAppService, never()).optIn(anyString());
+        verify(whatsAppSender, never()).optIn(anyString());
         verify(kafkaProducer, never()).publishJson(anyString(), any());
         verifyNoInteractions(escalationPdfService, minioStorageService, messageTemplateService);
     }
 
     @Test
     void route_fallsBackToOptIn_andPublishesEvent_whenNoStoredContactId() {
-        when(glificWhatsAppService.optIn("919876543210")).thenReturn(99L);
+        when(whatsAppSender.optIn("919876543210")).thenReturn(99L);
         when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(true);
 
         router.route("""
@@ -188,7 +188,7 @@ class NotificationEventRouterTest {
                  "userId":10,"whatsappConnectionId":0,"tenantSchema":"tenant_mp"}
                 """);
 
-        verify(glificWhatsAppService).optIn("919876543210");
+        verify(whatsAppSender).optIn("919876543210");
         verify(whatsAppChannel).sendNudgeViaFlow(eq(99L), eq("Ramesh"), anyString());
         verify(kafkaProducer).publishJson(eq("common-topic"), argThat(event -> {
             String s = event.toString();
@@ -202,12 +202,12 @@ class NotificationEventRouterTest {
                 {"eventType":"NUDGE","recipientPhone":"","operatorName":"Op","tenantId":1,"languageId":0}
                 """);
 
-        verifyNoInteractions(whatsAppChannel, glificWhatsAppService);
+        verifyNoInteractions(whatsAppChannel, whatsAppSender);
     }
 
     @Test
     void route_usesDefaultOperatorName_whenOperatorNameAbsent() {
-        when(glificWhatsAppService.optIn(anyString())).thenReturn(55L);
+        when(whatsAppSender.optIn(anyString())).thenReturn(55L);
         when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(true);
 
         router.route("""
@@ -219,7 +219,7 @@ class NotificationEventRouterTest {
 
     @Test
     void route_isCaseInsensitive_forNudgeEventType() {
-        when(glificWhatsAppService.optIn(anyString())).thenReturn(55L);
+        when(whatsAppSender.optIn(anyString())).thenReturn(55L);
         when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(true);
 
         router.route("""
@@ -251,7 +251,7 @@ class NotificationEventRouterTest {
         // Escalations keep the original flat single-bucket upload; only the water reports are foldered.
         verify(minioStorageService).upload(any(Path.class));
         verify(whatsAppChannel).sendDocument(eq(77L), eq("https://minio.example.com/report.pdf"));
-        verify(glificWhatsAppService, never()).optIn(anyString());
+        verify(whatsAppSender, never()).optIn(anyString());
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
 
@@ -297,7 +297,7 @@ class NotificationEventRouterTest {
     void route_fallsBackToOptIn_andPublishesEvent_forEscalation_whenNoStoredContactId() throws Exception {
         when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenReturn("r.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/r.pdf");
-        when(glificWhatsAppService.optIn("919876500000")).thenReturn(88L);
+        when(whatsAppSender.optIn("919876500000")).thenReturn(88L);
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
 
         router.route("""
@@ -309,7 +309,7 @@ class NotificationEventRouterTest {
                                "lastRecordedBfmDate":"2024-01-01"}]}
                 """);
 
-        verify(glificWhatsAppService).optIn("919876500000");
+        verify(whatsAppSender).optIn("919876500000");
         verify(whatsAppChannel).sendDocument(eq(88L), anyString());
         verify(kafkaProducer).publishJson(eq("common-topic"), argThat(event -> {
             String s = event.toString();
@@ -343,7 +343,7 @@ class NotificationEventRouterTest {
     void route_isCaseInsensitive_forEscalationEventType() throws Exception {
         when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq("corr-case"))).thenReturn("r.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/r.pdf");
-        when(glificWhatsAppService.optIn(anyString())).thenReturn(11L);
+        when(whatsAppSender.optIn(anyString())).thenReturn(11L);
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
 
         router.route("""
@@ -369,7 +369,7 @@ class NotificationEventRouterTest {
 
     @Test
     void route_rethrowsException_forKafkaRetry_whenNudgeFails() {
-        when(glificWhatsAppService.optIn(anyString())).thenReturn(55L);
+        when(whatsAppSender.optIn(anyString())).thenReturn(55L);
         when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString()))
                 .thenThrow(new RuntimeException("Glific unreachable"));
 
@@ -725,12 +725,12 @@ class NotificationEventRouterTest {
                 """);
 
         verify(whatsAppChannel).sendLoginOtp(42L, "654321");
-        verify(glificWhatsAppService, never()).optIn(anyString());
+        verify(whatsAppSender, never()).optIn(anyString());
     }
 
     @Test
     void route_sendsLoginOtp_usingOptIn_whenGlificIdAbsent() {
-        when(glificWhatsAppService.optIn("919876500010")).thenReturn(77L);
+        when(whatsAppSender.optIn("919876500010")).thenReturn(77L);
         when(whatsAppChannel.sendLoginOtp(77L, "654321")).thenReturn(true);
 
         router.route("""
@@ -738,7 +738,7 @@ class NotificationEventRouterTest {
                  "OTP":"654321","deliveryChannel":"WHATSAPP","glific_id":"","officerPhoneNumber":"919876500010"}
                 """);
 
-        verify(glificWhatsAppService).optIn("919876500010");
+        verify(whatsAppSender).optIn("919876500010");
         verify(whatsAppChannel).sendLoginOtp(77L, "654321");
     }
 
@@ -748,7 +748,7 @@ class NotificationEventRouterTest {
                 {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"","glific_id":"42"}
                 """);
 
-        verifyNoInteractions(whatsAppChannel, glificWhatsAppService);
+        verifyNoInteractions(whatsAppChannel, whatsAppSender);
     }
 
     @Test
@@ -758,7 +758,7 @@ class NotificationEventRouterTest {
                  "glific_id":"","officerPhoneNumber":""}
                 """);
 
-        verifyNoInteractions(whatsAppChannel, glificWhatsAppService);
+        verifyNoInteractions(whatsAppChannel, whatsAppSender);
     }
 
     @Test
@@ -768,12 +768,12 @@ class NotificationEventRouterTest {
                  "glific_id":"not-a-number"}
                 """);
 
-        verifyNoInteractions(whatsAppChannel, glificWhatsAppService);
+        verifyNoInteractions(whatsAppChannel, whatsAppSender);
     }
 
     @Test
     void route_rethrowsException_whenLoginOtpDeliveryFails() {
-        when(glificWhatsAppService.optIn(anyString())).thenReturn(55L);
+        when(whatsAppSender.optIn(anyString())).thenReturn(55L);
         when(whatsAppChannel.sendLoginOtp(anyLong(), anyString()))
                 .thenReturn(false);
 
@@ -798,7 +798,7 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":["919111111111"]}
                 """);
 
-        verify(glificWhatsAppService).startWelcomeFlow(88L, "Ramesh Kumar", "Madhya Pradesh");
+        verify(whatsAppSender).startWelcomeFlow(88L, "Ramesh Kumar", "Madhya Pradesh");
         verify(kafkaProducer, never()).publishJson(eq("welcome-message-dlt"), any());
     }
 
@@ -812,7 +812,7 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":["919222222222"]}
                 """);
 
-        verify(glificWhatsAppService, never()).startWelcomeFlow(anyLong(), anyString(), anyString());
+        verify(whatsAppSender, never()).startWelcomeFlow(anyLong(), anyString(), anyString());
         verify(kafkaProducer).publishJson(eq("welcome-message-dlt"), any());
     }
 
@@ -823,7 +823,7 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":["919333333333"]}
                 """);
 
-        verifyNoInteractions(glificWhatsAppService);
+        verifyNoInteractions(whatsAppSender);
     }
 
     @Test
@@ -833,7 +833,7 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":[]}
                 """);
 
-        verifyNoInteractions(glificWhatsAppService);
+        verifyNoInteractions(whatsAppSender);
     }
 
     // ──────────────────────── UPDATE_USER_LANGUAGE ─────────────────────────────
@@ -848,7 +848,7 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":["919444444444"]}
                 """);
 
-        verify(glificWhatsAppService).updateContactLanguage(99L, 3);
+        verify(whatsAppSender).updateContactLanguage(99L, 3);
     }
 
     @Test
@@ -872,7 +872,7 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":["919666666666"]}
                 """);
 
-        verifyNoInteractions(glificWhatsAppService, jdbcTemplate);
+        verifyNoInteractions(whatsAppSender, jdbcTemplate);
     }
 
     @Test
@@ -883,7 +883,7 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":["919777777777"]}
                 """);
 
-        verifyNoInteractions(glificWhatsAppService, jdbcTemplate);
+        verifyNoInteractions(whatsAppSender, jdbcTemplate);
     }
 
     // ──────────────────── SEND_WELCOME_MESSAGE_ADMIN ───────────────────────────
@@ -895,7 +895,7 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":["919100000001"]}
                 """);
 
-        verifyNoInteractions(glificWhatsAppService);
+        verifyNoInteractions(whatsAppSender);
     }
 
     @Test
@@ -905,7 +905,7 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":["919100000002"]}
                 """);
 
-        verifyNoInteractions(glificWhatsAppService);
+        verifyNoInteractions(whatsAppSender);
     }
 
     @Test
@@ -915,7 +915,7 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":[]}
                 """);
 
-        verifyNoInteractions(glificWhatsAppService);
+        verifyNoInteractions(whatsAppSender);
     }
 
     @Test
@@ -929,14 +929,14 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":["919100000003"]}
                 """);
 
-        verify(glificWhatsAppService).startWelcomeFlow(55L, "Operator A", "Madhya Pradesh");
+        verify(whatsAppSender).startWelcomeFlow(55L, "Operator A", "Madhya Pradesh");
         verify(kafkaProducer, never()).publishJson(eq("welcome-message-dlt"), any());
     }
 
     @Test
     void route_optInsAndSendsWelcomeAdmin_whenContactIdNotFoundInDb() {
         stubWelcomeLookup("mp", "919100000004", List.of());
-        when(glificWhatsAppService.optIn("919100000004")).thenReturn(66L);
+        when(whatsAppSender.optIn("919100000004")).thenReturn(66L);
         when(messageTemplateService.findStateName(anyInt())).thenReturn("MP");
 
         router.route("""
@@ -944,15 +944,15 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":["919100000004"]}
                 """);
 
-        verify(glificWhatsAppService).optIn("919100000004");
-        verify(glificWhatsAppService).startWelcomeFlow(66L, null, "MP");
+        verify(whatsAppSender).optIn("919100000004");
+        verify(whatsAppSender).startWelcomeFlow(66L, null, "MP");
         verify(kafkaProducer, never()).publishJson(eq("welcome-message-dlt"), any());
     }
 
     @Test
     void route_routesToDlt_whenOptInFails_forWelcomeAdmin() {
         stubWelcomeLookup("mp", "919100000005", List.of());
-        when(glificWhatsAppService.optIn(anyString())).thenReturn(0L);
+        when(whatsAppSender.optIn(anyString())).thenReturn(0L);
         when(messageTemplateService.findStateName(anyInt())).thenReturn("");
 
         router.route("""
@@ -975,7 +975,7 @@ class NotificationEventRouterTest {
 
         verify(kafkaProducer).publishJson(eq("welcome-message-dlt"),
                 argThat(p -> p.toString().contains("blank_phone")));
-        verifyNoInteractions(glificWhatsAppService);
+        verifyNoInteractions(whatsAppSender);
     }
 
     @Test
@@ -985,7 +985,7 @@ class NotificationEventRouterTest {
         // normalized number, which lets us assert the prefix was applied without needing two
         // jdbcTemplate stubs on the same method signature.
         when(messageTemplateService.findStateName(anyInt())).thenReturn("");
-        when(glificWhatsAppService.optIn("919876543210")).thenReturn(77L);
+        when(whatsAppSender.optIn("919876543210")).thenReturn(77L);
 
         // Stub the jdbcTemplate lookup for the raw AND normalized phone.
         // Use lenient() because only one will actually be called depending on equality check.
@@ -1000,7 +1000,7 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":["9876543210"]}
                 """);
 
-        verify(glificWhatsAppService).optIn("919876543210");
+        verify(whatsAppSender).optIn("919876543210");
     }
 
     // ───────────────────── SEND_LOGIN_OTP — SMS channel ────────────────────────
@@ -1077,7 +1077,7 @@ class NotificationEventRouterTest {
                  "deliveryChannel":"","officerPhoneNumber":"919876500023"}
                 """);
 
-        verifyNoInteractions(whatsAppChannel, smsSender, glificWhatsAppService);
+        verifyNoInteractions(whatsAppChannel, smsSender, whatsAppSender);
     }
 
     @Test
@@ -1087,7 +1087,7 @@ class NotificationEventRouterTest {
                  "deliveryChannel":"TELEGRAM","officerPhoneNumber":"919876500024"}
                 """);
 
-        verifyNoInteractions(whatsAppChannel, smsSender, glificWhatsAppService);
+        verifyNoInteractions(whatsAppChannel, smsSender, whatsAppSender);
     }
 
     // ────────────── SEND_INVITE_EMAIL — STATE_ADMIN with stateName ──────────────
@@ -1200,7 +1200,7 @@ class NotificationEventRouterTest {
         verify(minioStorageService).upload(any(Path.class), eq(ReportFileNaming.DAILY_BUCKET), anyString());
         verify(whatsAppChannel).sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli");
         // Stored contact present → no opt-in, no contact-registered event.
-        verify(glificWhatsAppService, never()).optIn(anyString());
+        verify(whatsAppSender, never()).optIn(anyString());
     }
 
 
@@ -1267,14 +1267,14 @@ class NotificationEventRouterTest {
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
                 .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
-        when(glificWhatsAppService.optIn("919876500024")).thenReturn(88L);
+        when(whatsAppSender.optIn("919876500024")).thenReturn(88L);
         when(whatsAppChannel.sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
                 .thenReturn(acceptedSend());
 
         router.route(DAILY_REPORT_JSON);
 
         verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
-        verify(glificWhatsAppService).optIn("919876500024");
+        verify(whatsAppSender).optIn("919876500024");
         verify(whatsAppChannel).sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli");
         verify(kafkaProducer).publishJson(eq("common-topic"), argThat(event -> {
             String s = event.toString();
@@ -1297,8 +1297,8 @@ class NotificationEventRouterTest {
         stubOfficerContact(null, "enc-title", "enc-phone");
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(piiEncryptionService.safeDecrypt("enc-phone")).thenReturn("919876500025");
-        when(glificWhatsAppService.optIn("919876500025")).thenReturn(0L);
-        when(glificWhatsAppService.isDailyReportDeliveryEnabled()).thenReturn(true);
+        when(whatsAppSender.optIn("919876500025")).thenReturn(0L);
+        when(whatsAppSender.isDailyReportDeliveryEnabled()).thenReturn(true);
 
         router.route(DAILY_REPORT_JSON);
 
@@ -1454,8 +1454,8 @@ class NotificationEventRouterTest {
                 .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
-                .thenReturn(DailyReportSendOutcome.failed(
-                        GlificSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
+                .thenReturn(ReportSendOutcome.failed(
+                        WhatsAppSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
 
         String failed = captureRouterLogExpectingRethrow(DAILY_REPORT_JSON, "result=FAILED_DELIVERY");
 
@@ -1479,8 +1479,8 @@ class NotificationEventRouterTest {
                 .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
-                .thenReturn(DailyReportSendOutcome.failed(
-                        GlificSendStage.CONFIG, null, "daily report LINK template id is not configured"));
+                .thenReturn(ReportSendOutcome.failed(
+                        WhatsAppSendStage.CONFIG, null, "daily report LINK template id is not configured"));
 
         // captureRouterLogs fails the test if the router rethrows — which is the property under test.
         List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
@@ -1507,8 +1507,8 @@ class NotificationEventRouterTest {
                 .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
-                .thenReturn(DailyReportSendOutcome.accepted(
-                        GlificSendResult.suppressed(DailyReportDeliveryMode.LINK)));
+                .thenReturn(ReportSendOutcome.accepted(
+                        WhatsAppSendResult.suppressed(ReportDeliveryMode.LINK)));
 
         List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
 
@@ -1534,8 +1534,8 @@ class NotificationEventRouterTest {
                 .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
-                .thenReturn(DailyReportSendOutcome.failed(
-                        GlificSendStage.TIMEOUT, null, "Timeout on blocking read for 30000 MILLISECONDS"));
+                .thenReturn(ReportSendOutcome.failed(
+                        WhatsAppSendStage.TIMEOUT, null, "Timeout on blocking read for 30000 MILLISECONDS"));
 
         List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
 
@@ -1562,7 +1562,7 @@ class NotificationEventRouterTest {
                 .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
-                .thenReturn(DailyReportSendOutcome.failed(GlificSendStage.SEND_NO_MESSAGE_ID, null,
+                .thenReturn(ReportSendOutcome.failed(WhatsAppSendStage.SEND_NO_MESSAGE_ID, null,
                         "Glific accepted sendHsmMessage but returned no message.id"));
 
         List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
@@ -1582,8 +1582,8 @@ class NotificationEventRouterTest {
                 .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
-                .thenReturn(DailyReportSendOutcome.failed(
-                        GlificSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
+                .thenReturn(ReportSendOutcome.failed(
+                        WhatsAppSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
 
         assertThatThrownBy(() -> router.route(DAILY_REPORT_JSON))
                 .isInstanceOf(RuntimeException.class)
@@ -1809,9 +1809,9 @@ class NotificationEventRouterTest {
         verify(whatsAppChannel, never()).sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString());
     }
 
-    private static DailyReportSendOutcome acceptedSend() {
-        return DailyReportSendOutcome.accepted(
-                new GlificSendResult("241952654", "880557", DailyReportDeliveryMode.LINK));
+    private static ReportSendOutcome acceptedSend() {
+        return ReportSendOutcome.accepted(
+                new WhatsAppSendResult("241952654", "880557", ReportDeliveryMode.LINK));
     }
 
     // ── weekly terminal log lines ────────────────────────────────────────────────
@@ -1841,8 +1841,8 @@ class NotificationEventRouterTest {
     void handleWeeklyReport_logsASuppressedSendUnderTheWeeklyPrefix() throws Exception {
         // Weekly delivery ships suppressed until the Meta templates are approved, so this is the shape
         // of a normal run for now — and it must not read as a delivered one.
-        stubWeeklySend(DailyReportSendOutcome.accepted(
-                GlificSendResult.suppressed(DailyReportDeliveryMode.LINK)));
+        stubWeeklySend(ReportSendOutcome.accepted(
+                WhatsAppSendResult.suppressed(ReportDeliveryMode.LINK)));
 
         List<String> lines = captureRouterLogs(WEEKLY_SO_JSON);
 
@@ -1856,8 +1856,8 @@ class NotificationEventRouterTest {
 
     @Test
     void handleWeeklyReport_logsAFailedDeliveryUnderTheWeeklyPrefixAndNamesItInTheThrow() throws Exception {
-        stubWeeklySend(DailyReportSendOutcome.failed(
-                GlificSendStage.SEND, "receiver", "Receiver does not exist"));
+        stubWeeklySend(ReportSendOutcome.failed(
+                WhatsAppSendStage.SEND, "receiver", "Receiver does not exist"));
 
         String failed = captureRouterLogExpectingRethrow(WEEKLY_SO_JSON, "result=FAILED_DELIVERY");
 
@@ -1875,7 +1875,7 @@ class NotificationEventRouterTest {
 
     @Test
     void handleWeeklyReport_recordsAnUnconfirmedDeliveryWithTheWeekItCovers() throws Exception {
-        stubWeeklySend(DailyReportSendOutcome.failed(GlificSendStage.TIMEOUT, null,
+        stubWeeklySend(ReportSendOutcome.failed(WhatsAppSendStage.TIMEOUT, null,
                 "Timeout on blocking read for 30000 MILLISECONDS"));
 
         List<String> lines = captureRouterLogs(WEEKLY_SO_JSON);
@@ -1901,7 +1901,7 @@ class NotificationEventRouterTest {
         when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
                 .thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
-                .thenReturn(DailyReportSendOutcome.failed(GlificSendStage.TIMEOUT, null,
+                .thenReturn(ReportSendOutcome.failed(WhatsAppSendStage.TIMEOUT, null,
                         "Timeout on blocking read for 30000 MILLISECONDS"));
 
         List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
@@ -2079,7 +2079,7 @@ class NotificationEventRouterTest {
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
     }
 
-    private void stubWeeklySend(DailyReportSendOutcome outcome) throws Exception {
+    private void stubWeeklySend(ReportSendOutcome outcome) throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),

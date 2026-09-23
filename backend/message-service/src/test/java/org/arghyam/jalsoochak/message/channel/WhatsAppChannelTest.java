@@ -1,12 +1,12 @@
 package org.arghyam.jalsoochak.message.channel;
 
-import org.arghyam.jalsoochak.message.channel.glific.DailyReportDeliveryMode;
-import org.arghyam.jalsoochak.message.channel.glific.DailyReportSendOutcome;
 import org.arghyam.jalsoochak.message.channel.glific.GlificMissingMessageIdException;
 import org.arghyam.jalsoochak.message.channel.glific.GlificMutationException;
-import org.arghyam.jalsoochak.message.channel.glific.GlificSendResult;
-import org.arghyam.jalsoochak.message.channel.glific.GlificSendStage;
-import org.arghyam.jalsoochak.message.channel.glific.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.provider.ReportDeliveryMode;
+import org.arghyam.jalsoochak.message.channel.provider.ReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -25,7 +25,7 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for {@link WhatsAppChannel}.
  *
- * <p>Verifies that the channel delegates correctly to {@link GlificWhatsAppService},
+ * <p>Verifies that the channel delegates correctly to {@link WhatsAppSender},
  * returns {@code true} on success, and returns {@code false} (without throwing)
  * on failure to allow the caller to handle delivery failures gracefully.</p>
  */
@@ -33,7 +33,7 @@ import static org.mockito.Mockito.*;
 class WhatsAppChannelTest {
 
     @Mock
-    private GlificWhatsAppService glificWhatsAppService;
+    private WhatsAppSender whatsAppSender;
 
     @InjectMocks
     private WhatsAppChannel whatsAppChannel;
@@ -42,31 +42,31 @@ class WhatsAppChannelTest {
 
     @Test
     void sendNudge_returnsTrueAndSendsHsm_onSuccess() {
-        when(glificWhatsAppService.optIn("919876543210")).thenReturn(42L);
+        when(whatsAppSender.optIn("919876543210")).thenReturn(42L);
 
         boolean result = whatsAppChannel.sendNudge("919876543210", "Ramesh", "02 March 2026");
 
         assertThat(result).isTrue();
-        verify(glificWhatsAppService).optIn("919876543210");
-        verify(glificWhatsAppService).sendNudgeHsm(42L, "Ramesh", "02 March 2026");
+        verify(whatsAppSender).optIn("919876543210");
+        verify(whatsAppSender).sendNudgeHsm(42L, "Ramesh", "02 March 2026");
     }
 
     @Test
     void sendNudge_returnsFalse_whenOptInThrows() {
-        when(glificWhatsAppService.optIn(anyString()))
+        when(whatsAppSender.optIn(anyString()))
                 .thenThrow(new RuntimeException("Glific unreachable"));
 
         boolean result = whatsAppChannel.sendNudge("919876543210", "Ramesh", "02 March 2026");
 
         assertThat(result).isFalse();
-        verify(glificWhatsAppService, never()).sendNudgeHsm(anyLong(), anyString(), anyString());
+        verify(whatsAppSender, never()).sendNudgeHsm(anyLong(), anyString(), anyString());
     }
 
     @Test
     void sendNudge_returnsFalse_whenSendNudgeHsmThrows() {
-        when(glificWhatsAppService.optIn(anyString())).thenReturn(99L);
+        when(whatsAppSender.optIn(anyString())).thenReturn(99L);
         doThrow(new RuntimeException("HSM send failed"))
-                .when(glificWhatsAppService).sendNudgeHsm(anyLong(), anyString(), anyString());
+                .when(whatsAppSender).sendNudgeHsm(anyLong(), anyString(), anyString());
 
         boolean result = whatsAppChannel.sendNudge("919876543210", "Op", "02 March 2026");
 
@@ -75,11 +75,11 @@ class WhatsAppChannelTest {
 
     @Test
     void sendNudge_passesCorrectParametersToHsm() {
-        when(glificWhatsAppService.optIn("911111111111")).thenReturn(55L);
+        when(whatsAppSender.optIn("911111111111")).thenReturn(55L);
 
         whatsAppChannel.sendNudge("911111111111", "Suresh", "03 March 2026");
 
-        verify(glificWhatsAppService).sendNudgeHsm(eq(55L), eq("Suresh"), eq("03 March 2026"));
+        verify(whatsAppSender).sendNudgeHsm(eq(55L), eq("Suresh"), eq("03 March 2026"));
     }
 
     // ──────────────────────────── sendNudgeViaFlow ─────────────────────────────
@@ -89,26 +89,26 @@ class WhatsAppChannelTest {
         boolean result = whatsAppChannel.sendNudgeViaFlow(42L, "Ramesh", "02 March 2026");
 
         assertThat(result).isTrue();
-        verify(glificWhatsAppService).startNudgeFlow(42L, "Ramesh", "02 March 2026");
-        verify(glificWhatsAppService, never()).optIn(anyString());
+        verify(whatsAppSender).startNudgeFlow(42L, "Ramesh", "02 March 2026");
+        verify(whatsAppSender, never()).optIn(anyString());
     }
 
     @Test
     void sendNudgeViaFlow_returnsFalse_whenStartNudgeFlowThrows() {
         doThrow(new RuntimeException("Flow error"))
-                .when(glificWhatsAppService).startNudgeFlow(anyLong(), anyString(), anyString());
+                .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
 
         boolean result = whatsAppChannel.sendNudgeViaFlow(42L, "Ramesh", "02 March 2026");
 
         assertThat(result).isFalse();
-        verify(glificWhatsAppService, never()).optIn(anyString());
+        verify(whatsAppSender, never()).optIn(anyString());
     }
 
     @Test
     void sendNudgeViaFlow_passesContactIdDirectly() {
         whatsAppChannel.sendNudgeViaFlow(77L, "Suresh", "03 March 2026");
 
-        verify(glificWhatsAppService).startNudgeFlow(eq(77L), eq("Suresh"), eq("03 March 2026"));
+        verify(whatsAppSender).startNudgeFlow(eq(77L), eq("Suresh"), eq("03 March 2026"));
     }
 
     // ────────────────────────────── sendDocument ───────────────────────────────
@@ -118,19 +118,19 @@ class WhatsAppChannelTest {
         boolean result = whatsAppChannel.sendDocument(77L, "https://minio.example.com/report.pdf");
 
         assertThat(result).isTrue();
-        verify(glificWhatsAppService).sendEscalationHsm(77L, "https://minio.example.com/report.pdf");
-        verify(glificWhatsAppService, never()).optIn(anyString());
+        verify(whatsAppSender).sendEscalationHsm(77L, "https://minio.example.com/report.pdf");
+        verify(whatsAppSender, never()).optIn(anyString());
     }
 
     @Test
     void sendDocument_returnsFalse_whenSendEscalationHsmThrows() {
         doThrow(new RuntimeException("HSM delivery failed"))
-                .when(glificWhatsAppService).sendEscalationHsm(anyLong(), anyString());
+                .when(whatsAppSender).sendEscalationHsm(anyLong(), anyString());
 
         boolean result = whatsAppChannel.sendDocument(88L, "https://minio.example.com/r2.pdf");
 
         assertThat(result).isFalse();
-        verify(glificWhatsAppService, never()).optIn(anyString());
+        verify(whatsAppSender, never()).optIn(anyString());
     }
 
     @Test
@@ -139,41 +139,41 @@ class WhatsAppChannelTest {
 
         whatsAppChannel.sendDocument(33L, minioUrl);
 
-        verify(glificWhatsAppService).sendEscalationHsm(eq(33L), eq(minioUrl));
+        verify(whatsAppSender).sendEscalationHsm(eq(33L), eq(minioUrl));
     }
 
     // ────────────────────────── onboardOperator ────────────────────────────────
 
     @Test
     void onboardOperator_callsOptIn_updateLanguage_andStartWelcomeFlow_inOrder_andReturnsContactId() {
-        when(glificWhatsAppService.optIn("919876543210")).thenReturn(42L);
+        when(whatsAppSender.optIn("919876543210")).thenReturn(42L);
 
         long contactId = whatsAppChannel.onboardOperator("919876543210", 2);
 
         assertThat(contactId).isEqualTo(42L);
-        InOrder inOrder = inOrder(glificWhatsAppService);
-        inOrder.verify(glificWhatsAppService).optIn("919876543210");
-        inOrder.verify(glificWhatsAppService).updateContactLanguage(42L, 2);
-        inOrder.verify(glificWhatsAppService).startWelcomeFlow(42L, null, null);
+        InOrder inOrder = inOrder(whatsAppSender);
+        inOrder.verify(whatsAppSender).optIn("919876543210");
+        inOrder.verify(whatsAppSender).updateContactLanguage(42L, 2);
+        inOrder.verify(whatsAppSender).startWelcomeFlow(42L, null, null);
     }
 
     @Test
     void onboardOperator_throwsException_whenOptInFails() {
-        when(glificWhatsAppService.optIn(anyString()))
+        when(whatsAppSender.optIn(anyString()))
                 .thenThrow(new RuntimeException("Glific unreachable"));
 
         assertThatThrownBy(() -> whatsAppChannel.onboardOperator("919876543210", 2))
                 .isInstanceOf(RuntimeException.class);
 
-        verify(glificWhatsAppService, never()).updateContactLanguage(anyLong(), anyInt());
-        verify(glificWhatsAppService, never()).startWelcomeFlow(anyLong(), any(), any());
+        verify(whatsAppSender, never()).updateContactLanguage(anyLong(), anyInt());
+        verify(whatsAppSender, never()).startWelcomeFlow(anyLong(), any(), any());
     }
 
     @Test
     void onboardOperator_throwsException_whenWelcomeFlowFails() {
-        when(glificWhatsAppService.optIn("919876543210")).thenReturn(42L);
+        when(whatsAppSender.optIn("919876543210")).thenReturn(42L);
         doThrow(new RuntimeException("Flow error"))
-                .when(glificWhatsAppService).startWelcomeFlow(42L, null, null);
+                .when(whatsAppSender).startWelcomeFlow(42L, null, null);
 
         assertThatThrownBy(() -> whatsAppChannel.onboardOperator("919876543210", 2))
                 .isInstanceOf(RuntimeException.class)
@@ -189,40 +189,40 @@ class WhatsAppChannelTest {
      */
     @Test
     void sendDailyReport_returnsGlificsMessageIdOnAcceptance() {
-        GlificSendResult glificResult =
-                new GlificSendResult("241952654", "880557", DailyReportDeliveryMode.LINK);
-        when(glificWhatsAppService.sendDailyReportHsm(42L, "https://minio/r.pdf", "SECTION_OFFICER",
+        WhatsAppSendResult glificResult =
+                new WhatsAppSendResult("241952654", "880557", ReportDeliveryMode.LINK);
+        when(whatsAppSender.sendDailyReportHsm(42L, "https://minio/r.pdf", "SECTION_OFFICER",
                 LocalDate.of(2026, 8, 27), "Binod")).thenReturn(glificResult);
 
-        DailyReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
+        ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
                 42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
 
         assertThat(outcome.accepted()).isTrue();
         assertThat(outcome.result().messageId()).isEqualTo("241952654");
         assertThat(outcome.result().templateId()).isEqualTo("880557");
-        assertThat(outcome.result().mode()).isEqualTo(DailyReportDeliveryMode.LINK);
+        assertThat(outcome.result().mode()).isEqualTo(ReportDeliveryMode.LINK);
     }
 
     @Test
     void sendDailyReport_normalisesABlankRoleBeforeSending() {
-        when(glificWhatsAppService.sendDailyReportHsm(anyLong(), anyString(), eq("UNKNOWN"), any(), any()))
-                .thenReturn(new GlificSendResult("1", "880557", DailyReportDeliveryMode.LINK));
+        when(whatsAppSender.sendDailyReportHsm(anyLong(), anyString(), eq("UNKNOWN"), any(), any()))
+                .thenReturn(new WhatsAppSendResult("1", "880557", ReportDeliveryMode.LINK));
 
-        DailyReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
+        ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
                 42L, "https://minio/r.pdf", "  ", LocalDate.of(2026, 8, 27), "Binod");
 
         assertThat(outcome.accepted()).isTrue();
-        verify(glificWhatsAppService).sendDailyReportHsm(42L, "https://minio/r.pdf", "UNKNOWN",
+        verify(whatsAppSender).sendDailyReportHsm(42L, "https://minio/r.pdf", "UNKNOWN",
                 LocalDate.of(2026, 8, 27), "Binod");
     }
 
     /** A dry-run is accepted with no message id — never a placeholder that could be mistaken for real. */
     @Test
     void sendDailyReport_acceptsASuppressedSendWithoutAMessageId() {
-        when(glificWhatsAppService.sendDailyReportHsm(anyLong(), anyString(), anyString(), any(), any()))
-                .thenReturn(GlificSendResult.suppressed(DailyReportDeliveryMode.LINK));
+        when(whatsAppSender.sendDailyReportHsm(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(WhatsAppSendResult.suppressed(ReportDeliveryMode.LINK));
 
-        DailyReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
+        ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
                 42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
 
         assertThat(outcome.accepted()).isTrue();
@@ -232,10 +232,10 @@ class WhatsAppChannelTest {
 
     @Test
     void sendDailyReport_doesNotThrow_whenGlificFails() {
-        when(glificWhatsAppService.sendDailyReportHsm(anyLong(), anyString(), anyString(), any(), any()))
+        when(whatsAppSender.sendDailyReportHsm(anyLong(), anyString(), anyString(), any(), any()))
                 .thenThrow(new RuntimeException("Glific unreachable"));
 
-        DailyReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
+        ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
                 42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
 
         assertThat(outcome.accepted()).isFalse();
@@ -252,26 +252,26 @@ class WhatsAppChannelTest {
     @Test
     void stageOf_tagsAMediaRegistrationFailure() {
         assertThat(WhatsAppChannel.stageOf(new GlificMutationException("createMessageMedia", "media",
-                "(#131053) Media upload error"))).isEqualTo(GlificSendStage.MEDIA_REGISTER);
+                "(#131053) Media upload error"))).isEqualTo(WhatsAppSendStage.MEDIA_REGISTER);
     }
 
     /**
      * A send Glific accepted but returned no id for. It subclasses {@link GlificMutationException}, so
-     * it would otherwise be swept into {@link GlificSendStage#SEND} and retried — sending the officer a
+     * it would otherwise be swept into {@link WhatsAppSendStage#SEND} and retried — sending the officer a
      * second copy of a report Glific already holds.
      */
     @Test
     void stageOf_tagsAnAcceptedSendThatReturnedNoMessageId() {
         assertThat(WhatsAppChannel.stageOf(new GlificMissingMessageIdException("sendHsmMessage")))
-                .isEqualTo(GlificSendStage.SEND_NO_MESSAGE_ID);
+                .isEqualTo(WhatsAppSendStage.SEND_NO_MESSAGE_ID);
     }
 
     @Test
     void stageOf_tagsARejectedSend() {
         assertThat(WhatsAppChannel.stageOf(new GlificMutationException("sendHsmMessage", "receiver",
-                "Receiver does not exist"))).isEqualTo(GlificSendStage.SEND);
+                "Receiver does not exist"))).isEqualTo(WhatsAppSendStage.SEND);
         assertThat(WhatsAppChannel.stageOf(new GlificMutationException("createAndSendMessage", null,
-                "boom"))).isEqualTo(GlificSendStage.SEND);
+                "boom"))).isEqualTo(WhatsAppSendStage.SEND);
     }
 
     /**
@@ -282,7 +282,7 @@ class WhatsAppChannelTest {
     void stageOf_tagsABlockTimeoutBeforeTreatingItAsConfiguration() {
         assertThat(WhatsAppChannel.stageOf(
                 new IllegalStateException("Timeout on blocking read for 30000 MILLISECONDS")))
-                .isEqualTo(GlificSendStage.TIMEOUT);
+                .isEqualTo(WhatsAppSendStage.TIMEOUT);
     }
 
     @Test
@@ -290,21 +290,21 @@ class WhatsAppChannelTest {
         RuntimeException wrapped = new RuntimeException("send failed",
                 new IllegalStateException("Timeout on blocking read for 30000 MILLISECONDS"));
 
-        assertThat(WhatsAppChannel.stageOf(wrapped)).isEqualTo(GlificSendStage.TIMEOUT);
+        assertThat(WhatsAppChannel.stageOf(wrapped)).isEqualTo(WhatsAppSendStage.TIMEOUT);
     }
 
     @Test
     void stageOf_tagsOurOwnConfigurationAndInputErrors() {
         assertThat(WhatsAppChannel.stageOf(new IllegalArgumentException("requires a resolved contact id")))
-                .isEqualTo(GlificSendStage.CONFIG);
+                .isEqualTo(WhatsAppSendStage.CONFIG);
         assertThat(WhatsAppChannel.stageOf(new IllegalStateException("does not start with the prefix")))
-                .isEqualTo(GlificSendStage.CONFIG);
+                .isEqualTo(WhatsAppSendStage.CONFIG);
     }
 
     @Test
     void stageOf_fallsBackToSendForAnythingElse() {
         assertThat(WhatsAppChannel.stageOf(new RuntimeException("who knows")))
-                .isEqualTo(GlificSendStage.SEND);
+                .isEqualTo(WhatsAppSendStage.SEND);
     }
 
     // ─────────────────────────── channelType ───────────────────────────────────

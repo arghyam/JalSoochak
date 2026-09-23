@@ -1,11 +1,11 @@
 package org.arghyam.jalsoochak.message.channel;
 
-import org.arghyam.jalsoochak.message.channel.glific.DailyReportSendOutcome;
 import org.arghyam.jalsoochak.message.channel.glific.GlificMissingMessageIdException;
 import org.arghyam.jalsoochak.message.channel.glific.GlificMutationException;
-import org.arghyam.jalsoochak.message.channel.glific.GlificSendResult;
-import org.arghyam.jalsoochak.message.channel.glific.GlificSendStage;
-import org.arghyam.jalsoochak.message.channel.glific.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.provider.ReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.arghyam.jalsoochak.message.dto.NotificationRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,7 +34,7 @@ import java.util.Map;
 @Slf4j
 public class WhatsAppChannel implements NotificationChannel {
 
-    private final GlificWhatsAppService glificWhatsAppService;
+    private final WhatsAppSender whatsAppSender;
 
     @Override
     public String channelType() {
@@ -44,8 +44,8 @@ public class WhatsAppChannel implements NotificationChannel {
     @Override
     public boolean send(NotificationRequest request) {
         try {
-            Long contactId = glificWhatsAppService.optIn(request.getRecipient());
-            glificWhatsAppService.sendNudgeHsm(contactId, request.getBody(),
+            Long contactId = whatsAppSender.optIn(request.getRecipient());
+            whatsAppSender.sendNudgeHsm(contactId, request.getBody(),
                     request.getDate() != null ? request.getDate() : "");
             log.info("[WHATSAPP] Nudge HSM sent");
             log.debug("[WHATSAPP] Nudge HSM sent to {}", request.getRecipient());
@@ -66,8 +66,8 @@ public class WhatsAppChannel implements NotificationChannel {
      */
     public boolean sendNudge(String phone, String operatorName, String date) {
         try {
-            Long contactId = glificWhatsAppService.optIn(phone);
-            glificWhatsAppService.sendNudgeHsm(contactId, operatorName, date);
+            Long contactId = whatsAppSender.optIn(phone);
+            whatsAppSender.sendNudgeHsm(contactId, operatorName, date);
             log.info("[WHATSAPP] Nudge HSM sent");
             log.debug("[WHATSAPP] Nudge HSM sent to {}", phone);
             return true;
@@ -89,7 +89,7 @@ public class WhatsAppChannel implements NotificationChannel {
      */
     public boolean sendNudgeViaFlow(long contactId, String operatorName, String date) {
         try {
-            glificWhatsAppService.startNudgeFlow(contactId, operatorName, date);
+            whatsAppSender.startNudgeFlow(contactId, operatorName, date);
             log.info("[WHATSAPP] Nudge flow initiated");
             log.debug("[WHATSAPP] Nudge flow initiated for contactId={}", contactId);
             return true;
@@ -108,9 +108,9 @@ public class WhatsAppChannel implements NotificationChannel {
      * @return Glific contact ID assigned to this operator
      */
     public long onboardOperator(String phone, int glificLanguageId) {
-        long contactId = glificWhatsAppService.optIn(phone);
-        glificWhatsAppService.updateContactLanguage(contactId, glificLanguageId);
-        glificWhatsAppService.startWelcomeFlow(contactId, null, null);
+        long contactId = whatsAppSender.optIn(phone);
+        whatsAppSender.updateContactLanguage(contactId, glificLanguageId);
+        whatsAppSender.startWelcomeFlow(contactId, null, null);
         log.info("[WHATSAPP] Operator onboarded to Glific");
         String phoneSuffix = phone != null && phone.length() >= 4
                 ? phone.substring(phone.length() - 4)
@@ -129,7 +129,7 @@ public class WhatsAppChannel implements NotificationChannel {
      */
     public boolean sendLoginOtp(long contactId, String otp) {
         try {
-            glificWhatsAppService.sendLoginOtpHsm(contactId, otp);
+            whatsAppSender.sendLoginOtpHsm(contactId, otp);
             log.info("[WHATSAPP] Login OTP HSM sent");
             log.debug("[WHATSAPP] Login OTP HSM sent to contactId={}", contactId);
             return true;
@@ -149,7 +149,7 @@ public class WhatsAppChannel implements NotificationChannel {
      */
     public boolean sendDocument(long contactId, String documentUrl) {
         try {
-            glificWhatsAppService.sendEscalationHsm(contactId, documentUrl);
+            whatsAppSender.sendEscalationHsm(contactId, documentUrl);
             log.info("[WHATSAPP] Escalation HSM sent");
             log.debug("[WHATSAPP] Escalation HSM sent to contactId={}", contactId);
             return true;
@@ -172,26 +172,26 @@ public class WhatsAppChannel implements NotificationChannel {
      * @param officerName     the officer's name; template variable {{1}} in link mode, unused for the
      *                        document. Not logged — see the privacy rule in CLAUDE.md
      * @return an accepted outcome carrying Glific's message id, template id and mode, or a failed
-     *         outcome naming the {@link GlificSendStage} it broke at. <strong>Acceptance is not
+     *         outcome naming the {@link WhatsAppSendStage} it broke at. <strong>Acceptance is not
      *         delivery</strong> — it means the GraphQL mutation returned no errors; Gupshup and Meta
      *         act after this call returns and report back only to Glific
      */
-    public DailyReportSendOutcome sendDailyReport(long contactId, String documentUrl, String officerUserType,
-                                                  LocalDate reportDate, String officerName) {
+    public ReportSendOutcome sendDailyReport(long contactId, String documentUrl, String officerUserType,
+                                             LocalDate reportDate, String officerName) {
         String role = (officerUserType == null || officerUserType.isBlank()) ? "UNKNOWN" : officerUserType.trim();
         try {
             // Send with the same token that is logged, so the template picked matches the counted role.
-            GlificSendResult result = glificWhatsAppService.sendDailyReportHsm(
+            WhatsAppSendResult result = whatsAppSender.sendDailyReportHsm(
                     contactId, documentUrl, role, reportDate, officerName);
             log.info("[WHATSAPP] Daily report HSM sent role={} glificMsgId={}", role, result.messageIdForLog());
             log.debug("[WHATSAPP] Daily report HSM sent role={} contactId={}", role, contactId);
-            return DailyReportSendOutcome.accepted(result);
+            return ReportSendOutcome.accepted(result);
         } catch (Exception ex) {
-            GlificSendStage stage = stageOf(ex);
+            WhatsAppSendStage stage = stageOf(ex);
             String errorKey = (ex instanceof GlificMutationException gme) ? gme.getErrorKey() : null;
             log.error("[WHATSAPP] Failed daily report delivery role={} stage={}: {}",
                     role, stage, ex.getMessage(), ex);
-            return DailyReportSendOutcome.failed(stage, errorKey, ex.getMessage());
+            return ReportSendOutcome.failed(stage, errorKey, ex.getMessage());
         }
     }
 
@@ -201,21 +201,21 @@ public class WhatsAppChannel implements NotificationChannel {
      *
      * @param weekStart the first day of the reported week, template variable {{2}}
      */
-    public DailyReportSendOutcome sendWeeklyReport(long contactId, String documentUrl, String officerUserType,
-                                                   LocalDate weekStart, String officerName) {
+    public ReportSendOutcome sendWeeklyReport(long contactId, String documentUrl, String officerUserType,
+                                              LocalDate weekStart, String officerName) {
         String role = (officerUserType == null || officerUserType.isBlank()) ? "UNKNOWN" : officerUserType.trim();
         try {
-            GlificSendResult result = glificWhatsAppService.sendWeeklyReportHsm(
+            WhatsAppSendResult result = whatsAppSender.sendWeeklyReportHsm(
                     contactId, documentUrl, role, weekStart, officerName);
             log.info("[WHATSAPP] Weekly report HSM sent role={} glificMsgId={}", role, result.messageIdForLog());
             log.debug("[WHATSAPP] Weekly report HSM sent role={} contactId={}", role, contactId);
-            return DailyReportSendOutcome.accepted(result);
+            return ReportSendOutcome.accepted(result);
         } catch (Exception ex) {
-            GlificSendStage stage = stageOf(ex);
+            WhatsAppSendStage stage = stageOf(ex);
             String errorKey = (ex instanceof GlificMutationException gme) ? gme.getErrorKey() : null;
             log.error("[WHATSAPP] Failed weekly report delivery role={} stage={}: {}",
                     role, stage, ex.getMessage(), ex);
-            return DailyReportSendOutcome.failed(stage, errorKey, ex.getMessage());
+            return ReportSendOutcome.failed(stage, errorKey, ex.getMessage());
         }
     }
 
@@ -228,27 +228,27 @@ public class WhatsAppChannel implements NotificationChannel {
      * must be recognised <em>before</em> the generic configuration branch — it is the one failure a
      * retry makes worse, because Glific may already have sent the message.</p>
      */
-    static GlificSendStage stageOf(Throwable ex) {
+    static WhatsAppSendStage stageOf(Throwable ex) {
         if (isBlockTimeout(ex)) {
-            return GlificSendStage.TIMEOUT;
+            return WhatsAppSendStage.TIMEOUT;
         }
         // A subclass of GlificMutationException, so it must be matched before the branch below.
         if (ex instanceof GlificMissingMessageIdException) {
-            return GlificSendStage.SEND_NO_MESSAGE_ID;
+            return WhatsAppSendStage.SEND_NO_MESSAGE_ID;
         }
         if (ex instanceof GlificMutationException gme) {
             // createMessageMedia is the DOCUMENT-mode media step — the 20 Aug (#131053) failure —
             // and needs a completely different fix from a rejected send.
             return "createMessageMedia".equals(gme.getMutationKey())
-                    ? GlificSendStage.MEDIA_REGISTER
-                    : GlificSendStage.SEND;
+                    ? WhatsAppSendStage.MEDIA_REGISTER
+                    : WhatsAppSendStage.SEND;
         }
         // Thrown by requireContactId, the LINK-mode linkSuffix prefix check, a blank template id and
         // the PublicUrlValidator guard — all of them our own configuration or inputs, none retryable.
         if (ex instanceof IllegalArgumentException || ex instanceof IllegalStateException) {
-            return GlificSendStage.CONFIG;
+            return WhatsAppSendStage.CONFIG;
         }
-        return GlificSendStage.SEND;
+        return WhatsAppSendStage.SEND;
     }
 
     /**

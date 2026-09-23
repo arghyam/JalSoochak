@@ -6,6 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.message.channel.provider.ReportDeliveryMode;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.arghyam.jalsoochak.message.util.PublicUrlValidator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -28,13 +32,13 @@ import java.util.Map;
  * </ol>
  * </p>
  * <p>Daily report: either shape, chosen by {@code notifications.daily-report.delivery-mode} — see
- * {@link DailyReportDeliveryMode}. {@code LINK} mode is a single {@code sendHsmMessage} with
+ * {@link ReportDeliveryMode}. {@code LINK} mode is a single {@code sendHsmMessage} with
  * {{1}} = officer name, {{2}} = report date and the button's URL suffix last.</p>
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class GlificWhatsAppService {
+public class GlificWhatsAppService implements WhatsAppSender {
 
     private static final String OPTIN_MUTATION = """
             mutation optinContact($phone: String!) {
@@ -46,7 +50,7 @@ public class GlificWhatsAppService {
 
     /**
      * The plain HSM send. Shared by every template whose variables are all text — the nudge, the
-     * login OTP and the daily report in {@link DailyReportDeliveryMode#LINK} mode. Only the document
+     * login OTP and the daily report in {@link ReportDeliveryMode#LINK} mode. Only the document
      * templates need the two-step {@code createMessageMedia} + {@code createAndSendMessage} pair.
      */
     private static final String NUDGE_HSM_MUTATION = """
@@ -461,6 +465,7 @@ public class GlificWhatsAppService {
      * @param contactId Glific contact ID of the officer
      * @param otp       one-time password for template {@code {{1}}}
      */
+    @Override
     public void sendLoginOtpHsm(Long contactId, String otp) {
         if (isDryRun(whatsappDryRun, "sendLoginOtpHsm")) return;
         requireContactId(contactId, "sendLoginOtpHsm");
@@ -479,6 +484,7 @@ public class GlificWhatsAppService {
      * Opts in the contact by phone number and returns the Glific contact ID.
      * Phone must be in E.164 format (e.g., 919876543210).
      */
+    @Override
     public Long optIn(String phone) {
         if (isDryRun(isOptInDryRun(), "optIn")) return 0L;
         log.debug("[Glific] Opting in contact");
@@ -491,6 +497,7 @@ public class GlificWhatsAppService {
      * Sends the nudge HSM template to the contact.
      * Template variable {{1}} = operator name, {{2}} = today's date.
      */
+    @Override
     public void sendNudgeHsm(Long contactId, String operatorName, String date) {
         if (isDryRun(nudgeDryRun, "sendNudgeHsm")) return;
         requireContactId(contactId, "sendNudgeHsm");
@@ -542,9 +549,9 @@ public class GlificWhatsAppService {
      * Sends the Daily Water Service Situation Report to an officer, in whichever shape
      * {@code notifications.daily-report.delivery-mode} selects:
      * <ul>
-     *   <li>{@link DailyReportDeliveryMode#DOCUMENT} — the PDF as a document HSM. Meta downloads the
+     *   <li>{@link ReportDeliveryMode#DOCUMENT} — the PDF as a document HSM. Meta downloads the
      *       MinIO URL itself, which the India-only firewall in front of production MinIO blocks.</li>
-     *   <li>{@link DailyReportDeliveryMode#LINK} — a text HSM whose "View Report" button carries the
+     *   <li>{@link ReportDeliveryMode#LINK} — a text HSM whose "View Report" button carries the
      *       MinIO path. Meta fetches nothing; the officer's phone opens the PDF when they tap it.</li>
      * </ul>
      * The dry-run guard and the contact-id check are shared, so a suppressed report costs no work and
@@ -560,14 +567,15 @@ public class GlificWhatsAppService {
      *                        degrades to "Officer". Unused in DOCUMENT mode
      * @return the Glific message id, template id and mode of the accepted send — the join key that
      *         lets the delivery status Gupshup and Meta report back to Glific later be matched to this
-     *         officer. A dry-run returns {@link GlificSendResult#suppressed} with a null message id
+     *         officer. A dry-run returns {@link WhatsAppSendResult#suppressed} with a null message id
      */
-    public GlificSendResult sendDailyReportHsm(Long contactId, String minioUrl, String officerUserType,
-                                               LocalDate reportDate, String officerName) {
+    @Override
+    public WhatsAppSendResult sendDailyReportHsm(Long contactId, String minioUrl, String officerUserType,
+                                                 LocalDate reportDate, String officerName) {
         if (isDryRun(dailyReportDryRun, "sendDailyReportHsm")) {
             // Reported leniently: a suppressed send must not start failing because the mode property
             // has a typo, which is the behaviour before this method returned anything at all.
-            return GlificSendResult.suppressed(deliveryModeOrNull());
+            return WhatsAppSendResult.suppressed(deliveryModeOrNull());
         }
         // Checked before the media upload so a missing contact id costs no Glific round-trip.
         requireContactId(contactId, "sendDailyReportHsm");
@@ -579,8 +587,8 @@ public class GlificWhatsAppService {
     }
 
     /** The original two-step document send: register the PDF as media, then send it as the header. */
-    private GlificSendResult sendDailyReportDocumentHsm(Long contactId, String minioUrl, String officerUserType,
-                                                        LocalDate reportDate) {
+    private WhatsAppSendResult sendDailyReportDocumentHsm(Long contactId, String minioUrl, String officerUserType,
+                                                          LocalDate reportDate) {
         String templateId = resolveDailyReportTemplateId(officerUserType);
         String mediaId = uploadMediaInternal(minioUrl, dailyReportDocumentName(reportDate), dailyReportDryRun);
 
@@ -597,7 +605,7 @@ public class GlificWhatsAppService {
         checkErrors(response, "createAndSendMessage");
         String messageId = extractMessageId(response, "createAndSendMessage");
         log.debug("[Glific] Daily report HSM sent to contactId={} glificMsgId={}", contactId, messageId);
-        return new GlificSendResult(messageId, templateId, DailyReportDeliveryMode.DOCUMENT);
+        return new WhatsAppSendResult(messageId, templateId, ReportDeliveryMode.DOCUMENT);
     }
 
     /**
@@ -611,8 +619,8 @@ public class GlificWhatsAppService {
      * flat {@code params} array filled in order of occurrence, body variables first and the button's
      * URL suffix last.</p>
      */
-    private GlificSendResult sendDailyReportLinkHsm(Long contactId, String minioUrl, String officerUserType,
-                                                    LocalDate reportDate, String officerName) {
+    private WhatsAppSendResult sendDailyReportLinkHsm(Long contactId, String minioUrl, String officerUserType,
+                                                      LocalDate reportDate, String officerName) {
         String templateId = resolveDailyReportLinkTemplateId(officerUserType);
         if (isBlank(templateId)) {
             throw new IllegalStateException(
@@ -637,7 +645,7 @@ public class GlificWhatsAppService {
         log.info("[Glific] Daily report HSM sent mode=LINK role={} glificMsgId={} templateId={}",
                 role, messageId, templateId);
         log.debug("[Glific] Daily report link HSM sent to contactId={} suffix={}", contactId, urlSuffix);
-        return new GlificSendResult(messageId, templateId, DailyReportDeliveryMode.LINK);
+        return new WhatsAppSendResult(messageId, templateId, ReportDeliveryMode.LINK);
     }
 
     /**
@@ -684,8 +692,8 @@ public class GlificWhatsAppService {
     }
 
     /** The configured delivery mode; parsed on use so an unknown value fails loudly wherever it is read. */
-    private DailyReportDeliveryMode deliveryMode() {
-        return DailyReportDeliveryMode.from(dailyReportDeliveryMode);
+    private ReportDeliveryMode deliveryMode() {
+        return ReportDeliveryMode.from(dailyReportDeliveryMode);
     }
 
     /**
@@ -695,7 +703,7 @@ public class GlificWhatsAppService {
      * throwing on a typo it never used to read. A live send still goes through {@link #deliveryMode()}
      * and still fails loudly.</p>
      */
-    private DailyReportDeliveryMode deliveryModeOrNull() {
+    private ReportDeliveryMode deliveryModeOrNull() {
         try {
             return deliveryMode();
         } catch (IllegalStateException e) {
@@ -726,6 +734,7 @@ public class GlificWhatsAppService {
      * (report muted, so a contact id of 0 is expected and harmless) from a genuine failure (report live
      * but the officer has no Glific contact) without duplicating the dry-run properties.
      */
+    @Override
     public boolean isDailyReportDeliveryEnabled() {
         return !dailyReportDryRun;
     }
@@ -763,12 +772,13 @@ public class GlificWhatsAppService {
      *
      * @param weekStart the first day of the reported week — template variable {{2}}
      * @return the Glific message id, template id and mode of the accepted send; a dry run returns
-     *         {@link GlificSendResult#suppressed}
+     *         {@link WhatsAppSendResult#suppressed}
      */
-    public GlificSendResult sendWeeklyReportHsm(Long contactId, String minioUrl, String officerUserType,
-                                                LocalDate weekStart, String officerName) {
+    @Override
+    public WhatsAppSendResult sendWeeklyReportHsm(Long contactId, String minioUrl, String officerUserType,
+                                                  LocalDate weekStart, String officerName) {
         if (isDryRun(weeklyReportDryRun, "sendWeeklyReportHsm")) {
-            return GlificSendResult.suppressed(DailyReportDeliveryMode.LINK);
+            return WhatsAppSendResult.suppressed(ReportDeliveryMode.LINK);
         }
         requireContactId(contactId, "sendWeeklyReportHsm");
 
@@ -796,7 +806,7 @@ public class GlificWhatsAppService {
         log.info("[Glific] Weekly report HSM sent mode=LINK role={} glificMsgId={} templateId={}",
                 role, messageId, templateId);
         log.debug("[Glific] Weekly report link HSM sent to contactId={} suffix={}", contactId, urlSuffix);
-        return new GlificSendResult(messageId, templateId, DailyReportDeliveryMode.LINK);
+        return new WhatsAppSendResult(messageId, templateId, ReportDeliveryMode.LINK);
     }
 
     /** SDO→SO fallback, so a deployment with only one approved weekly template still serves both roles. */
@@ -809,6 +819,7 @@ public class GlificWhatsAppService {
     }
 
     /** Whether weekly reports are actually delivered (as opposed to generated and suppressed). */
+    @Override
     public boolean isWeeklyReportDeliveryEnabled() {
         return !weeklyReportDryRun;
     }
@@ -826,6 +837,7 @@ public class GlificWhatsAppService {
      * @param contactId Glific contact ID of the officer
      * @param minioUrl  publicly reachable URL of the escalation PDF
      */
+    @Override
     public void sendEscalationHsm(Long contactId, String minioUrl) {
         if (isDryRun(escalationDryRun, "sendEscalationHsm")) return;
         // Checked before the media upload so a missing contact id costs no Glific round-trip.
@@ -872,6 +884,7 @@ public class GlificWhatsAppService {
      * @throws IllegalStateException if {@code glific.flow.nudge-id} is blank
      * @throws RuntimeException      if Glific returns GraphQL errors or {@code success=false}
      */
+    @Override
     public void startNudgeFlow(Long contactId, String operatorName, String date) {
         if (isDryRun(nudgeDryRun, "startNudgeFlow")) return;
         requireContactId(contactId, "startNudgeFlow");
@@ -910,6 +923,7 @@ public class GlificWhatsAppService {
      * @param state     tenant state name passed as {@code @results.state} in the flow
      * @throws RuntimeException if Glific returns GraphQL errors or {@code success=false}
      */
+    @Override
     public void startWelcomeFlow(Long contactId, String name, String state) {
         startWelcomeFlow(contactId, welcomeFlowId, name, state);
     }
@@ -924,6 +938,7 @@ public class GlificWhatsAppService {
      * @throws IllegalStateException if {@code flowId} is blank
      * @throws RuntimeException      if Glific returns GraphQL errors or {@code success=false}
      */
+    @Override
     public void startWelcomeFlow(Long contactId, String flowId, String name, String state) {
         if (isDryRun(whatsappDryRun, "startWelcomeFlow")) return;
         requireContactId(contactId, "startWelcomeFlow");
@@ -951,6 +966,7 @@ public class GlificWhatsAppService {
      * @param contactId        Glific contact ID
      * @param glificLanguageId Glific-side language ID
      */
+    @Override
     public void updateContactLanguage(Long contactId, int glificLanguageId) {
         if (isDryRun(whatsappDryRun, "updateContactLanguage")) return;
         JsonNode response = client.execute(UPDATE_CONTACT_MUTATION, Map.of(
@@ -966,7 +982,7 @@ public class GlificWhatsAppService {
      * <p>Throws {@link GlificMutationException} rather than a bare {@link RuntimeException}, with the
      * message unchanged: callers that only catch {@code Exception} behave exactly as before, while
      * those that need to know <em>which</em> mutation failed (to tag a
-     * {@link GlificSendStage}) can read it off the exception instead of parsing the text.</p>
+     * {@link WhatsAppSendStage}) can read it off the exception instead of parsing the text.</p>
      */
     private void checkErrors(JsonNode response, String mutationKey) {
         JsonNode mutationNode = response.path(mutationKey);
@@ -992,7 +1008,7 @@ public class GlificWhatsAppService {
      * reconciliation in the same step, invisibly. Throwing turns that into a logged, counted outcome.</p>
      *
      * <p>A suppressed send never reaches here — {@link #sendDailyReportHsm} returns
-     * {@link GlificSendResult#suppressed} before any mutation runs, and that path keeps its null
+     * {@link WhatsAppSendResult#suppressed} before any mutation runs, and that path keeps its null
      * message id. So a missing id at this point is always the live anomaly, never the dry-run.</p>
      */
     private static String extractMessageId(JsonNode response, String mutationKey) {

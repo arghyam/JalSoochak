@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.message.channel.glific;
+package org.arghyam.jalsoochak.message.channel.provider;
 
 /**
  * The result of one daily-report send attempt — either Glific accepted it, or it failed at a
@@ -11,23 +11,23 @@ package org.arghyam.jalsoochak.message.channel.glific;
  *
  * <p>Exactly one of {@code result} / {@code failure} is non-null.</p>
  */
-public record DailyReportSendOutcome(GlificSendResult result, Failure failure) {
+public record ReportSendOutcome(WhatsAppSendResult result, Failure failure) {
 
     /** Why a send failed, in the two fields that make a log line actionable. */
-    public record Failure(GlificSendStage stage, String glificErrorKey, String message) {
+    public record Failure(WhatsAppSendStage stage, String errorKey, String message) {
 
         /** Glific's error key for logging, or {@code "-"} when the failure came from our own side. */
         public String errorKeyForLog() {
-            return glificErrorKey == null || glificErrorKey.isBlank() ? "-" : glificErrorKey;
+            return errorKey == null || errorKey.isBlank() ? "-" : errorKey;
         }
     }
 
-    public static DailyReportSendOutcome accepted(GlificSendResult result) {
-        return new DailyReportSendOutcome(result, null);
+    public static ReportSendOutcome accepted(WhatsAppSendResult result) {
+        return new ReportSendOutcome(result, null);
     }
 
-    public static DailyReportSendOutcome failed(GlificSendStage stage, String glificErrorKey, String message) {
-        return new DailyReportSendOutcome(null, new Failure(stage, glificErrorKey, message));
+    public static ReportSendOutcome failed(WhatsAppSendStage stage, String errorKey, String message) {
+        return new ReportSendOutcome(null, new Failure(stage, errorKey, message));
     }
 
     /** True when Glific accepted the send. <strong>Not</strong> a delivery confirmation. */

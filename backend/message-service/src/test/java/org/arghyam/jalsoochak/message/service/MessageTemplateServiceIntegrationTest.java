@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
 import org.arghyam.jalsoochak.message.channel.glific.GlificAuthService;
-import org.arghyam.jalsoochak.message.channel.glific.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>Fallback chain: lang-specific → english → generic → hardcoded default</li>
  *   <li>Language resolution: languageId → {@code language_N} config key → name → normalized key</li>
  *   <li>Hindi and English language normalization</li>
+ *   <li>Welcome flow id: {@code welcome_flow_id} → legacy {@code glific_welcome_flow_id}</li>
  * </ul>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -50,7 +51,7 @@ class MessageTemplateServiceIntegrationTest {
 
     // Suppress GlificWhatsAppService @PostConstruct validateTemplates
     @MockBean
-    private GlificWhatsAppService glificWhatsAppService;
+    private WhatsAppSender whatsAppSender;
 
     @Autowired
     private MessageTemplateService messageTemplateService;
@@ -229,6 +230,51 @@ class MessageTemplateServiceIntegrationTest {
         String name = messageTemplateService.findStateName(TENANT_ID);
 
         assertThat(name).isEqualTo("Test State");
+    }
+
+    // ─────────────────────────── welcome flow id ───────────────────────────────
+
+    @Test
+    void findWelcomeFlowId_prefersCanonicalKey_whenBothKeysHoldDifferentValues() {
+        insertConfig("glific_welcome_flow_id", "legacy-flow");
+        insertConfig("welcome_flow_id", "canonical-flow");
+
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).contains("canonical-flow");
+    }
+
+    @Test
+    void findWelcomeFlowId_fallsBackToLegacyKey_whenCanonicalKeyAbsent() {
+        insertConfig("glific_welcome_flow_id", "legacy-flow");
+
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).contains("legacy-flow");
+    }
+
+    @Test
+    void findWelcomeFlowId_returnsCanonicalKey_whenLegacyKeyAbsent() {
+        insertConfig("welcome_flow_id", "canonical-flow");
+
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).contains("canonical-flow");
+    }
+
+    @Test
+    void findWelcomeFlowId_returnsEmpty_whenNeitherKeyExists() {
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).isEmpty();
+    }
+
+    @Test
+    void findWelcomeFlowId_trimsValue() {
+        insertConfig("welcome_flow_id", "  canonical-flow  ");
+
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).contains("canonical-flow");
+    }
+
+    @Test
+    void findWelcomeFlowId_returnsEmpty_whenCanonicalValueIsBlank_evenIfLegacyKeyIsSet() {
+        // A present-but-blank canonical row does not fall through to the legacy key.
+        insertConfig("welcome_flow_id", "   ");
+        insertConfig("glific_welcome_flow_id", "legacy-flow");
+
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).isEmpty();
     }
 
     // ────────────────────────────── helpers ────────────────────────────────────
