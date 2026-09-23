@@ -8,15 +8,15 @@ import java.util.Locale;
  *
  * <p>Glific's own {@code MessageStatusEnum} is
  * {@code CONTACT_OPT_OUT, DELETED, DELIVERED, ENQUEUED, ERROR, PLAYED, REACHED, READ, RECEIVED, SEEN,
- * SENT} (confirmed by introspection — see {@code mydocs/GLIFIC_API_CONTRACT.md}). This enum collapses
- * it to the five outcomes worth counting, and keeps the raw value alongside so nothing is lost.</p>
+ * SENT} (confirmed by introspection). This enum collapses it to the five outcomes worth counting, and
+ * keeps the raw value alongside so nothing is lost.</p>
  *
  * <p><strong>Note the {@code SENT} collision.</strong> Glific's {@code SENT} means <em>Meta accepted
  * the message, not yet delivered</em>; our own {@code result=SENT} log token means <em>Glific accepted
  * our API call</em>. They are different facts about different hops, so Glific's {@code SENT} maps to
  * {@link #PENDING} here and is never re-emitted as a bare {@code result=SENT}.</p>
  */
-public enum GlificDeliveryOutcome {
+public enum WhatsAppDeliveryOutcome {
 
     /** Reached the handset. */
     DELIVERED(true),
@@ -38,7 +38,7 @@ public enum GlificDeliveryOutcome {
 
     private final boolean terminal;
 
-    GlificDeliveryOutcome(boolean terminal) {
+    WhatsAppDeliveryOutcome(boolean terminal) {
         this.terminal = terminal;
     }
 
@@ -53,7 +53,7 @@ public enum GlificDeliveryOutcome {
      * <p>An unrecognised value yields {@link #UNKNOWN_STATUS} rather than an exception: Glific may add
      * enum members, and a reconciliation pass must not die on a status it has never seen.</p>
      */
-    public static GlificDeliveryOutcome fromBspStatus(String bspStatus) {
+    public static WhatsAppDeliveryOutcome fromBspStatus(String bspStatus) {
         if (bspStatus == null || bspStatus.isBlank()) {
             return UNKNOWN_STATUS;
         }

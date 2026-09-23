@@ -884,7 +884,7 @@ public class NotificationEventRouter {
      * rejected send, and {@code DELIVERY_UNCONFIRMED} one Glific may have sent but cannot confirm —
      * the last of which is deliberately <strong>not</strong> retried (see
      * {@link #isAmbiguousDelivery}). None of them means WhatsApp delivered anything; only
-     * {@link GlificDeliveryReconciliationService} can say that.</p>
+     * {@link WhatsAppDeliveryReconciliationService} can say that.</p>
      */
     private void handleDailySituationReport(JsonNode root) throws Exception {
         int tenantId = root.path("tenantId").asInt(0);
@@ -1192,7 +1192,7 @@ public class NotificationEventRouter {
                             + " stage={} glificErrorKey={} {}={} (non-retryable) — Glific may already"
                             + " have sent this report, so the event is not retried. Settle it against"
                             + " Glific's own delivery status for this officer; see"
-                            + " GlificDeliveryReconciliationService ({})",
+                            + " WhatsAppDeliveryReconciliationService ({})",
                     tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
                     failure.stage(), failure.errorKeyForLog(), ctx.kind().periodField(), period, loggableUrl);
             return;
@@ -1235,7 +1235,7 @@ public class NotificationEventRouter {
         }
         // result=SENT means Glific ACCEPTED the send — it is not a WhatsApp delivery confirmation.
         // glificMsgId is what lets the delivery status Gupshup and Meta later report to Glific be
-        // matched back to this officer; see GlificDeliveryReconciliationService. Every new field goes after officer= to preserve
+        // matched back to this officer; see WhatsAppDeliveryReconciliationService. Every new field goes after officer= to preserve
         // the field adjacency the log-counting recipes rely on.
         log.info("[Router/{}] corr={} result=SENT role={} tenant={} officer={}"
                         + " stage=GLIFIC_ACCEPTED glificMsgId={} glificContactId={} mode={} templateId={}"

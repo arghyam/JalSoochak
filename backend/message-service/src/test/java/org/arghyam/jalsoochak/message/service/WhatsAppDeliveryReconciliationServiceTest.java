@@ -4,8 +4,9 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import org.arghyam.jalsoochak.message.dto.GlificDeliveryOutcome;
-import org.arghyam.jalsoochak.message.dto.GlificMessageStatus;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppDeliveryStatusReader;
+import org.arghyam.jalsoochak.message.dto.WhatsAppDeliveryOutcome;
+import org.arghyam.jalsoochak.message.dto.WhatsAppMessageStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -39,7 +40,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link GlificDeliveryReconciliationService}.
+ * Unit tests for {@link WhatsAppDeliveryReconciliationService}.
  *
  * <p>The three goals this job exists for are asserted directly: delivered counts per role, failures
  * with their reason, and the officer user ids behind those failures. Alongside them sit the guards
@@ -48,7 +49,7 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-class GlificDeliveryReconciliationServiceTest {
+class WhatsAppDeliveryReconciliationServiceTest {
 
     private static final String SO = "SECTION_OFFICER";
     private static final String SDO = "SUB_DIVISIONAL_OFFICER";
@@ -60,13 +61,13 @@ class GlificDeliveryReconciliationServiceTest {
     private static final String FIXTURE_PHONE = "919999900001";
 
     @Mock
-    private GlificDeliveryStatusService glificDeliveryStatusService;
+    private WhatsAppDeliveryStatusReader deliveryStatusReader;
 
     @Mock
     private JdbcTemplate jdbcTemplate;
 
     @InjectMocks
-    private GlificDeliveryReconciliationService service;
+    private WhatsAppDeliveryReconciliationService service;
 
     private ListAppender<ILoggingEvent> appender;
     private Logger logger;
@@ -90,7 +91,7 @@ class GlificDeliveryReconciliationServiceTest {
         ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", String.valueOf(WEEKLY_REPORT_TEMPLATE));
         ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "");
 
-        logger = (Logger) LoggerFactory.getLogger(GlificDeliveryReconciliationService.class);
+        logger = (Logger) LoggerFactory.getLogger(WhatsAppDeliveryReconciliationService.class);
         appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
@@ -110,7 +111,7 @@ class GlificDeliveryReconciliationServiceTest {
 
         service.reconcileScheduled();
 
-        verifyNoInteractions(glificDeliveryStatusService, jdbcTemplate);
+        verifyNoInteractions(deliveryStatusReader, jdbcTemplate);
     }
 
     /**
@@ -124,7 +125,7 @@ class GlificDeliveryReconciliationServiceTest {
 
         service.reconcile(from, to);
 
-        verifyNoInteractions(glificDeliveryStatusService);
+        verifyNoInteractions(deliveryStatusReader);
         assertThat(logLines()).anyMatch(l -> l.contains("No report template ids configured"));
     }
 
@@ -153,7 +154,7 @@ class GlificDeliveryReconciliationServiceTest {
         void countsReadSeparatelyFromDelivered() {
             stubTenants(tenant(74, "MH"));
             stubOfficers(Map.of(6530736L, officer(16714L, SO)));
-            stubStatus("READ", message("1", "READ", 6530736L, GlificDeliveryOutcome.READ, null, null));
+            stubStatus("READ", message("1", "READ", 6530736L, WhatsAppDeliveryOutcome.READ, null, null));
 
             service.reconcile(from, to);
 
@@ -265,7 +266,7 @@ class GlificDeliveryReconciliationServiceTest {
         void glificSentCountsAsPendingNotDelivered() {
             stubTenants(tenant(74, "MH"));
             stubOfficers(Map.of(6530736L, officer(16714L, SO)));
-            stubStatus("SENT", message("1", "SENT", 6530736L, GlificDeliveryOutcome.PENDING, null, null));
+            stubStatus("SENT", message("1", "SENT", 6530736L, WhatsAppDeliveryOutcome.PENDING, null, null));
 
             service.reconcile(from, to);
 
@@ -301,8 +302,8 @@ class GlificDeliveryReconciliationServiceTest {
             stubOfficers(Map.of(6530736L, officer(16714L, SO)));
             stubStatus("DELIVERED",
                     delivered("1", 6530736L),
-                    new GlificMessageStatus("2", "wamid.x", "DELIVERED", null, false, "INBOUND",
-                            2239259L, GlificDeliveryOutcome.DELIVERED, null, null));
+                    new WhatsAppMessageStatus("2", "wamid.x", "DELIVERED", null, false, "INBOUND",
+                            2239259L, WhatsAppDeliveryOutcome.DELIVERED, null, null));
 
             service.reconcile(from, to);
 
@@ -312,12 +313,12 @@ class GlificDeliveryReconciliationServiceTest {
         @Test
         void skipsAStatusGlificReportsAsEmpty() {
             stubTenants(tenant(74, "MH"));
-            when(glificDeliveryStatusService.countMessages(any(), any(), anyString(), anyString()))
+            when(deliveryStatusReader.countMessages(any(), any(), anyString(), anyString()))
                     .thenReturn(0);
 
             service.reconcile(from, to);
 
-            verify(glificDeliveryStatusService, never())
+            verify(deliveryStatusReader, never())
                     .fetchMessages(any(), any(), anyString(), anyString(), anyInt(), anyInt());
         }
 
@@ -329,7 +330,7 @@ class GlificDeliveryReconciliationServiceTest {
         @Test
         void aWindowWithNothingOfOursStillLogsASummaryTotal() {
             stubTenants(tenant(74, "MH"));
-            when(glificDeliveryStatusService.countMessages(any(), any(), anyString(), anyString()))
+            when(deliveryStatusReader.countMessages(any(), any(), anyString(), anyString()))
                     .thenReturn(0);
 
             service.reconcile(from, to);
@@ -368,10 +369,10 @@ class GlificDeliveryReconciliationServiceTest {
             ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "990102");
 
             assertThat(service.resolveTemplateKinds().kinds())
-                    .containsEntry(DAILY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.DAILY)
-                    .containsEntry(880559, GlificDeliveryReconciliationService.ReportKind.DAILY)
-                    .containsEntry(WEEKLY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.WEEKLY)
-                    .containsEntry(990102, GlificDeliveryReconciliationService.ReportKind.WEEKLY);
+                    .containsEntry(DAILY_REPORT_TEMPLATE, WhatsAppDeliveryReconciliationService.ReportKind.DAILY)
+                    .containsEntry(880559, WhatsAppDeliveryReconciliationService.ReportKind.DAILY)
+                    .containsEntry(WEEKLY_REPORT_TEMPLATE, WhatsAppDeliveryReconciliationService.ReportKind.WEEKLY)
+                    .containsEntry(990102, WhatsAppDeliveryReconciliationService.ReportKind.WEEKLY);
         }
 
         /**
@@ -387,8 +388,8 @@ class GlificDeliveryReconciliationServiceTest {
 
             assertThat(service.resolveTemplateKinds().conflicts()).isEmpty();
             assertThat(service.resolveTemplateKinds().kinds())
-                    .containsEntry(DAILY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.DAILY)
-                    .containsEntry(WEEKLY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.WEEKLY);
+                    .containsEntry(DAILY_REPORT_TEMPLATE, WhatsAppDeliveryReconciliationService.ReportKind.DAILY)
+                    .containsEntry(WEEKLY_REPORT_TEMPLATE, WhatsAppDeliveryReconciliationService.ReportKind.WEEKLY);
         }
 
         /**
@@ -403,7 +404,7 @@ class GlificDeliveryReconciliationServiceTest {
 
             service.reconcile(from, to);
 
-            verifyNoInteractions(glificDeliveryStatusService);
+            verifyNoInteractions(deliveryStatusReader);
             assertThat(logLines()).anyMatch(l -> l.contains("configured for more than one report")
                     && l.contains(String.valueOf(DAILY_REPORT_TEMPLATE))
                     && l.contains("DAILY")
@@ -425,7 +426,7 @@ class GlificDeliveryReconciliationServiceTest {
 
             service.reconcile(from, to);
 
-            verifyNoInteractions(glificDeliveryStatusService);
+            verifyNoInteractions(deliveryStatusReader);
             assertThat(logLines()).anyMatch(l -> l.contains("configured for more than one report"));
         }
 
@@ -446,9 +447,9 @@ class GlificDeliveryReconciliationServiceTest {
                     DAILY_REPORT_TEMPLATE + "," + WEEKLY_REPORT_TEMPLATE + ",111");
 
             assertThat(service.resolveTemplateKinds().kinds())
-                    .containsEntry(DAILY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.DAILY)
-                    .containsEntry(WEEKLY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.WEEKLY)
-                    .containsEntry(111, GlificDeliveryReconciliationService.ReportKind.UNKNOWN);
+                    .containsEntry(DAILY_REPORT_TEMPLATE, WhatsAppDeliveryReconciliationService.ReportKind.DAILY)
+                    .containsEntry(WEEKLY_REPORT_TEMPLATE, WhatsAppDeliveryReconciliationService.ReportKind.WEEKLY)
+                    .containsEntry(111, WhatsAppDeliveryReconciliationService.ReportKind.UNKNOWN);
         }
 
         @Test
@@ -602,8 +603,8 @@ class GlificDeliveryReconciliationServiceTest {
         void neverLogsAPhoneNumber() {
             stubTenants(tenant(74, "MH"));
             stubOfficers(Map.of(6629592L, officer(16733L, SO)));
-            stubStatus("ERROR", new GlificMessageStatus("1", "gs-1", "ERROR", DAILY_REPORT_TEMPLATE, true,
-                    "OUTBOUND", 6629592L, GlificDeliveryOutcome.DELIVERY_FAILED, "131026",
+            stubStatus("ERROR", new WhatsAppMessageStatus("1", "gs-1", "ERROR", DAILY_REPORT_TEMPLATE, true,
+                    "OUTBOUND", 6629592L, WhatsAppDeliveryOutcome.DELIVERY_FAILED, "131026",
                     "Message undeliverable to " + FIXTURE_PHONE));
 
             service.reconcile(from, to);
@@ -675,44 +676,44 @@ class GlificDeliveryReconciliationServiceTest {
         return rows;
     }
 
-    private void stubStatus(String bspStatus, GlificMessageStatus... messages) {
-        when(glificDeliveryStatusService.countMessages(any(), any(), eq(bspStatus), anyString()))
+    private void stubStatus(String bspStatus, WhatsAppMessageStatus... messages) {
+        when(deliveryStatusReader.countMessages(any(), any(), eq(bspStatus), anyString()))
                 .thenReturn(messages.length);
-        when(glificDeliveryStatusService.fetchMessages(any(), any(), eq(bspStatus), anyString(),
+        when(deliveryStatusReader.fetchMessages(any(), any(), eq(bspStatus), anyString(),
                 anyInt(), anyInt())).thenReturn(List.of(messages));
     }
 
-    private static GlificMessageStatus delivered(String id, long contactId) {
-        return message(id, "DELIVERED", contactId, GlificDeliveryOutcome.DELIVERED, null, null);
+    private static WhatsAppMessageStatus delivered(String id, long contactId) {
+        return message(id, "DELIVERED", contactId, WhatsAppDeliveryOutcome.DELIVERED, null, null);
     }
 
-    private static GlificMessageStatus undeliverable(String id, long contactId) {
-        return message(id, "ERROR", contactId, GlificDeliveryOutcome.DELIVERY_FAILED, "131026",
+    private static WhatsAppMessageStatus undeliverable(String id, long contactId) {
+        return message(id, "ERROR", contactId, WhatsAppDeliveryOutcome.DELIVERY_FAILED, "131026",
                 "Message undeliverable, (#131026) Message Undeliverable.");
     }
 
-    private static GlificMessageStatus optedOut(String id, long contactId) {
-        return message(id, "CONTACT_OPT_OUT", contactId, GlificDeliveryOutcome.DELIVERY_FAILED,
+    private static WhatsAppMessageStatus optedOut(String id, long contactId) {
+        return message(id, "CONTACT_OPT_OUT", contactId, WhatsAppDeliveryOutcome.DELIVERY_FAILED,
                 "CONTACT_OPT_OUT", "contact opted out");
     }
 
-    private static GlificMessageStatus lowBalance(String id, long contactId) {
-        return message(id, "ERROR", contactId, GlificDeliveryOutcome.DELIVERY_FAILED, "9999", "low balance");
+    private static WhatsAppMessageStatus lowBalance(String id, long contactId) {
+        return message(id, "ERROR", contactId, WhatsAppDeliveryOutcome.DELIVERY_FAILED, "9999", "low balance");
     }
 
-    private static GlificMessageStatus message(String id, String bspStatus, long contactId,
-                                               GlificDeliveryOutcome outcome, String code, String reason) {
-        return new GlificMessageStatus(id, "gs-" + id, bspStatus, DAILY_REPORT_TEMPLATE, true, "OUTBOUND",
+    private static WhatsAppMessageStatus message(String id, String bspStatus, long contactId,
+                                               WhatsAppDeliveryOutcome outcome, String code, String reason) {
+        return new WhatsAppMessageStatus(id, "gs-" + id, bspStatus, DAILY_REPORT_TEMPLATE, true, "OUTBOUND",
                 contactId, outcome, code, reason);
     }
 
     /** The same message, moved onto the weekly template — the only thing that tells the reports apart. */
-    private static GlificMessageStatus onWeeklyTemplate(GlificMessageStatus m) {
+    private static WhatsAppMessageStatus onWeeklyTemplate(WhatsAppMessageStatus m) {
         return withTemplate(m, WEEKLY_REPORT_TEMPLATE);
     }
 
-    private static GlificMessageStatus withTemplate(GlificMessageStatus m, Integer templateId) {
-        return new GlificMessageStatus(m.messageId(), m.bspMessageId(), m.bspStatus(), templateId, m.hsm(),
+    private static WhatsAppMessageStatus withTemplate(WhatsAppMessageStatus m, Integer templateId) {
+        return new WhatsAppMessageStatus(m.messageId(), m.bspMessageId(), m.bspStatus(), templateId, m.hsm(),
                 m.flow(), m.receiverContactId(), m.outcome(), m.errorCode(), m.errorReason());
     }
 

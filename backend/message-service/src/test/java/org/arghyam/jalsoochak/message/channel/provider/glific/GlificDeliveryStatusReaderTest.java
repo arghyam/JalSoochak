@@ -1,12 +1,11 @@
-package org.arghyam.jalsoochak.message.service;
+package org.arghyam.jalsoochak.message.channel.provider.glific;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.arghyam.jalsoochak.message.channel.provider.glific.GlificGraphQLClient;
-import org.arghyam.jalsoochak.message.dto.GlificDeliveryOutcome;
-import org.arghyam.jalsoochak.message.dto.GlificMessageStatus;
+import org.arghyam.jalsoochak.message.dto.WhatsAppDeliveryOutcome;
+import org.arghyam.jalsoochak.message.dto.WhatsAppMessageStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -30,18 +29,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link GlificDeliveryStatusService}.
+ * Unit tests for {@link GlificDeliveryStatusReader}.
  *
  * <p>The Glific response shapes here are copied from real introspection and real query output against
- * {@code api.arghyam.glific.com} — see {@code mydocs/GLIFIC_API_CONTRACT.md}. Two of them matter most:
- * {@code errors} arrives as an <em>escaped JSON string</em> (so it needs a second parse), and its
- * {@code payload.destination} holds the recipient's phone number, which must never escape this
- * service.</p>
+ * {@code api.arghyam.glific.com}. Two of them matter most: {@code errors} arrives as an <em>escaped
+ * JSON string</em> (so it needs a second parse), and its {@code payload.destination} holds the
+ * recipient's phone number, which must never escape the adapter.</p>
  *
  * <p>Phone numbers in fixtures use the {@code 91XXXXXXXXXX} shape but are not real, per CLAUDE.md.</p>
  */
 @ExtendWith(MockitoExtension.class)
-class GlificDeliveryStatusServiceTest {
+class GlificDeliveryStatusReaderTest {
 
     /** Not a real number. Present in the fixture precisely so a test can prove it never leaks. */
     private static final String FIXTURE_DESTINATION = "919999900001";
@@ -71,14 +69,14 @@ class GlificDeliveryStatusServiceTest {
      * parses with — no field reflection, and a changed dependency list breaks compilation instead of
      * leaving a silently null field.
      */
-    private GlificDeliveryStatusService service;
+    private GlificDeliveryStatusReader service;
 
     private final Instant from = Instant.parse("2026-08-27T00:30:00Z");
     private final Instant to = Instant.parse("2026-08-27T06:30:00Z");
 
     @BeforeEach
     void setUp() {
-        service = new GlificDeliveryStatusService(client, mapper);
+        service = new GlificDeliveryStatusReader(client, mapper);
     }
 
     // ──────────────────────────── query construction ───────────────────────────
@@ -138,7 +136,7 @@ class GlificDeliveryStatusServiceTest {
                     .thenReturn(messagesResponse(fullPage(2)))
                     .thenReturn(messagesResponse(fullPage(1)));
 
-            List<GlificMessageStatus> result =
+            List<WhatsAppMessageStatus> result =
                     service.fetchMessages(from, to, "DELIVERED", "inserted_at", 2, 10);
 
             assertThat(result).hasSize(3);
@@ -161,7 +159,7 @@ class GlificDeliveryStatusServiceTest {
         void honoursTheMaxPageCap() {
             when(client.execute(contains("messages"), anyMap())).thenReturn(messagesResponse(fullPage(2)));
 
-            List<GlificMessageStatus> result =
+            List<WhatsAppMessageStatus> result =
                     service.fetchMessages(from, to, "DELIVERED", "inserted_at", 2, 3);
 
             assertThat(result).hasSize(6);
@@ -188,17 +186,17 @@ class GlificDeliveryStatusServiceTest {
                 "RECEIVED,        IGNORED",
                 "DELETED,         IGNORED",
         })
-        void mapsEveryConfirmedEnumMember(String bspStatus, GlificDeliveryOutcome expected) {
-            assertThat(GlificDeliveryOutcome.fromBspStatus(bspStatus)).isEqualTo(expected);
+        void mapsEveryConfirmedEnumMember(String bspStatus, WhatsAppDeliveryOutcome expected) {
+            assertThat(WhatsAppDeliveryOutcome.fromBspStatus(bspStatus)).isEqualTo(expected);
         }
 
         /** Glific may add members; a pass must not die on one it has never seen. */
         @Test
         void anUnknownStatusIsNotAnError() {
-            assertThat(GlificDeliveryOutcome.fromBspStatus("SOME_FUTURE_STATE"))
-                    .isEqualTo(GlificDeliveryOutcome.UNKNOWN_STATUS);
-            assertThat(GlificDeliveryOutcome.fromBspStatus(null))
-                    .isEqualTo(GlificDeliveryOutcome.UNKNOWN_STATUS);
+            assertThat(WhatsAppDeliveryOutcome.fromBspStatus("SOME_FUTURE_STATE"))
+                    .isEqualTo(WhatsAppDeliveryOutcome.UNKNOWN_STATUS);
+            assertThat(WhatsAppDeliveryOutcome.fromBspStatus(null))
+                    .isEqualTo(WhatsAppDeliveryOutcome.UNKNOWN_STATUS);
         }
 
         /**
@@ -208,8 +206,8 @@ class GlificDeliveryStatusServiceTest {
          */
         @Test
         void glificSentIsPendingNotDelivered() {
-            assertThat(GlificDeliveryOutcome.fromBspStatus("SENT")).isEqualTo(GlificDeliveryOutcome.PENDING);
-            assertThat(GlificDeliveryOutcome.fromBspStatus("SENT").isTerminal()).isFalse();
+            assertThat(WhatsAppDeliveryOutcome.fromBspStatus("SENT")).isEqualTo(WhatsAppDeliveryOutcome.PENDING);
+            assertThat(WhatsAppDeliveryOutcome.fromBspStatus("SENT").isTerminal()).isFalse();
         }
 
         @Test
@@ -218,7 +216,7 @@ class GlificDeliveryStatusServiceTest {
                     message("241952654", "da3d8d62-fe89-4f63-ab20-730dac83a8a1", "DELIVERED",
                             880557, true, "OUTBOUND", "6530736", null)));
 
-            GlificMessageStatus status =
+            WhatsAppMessageStatus status =
                     service.fetchMessages(from, to, "DELIVERED", "inserted_at", 10, 1).get(0);
 
             assertThat(status.messageId()).isEqualTo("241952654");
@@ -228,7 +226,7 @@ class GlificDeliveryStatusServiceTest {
             assertThat(status.hsm()).isTrue();
             assertThat(status.flow()).isEqualTo("OUTBOUND");
             assertThat(status.receiverContactId()).isEqualTo(6530736L);
-            assertThat(status.outcome()).isEqualTo(GlificDeliveryOutcome.DELIVERED);
+            assertThat(status.outcome()).isEqualTo(WhatsAppDeliveryOutcome.DELIVERED);
             assertThat(status.isOutboundHsm()).isTrue();
         }
 
@@ -242,7 +240,7 @@ class GlificDeliveryStatusServiceTest {
                     message("241962444", "wamid.HBgMOTE4NjM4", "DELIVERED",
                             null, false, "INBOUND", "2239259", null)));
 
-            GlificMessageStatus status =
+            WhatsAppMessageStatus status =
                     service.fetchMessages(from, to, "DELIVERED", "inserted_at", 10, 1).get(0);
 
             assertThat(status.isOutboundHsm()).isFalse();
@@ -261,10 +259,10 @@ class GlificDeliveryStatusServiceTest {
                     message("241952232", "gs-1", "ERROR", 880557, true, "OUTBOUND", "6629592",
                             UNDELIVERABLE_ERRORS)));
 
-            GlificMessageStatus status =
+            WhatsAppMessageStatus status =
                     service.fetchMessages(from, to, "ERROR", "inserted_at", 10, 1).get(0);
 
-            assertThat(status.outcome()).isEqualTo(GlificDeliveryOutcome.DELIVERY_FAILED);
+            assertThat(status.outcome()).isEqualTo(WhatsAppDeliveryOutcome.DELIVERY_FAILED);
             assertThat(status.errorCode()).isEqualTo("131026");
             assertThat(status.errorReason()).contains("Message Undeliverable");
             assertThat(status.failureKey()).isEqualTo("131026");
@@ -280,7 +278,7 @@ class GlificDeliveryStatusServiceTest {
                     message("241952232", "gs-1", "ERROR", 880557, true, "OUTBOUND", "6629592",
                             UNDELIVERABLE_ERRORS)));
 
-            GlificMessageStatus status =
+            WhatsAppMessageStatus status =
                     service.fetchMessages(from, to, "ERROR", "inserted_at", 10, 1).get(0);
 
             assertThat(status.toString()).doesNotContain(FIXTURE_DESTINATION);
@@ -296,7 +294,7 @@ class GlificDeliveryStatusServiceTest {
             when(client.execute(contains("messages"), anyMap())).thenReturn(messagesResponse(
                     message("1", "gs-1", "ERROR", 880557, true, "OUTBOUND", "1", errors)));
 
-            GlificMessageStatus status =
+            WhatsAppMessageStatus status =
                     service.fetchMessages(from, to, "ERROR", "inserted_at", 10, 1).get(0);
 
             assertThat(status.errorReason()).doesNotContain("919999900002").contains("0002");
@@ -308,7 +306,7 @@ class GlificDeliveryStatusServiceTest {
                     message("233212612", "gs-2", "ERROR", null, true, "OUTBOUND", "6275488",
                             LOW_BALANCE_ERRORS)));
 
-            GlificMessageStatus status =
+            WhatsAppMessageStatus status =
                     service.fetchMessages(from, to, "ERROR", "inserted_at", 10, 1).get(0);
 
             assertThat(status.errorCode()).isEqualTo("9999");
@@ -321,10 +319,10 @@ class GlificDeliveryStatusServiceTest {
             when(client.execute(contains("messages"), anyMap())).thenReturn(messagesResponse(
                     message("2", "gs-3", "CONTACT_OPT_OUT", 880557, true, "OUTBOUND", "77", null)));
 
-            GlificMessageStatus status =
+            WhatsAppMessageStatus status =
                     service.fetchMessages(from, to, "CONTACT_OPT_OUT", "inserted_at", 10, 1).get(0);
 
-            assertThat(status.outcome()).isEqualTo(GlificDeliveryOutcome.DELIVERY_FAILED);
+            assertThat(status.outcome()).isEqualTo(WhatsAppDeliveryOutcome.DELIVERY_FAILED);
             assertThat(status.errorCode()).isEqualTo("CONTACT_OPT_OUT");
             assertThat(status.errorReason()).isEqualTo("contact opted out");
         }
@@ -334,10 +332,10 @@ class GlificDeliveryStatusServiceTest {
             when(client.execute(contains("messages"), anyMap())).thenReturn(messagesResponse(
                     message("3", "gs-4", "ERROR", 880557, true, "OUTBOUND", "78", "not json at all")));
 
-            GlificMessageStatus status =
+            WhatsAppMessageStatus status =
                     service.fetchMessages(from, to, "ERROR", "inserted_at", 10, 1).get(0);
 
-            assertThat(status.outcome()).isEqualTo(GlificDeliveryOutcome.DELIVERY_FAILED);
+            assertThat(status.outcome()).isEqualTo(WhatsAppDeliveryOutcome.DELIVERY_FAILED);
             assertThat(status.errorCode()).isNull();
             assertThat(status.failureKey()).isEqualTo("ERROR");
         }
@@ -349,7 +347,7 @@ class GlificDeliveryStatusServiceTest {
             msg.set("errors", mapper.readTree(UNDELIVERABLE_ERRORS));
             when(client.execute(contains("messages"), anyMap())).thenReturn(messagesResponse(msg));
 
-            GlificMessageStatus status =
+            WhatsAppMessageStatus status =
                     service.fetchMessages(from, to, "ERROR", "inserted_at", 10, 1).get(0);
 
             assertThat(status.errorCode()).isEqualTo("131026");

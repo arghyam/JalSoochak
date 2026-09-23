@@ -2,8 +2,9 @@ package org.arghyam.jalsoochak.message.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.arghyam.jalsoochak.message.dto.GlificDeliveryOutcome;
-import org.arghyam.jalsoochak.message.dto.GlificMessageStatus;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppDeliveryStatusReader;
+import org.arghyam.jalsoochak.message.dto.WhatsAppDeliveryOutcome;
+import org.arghyam.jalsoochak.message.dto.WhatsAppMessageStatus;
 import org.arghyam.jalsoochak.message.util.PhoneRedactor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -40,7 +41,7 @@ import java.util.stream.Collectors;
  * <h2>Shape of a pass</h2>
  * <ol>
  *   <li>For each {@code bspStatus} of interest, count then page the window
- *       ({@link GlificDeliveryStatusService}).</li>
+ *       ({@link WhatsAppDeliveryStatusReader}).</li>
  *   <li>Discard anything that is not an outbound HSM on one of our report templates —
  *       {@code MessageFilter} cannot do this server-side.</li>
  *   <li>Label each survivor {@code DAILY} or {@code WEEKLY} from its template id.</li>
@@ -60,7 +61,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class GlificDeliveryReconciliationService {
+public class WhatsAppDeliveryReconciliationService {
 
     /**
      * The statuses worth pulling. Every outbound state Glific can report is here: omitting one would
@@ -85,7 +86,7 @@ public class GlificDeliveryReconciliationService {
      */
     enum ReportKind { DAILY, WEEKLY, UNKNOWN }
 
-    private final GlificDeliveryStatusService glificDeliveryStatusService;
+    private final WhatsAppDeliveryStatusReader deliveryStatusReader;
     private final JdbcTemplate jdbcTemplate;
 
     @Value("${glific.status.reconcile.enabled:false}")
@@ -188,7 +189,7 @@ public class GlificDeliveryReconciliationService {
         Tally total = new Tally();
         int unmappedContacts = 0;
 
-        for (GlificMessageStatus message : scan.matched()) {
+        for (WhatsAppMessageStatus message : scan.matched()) {
             ReportKind report = templateKinds.getOrDefault(message.templateId(), ReportKind.UNKNOWN);
             OfficerRef officer = message.receiverContactId() == null
                     ? null
@@ -233,12 +234,12 @@ public class GlificDeliveryReconciliationService {
      *                                <em>unfiltered</em> set — a low-balance rejection can arrive with
      *                                a null {@code templateId} and would otherwise be filtered away
      */
-    private record WindowScan(List<GlificMessageStatus> matched, int windowScanned, int discardedInbound,
+    private record WindowScan(List<WhatsAppMessageStatus> matched, int windowScanned, int discardedInbound,
                               int discardedOtherTemplates, int discardedAccountLevel,
                               Map<String, Integer> accountLevelFailures) {}
 
     private WindowScan scanWindow(Instant from, Instant to, Map<Integer, ReportKind> templateKinds) {
-        List<GlificMessageStatus> matched = new ArrayList<>();
+        List<WhatsAppMessageStatus> matched = new ArrayList<>();
         Map<String, Integer> accountLevel = new TreeMap<>();
         Set<String> accountLevelCodes = csvToSet(accountLevelErrorCodesCsv);
         int windowScanned = 0;
@@ -247,14 +248,14 @@ public class GlificDeliveryReconciliationService {
         int discardedAccountLevel = 0;
 
         for (String status : STATUSES_TO_CHECK) {
-            int count = glificDeliveryStatusService.countMessages(from, to, status, dateColumn);
+            int count = deliveryStatusReader.countMessages(from, to, status, dateColumn);
             if (count == 0) {
                 continue;
             }
-            List<GlificMessageStatus> page =
-                    glificDeliveryStatusService.fetchMessages(from, to, status, dateColumn, pageSize, maxPages);
+            List<WhatsAppMessageStatus> page =
+                    deliveryStatusReader.fetchMessages(from, to, status, dateColumn, pageSize, maxPages);
             windowScanned += page.size();
-            for (GlificMessageStatus message : page) {
+            for (WhatsAppMessageStatus message : page) {
                 if (isAccountLevel(message, accountLevelCodes)) {
                     accountLevel.merge(message.failureKey(), 1, Integer::sum);
                     // Counted on the ACCOUNT-LEVEL FAILURE line and nowhere else. Letting it fall through
@@ -277,8 +278,8 @@ public class GlificDeliveryReconciliationService {
                 discardedAccountLevel, accountLevel);
     }
 
-    private static boolean isAccountLevel(GlificMessageStatus message, Set<String> accountLevelCodes) {
-        return message.outcome() == GlificDeliveryOutcome.DELIVERY_FAILED
+    private static boolean isAccountLevel(WhatsAppMessageStatus message, Set<String> accountLevelCodes) {
+        return message.outcome() == WhatsAppDeliveryOutcome.DELIVERY_FAILED
                 && message.errorCode() != null
                 && accountLevelCodes.contains(message.errorCode());
     }
@@ -292,9 +293,9 @@ public class GlificDeliveryReconciliationService {
         }
     }
 
-    private static Set<Long> contactIdsOf(List<GlificMessageStatus> messages) {
+    private static Set<Long> contactIdsOf(List<WhatsAppMessageStatus> messages) {
         Set<Long> ids = new LinkedHashSet<>();
-        for (GlificMessageStatus m : messages) {
+        for (WhatsAppMessageStatus m : messages) {
             if (m.receiverContactId() != null) {
                 ids.add(m.receiverContactId());
             }
@@ -410,7 +411,7 @@ public class GlificDeliveryReconciliationService {
         private int unknownStatus;
     }
 
-    private static void record(Tally tally, OfficerRef officer, GlificMessageStatus message,
+    private static void record(Tally tally, OfficerRef officer, WhatsAppMessageStatus message,
                                ReportKind report) {
         tally.matched++;
         String reportKey = report.name();
@@ -443,12 +444,12 @@ public class GlificDeliveryReconciliationService {
      * {@code officer=} follow in that order; {@code report=} is appended <em>after</em> {@code officer=}
      * so it names which report arrived without disturbing that adjacency.
      */
-    private void logMessage(OfficerRef officer, GlificMessageStatus message, ReportKind report) {
-        if (message.outcome() == GlificDeliveryOutcome.DELIVERY_FAILED) {
-            // Redacted again at the point of logging, even though GlificDeliveryStatusService already
-            // redacts what it extracts. The reason text originates with Gupshup and is the one field
+    private void logMessage(OfficerRef officer, WhatsAppMessageStatus message, ReportKind report) {
+        if (message.outcome() == WhatsAppDeliveryOutcome.DELIVERY_FAILED) {
+            // Redacted again at the point of logging, even though the WhatsAppDeliveryStatusReader adapter
+            // already redacts what it extracts. The reason text originates with Gupshup and is the one field
             // here that can carry a phone number; a second pass costs nothing and means a future code
-            // path that builds a GlificMessageStatus some other way cannot leak one through this line.
+            // path that builds a WhatsAppMessageStatus some other way cannot leak one through this line.
             log.warn("[GlificStatus] result=DELIVERY_FAILED role={} tenant={} officer={} report={}"
                             + " glificMsgId={} glificContactId={} templateId={} bspStatus={} errorCode={}"
                             + " reason=\"{}\"",
@@ -468,7 +469,7 @@ public class GlificDeliveryReconciliationService {
      * A message on one of our templates whose recipient matches no officer in any tenant. Logged rather
      * than dropped: it usually means a stale {@code whatsapp_connection_id}, which is worth fixing.
      */
-    private void logUnmapped(GlificMessageStatus message, ReportKind report) {
+    private void logUnmapped(WhatsAppMessageStatus message, ReportKind report) {
         log.warn("[GlificStatus] result=UNMAPPED_CONTACT report={} glificMsgId={} glificContactId={}"
                         + " templateId={} bspStatus={} — no officer in any active tenant has this"
                         + " whatsapp_connection_id",

@@ -1,14 +1,14 @@
-package org.arghyam.jalsoochak.message.service;
+package org.arghyam.jalsoochak.message.channel.provider.glific;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.arghyam.jalsoochak.message.channel.provider.glific.GlificGraphQLClient;
-import org.arghyam.jalsoochak.message.dto.GlificDeliveryOutcome;
-import org.arghyam.jalsoochak.message.dto.GlificMessageStatus;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppDeliveryStatusReader;
+import org.arghyam.jalsoochak.message.dto.WhatsAppDeliveryOutcome;
+import org.arghyam.jalsoochak.message.dto.WhatsAppMessageStatus;
 import org.arghyam.jalsoochak.message.util.PhoneRedactor;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -43,13 +43,11 @@ import java.util.Map;
  * {@code destination} field. Only {@code code} and {@code reason} are lifted out, and the reason is
  * run through {@link PhoneRedactor} before it can reach a log line. The raw blob is never logged above
  * {@code DEBUG} and never leaves this class.</p>
- *
- * @see <a href="file:../../../../../../../../../mydocs/GLIFIC_API_CONTRACT.md">mydocs/GLIFIC_API_CONTRACT.md</a>
  */
-@Service
+@Component
 @RequiredArgsConstructor
 @Slf4j
-public class GlificDeliveryStatusService {
+public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader {
 
     private static final String MESSAGES_QUERY = """
             query messages($filter: MessageFilter, $opts: Opts) {
@@ -83,14 +81,12 @@ public class GlificDeliveryStatusService {
     private final ObjectMapper objectMapper;
 
     /**
-     * How many messages of a given status Glific holds in the window, across the whole organisation.
+     * {@inheritDoc}
      *
-     * <p>Not the per-role number: {@code countMessages} takes only a filter and cannot filter by
-     * template, so this counts nudges, OTPs and inbound traffic too. Its value is as a sanity total —
-     * it makes an unexpectedly huge window visible in the logs before we spend calls paginating it.</p>
-     *
-     * @return the count, or {@code -1} if Glific did not answer with a number
+     * <p>Glific's {@code countMessages} takes only a filter and cannot filter by template, so this
+     * counts nudges, OTPs and inbound traffic too.</p>
      */
+    @Override
     public int countMessages(Instant from, Instant to, String bspStatus, String dateColumn) {
         JsonNode response = client.execute(COUNT_QUERY,
                 Map.of("filter", buildFilter(from, to, bspStatus, dateColumn)));
@@ -98,18 +94,10 @@ public class GlificDeliveryStatusService {
         return count.isNumber() ? count.asInt() : -1;
     }
 
-    /**
-     * Pages through every message of one {@code bspStatus} in the window.
-     *
-     * @param maxPages hard stop so a pathological window cannot consume the whole throttle budget.
-     *                 Hitting it is logged at {@code WARN} — a truncated pass that looked complete
-     *                 would silently under-report delivery
-     * @return every message returned, unfiltered. Template and direction filtering is the caller's
-     *         job, so a caller can also see what it discarded
-     */
-    public List<GlificMessageStatus> fetchMessages(Instant from, Instant to, String bspStatus,
-                                                   String dateColumn, int pageSize, int maxPages) {
-        List<GlificMessageStatus> all = new ArrayList<>();
+    @Override
+    public List<WhatsAppMessageStatus> fetchMessages(Instant from, Instant to, String bspStatus,
+                                                     String dateColumn, int pageSize, int maxPages) {
+        List<WhatsAppMessageStatus> all = new ArrayList<>();
         Map<String, Object> filter = buildFilter(from, to, bspStatus, dateColumn);
         for (int page = 0; page < maxPages; page++) {
             int offset = page * pageSize;
@@ -152,10 +140,10 @@ public class GlificDeliveryStatusService {
     }
 
     /** Maps one raw Glific message node onto our record, extracting the failure code and reason. */
-    private GlificMessageStatus toStatus(JsonNode node) {
+    private WhatsAppMessageStatus toStatus(JsonNode node) {
         String bspStatus = node.path("bspStatus").asText(null);
         GlificFailure failure = parseFailure(node.path("errors"), bspStatus);
-        return new GlificMessageStatus(
+        return new WhatsAppMessageStatus(
                 node.path("id").asText(null),
                 node.path("bspMessageId").asText(null),
                 bspStatus,
@@ -164,7 +152,7 @@ public class GlificDeliveryStatusService {
                 node.path("flow").asText(null),
                 node.path("receiver").path("id").isMissingNode() ? null
                         : parseContactId(node.path("receiver").path("id").asText(null)),
-                GlificDeliveryOutcome.fromBspStatus(bspStatus),
+                WhatsAppDeliveryOutcome.fromBspStatus(bspStatus),
                 failure.code(),
                 failure.reason());
     }

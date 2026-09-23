@@ -5,8 +5,7 @@ package org.arghyam.jalsoochak.message.dto;
  *
  * <p>Everything here is an identifier or a status — no phone number, no name. Glific's raw
  * {@code errors} payload does contain the recipient's number in its {@code destination} field, so
- * only the extracted {@code errorCode} and {@code errorReason} survive into this record. See
- * {@code mydocs/GLIFIC_API_CONTRACT.md}.</p>
+ * only the extracted {@code errorCode} and {@code errorReason} survive into this record.</p>
  *
  * @param messageId         Glific {@code Message.id} — the join key back to our {@code result=SENT} line
  * @param bspMessageId      Gupshup-side id; the reference to quote when escalating a case to Glific
@@ -24,7 +23,7 @@ package org.arghyam.jalsoochak.message.dto;
  * @param errorCode         BSP failure code (e.g. {@code 131026}), or {@code null}
  * @param errorReason       BSP failure text, phone-redacted, or {@code null}
  */
-public record GlificMessageStatus(
+public record WhatsAppMessageStatus(
         String messageId,
         String bspMessageId,
         String bspStatus,
@@ -32,7 +31,7 @@ public record GlificMessageStatus(
         boolean hsm,
         String flow,
         Long receiverContactId,
-        GlificDeliveryOutcome outcome,
+        WhatsAppDeliveryOutcome outcome,
         String errorCode,
         String errorReason) {
 
