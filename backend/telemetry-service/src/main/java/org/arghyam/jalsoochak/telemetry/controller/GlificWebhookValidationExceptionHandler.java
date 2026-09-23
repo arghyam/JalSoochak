@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
  *
  * <p><strong>Why this class has to exist.</strong> {@link MethodArgumentNotValidException} is raised
  * by the argument resolver <em>before</em> the handler body runs, so the {@code try/catch} inside
- * every {@link GlificWebhookController} method can never see it. Without an advice the rejection
+ * every webhook handler method can never see it. Without an advice the rejection
  * falls through to Boot's default error shape ({@code {timestamp,status,error,path}}) — still a
  * {@code 400}, but not the envelope a Glific flow node reads. The sibling
  * {@link TelemetryValidationExceptionHandler} cannot cover this because it is scoped to

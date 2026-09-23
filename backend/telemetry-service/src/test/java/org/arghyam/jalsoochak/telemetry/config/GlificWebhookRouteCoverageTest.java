@@ -1,23 +1,16 @@
 package org.arghyam.jalsoochak.telemetry.config;
 
-import org.arghyam.jalsoochak.telemetry.TelemetryServiceApplication;
+import org.arghyam.jalsoochak.telemetry.controller.ControllerRoutes;
+import org.arghyam.jalsoochak.telemetry.controller.ControllerRoutes.Route;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.config.BeanDefinition;
-import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
-import org.springframework.core.annotation.AnnotatedElementUtils;
-import org.springframework.core.type.filter.AnnotationTypeFilter;
-import org.springframework.stereotype.Controller;
-import org.springframework.util.ClassUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -41,8 +34,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("GlificWebhookRoutes — coverage of the webhook controllers")
 class GlificWebhookRouteCoverageTest {
 
-    private static final String SERVICE_PACKAGE = "org.arghyam.jalsoochak.telemetry";
-
     /**
      * Routes deliberately served outside both credential gates. {@code ApiController} is Initializr
      * scaffolding due for deletion; these entries go with it, and the test fails until they do.
@@ -51,12 +42,6 @@ class GlificWebhookRouteCoverageTest {
             "GET /api/v1/telemetry",
             "POST /api/v1/publish"
     );
-
-    private record Route(Class<?> controller, String method, String path) {
-        String key() {
-            return method + " " + path;
-        }
-    }
 
     @Test
     @DisplayName("every @PostMapping on a webhook controller is in the protected set, and vice versa")
@@ -91,7 +76,7 @@ class GlificWebhookRouteCoverageTest {
     @DisplayName("webhook controllers map nothing but POST, the only method the allowlist matches")
     void webhookControllersMapOnlyPost() {
         List<String> nonPost = webhookControllers().stream()
-                .flatMap(controller -> routesOf(controller).stream())
+                .flatMap(controller -> ControllerRoutes.routesOf(controller).stream())
                 .filter(route -> !"POST".equals(route.method()))
                 .map(route -> route.controller().getSimpleName() + ": " + route.key())
                 .toList();
@@ -162,9 +147,7 @@ class GlificWebhookRouteCoverageTest {
     @Test
     @DisplayName("every route the service maps is behind exactly one credential gate")
     void everyRouteIsBehindExactlyOneGate() {
-        List<Route> routes = controllers().stream()
-                .flatMap(controller -> routesOf(controller).stream())
-                .toList();
+        List<Route> routes = ControllerRoutes.routes();
 
         List<String> misgated = routes.stream()
                 .filter(route -> !UNGATED_ROUTES.contains(route.key()))
@@ -188,7 +171,7 @@ class GlificWebhookRouteCoverageTest {
     }
 
     private static Set<Class<?>> webhookControllers() {
-        return controllers().stream()
+        return ControllerRoutes.controllers().stream()
                 .filter(controller -> controller.isAnnotationPresent(WebhookRoute.class))
                 .collect(Collectors.toSet());
     }
@@ -207,55 +190,5 @@ class GlificWebhookRouteCoverageTest {
             paths.addAll(Arrays.asList(values));
         }
         return paths;
-    }
-
-    /** Every (method, absolute path) pair a controller serves, from the composed mapping annotations. */
-    private static List<Route> routesOf(Class<?> controller) {
-        RequestMapping typeMapping = AnnotatedElementUtils.findMergedAnnotation(controller, RequestMapping.class);
-        String[] bases = typeMapping == null || typeMapping.path().length == 0 ? new String[]{""} : typeMapping.path();
-
-        List<Route> routes = new ArrayList<>();
-        for (Method method : controller.getDeclaredMethods()) {
-            RequestMapping mapping = AnnotatedElementUtils.findMergedAnnotation(method, RequestMapping.class);
-            if (mapping == null) {
-                continue;
-            }
-            String[] paths = mapping.path().length == 0 ? new String[]{""} : mapping.path();
-            // An empty method list maps every verb; record it as such so no gate can claim it.
-            List<String> verbs = mapping.method().length == 0
-                    ? List.of("ANY")
-                    : Arrays.stream(mapping.method()).map(RequestMethod::name).toList();
-            for (String base : bases) {
-                for (String path : paths) {
-                    for (String verb : verbs) {
-                        routes.add(new Route(controller, verb, base + path));
-                    }
-                }
-            }
-        }
-        return routes;
-    }
-
-    /**
-     * Scans the service's own classes rather than booting a context: a {@code @SpringBootTest} here
-     * would need Postgres and Kafka to answer a question about static structure. Test sources share
-     * the package and declare fixture controllers of their own, so anything not compiled alongside
-     * the application class is left out.
-     */
-    private static Set<Class<?>> controllers() {
-        ClassPathScanningCandidateComponentProvider provider =
-                new ClassPathScanningCandidateComponentProvider(false);
-        provider.addIncludeFilter(new AnnotationTypeFilter(Controller.class));
-
-        return provider.findCandidateComponents(SERVICE_PACKAGE).stream()
-                .map(BeanDefinition::getBeanClassName)
-                .filter(Objects::nonNull)
-                .map(name -> ClassUtils.resolveClassName(name, GlificWebhookRouteCoverageTest.class.getClassLoader()))
-                .filter(type -> codeSource(type).equals(codeSource(TelemetryServiceApplication.class)))
-                .collect(Collectors.toSet());
-    }
-
-    private static String codeSource(Class<?> type) {
-        return type.getProtectionDomain().getCodeSource().getLocation().toString();
     }
 }

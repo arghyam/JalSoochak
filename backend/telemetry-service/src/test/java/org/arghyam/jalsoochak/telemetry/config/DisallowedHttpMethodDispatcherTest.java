@@ -30,9 +30,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * which is the part the audit finding is actually about. Each pair runs the same request with and
  * without the filter, so the negative control documents the vulnerability rather than describing it.
  *
- * <p>The controller here is a stand-in for {@code GlificWebhookController} — a single POST mapping on
- * the audited path. Using the real controller would mean wiring its service dependencies to assert a
- * property of the dispatcher, not of the controller.
+ * <p>The controller here is a stand-in for {@code SelectionWebhookController} — a single POST mapping
+ * on the audited path. Using the real controller would mean wiring its service dependencies to assert
+ * a property of the dispatcher, not of the controller.
  */
 @DisplayName("DisallowedHttpMethodFilter against the real dispatcher")
 class DisallowedHttpMethodDispatcherTest {

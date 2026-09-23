@@ -87,9 +87,9 @@ The endpoints:
 * `POST /api/v1/telemetry/others`, `/others/submitted` — free-text fallback
 * `POST /api/v1/telemetry/trigger-welcome-message` — operator onboarding message
 
-> Adding a webhook to `GlificWebhookController` without registering it in `GlificWebhookRoutes` fails
-> the build (`GlificWebhookRouteCoverageTest`), because it would ship unauthenticated. A new endpoint
-> also needs the header added to its Glific flow node.
+> Adding a webhook to a `@WebhookRoute` controller without registering it in `GlificWebhookRoutes`
+> fails the build (`GlificWebhookRouteCoverageTest`), because it would ship unauthenticated. A new
+> endpoint also needs the header added to its Glific flow node.
 
 ```json
 // Example reading event published after a successful submission

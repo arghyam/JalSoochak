@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.controller;
 
+import org.arghyam.jalsoochak.telemetry.controller.webhook.IssueReportWebhookController;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
@@ -43,7 +44,7 @@ class GlificWebhookValidationExceptionHandlerTest {
     private GlificWebhookService webhookService;
 
     private MockMvc mockMvc() {
-        return MockMvcBuilders.standaloneSetup(new GlificWebhookController(webhookService))
+        return MockMvcBuilders.standaloneSetup(new IssueReportWebhookController(webhookService))
                 .setControllerAdvice(new GlificWebhookValidationExceptionHandler())
                 .build();
     }

@@ -5,8 +5,12 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import org.arghyam.jalsoochak.telemetry.TelemetryServiceApplication;
 import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
+import org.arghyam.jalsoochak.telemetry.controller.webhook.ConversationWebhookController;
+import org.arghyam.jalsoochak.telemetry.controller.webhook.IssueReportWebhookController;
+import org.arghyam.jalsoochak.telemetry.controller.webhook.MeterChangeWebhookController;
+import org.arghyam.jalsoochak.telemetry.controller.webhook.ReadingWebhookController;
+import org.arghyam.jalsoochak.telemetry.controller.webhook.SelectionWebhookController;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.ingest.CanonicalReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapperRegistry;
@@ -14,6 +18,7 @@ import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
+import org.arghyam.jalsoochak.telemetry.service.WelcomeMessageService;
 import org.arghyam.jalsoochak.telemetry.validation.ReadingUrlTestValidation;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -26,21 +31,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.config.BeanDefinition;
-import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.context.support.GenericApplicationContext;
-import org.springframework.core.type.filter.AnnotationTypeFilter;
-import org.springframework.stereotype.Controller;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.util.ClassUtils;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.method.ControllerAdviceBean;
 
-import java.lang.annotation.Annotation;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -102,6 +100,8 @@ class ControllerAdviceBindingTest {
     private TelemetrySubmissionAuditService auditService;
     @Mock
     private TelemetryEventPublisher eventPublisher;
+    @Mock
+    private WelcomeMessageService welcomeMessageService;
 
     private MockMvc mockMvc;
 
@@ -135,7 +135,11 @@ class ControllerAdviceBindingTest {
         ReadingRequestMapperRegistry registry = new ReadingRequestMapperRegistry(List.of(
                 new CanonicalReadingRequestMapper(JsonMapper.builder().addModule(new JavaTimeModule()).build())));
         mockMvc = MockMvcBuilders.standaloneSetup(
-                        new GlificWebhookController(webhookService),
+                        new ReadingWebhookController(webhookService),
+                        new SelectionWebhookController(webhookService),
+                        new IssueReportWebhookController(webhookService),
+                        new MeterChangeWebhookController(webhookService),
+                        new ConversationWebhookController(webhookService, welcomeMessageService),
                         new SingleTenantTelemetryController(webhookService, apiKeyService, bfmReadingService),
                         new MultiFormatReadingController(registry, apiKeyService, webhookService,
                                 ReadingUrlTestValidation.validator()))
@@ -153,7 +157,7 @@ class ControllerAdviceBindingTest {
     void theTwoScopedAdvicesAreTheOnlyOnes() {
         // A new advice — above all an unscoped, global one — changes the error contract of every
         // controller at once. Failing here forces a deliberate look at the bindings below.
-        assertThat(types(ControllerAdvice.class)).containsExactlyInAnyOrder(
+        assertThat(ControllerRoutes.productionTypes(ControllerAdvice.class)).containsExactlyInAnyOrder(
                 GlificWebhookValidationExceptionHandler.class,
                 TelemetryValidationExceptionHandler.class);
     }
@@ -161,7 +165,7 @@ class ControllerAdviceBindingTest {
     @Test
     @DisplayName("every @WebhookRoute controller is answered by the webhook advice alone")
     void everyWebhookControllerIsAnsweredByTheWebhookAdviceAlone() {
-        Set<Class<?>> webhookControllers = types(Controller.class).stream()
+        Set<Class<?>> webhookControllers = ControllerRoutes.controllers().stream()
                 .filter(controller -> controller.isAnnotationPresent(WebhookRoute.class))
                 .collect(Collectors.toSet());
 
@@ -293,27 +297,5 @@ class ControllerAdviceBindingTest {
                 .filter(advice -> advice.isApplicableToBeanType(controller))
                 .map(ControllerAdviceBean::getBeanType)
                 .collect(Collectors.toSet());
-    }
-
-    /**
-     * The service's own classes carrying {@code annotation}. Test sources share the package and
-     * declare fixture controllers of their own, so anything not compiled alongside the application
-     * class is left out.
-     */
-    private static Set<Class<?>> types(Class<? extends Annotation> annotation) {
-        ClassPathScanningCandidateComponentProvider provider =
-                new ClassPathScanningCandidateComponentProvider(false);
-        provider.addIncludeFilter(new AnnotationTypeFilter(annotation));
-
-        return provider.findCandidateComponents(SERVICE_PACKAGE).stream()
-                .map(BeanDefinition::getBeanClassName)
-                .filter(Objects::nonNull)
-                .map(name -> ClassUtils.resolveClassName(name, ControllerAdviceBindingTest.class.getClassLoader()))
-                .filter(type -> codeSource(type).equals(codeSource(TelemetryServiceApplication.class)))
-                .collect(Collectors.toSet());
-    }
-
-    private static String codeSource(Class<?> type) {
-        return type.getProtectionDomain().getCodeSource().getLocation().toString();
     }
 }

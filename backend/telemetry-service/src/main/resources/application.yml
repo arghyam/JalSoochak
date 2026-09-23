@@ -69,9 +69,9 @@ telemetry:
       enabled: ${TELEMETRY_READING_URL_VALIDATION_ENABLED:true}
   webhook:
     auth:
-      # Shared-secret authentication for the 26 Glific webhook endpoints on
-      # GlificWebhookController. These are exposed publicly by ingress, bypassing the api-gateway,
-      # so this filter is the only thing standing in front of them.
+      # Shared-secret authentication for the 26 Glific webhook endpoints on the @WebhookRoute
+      # controllers in controller/webhook/. These are exposed publicly by ingress, bypassing the
+      # api-gateway, so this filter is the only thing standing in front of them.
       #
       # ENFORCE (default) rejects with 401. AUDIT records the outcome but always serves — it is the
       # kill switch: set TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT and restart to revert without a code
