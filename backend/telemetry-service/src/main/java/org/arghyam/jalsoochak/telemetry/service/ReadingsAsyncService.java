@@ -14,18 +14,18 @@ public class ReadingsAsyncService {
 
     private final MeterImageWorkflowService imageWorkflowService;
     private final GlificFlowResumeService glificFlowResumeService;
-    private final Executor glificSyncExecutor;
+    private final Executor whatsAppSyncExecutor;
 
     public ReadingsAsyncService(MeterImageWorkflowService imageWorkflowService,
                                 GlificFlowResumeService glificFlowResumeService,
-                                @Qualifier("glificSyncExecutor") Executor glificSyncExecutor) {
+                                @Qualifier("whatsAppSyncExecutor") Executor whatsAppSyncExecutor) {
         this.imageWorkflowService = imageWorkflowService;
         this.glificFlowResumeService = glificFlowResumeService;
-        this.glificSyncExecutor = glificSyncExecutor;
+        this.whatsAppSyncExecutor = whatsAppSyncExecutor;
     }
 
     public void enqueueProcessAndResume(MeterImageWebhookRequest request, String jobId) {
-        glificSyncExecutor.execute(() -> processAndResume(request, jobId));
+        whatsAppSyncExecutor.execute(() -> processAndResume(request, jobId));
     }
 
     private void processAndResume(MeterImageWebhookRequest request, String jobId) {

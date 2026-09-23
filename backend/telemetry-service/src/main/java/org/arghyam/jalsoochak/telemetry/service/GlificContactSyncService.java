@@ -28,7 +28,7 @@ public class GlificContactSyncService {
     private static final Map<String, Integer> GLIFIC_LANGUAGE_IDS = buildLanguageMap();
 
     private final RestTemplate restTemplate;
-    private final Executor glificSyncExecutor;
+    private final Executor whatsAppSyncExecutor;
 
     // Optional data-driven catalog (V36). Injected when the bean/table exist; when null or without a
     // matching row, resolution falls back to the hardcoded GLIFIC_LANGUAGE_IDS map below. Kept as a
@@ -49,9 +49,9 @@ public class GlificContactSyncService {
     private String glificUserPassword;
 
     public GlificContactSyncService(RestTemplate restTemplate,
-                                    @Qualifier("glificSyncExecutor") Executor glificSyncExecutor) {
+                                    @Qualifier("whatsAppSyncExecutor") Executor whatsAppSyncExecutor) {
         this.restTemplate = restTemplate;
-        this.glificSyncExecutor = glificSyncExecutor;
+        this.whatsAppSyncExecutor = whatsAppSyncExecutor;
     }
 
     public void syncContactLanguageAsync(String contactPhone, String selectedLanguage) {
@@ -69,7 +69,7 @@ public class GlificContactSyncService {
             return;
         }
 
-        glificSyncExecutor.execute(() -> {
+        whatsAppSyncExecutor.execute(() -> {
             try {
                 syncContactLanguage(phone, languageId);
             } catch (Exception e) {

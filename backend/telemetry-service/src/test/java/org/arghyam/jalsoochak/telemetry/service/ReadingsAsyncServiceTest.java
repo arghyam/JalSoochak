@@ -23,7 +23,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * The async hand-off behind the Glific readings webhook: the controller acks immediately, this
- * service does the work on the {@code glificSyncExecutor} and then resumes the operator's flow —
+ * service does the work on the {@code whatsAppSyncExecutor} and then resumes the operator's flow —
  * including when processing blew up, so the operator is never left waiting on a dead flow.
  */
 @ExtendWith(MockitoExtension.class)
