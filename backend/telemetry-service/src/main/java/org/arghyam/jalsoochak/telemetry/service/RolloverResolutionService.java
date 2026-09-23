@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.RolloverPosition;
 import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
 import org.springframework.beans.factory.annotation.Value;
@@ -82,7 +82,7 @@ public class RolloverResolutionService {
     private final ObjectMapper objectMapper;
 
     public RolloverResolutionService(
-            @Value("${flowvision.rollover.resolution.enabled:false}") boolean enabled,
+            @Value("${ocr.rollover.resolution.enabled:false}") boolean enabled,
             ObjectMapper objectMapper) {
         this.enabled = enabled;
         this.objectMapper = objectMapper;
@@ -120,7 +120,7 @@ public class RolloverResolutionService {
      * @param isMeterReplaced   whether this submission is itself a meter replacement (fresh baseline).
      * @return the resolved reading plus its provenance {@code source} and an optional audit blob.
      */
-    public ResolvedReading resolve(FlowVisionResult ocr,
+    public ResolvedReading resolve(OcrReadingResult ocr,
                                    List<DailyConfirmedReading> history,
                                    BigDecimal previousConfirmed,
                                    boolean isMeterReplaced) {

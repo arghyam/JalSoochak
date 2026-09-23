@@ -8,7 +8,7 @@ import java.util.List;
 
 @Data
 @Builder
-public class FlowVisionResult {
+public class OcrReadingResult {
 
     private BigDecimal adjustedReading;
 

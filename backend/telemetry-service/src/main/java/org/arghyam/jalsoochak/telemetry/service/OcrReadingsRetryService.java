@@ -7,7 +7,8 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryRegistry;
 import lombok.extern.slf4j.Slf4j;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
+import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.springframework.stereotype.Service;
 
 import java.util.Locale;
@@ -17,13 +18,13 @@ import java.util.function.Supplier;
 
 @Service
 @Slf4j
-public class FlowVisionReadingsRetryService {
+public class OcrReadingsRetryService {
 
     static final String INSTANCE_NAME = "flowvisionReadings";
     /** Per-provider resilience instances are named "flowvisionReadings-<providerId>" for isolation + metrics. */
     static final String PROVIDER_INSTANCE_PREFIX = INSTANCE_NAME + "-";
 
-    private final FlowVisionService flowVisionService;
+    private final FlowVisionOcrExtractor flowVisionOcrExtractor;
     private final OcrProviderRegistry ocrProviderRegistry;
     private final RetryRegistry retryRegistry;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
@@ -38,12 +39,12 @@ public class FlowVisionReadingsRetryService {
      */
     private final Map<String, ResilienceBundle> providerBundles = new ConcurrentHashMap<>();
 
-    public FlowVisionReadingsRetryService(FlowVisionService flowVisionService,
+    public OcrReadingsRetryService(FlowVisionOcrExtractor flowVisionOcrExtractor,
                                           OcrProviderRegistry ocrProviderRegistry,
                                           RetryRegistry retryRegistry,
                                           CircuitBreakerRegistry circuitBreakerRegistry,
                                           BulkheadRegistry bulkheadRegistry) {
-        this.flowVisionService = flowVisionService;
+        this.flowVisionOcrExtractor = flowVisionOcrExtractor;
         this.ocrProviderRegistry = ocrProviderRegistry;
         this.retryRegistry = retryRegistry;
         this.circuitBreakerRegistry = circuitBreakerRegistry;
@@ -54,7 +55,7 @@ public class FlowVisionReadingsRetryService {
     }
 
     /** Resilient extraction against the global-default FlowVision endpoint. */
-    public FlowVisionResult extractReading(String readingUrl) {
+    public OcrReadingResult extractReading(String readingUrl) {
         return extractReading(readingUrl, null);
     }
 
@@ -63,14 +64,14 @@ public class FlowVisionReadingsRetryService {
      * default provider. Retry and circuit breaker are isolated per provider so a failing backend trips
      * only its own breaker; the bulkhead (concurrency cap) is shared across providers.
      */
-    public FlowVisionResult extractReading(String readingUrl, OcrProviderSettings settings) {
+    public OcrReadingResult extractReading(String readingUrl, OcrProviderSettings settings) {
         // Resolve the extractor once so the resilience instance follows the provider that actually serves
         // the call: an unknown/mis-typed id degrades to FlowVision in the registry, and must then use the
         // default breaker rather than spawning a phantom instance named after a provider that never runs.
         MeterReadingExtractor extractor = resolveExtractor(settings);
         ResilienceBundle bundle = bundleFor(extractor);
-        Supplier<FlowVisionResult> supplier = () -> invokeExtractor(extractor, readingUrl, settings);
-        Supplier<FlowVisionResult> resilientSupplier = Retry.decorateSupplier(
+        Supplier<OcrReadingResult> supplier = () -> invokeExtractor(extractor, readingUrl, settings);
+        Supplier<OcrReadingResult> resilientSupplier = Retry.decorateSupplier(
                 bundle.retry(),
                 CircuitBreaker.decorateSupplier(bundle.circuitBreaker(), Bulkhead.decorateSupplier(bulkhead, supplier))
         );
@@ -78,12 +79,12 @@ public class FlowVisionReadingsRetryService {
         try {
             return resilientSupplier.get();
         } catch (Exception ex) {
-            if (FlowVisionTransientFailures.isServiceUnavailable(ex)) {
+            if (OcrTransientFailures.isServiceUnavailable(ex)) {
                 log.warn("FlowVision /readings retry exhausted provider={} imageUrlHash={} reason={}",
                         providerLabel(extractor),
                         imageUrlHash(readingUrl),
                         sanitizeLogValue(ex.getMessage()));
-                throw new FlowVisionReadingsUnavailableException("FlowVision readings service is temporarily unavailable", ex);
+                throw new OcrReadingsUnavailableException("FlowVision readings service is temporarily unavailable", ex);
             }
             throw ex;
         }
@@ -96,7 +97,7 @@ public class FlowVisionReadingsRetryService {
      */
     private MeterReadingExtractor resolveExtractor(OcrProviderSettings settings) {
         if (settings == null || ocrProviderRegistry == null) {
-            return flowVisionService;
+            return flowVisionOcrExtractor;
         }
         return ocrProviderRegistry.get(settings.providerId());
     }
@@ -136,9 +137,9 @@ public class FlowVisionReadingsRetryService {
         return normalized;
     }
 
-    private FlowVisionResult invokeExtractor(MeterReadingExtractor extractor, String readingUrl, OcrProviderSettings settings) {
+    private OcrReadingResult invokeExtractor(MeterReadingExtractor extractor, String readingUrl, OcrProviderSettings settings) {
         if (settings == null || ocrProviderRegistry == null) {
-            return flowVisionService.extractReadingOrThrow(readingUrl);
+            return flowVisionOcrExtractor.extractReadingOrThrow(readingUrl);
         }
         return extractor.extractReadingOrThrow(readingUrl, settings);
     }

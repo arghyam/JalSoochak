@@ -117,7 +117,7 @@ public class MeterImageWorkflowService {
                     operatorWithSchema.operator(),
                     contactId,
                     isMeterReplaced,
-                    FlowVisionRetryMode.RESILIENT
+                    OcrRetryMode.RESILIENT
             );
             response.setMessage(localizationService.localizeMessage(response.getMessage(), languageKey));
             return response;
@@ -242,7 +242,7 @@ public class MeterImageWorkflowService {
                     operator,
                     channelContactId,
                     false,
-                    FlowVisionRetryMode.RESILIENT
+                    OcrRetryMode.RESILIENT
             );
 
             response.setMessage(localizationService.localizeMessage(response.getMessage(), languageKey));

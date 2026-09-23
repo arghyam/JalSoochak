@@ -2,7 +2,7 @@ package org.arghyam.jalsoochak.telemetry.config;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.retry.RetryConfig;
-import org.arghyam.jalsoochak.telemetry.service.FlowVisionTransientFailures;
+import org.arghyam.jalsoochak.telemetry.service.OcrTransientFailures;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -14,22 +14,22 @@ import java.nio.charset.StandardCharsets;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class FlowVisionResilienceConfigTest {
+class OcrResilienceConfigTest {
 
-    private final FlowVisionResilienceConfig config = new FlowVisionResilienceConfig();
+    private final OcrResilienceConfig config = new OcrResilienceConfig();
 
     @Test
     void retryAndCircuitBreakerUseTransientFailureClassifier() {
         RetryConfig.Builder<Object> retryBuilder = RetryConfig.custom();
         CircuitBreakerConfig.Builder circuitBreakerBuilder = CircuitBreakerConfig.custom();
 
-        config.flowVisionReadingsRetryExceptions().customize(retryBuilder);
-        config.flowVisionReadingsCircuitBreakerExceptions().customize(circuitBreakerBuilder);
+        config.ocrReadingsRetryExceptions().customize(retryBuilder);
+        config.ocrReadingsCircuitBreakerExceptions().customize(circuitBreakerBuilder);
 
         RetryConfig retryConfig = retryBuilder.build();
         CircuitBreakerConfig circuitBreakerConfig = circuitBreakerBuilder.build();
 
-        for (Class<? extends Throwable> exceptionClass : FlowVisionTransientFailures.retriableExceptions()) {
+        for (Class<? extends Throwable> exceptionClass : OcrTransientFailures.retriableExceptions()) {
             RuntimeException exception = instantiate(exceptionClass);
             assertTrue(retryConfig.getExceptionPredicate().test(exception));
             assertTrue(circuitBreakerConfig.getRecordExceptionPredicate().test(exception));

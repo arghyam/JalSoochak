@@ -139,7 +139,7 @@ security:
     # and a browser preflight already failed. See MethodGuardProperties.
     mode: ${SECURITY_METHOD_GUARD_MODE:ENFORCE}
 
-flowvision:
+ocr:
   url: ${FLOWVISION_URL:https://jalsoochak.beehyv.com/flowvision/v1/extract-reading}
   # Default OCR/AI provider id used when a tenant sets no `ocr_provider` config key. Providers are
   # pluggable per state/tenant: implement MeterReadingExtractor, register it as a bean, and point the

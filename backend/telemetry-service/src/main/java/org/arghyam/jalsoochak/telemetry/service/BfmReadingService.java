@@ -9,9 +9,10 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -46,12 +47,12 @@ import java.util.UUID;
 public class BfmReadingService {
 
     private final TelemetryTenantRepository telemetryTenantRepository;
-    private final FlowVisionService flowVisionService;
+    private final FlowVisionOcrExtractor flowVisionOcrExtractor;
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
     private final OperatorContextService operatorContextService;
-    private final FlowVisionReadingsRetryService flowVisionReadingsRetryService;
+    private final OcrReadingsRetryService ocrReadingsRetryService;
     private final ReadingChannelResolver readingChannelResolver;
     private final RolloverResolutionService rolloverResolutionService;
     private final SupplyPlausibilityGuard supplyPlausibilityGuard;
@@ -81,7 +82,7 @@ public class BfmReadingService {
                                                TelemetryOperator operator,
                                                String contactId,
                                                boolean isMeterReplaced) {
-        return createReading(request, schemaName, operator, contactId, isMeterReplaced, FlowVisionRetryMode.NONE);
+        return createReading(request, schemaName, operator, contactId, isMeterReplaced, OcrRetryMode.NONE);
     }
 
     public CreateReadingResponse createReading(CreateReadingRequest request,
@@ -89,7 +90,7 @@ public class BfmReadingService {
                                                TelemetryOperator operator,
                                                String contactId,
                                                boolean isMeterReplaced,
-                                               FlowVisionRetryMode flowVisionRetryMode) {
+                                               OcrRetryMode ocrRetryMode) {
         if (!telemetryTenantRepository.existsSchemeById(schemaName, request.getSchemeId())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "State scheme not found");
         }
@@ -111,7 +112,7 @@ public class BfmReadingService {
         if (!belongsToScheme && !lenientIngestion) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Operator does not belong to the specified scheme");
         }
-        FlowVisionResult ocrResult = null;
+        OcrReadingResult ocrResult = null;
         BigDecimal finalReading = request.getReadingValue();
         BigDecimal confidenceLevel = null;
         String message = "Reading created successfully";
@@ -124,12 +125,12 @@ public class BfmReadingService {
             try {
                 OcrProviderSettings ocrSettings =
                         ocrProviderResolver == null ? null : ocrProviderResolver.resolve(tenantId);
-                ocrResult = extractReading(request.getReadingUrl(), ocrSettings, flowVisionRetryMode);
+                ocrResult = extractReading(request.getReadingUrl(), ocrSettings, ocrRetryMode);
                 log.info("readings_glific flowvision_result operatorId={} schemeId={} imageUrlHash={} result={}",
                         operatorInRequest.id(),
                         request.getSchemeId(),
                         imageUrlHash(request.getReadingUrl()),
-                        summarizeFlowVisionResult(ocrResult));
+                        summarizeOcrResult(ocrResult));
                 if (ocrResult == null || ocrResult.getAdjustedReading() == null) {
                     String anomalyCorrelationId = buildImageAnomalyCorrelationId(
                             AnomalyConstants.TYPE_UNREADABLE_IMAGE,
@@ -174,7 +175,7 @@ public class BfmReadingService {
                         finalReading,
                         confidenceLevel,
                         sanitizeLogValue(ocrResult.getQualityStatus()));
-            } catch (FlowVisionReadingsUnavailableException ex) {
+            } catch (OcrReadingsUnavailableException ex) {
                 log.warn("FlowVision OCR temporarily unavailable for imageUrlHash={}: {}",
                         imageUrlHash(request.getReadingUrl()),
                         ex.getMessage());
@@ -231,15 +232,15 @@ public class BfmReadingService {
         boolean isValid = hasPositiveReading && hasAcceptableConfidence;
 
         String storageCorrelationId = Optional.ofNullable(ocrResult)
-                .map(FlowVisionResult::getRequestId)
+                .map(OcrReadingResult::getRequestId)
                 .filter(value -> !value.isBlank())
                 .orElse(UUID.randomUUID().toString());
         String responseCorrelationId = Optional.ofNullable(ocrResult)
-                .map(FlowVisionResult::getCorrelationId)
+                .map(OcrReadingResult::getCorrelationId)
                 .filter(value -> !value.isBlank())
                 .orElse(storageCorrelationId);
         String flowVisionCorrelationId = Optional.ofNullable(ocrResult)
-                .map(FlowVisionResult::getCorrelationId)
+                .map(OcrReadingResult::getCorrelationId)
                 .filter(value -> !value.isBlank())
                 .orElse(null);
         LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(ReadingTime.now());
@@ -738,7 +739,7 @@ public class BfmReadingService {
     private Optional<RolloverResolutionService.ResolvedReading> resolveRolloverIfApplicable(
             String schemaName,
             CreateReadingRequest request,
-            FlowVisionResult ocrResult,
+            OcrReadingResult ocrResult,
             boolean isMeterReplaced,
             Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt) {
         if (!rolloverResolutionService.isEnabled()
@@ -765,17 +766,17 @@ public class BfmReadingService {
      * OCR override and the built-in FlowVision path is used unchanged; otherwise the resolved provider is
      * dispatched via {@link OcrProviderRegistry}. Honours the resilient (retry/circuit-breaker) path.
      */
-    private FlowVisionResult extractReading(String readingUrl, OcrProviderSettings settings, FlowVisionRetryMode flowVisionRetryMode) {
-        if (flowVisionRetryMode == FlowVisionRetryMode.RESILIENT && flowVisionReadingsRetryService != null) {
+    private OcrReadingResult extractReading(String readingUrl, OcrProviderSettings settings, OcrRetryMode ocrRetryMode) {
+        if (ocrRetryMode == OcrRetryMode.RESILIENT && ocrReadingsRetryService != null) {
             return settings == null
-                    ? flowVisionReadingsRetryService.extractReading(readingUrl)
-                    : flowVisionReadingsRetryService.extractReading(readingUrl, settings);
+                    ? ocrReadingsRetryService.extractReading(readingUrl)
+                    : ocrReadingsRetryService.extractReading(readingUrl, settings);
         }
-        if (flowVisionRetryMode == FlowVisionRetryMode.RESILIENT) {
+        if (ocrRetryMode == OcrRetryMode.RESILIENT) {
             log.warn("FlowVision readings retry service is not available; using direct OCR path");
         }
         if (settings == null) {
-            return flowVisionService.extractReading(readingUrl);
+            return flowVisionOcrExtractor.extractReading(readingUrl);
         }
         return ocrProviderRegistry.get(settings.providerId()).extractReading(readingUrl, settings);
     }
@@ -1498,7 +1499,7 @@ public class BfmReadingService {
                 .build();
     }
 
-    private String summarizeFlowVisionResult(FlowVisionResult result) {
+    private String summarizeOcrResult(OcrReadingResult result) {
         if (result == null) {
             return "null";
         }
@@ -1511,9 +1512,9 @@ public class BfmReadingService {
         );
     }
 
-    private String unreadableImageMessage(FlowVisionResult result) {
+    private String unreadableImageMessage(OcrReadingResult result) {
         String rejectionReason = Optional.ofNullable(result)
-                .map(FlowVisionResult::getRejectionReason)
+                .map(OcrReadingResult::getRejectionReason)
                 .filter(reason -> !reason.isBlank())
                 .orElse(null);
         if (rejectionReason == null) {

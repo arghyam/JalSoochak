@@ -25,8 +25,8 @@ public class RestTemplateConfig {
     private final int readTimeoutMs;
 
     public RestTemplateConfig(
-            @Value("${flowvision.http.connect-timeout-ms:5000}") int connectTimeoutMs,
-            @Value("${flowvision.http.read-timeout-ms:10000}") int readTimeoutMs
+            @Value("${ocr.http.connect-timeout-ms:5000}") int connectTimeoutMs,
+            @Value("${ocr.http.read-timeout-ms:10000}") int readTimeoutMs
     ) {
         this.connectTimeoutMs = connectTimeoutMs;
         this.readTimeoutMs = readTimeoutMs;

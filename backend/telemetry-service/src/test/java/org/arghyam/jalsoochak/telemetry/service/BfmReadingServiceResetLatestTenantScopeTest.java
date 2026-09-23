@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -60,7 +61,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private FlowVisionService flowVisionService;
+    private FlowVisionOcrExtractor flowVisionOcrExtractor;
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
@@ -72,7 +73,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
     private OperatorContextService operatorContextService;
 
     @Mock
-    private FlowVisionReadingsRetryService flowVisionReadingsRetryService;
+    private OcrReadingsRetryService ocrReadingsRetryService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();

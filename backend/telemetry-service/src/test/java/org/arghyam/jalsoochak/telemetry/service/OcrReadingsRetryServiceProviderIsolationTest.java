@@ -7,7 +7,8 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryConfig;
 import io.github.resilience4j.retry.RetryRegistry;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
+import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.ResourceAccessException;
 
@@ -29,19 +30,19 @@ import static org.mockito.Mockito.when;
  * A failing OCR provider must trip only its own circuit breaker; the built-in default provider (and any
  * other provider) keeps working. This is the payoff of per-provider resilience isolation.
  */
-class FlowVisionReadingsRetryServiceProviderIsolationTest {
+class OcrReadingsRetryServiceProviderIsolationTest {
 
     private static final String URL = "https://img.example.com/a.jpg";
 
     @Test
     void failingProviderTripsOnlyItsOwnBreakerAndDefaultKeepsWorking() {
         // Default provider always succeeds.
-        FlowVisionResult ok = FlowVisionResult.builder()
+        OcrReadingResult ok = OcrReadingResult.builder()
                 .adjustedReading(new BigDecimal("100"))
                 .qualityStatus("GOOD")
                 .build();
-        FlowVisionService flowVisionService = mock(FlowVisionService.class);
-        when(flowVisionService.extractReadingOrThrow(anyString())).thenReturn(ok);
+        FlowVisionOcrExtractor flowVisionOcrExtractor = mock(FlowVisionOcrExtractor.class);
+        when(flowVisionOcrExtractor.extractReadingOrThrow(anyString())).thenReturn(ok);
 
         // Provider "vision-x" always fails with a transient (recorded) error.
         MeterReadingExtractor visionX = mock(MeterReadingExtractor.class);
@@ -59,15 +60,15 @@ class FlowVisionReadingsRetryServiceProviderIsolationTest {
                 .failureRateThreshold(50f)
                 .waitDurationInOpenState(Duration.ofSeconds(60))
                 .automaticTransitionFromOpenToHalfOpenEnabled(false)
-                .recordExceptions(FlowVisionTransientFailures.retriableExceptions())
+                .recordExceptions(OcrTransientFailures.retriableExceptions())
                 .build();
         RetryConfig retryConfig = RetryConfig.custom()
                 .maxAttempts(1)
-                .retryExceptions(FlowVisionTransientFailures.retriableExceptions())
+                .retryExceptions(OcrTransientFailures.retriableExceptions())
                 .build();
 
-        FlowVisionReadingsRetryService service = new FlowVisionReadingsRetryService(
-                flowVisionService,
+        OcrReadingsRetryService service = new OcrReadingsRetryService(
+                flowVisionOcrExtractor,
                 providerRegistry,
                 RetryRegistry.of(retryConfig),
                 CircuitBreakerRegistry.of(cbConfig),
@@ -77,12 +78,12 @@ class FlowVisionReadingsRetryServiceProviderIsolationTest {
                 new OcrProviderSettings("vision-x", "https://vision-x/extract", "k", "Authorization");
 
         // Two real failures open vision-x's breaker.
-        assertThrows(FlowVisionReadingsUnavailableException.class, () -> service.extractReading(URL, visionXSettings));
-        assertThrows(FlowVisionReadingsUnavailableException.class, () -> service.extractReading(URL, visionXSettings));
+        assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(URL, visionXSettings));
+        assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(URL, visionXSettings));
         verify(visionX, times(2)).extractReadingOrThrow(anyString(), any(OcrProviderSettings.class));
 
         // Breaker now OPEN: the next call short-circuits without invoking the extractor.
-        assertThrows(FlowVisionReadingsUnavailableException.class, () -> service.extractReading(URL, visionXSettings));
+        assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(URL, visionXSettings));
         verify(visionX, times(2)).extractReadingOrThrow(anyString(), any(OcrProviderSettings.class));
 
         // The default provider's breaker is unaffected — it still succeeds.
@@ -92,13 +93,13 @@ class FlowVisionReadingsRetryServiceProviderIsolationTest {
     @Test
     void defaultProviderUsesTheSharedTunedInstance() {
         // Sanity: null settings resolve the shared "flowvisionReadings" breaker, not a per-provider one.
-        FlowVisionService flowVisionService = mock(FlowVisionService.class);
-        FlowVisionResult ok = FlowVisionResult.builder().adjustedReading(new BigDecimal("1")).build();
-        when(flowVisionService.extractReadingOrThrow(anyString())).thenReturn(ok);
+        FlowVisionOcrExtractor flowVisionOcrExtractor = mock(FlowVisionOcrExtractor.class);
+        OcrReadingResult ok = OcrReadingResult.builder().adjustedReading(new BigDecimal("1")).build();
+        when(flowVisionOcrExtractor.extractReadingOrThrow(anyString())).thenReturn(ok);
 
         CircuitBreakerRegistry cbRegistry = CircuitBreakerRegistry.ofDefaults();
-        FlowVisionReadingsRetryService service = new FlowVisionReadingsRetryService(
-                flowVisionService,
+        OcrReadingsRetryService service = new OcrReadingsRetryService(
+                flowVisionOcrExtractor,
                 new OcrProviderRegistry(List.of(), "flowvision"),
                 RetryRegistry.ofDefaults(),
                 cbRegistry,
@@ -106,7 +107,7 @@ class FlowVisionReadingsRetryServiceProviderIsolationTest {
 
         service.extractReading(URL);
 
-        CircuitBreaker defaultBreaker = cbRegistry.circuitBreaker(FlowVisionReadingsRetryService.INSTANCE_NAME);
+        CircuitBreaker defaultBreaker = cbRegistry.circuitBreaker(OcrReadingsRetryService.INSTANCE_NAME);
         assertEquals(1, defaultBreaker.getMetrics().getNumberOfSuccessfulCalls());
     }
 
@@ -120,12 +121,12 @@ class FlowVisionReadingsRetryServiceProviderIsolationTest {
         OcrProviderRegistry registry = new OcrProviderRegistry(List.of(flowvision), "flowvision");
 
         CircuitBreakerRegistry cbRegistry = CircuitBreakerRegistry.ofDefaults();
-        FlowVisionReadingsRetryService service = new FlowVisionReadingsRetryService(
-                mock(FlowVisionService.class),
+        OcrReadingsRetryService service = new OcrReadingsRetryService(
+                mock(FlowVisionOcrExtractor.class),
                 registry,
                 RetryRegistry.of(RetryConfig.custom()
                         .maxAttempts(1)
-                        .retryExceptions(FlowVisionTransientFailures.retriableExceptions())
+                        .retryExceptions(OcrTransientFailures.retriableExceptions())
                         .build()),
                 cbRegistry,
                 BulkheadRegistry.ofDefaults());
@@ -133,12 +134,12 @@ class FlowVisionReadingsRetryServiceProviderIsolationTest {
         // A mis-typed provider id degrades to FlowVision in the registry.
         OcrProviderSettings unknown =
                 new OcrProviderSettings("typo-provider", "https://custom/extract", "k", "Authorization");
-        assertThrows(FlowVisionReadingsUnavailableException.class, () -> service.extractReading(URL, unknown));
+        assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(URL, unknown));
 
         // Failure is recorded on the shared default breaker; no phantom per-provider instance is created.
-        assertEquals(1, cbRegistry.circuitBreaker(FlowVisionReadingsRetryService.INSTANCE_NAME)
+        assertEquals(1, cbRegistry.circuitBreaker(OcrReadingsRetryService.INSTANCE_NAME)
                 .getMetrics().getNumberOfFailedCalls());
-        assertTrue(cbRegistry.find(FlowVisionReadingsRetryService.PROVIDER_INSTANCE_PREFIX + "typo-provider").isEmpty(),
+        assertTrue(cbRegistry.find(OcrReadingsRetryService.PROVIDER_INSTANCE_PREFIX + "typo-provider").isEmpty(),
                 "unknown provider must not spawn a phantom resilience instance");
     }
 }

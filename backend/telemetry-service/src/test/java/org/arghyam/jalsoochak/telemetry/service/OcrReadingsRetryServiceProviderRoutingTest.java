@@ -3,7 +3,8 @@ package org.arghyam.jalsoochak.telemetry.service;
 import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryRegistry;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
+import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -21,11 +22,11 @@ import static org.mockito.Mockito.when;
  * The resilient path must dispatch to the tenant-resolved provider (not the built-in FlowVision service)
  * when {@link OcrProviderSettings} are supplied.
  */
-class FlowVisionReadingsRetryServiceProviderRoutingTest {
+class OcrReadingsRetryServiceProviderRoutingTest {
 
     @Test
     void routesToResolvedProviderWhenSettingsSupplied() {
-        FlowVisionResult expected = FlowVisionResult.builder()
+        OcrReadingResult expected = OcrReadingResult.builder()
                 .adjustedReading(new BigDecimal("42"))
                 .qualityStatus("GOOD")
                 .build();
@@ -34,11 +35,11 @@ class FlowVisionReadingsRetryServiceProviderRoutingTest {
         when(visionX.providerId()).thenReturn("vision-x");
         when(visionX.extractReadingOrThrow(eq("https://img"), any(OcrProviderSettings.class))).thenReturn(expected);
 
-        FlowVisionService flowVisionService = mock(FlowVisionService.class);
+        FlowVisionOcrExtractor flowVisionOcrExtractor = mock(FlowVisionOcrExtractor.class);
         OcrProviderRegistry registry = new OcrProviderRegistry(List.of(visionX), "flowvision");
 
-        FlowVisionReadingsRetryService service = new FlowVisionReadingsRetryService(
-                flowVisionService,
+        OcrReadingsRetryService service = new OcrReadingsRetryService(
+                flowVisionOcrExtractor,
                 registry,
                 RetryRegistry.ofDefaults(),
                 CircuitBreakerRegistry.ofDefaults(),
@@ -47,10 +48,10 @@ class FlowVisionReadingsRetryServiceProviderRoutingTest {
         OcrProviderSettings settings =
                 new OcrProviderSettings("vision-x", "https://vision-x/extract", "key", "Authorization");
 
-        FlowVisionResult actual = service.extractReading("https://img", settings);
+        OcrReadingResult actual = service.extractReading("https://img", settings);
 
         assertSame(expected, actual);
         verify(visionX).extractReadingOrThrow("https://img", settings);
-        verifyNoInteractions(flowVisionService);
+        verifyNoInteractions(flowVisionOcrExtractor);
     }
 }

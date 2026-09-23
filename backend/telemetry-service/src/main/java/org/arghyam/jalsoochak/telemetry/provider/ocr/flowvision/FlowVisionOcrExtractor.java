@@ -1,9 +1,12 @@
-package org.arghyam.jalsoochak.telemetry.service;
+package org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.RolloverPosition;
+import org.arghyam.jalsoochak.telemetry.service.MeterReadingExtractor;
+import org.arghyam.jalsoochak.telemetry.service.OcrProviderSettings;
+import org.arghyam.jalsoochak.telemetry.service.OcrTransientFailures;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,7 +26,7 @@ import java.util.UUID;
 
 @Service
 @Slf4j
-public class FlowVisionService implements MeterReadingExtractor {
+public class FlowVisionOcrExtractor implements MeterReadingExtractor {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -32,11 +35,11 @@ public class FlowVisionService implements MeterReadingExtractor {
     private final OcrProviderSettings defaultSettings;
 
     @Autowired
-    public FlowVisionService(
+    public FlowVisionOcrExtractor(
             RestTemplate restTemplate,
-            @Value("${flowvision.url}") String flowVisionUrl,
-            @Value("${flowvision.api-key:}") String apiKey,
-            @Value("${flowvision.auth-header:" + OcrProviderSettings.DEFAULT_AUTH_HEADER + "}") String authHeader
+            @Value("${ocr.url}") String flowVisionUrl,
+            @Value("${ocr.api-key:}") String apiKey,
+            @Value("${ocr.auth-header:" + OcrProviderSettings.DEFAULT_AUTH_HEADER + "}") String authHeader
     ) {
         this.restTemplate = restTemplate;
         this.defaultSettings = new OcrProviderSettings(
@@ -47,7 +50,7 @@ public class FlowVisionService implements MeterReadingExtractor {
     }
 
     /** Convenience constructor (no auth) retained for unit tests that stub the endpoint directly. */
-    public FlowVisionService(RestTemplate restTemplate, String flowVisionUrl) {
+    public FlowVisionOcrExtractor(RestTemplate restTemplate, String flowVisionUrl) {
         this(restTemplate, flowVisionUrl, null, OcrProviderSettings.DEFAULT_AUTH_HEADER);
     }
 
@@ -57,17 +60,17 @@ public class FlowVisionService implements MeterReadingExtractor {
     }
 
     /** Extracts a reading against the global-default FlowVision endpoint (backwards-compatible entry point). */
-    public FlowVisionResult extractReading(String readingUrl) {
+    public OcrReadingResult extractReading(String readingUrl) {
         return extractReading(readingUrl, defaultSettings);
     }
 
     /** Throwing variant against the global-default endpoint (backwards-compatible entry point). */
-    public FlowVisionResult extractReadingOrThrow(String readingUrl) {
+    public OcrReadingResult extractReadingOrThrow(String readingUrl) {
         return extractReadingOrThrow(readingUrl, defaultSettings);
     }
 
     @Override
-    public FlowVisionResult extractReading(String readingUrl, OcrProviderSettings settings) {
+    public OcrReadingResult extractReading(String readingUrl, OcrProviderSettings settings) {
         OcrProviderSettings effective = settings == null ? defaultSettings : settings;
         String requestId = UUID.randomUUID().toString();
 
@@ -85,13 +88,13 @@ public class FlowVisionService implements MeterReadingExtractor {
     }
 
     @Override
-    public FlowVisionResult extractReadingOrThrow(String readingUrl, OcrProviderSettings settings) {
+    public OcrReadingResult extractReadingOrThrow(String readingUrl, OcrProviderSettings settings) {
         OcrProviderSettings effective = settings == null ? defaultSettings : settings;
         String requestId = UUID.randomUUID().toString();
         try {
             return requestFlowVisionReading(readingUrl, requestId, effective);
         } catch (RestClientResponseException ex) {
-            if (FlowVisionTransientFailures.isServiceUnavailable(ex)) {
+            if (OcrTransientFailures.isServiceUnavailable(ex)) {
                 // Let the retry mechanism handle transient FlowVision failures.
                 throw ex;
             }
@@ -100,7 +103,7 @@ public class FlowVisionService implements MeterReadingExtractor {
         // Transient failures such as ResourceAccessException propagate for retry.
     }
 
-    private FlowVisionResult requestFlowVisionReading(String readingUrl, String requestId, OcrProviderSettings settings) {
+    private OcrReadingResult requestFlowVisionReading(String readingUrl, String requestId, OcrProviderSettings settings) {
         Map<String, String> payload = new HashMap<>();
         payload.put("id", requestId);
         payload.put("imageURL", readingUrl);
@@ -151,7 +154,7 @@ public class FlowVisionService implements MeterReadingExtractor {
         if (resultMap == null || !"SUCCESS".equals(resultMap.get("status"))) {
             log.warn("FlowVision OCR not successful: {}", resultMap);
             String responseRequestId = extractRequestId(responseBody, resultMap, requestId);
-            return FlowVisionResult.builder()
+            return OcrReadingResult.builder()
                     .rejectionReason(extractRejectionReason(resultMap))
                     .requestId(responseRequestId)
                     .correlationId(extractCorrelationId(resultMap))
@@ -187,7 +190,7 @@ public class FlowVisionService implements MeterReadingExtractor {
         String responseRequestId = extractRequestId(responseBody, resultMap, requestId);
 
         List<RolloverPosition> rolloverPositions = parseRolloverPositions(dataMap);
-        FlowVisionResult result = FlowVisionResult.builder()
+        OcrReadingResult result = OcrReadingResult.builder()
                 .adjustedReading(adjustedReading)
                 .rawMeterReading(extractRawMeterReading(dataMap))
                 .redLastDigit(isRedLastDigit(dataMap))
@@ -205,14 +208,14 @@ public class FlowVisionService implements MeterReadingExtractor {
         return result;
     }
 
-    private FlowVisionResult handleFlowVisionErrorResponse(RestClientResponseException ex, String readingUrl, String requestId) {
+    private OcrReadingResult handleFlowVisionErrorResponse(RestClientResponseException ex, String readingUrl, String requestId) {
         String errorMsg = extractFlowVisionErrorMsg(ex.getResponseBodyAsString());
         if (errorMsg != null) {
             log.warn("FlowVision OCR rejected imageUrlHash={} status={} errorMsg={}",
                     imageUrlHash(readingUrl),
                     ex.getStatusCode(),
                     sanitizeLogValue(errorMsg));
-            return FlowVisionResult.builder()
+            return OcrReadingResult.builder()
                     .rejectionReason(errorMsg)
                     .requestId(requestId)
                     .qualityStatus("REJECTED")
@@ -389,7 +392,7 @@ public class FlowVisionService implements MeterReadingExtractor {
         }
     }
 
-    private String summarizeFlowVisionResult(FlowVisionResult result) {
+    private String summarizeFlowVisionResult(OcrReadingResult result) {
         if (result == null) {
             return "null";
         }
@@ -465,9 +468,9 @@ public class FlowVisionService implements MeterReadingExtractor {
         return null;
     }
 
-    private FlowVisionResult rejectedFlowVisionResult(Map<String, Object> responseBody, String requestId) {
+    private OcrReadingResult rejectedFlowVisionResult(Map<String, Object> responseBody, String requestId) {
         String errorMsg = extractFlowVisionErrorMsg(responseBody);
-        return FlowVisionResult.builder()
+        return OcrReadingResult.builder()
                 .rejectionReason(errorMsg)
                 .requestId(extractRequestId(responseBody, null, requestId))
                 .qualityStatus("REJECTED")

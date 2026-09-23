@@ -96,7 +96,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -116,7 +116,7 @@ class MeterImageWorkflowServiceAssamTest {
                 any(),
                 anyString(),
                 anyBoolean(),
-                eq(FlowVisionRetryMode.RESILIENT)
+                eq(OcrRetryMode.RESILIENT)
         );
     }
 
@@ -141,7 +141,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -161,7 +161,7 @@ class MeterImageWorkflowServiceAssamTest {
                 any(),
                 anyString(),
                 anyBoolean(),
-                eq(FlowVisionRetryMode.RESILIENT)
+                eq(OcrRetryMode.RESILIENT)
         );
     }
 
@@ -190,7 +190,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
                 .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -232,7 +232,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
                 .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -279,7 +279,7 @@ class MeterImageWorkflowServiceAssamTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.getOrCreatePlaceholderScheme("tenant_assam", "99999999", "88888888"))
                 .thenReturn(55555L);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -321,14 +321,14 @@ class MeterImageWorkflowServiceAssamTest {
                 .thenReturn(Optional.of(30244993L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(),
-                anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+                anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder().success(true).qualityStatus("CONFIRMED").build());
 
         service.processAssamReading(request, 22);
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
         verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(),
-                anyBoolean(), any(FlowVisionRetryMode.class));
+                anyBoolean(), any(OcrRetryMode.class));
 
         assertEquals(true, requestCaptor.getValue().isSupplyPlausibilityChecked());
     }
@@ -370,7 +370,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
                 .thenReturn(Optional.of(30244993L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -390,7 +390,7 @@ class MeterImageWorkflowServiceAssamTest {
                 any(),
                 anyString(),
                 anyBoolean(),
-                eq(FlowVisionRetryMode.RESILIENT)
+                eq(OcrRetryMode.RESILIENT)
         );
         assertEquals(30244993L, requestCaptor.getValue().getSchemeId());
         assertEquals(new BigDecimal("123.4"), requestCaptor.getValue().getReadingValue());
@@ -430,7 +430,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
                 .thenReturn(Optional.of(30244993L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder().success(true).correlationId("corr-2").build());
 
         service.processAssamReading(request, 22);
@@ -503,7 +503,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
                 .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -517,7 +517,7 @@ class MeterImageWorkflowServiceAssamTest {
         assertEquals(true, response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class));
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class));
         assertNull(requestCaptor.getValue().getReadingUrl());
         assertEquals(new BigDecimal("123.4"), requestCaptor.getValue().getReadingValue());
     }
@@ -546,7 +546,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
                 .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -560,7 +560,7 @@ class MeterImageWorkflowServiceAssamTest {
         assertEquals(true, response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class));
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class));
         assertNull(requestCaptor.getValue().getReadingTime());
     }
 
@@ -593,7 +593,7 @@ class MeterImageWorkflowServiceAssamTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.getOrCreatePlaceholderScheme("tenant_assam", "99999999", "88888888"))
                 .thenReturn(55555L);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -615,7 +615,7 @@ class MeterImageWorkflowServiceAssamTest {
         assertTrue(response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class));
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class));
         CreateReadingRequest captured = requestCaptor.getValue();
         assertEquals(55555L, captured.getSchemeId());
         assertNotNull(captured.getIngestionSource());
@@ -656,7 +656,7 @@ class MeterImageWorkflowServiceAssamTest {
                 .thenReturn(false);
         when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
                 .thenReturn(Optional.empty());
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -678,7 +678,7 @@ class MeterImageWorkflowServiceAssamTest {
         assertTrue(response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class));
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class));
         CreateReadingRequest captured = requestCaptor.getValue();
         assertEquals(30178236L, captured.getSchemeId());
         assertNotNull(captured.getIngestionSource());
@@ -719,7 +719,7 @@ class MeterImageWorkflowServiceAssamTest {
                 .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 999L, 30178236L))
                 .thenReturn(false);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -749,7 +749,7 @@ class MeterImageWorkflowServiceAssamTest {
         assertTrue(response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class));
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class));
         CreateReadingRequest captured = requestCaptor.getValue();
         assertTrue((captured.getIngestionSource() & IngestionSource.UNKNOWN_OPERATOR) != 0,
                 "Reading should be tagged UNKNOWN_OPERATOR");
@@ -830,7 +830,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
                 .thenReturn("Reading created successfully");
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), nullable(String.class), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -857,7 +857,7 @@ class MeterImageWorkflowServiceAssamTest {
                 eq(pumpOperator),
                 eq("919876543210"),
                 anyBoolean(),
-                eq(FlowVisionRetryMode.RESILIENT));
+                eq(OcrRetryMode.RESILIENT));
         CreateReadingRequest captured = requestCaptor.getValue();
         assertEquals(30178236L, captured.getSchemeId());
         assertEquals(11L, captured.getOperatorId());
@@ -892,7 +892,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
                 .thenReturn("Reading created successfully");
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), nullable(String.class), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -906,7 +906,7 @@ class MeterImageWorkflowServiceAssamTest {
         assertTrue(response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class));
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), nullable(String.class), anyBoolean(), any(OcrRetryMode.class));
         assertEquals(IngestionSource.PHONE_ABSENT, requestCaptor.getValue().getIngestionSource());
         // The blank phone must never be resolved as a contact.
         verify(operatorContextService, never()).tryResolveOperatorWithSchema(anyString(), any());
@@ -939,7 +939,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
                 .thenReturn("Reading created successfully");
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), nullable(String.class), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -959,7 +959,7 @@ class MeterImageWorkflowServiceAssamTest {
         assertTrue(response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class));
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), nullable(String.class), anyBoolean(), any(OcrRetryMode.class));
         CreateReadingRequest captured = requestCaptor.getValue();
         assertEquals(999L, captured.getOperatorId());
         assertEquals(IngestionSource.PHONE_ABSENT | IngestionSource.UNKNOWN_OPERATOR, captured.getIngestionSource());
@@ -1000,7 +1000,7 @@ class MeterImageWorkflowServiceAssamTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
                 .thenReturn("Reading created successfully");
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class)))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), nullable(String.class), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -1014,7 +1014,7 @@ class MeterImageWorkflowServiceAssamTest {
         assertTrue(response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class));
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), nullable(String.class), anyBoolean(), any(OcrRetryMode.class));
         CreateReadingRequest captured = requestCaptor.getValue();
         assertEquals(55555L, captured.getSchemeId());
         assertEquals(
@@ -1053,7 +1053,7 @@ class MeterImageWorkflowServiceAssamTest {
         assertEquals("REJECTED", response.getQualityStatus());
         assertEquals(TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME, response.getErrorCode());
         verify(telemetryTenantRepository, never()).getOrCreateUnknownOperatorUserId(anyString(), any());
-        verify(bfmReadingService, never()).createReading(any(), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class));
+        verify(bfmReadingService, never()).createReading(any(), anyString(), any(), nullable(String.class), anyBoolean(), any(OcrRetryMode.class));
     }
 
     @Test
@@ -1179,14 +1179,14 @@ class MeterImageWorkflowServiceAssamTest {
                 .thenReturn(Optional.of(30244993L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(),
-                anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+                anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder().success(true).qualityStatus("CONFIRMED").build());
     }
 
     private CreateReadingRequest capturedCreateReadingRequest() {
         ArgumentCaptor<CreateReadingRequest> captor = ArgumentCaptor.forClass(CreateReadingRequest.class);
         verify(bfmReadingService).createReading(captor.capture(), anyString(), any(), anyString(),
-                anyBoolean(), any(FlowVisionRetryMode.class));
+                anyBoolean(), any(OcrRetryMode.class));
         return captor.getValue();
     }
 }

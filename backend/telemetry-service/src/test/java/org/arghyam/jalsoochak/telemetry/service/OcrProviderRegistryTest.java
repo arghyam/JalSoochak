@@ -1,6 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -23,12 +23,12 @@ class OcrProviderRegistryTest {
         }
 
         @Override
-        public FlowVisionResult extractReading(String imageUrl, OcrProviderSettings settings) {
+        public OcrReadingResult extractReading(String imageUrl, OcrProviderSettings settings) {
             return null;
         }
 
         @Override
-        public FlowVisionResult extractReadingOrThrow(String imageUrl, OcrProviderSettings settings) {
+        public OcrReadingResult extractReadingOrThrow(String imageUrl, OcrProviderSettings settings) {
             return null;
         }
     }

@@ -1,6 +1,7 @@
-package org.arghyam.jalsoochak.telemetry.service;
+package org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision;
 
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
+import org.arghyam.jalsoochak.telemetry.service.OcrProviderSettings;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpEntity;
@@ -26,7 +27,7 @@ import static org.mockito.Mockito.when;
  * Verifies the pluggable per-tenant behaviour of the built-in FlowVision extractor: the resolved
  * {@link OcrProviderSettings} decide the endpoint hit and the auth header sent.
  */
-class FlowVisionServiceProviderSettingsTest {
+class FlowVisionOcrExtractorProviderSettingsTest {
 
     private static final String DEFAULT_URL = "https://default/extract";
 
@@ -36,11 +37,11 @@ class FlowVisionServiceProviderSettingsTest {
         when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
                 .thenReturn(successResponse());
 
-        FlowVisionService service = new FlowVisionService(restTemplate, DEFAULT_URL);
+        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, DEFAULT_URL);
         OcrProviderSettings settings =
                 new OcrProviderSettings("vision-x", "https://vision-x/extract", "secret-token", "X-Api-Key");
 
-        FlowVisionResult result = service.extractReading("https://img", settings);
+        OcrReadingResult result = service.extractReading("https://img", settings);
 
         assertNotNull(result);
         ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
@@ -57,7 +58,7 @@ class FlowVisionServiceProviderSettingsTest {
         when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
                 .thenReturn(successResponse());
 
-        FlowVisionService service = new FlowVisionService(restTemplate, DEFAULT_URL);
+        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, DEFAULT_URL);
 
         service.extractReading("https://img");
 

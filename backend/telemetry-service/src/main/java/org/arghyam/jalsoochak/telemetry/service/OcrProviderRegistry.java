@@ -14,7 +14,7 @@ import java.util.Map;
  *
  * <p>All extractor beans are collected at startup and indexed by {@link MeterReadingExtractor#providerId()}
  * (case-insensitively). An unknown / unconfigured provider falls back to the configured default
- * ({@code flowvision.default-provider}, default {@code flowvision}) so a mis-typed tenant config can never
+ * ({@code ocr.default-provider}, default {@code flowvision}) so a mis-typed tenant config can never
  * drop a reading — it degrades to the built-in provider with a warning.
  */
 @Component
@@ -25,7 +25,7 @@ public class OcrProviderRegistry {
     private final String defaultProviderId;
 
     public OcrProviderRegistry(List<MeterReadingExtractor> extractors,
-                               @Value("${flowvision.default-provider:" + OcrProviderSettings.DEFAULT_PROVIDER_ID + "}")
+                               @Value("${ocr.default-provider:" + OcrProviderSettings.DEFAULT_PROVIDER_ID + "}")
                                String defaultProviderId) {
         Map<String, MeterReadingExtractor> byId = new HashMap<>();
         for (MeterReadingExtractor extractor : extractors) {

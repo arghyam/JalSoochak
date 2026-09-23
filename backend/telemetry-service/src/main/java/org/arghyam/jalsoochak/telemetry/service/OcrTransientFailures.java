@@ -6,11 +6,11 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
-public final class FlowVisionTransientFailures {
+public final class OcrTransientFailures {
 
     private static final Class<? extends Throwable>[] RETRIABLE_EXCEPTIONS = buildRetriableExceptions();
 
-    private FlowVisionTransientFailures() {
+    private OcrTransientFailures() {
     }
 
     public static boolean isServiceUnavailable(Throwable throwable) {

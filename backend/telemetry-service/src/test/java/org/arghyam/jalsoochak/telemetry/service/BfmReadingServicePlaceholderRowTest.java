@@ -6,8 +6,9 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
@@ -46,7 +47,7 @@ class BfmReadingServicePlaceholderRowTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private FlowVisionService flowVisionService;
+    private FlowVisionOcrExtractor flowVisionOcrExtractor;
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
@@ -58,7 +59,7 @@ class BfmReadingServicePlaceholderRowTest {
     private OperatorContextService operatorContextService;
 
     @Mock
-    private FlowVisionReadingsRetryService flowVisionReadingsRetryService;
+    private OcrReadingsRetryService ocrReadingsRetryService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -97,8 +98,8 @@ class BfmReadingServicePlaceholderRowTest {
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
-        when(flowVisionService.extractReading("http://example.com/img.jpg")).thenReturn(
-                FlowVisionResult.builder()
+        when(flowVisionOcrExtractor.extractReading("http://example.com/img.jpg")).thenReturn(
+                OcrReadingResult.builder()
                         .requestId("request-1")
                         .correlationId("corr-1")
                         .qualityStatus("GOOD")
@@ -158,8 +159,8 @@ class BfmReadingServicePlaceholderRowTest {
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
-        when(flowVisionReadingsRetryService.extractReading("http://example.com/img.jpg"))
-                .thenThrow(new FlowVisionReadingsUnavailableException("temporarily unavailable", new RuntimeException("timeout")));
+        when(ocrReadingsRetryService.extractReading("http://example.com/img.jpg"))
+                .thenThrow(new OcrReadingsUnavailableException("temporarily unavailable", new RuntimeException("timeout")));
 
         CreateReadingResponse resp = service.createReading(
                 request,
@@ -167,7 +168,7 @@ class BfmReadingServicePlaceholderRowTest {
                 operator,
                 "919999999999",
                 false,
-                FlowVisionRetryMode.RESILIENT
+                OcrRetryMode.RESILIENT
         );
 
         assertNotNull(resp);
