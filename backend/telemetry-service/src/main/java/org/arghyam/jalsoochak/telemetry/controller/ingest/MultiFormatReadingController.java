@@ -11,7 +11,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapperRegistry;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,16 +50,16 @@ public class MultiFormatReadingController {
 
     private final ReadingRequestMapperRegistry mapperRegistry;
     private final TelemetryApiKeyService telemetryApiKeyService;
-    private final GlificWebhookService glificWebhookService;
+    private final GlificImageWorkflowService imageWorkflowService;
     private final Validator validator;
 
     public MultiFormatReadingController(ReadingRequestMapperRegistry mapperRegistry,
                                         TelemetryApiKeyService telemetryApiKeyService,
-                                        GlificWebhookService glificWebhookService,
+                                        GlificImageWorkflowService imageWorkflowService,
                                         Validator validator) {
         this.mapperRegistry = mapperRegistry;
         this.telemetryApiKeyService = telemetryApiKeyService;
-        this.glificWebhookService = glificWebhookService;
+        this.imageWorkflowService = imageWorkflowService;
         this.validator = validator;
     }
 
@@ -130,7 +130,7 @@ public class MultiFormatReadingController {
         }
 
         try {
-            CreateReadingResponse response = glificWebhookService.processAssamReading(request, tenantId);
+            CreateReadingResponse response = imageWorkflowService.processAssamReading(request, tenantId);
             boolean retry = response != null
                     && !response.isSuccess()
                     && "RETRY".equalsIgnoreCase(response.getQualityStatus());

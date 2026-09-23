@@ -5,7 +5,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.TriggerWelcomeMessageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.ClosingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificMessageService;
 import org.arghyam.jalsoochak.telemetry.service.WelcomeMessageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -37,7 +37,7 @@ class ConversationWebhookControllerTest {
     private static final RuntimeException BOOM = new IllegalStateException("downstream failure");
 
     @Mock
-    private GlificWebhookService glificWebhookService;
+    private GlificMessageService messageService;
     @Mock
     private WelcomeMessageService welcomeMessageService;
 
@@ -47,7 +47,7 @@ class ConversationWebhookControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new ConversationWebhookController(glificWebhookService, welcomeMessageService);
+        controller = new ConversationWebhookController(messageService, welcomeMessageService);
     }
 
     private static IntroRequest introRequest() {
@@ -62,14 +62,14 @@ class ConversationWebhookControllerTest {
 
         @Test
         void introReturnsTheServiceResponse() {
-            when(glificWebhookService.introMessage(any())).thenReturn(okIntro);
+            when(messageService.introMessage(any())).thenReturn(okIntro);
 
             assertThat(controller.sendIntro(introRequest()).getBody()).isSameAs(okIntro);
         }
 
         @Test
         void introFallsBackOnFailure() {
-            when(glificWebhookService.introMessage(any())).thenThrow(BOOM);
+            when(messageService.introMessage(any())).thenThrow(BOOM);
 
             var response = controller.sendIntro(introRequest());
 
@@ -81,7 +81,7 @@ class ConversationWebhookControllerTest {
         @Test
         void closingReturnsTheServiceResponse() {
             ClosingResponse ok = ClosingResponse.builder().success(true).build();
-            when(glificWebhookService.closingMessage(any())).thenReturn(ok);
+            when(messageService.closingMessage(any())).thenReturn(ok);
 
             ClosingRequest request = new ClosingRequest();
             request.setContactId(CONTACT);
@@ -90,7 +90,7 @@ class ConversationWebhookControllerTest {
 
         @Test
         void closingFallsBackOnFailure() {
-            when(glificWebhookService.closingMessage(any())).thenThrow(BOOM);
+            when(messageService.closingMessage(any())).thenThrow(BOOM);
 
             ClosingRequest request = new ClosingRequest();
             request.setContactId(CONTACT);

@@ -35,7 +35,7 @@ class GlificReadingsAsyncServiceTest {
     private static final String JOB_ID = "job-1";
 
     @Mock
-    private GlificWebhookService glificWebhookService;
+    private GlificImageWorkflowService imageWorkflowService;
     @Mock
     private GlificFlowResumeService glificFlowResumeService;
 
@@ -43,7 +43,7 @@ class GlificReadingsAsyncServiceTest {
     private final Executor inlineExecutor = Runnable::run;
 
     private GlificReadingsAsyncService service() {
-        return new GlificReadingsAsyncService(glificWebhookService, glificFlowResumeService, inlineExecutor);
+        return new GlificReadingsAsyncService(imageWorkflowService, glificFlowResumeService, inlineExecutor);
     }
 
     private static GlificWebhookRequest request() {
@@ -55,10 +55,10 @@ class GlificReadingsAsyncServiceTest {
     @Test
     void submitsTheWorkToTheConfiguredExecutorRatherThanRunningItInline() {
         Executor neverRuns = command -> { /* deliberately drops the task */ };
-        new GlificReadingsAsyncService(glificWebhookService, glificFlowResumeService, neverRuns)
+        new GlificReadingsAsyncService(imageWorkflowService, glificFlowResumeService, neverRuns)
                 .enqueueProcessAndResume(request(), JOB_ID);
 
-        verify(glificWebhookService, org.mockito.Mockito.never()).processImage(any());
+        verify(imageWorkflowService, org.mockito.Mockito.never()).processImage(any());
     }
 
     @Test
@@ -70,7 +70,7 @@ class GlificReadingsAsyncServiceTest {
                 .meterReading(new BigDecimal("1234"))
                 .message("Reading recorded.")
                 .build();
-        when(glificWebhookService.processImage(any())).thenReturn(processed);
+        when(imageWorkflowService.processImage(any())).thenReturn(processed);
 
         service().enqueueProcessAndResume(request(), JOB_ID);
 
@@ -79,7 +79,7 @@ class GlificReadingsAsyncServiceTest {
 
     @Test
     void resumesTheFlowWithARejectionWhenProcessingThrows() {
-        when(glificWebhookService.processImage(any())).thenThrow(new IllegalStateException("model down"));
+        when(imageWorkflowService.processImage(any())).thenThrow(new IllegalStateException("model down"));
 
         service().enqueueProcessAndResume(request(), JOB_ID);
 
@@ -94,8 +94,8 @@ class GlificReadingsAsyncServiceTest {
     }
 
     @Test
-    void toleratesANullResultFromTheWebhookService() {
-        when(glificWebhookService.processImage(any())).thenReturn(null);
+    void toleratesANullResultFromTheImageWorkflow() {
+        when(imageWorkflowService.processImage(any())).thenReturn(null);
 
         service().enqueueProcessAndResume(request(), JOB_ID);
 
@@ -104,7 +104,7 @@ class GlificReadingsAsyncServiceTest {
 
     @Test
     void toleratesANullRequest() {
-        when(glificWebhookService.processImage(isNull())).thenReturn(null);
+        when(imageWorkflowService.processImage(isNull())).thenReturn(null);
 
         service().enqueueProcessAndResume(null, JOB_ID);
 
@@ -113,7 +113,7 @@ class GlificReadingsAsyncServiceTest {
 
     @Test
     void stillResumesTheFlowWhenTheFailureResponseIsBuiltFromANullContact() {
-        when(glificWebhookService.processImage(isNull())).thenThrow(new IllegalStateException("boom"));
+        when(imageWorkflowService.processImage(isNull())).thenThrow(new IllegalStateException("boom"));
 
         service().enqueueProcessAndResume(null, JOB_ID);
 
@@ -125,7 +125,7 @@ class GlificReadingsAsyncServiceTest {
     @Test
     void handlesAResponseWhoseOptionalFieldsAreAllUnset() {
         // The log summariser touches every getter; an all-null response must not break the resume.
-        when(glificWebhookService.processImage(any()))
+        when(imageWorkflowService.processImage(any()))
                 .thenReturn(CreateReadingResponse.builder().build());
 
         service().enqueueProcessAndResume(request(), JOB_ID);
@@ -136,7 +136,7 @@ class GlificReadingsAsyncServiceTest {
     @Test
     void handlesAResponseCarryingNewlinesInItsMessage() {
         // Log-forging guard: newlines in model output must not break out of the log line.
-        when(glificWebhookService.processImage(any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processImage(any())).thenReturn(CreateReadingResponse.builder()
                 .success(true)
                 .message("line one\nline two\r\nline three")
                 .qualityStatus("ACCEPTED\n")

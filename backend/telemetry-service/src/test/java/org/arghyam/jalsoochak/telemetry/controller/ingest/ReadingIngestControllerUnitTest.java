@@ -10,7 +10,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.arghyam.jalsoochak.telemetry.validation.ReadingUrlTestValidation;
 import org.junit.jupiter.api.Test;
@@ -41,7 +41,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void assamReadingsReturnsOkWithCorrelationIdOnSuccess() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -70,7 +70,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void assamReadingsReturnsUnauthorizedWithoutCorrelationIdOnFailure() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 new StubBfmReadingService(false)
         );
@@ -95,7 +95,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void assamReadingsReturnsBadRequestAndSuccessFalseWhenServiceRejects() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(true),
+                new StubImageWorkflowService(true),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -124,7 +124,7 @@ class ReadingIngestControllerUnitTest {
         // A transient FlowVision outage is signalled by qualityStatus=RETRY (success=false). It is not a
         // client error, so the endpoint must surface it as 503 Service Unavailable, not 400 Bad Request.
         ReadingIngestController controller = new ReadingIngestController(
-                new RetryGlificWebhookService(),
+                new RetryImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -155,7 +155,7 @@ class ReadingIngestControllerUnitTest {
         // PHONE-OPTIONAL: a submission that omits phone_number must reach the service (which infers the
         // operator from the scheme) instead of being rejected by bean validation.
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -180,7 +180,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void assamReadingsValidationFailureReturnsRejectedResponse() throws Exception {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -209,7 +209,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void assamReadingsValidationFailureReturnsRejectedResponseWithContextPath() throws Exception {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -239,7 +239,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void assamReadingsAcceptsTrailingSlashPath() throws Exception {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -265,7 +265,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void assamReadingsValidationFailureOnTrailingSlashReturnsRejectedResponse() throws Exception {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -294,7 +294,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void updateReadingsAcceptsTrailingSlashPath() throws Exception {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -321,7 +321,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void updateReadingsReturnsBadRequestWhenConfirmedReadingMissing() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -344,7 +344,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void updateReadingsReturnsUnauthorizedWhenApiKeyInvalid() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 new StubBfmReadingService(false)
         );
@@ -367,7 +367,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void updateReadingsUsesPhoneNumberWhenCorrelationIdMissing() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -390,7 +390,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void updateReadingsUsesCorrelationIdWhenProvided() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -417,7 +417,7 @@ class ReadingIngestControllerUnitTest {
         // request and destroy the reading, returning 200 whether or not a key was supplied.
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 bfmReadingService
         );
@@ -441,7 +441,7 @@ class ReadingIngestControllerUnitTest {
     void resetLatestReadingRejectsAnInvalidApiKey() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 bfmReadingService
         );
@@ -462,7 +462,7 @@ class ReadingIngestControllerUnitTest {
     void resetLatestReadingAcceptsAValidApiKeyAndScopesTheResetToItsTenant() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 bfmReadingService
         );
@@ -490,7 +490,7 @@ class ReadingIngestControllerUnitTest {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
         StubTelemetryApiKeyService apiKeyService = new StubTelemetryApiKeyService(Optional.empty());
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 apiKeyService,
                 bfmReadingService
         );
@@ -512,13 +512,13 @@ class ReadingIngestControllerUnitTest {
     void resetLatestReadingAuditsTheDestroyedValueAndTheRefusals() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 bfmReadingService
         );
 
         ReadingIngestController unauthenticatedController = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 new StubBfmReadingService(false)
         );
@@ -566,7 +566,7 @@ class ReadingIngestControllerUnitTest {
         // same 404, so neither confirms the contact exists elsewhere. The error code has to stay just
         // as undiscriminating: one code for both, naming the lookup, not the caller's request.
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(
                         new ResponseStatusException(HttpStatus.NOT_FOUND, "No reading found for operator"))
@@ -587,7 +587,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void aMissingSchemeReportsSchemeNotFound() {
         ReadingIngestController controller = new ReadingIngestController(
-                new ThrowingGlificWebhookService(
+                new ThrowingImageWorkflowService(
                         new ResponseStatusException(HttpStatus.NOT_FOUND, "State scheme not found")),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
@@ -613,7 +613,7 @@ class ReadingIngestControllerUnitTest {
         // code, and inventing one would widen a contract the Assam integration already matches on —
         // so it takes the unclassified fallback rather than a code that misdescribes it.
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(
                         new ResponseStatusException(HttpStatus.NOT_FOUND, "Reading not found"))
@@ -635,7 +635,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void aGenuineBadRequestStillReportsBadRequest() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(
                         new ResponseStatusException(HttpStatus.BAD_REQUEST, "confirmedReading must be positive"))
@@ -658,7 +658,7 @@ class ReadingIngestControllerUnitTest {
     void anApiKeyFailureKeepsItsOwnCodeWhateverTheStatus() {
         // The api-key reason check must keep winning over the status-based branches.
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(
                         new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found for API key"))
@@ -679,7 +679,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void assamReadingsMaskPhoneAtInfoAndExposeRawOnlyAtDebug() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -727,7 +727,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void statusExceptionErrorCodeMappingsArePinned() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -777,7 +777,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void updateReadingSetsInvalidApiKeyErrorCodeWhenApiKeyInvalid() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 new StubBfmReadingService(false)
         );
@@ -799,7 +799,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void updateReadingSetsBadRequestErrorCodeWhenBothIdentifiersMissing() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -825,7 +825,7 @@ class ReadingIngestControllerUnitTest {
     void updateReadingSucceedsWithCorrelationIdAndNoPhoneNumber() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 bfmReadingService
         );
@@ -851,7 +851,7 @@ class ReadingIngestControllerUnitTest {
     void updateReadingPassesApiKeyTenantIdToService() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 bfmReadingService
         );
@@ -873,7 +873,7 @@ class ReadingIngestControllerUnitTest {
     void updateReadingStillAcceptsPhoneNumberWithoutCorrelationId() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 bfmReadingService
         );
@@ -895,7 +895,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void updateReadingSetsBadRequestErrorCodeWhenConfirmedReadingMissing() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -916,7 +916,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void updateReadingSetsBadRequestErrorCodeWhenServiceRejects() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(true)
         );
@@ -947,7 +947,7 @@ class ReadingIngestControllerUnitTest {
             }
         };
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 failing
         );
@@ -993,7 +993,7 @@ class ReadingIngestControllerUnitTest {
             }
         };
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 rejecting
         );
@@ -1022,7 +1022,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void resetLatestReadingSetsBadRequestErrorCodeWhenContactIdMissing() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -1046,7 +1046,7 @@ class ReadingIngestControllerUnitTest {
             }
         };
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 failing
         );
@@ -1061,16 +1061,16 @@ class ReadingIngestControllerUnitTest {
         assertEquals(TelemetryErrorCode.PROCESSING_FAILED, response.getBody().getData().getErrorCode());
     }
 
-    private static final class StubGlificWebhookService extends GlificWebhookService {
+    private static final class StubImageWorkflowService extends GlificImageWorkflowService {
         private final boolean rejected;
         private int processAssamReadingCount;
 
-        private StubGlificWebhookService() {
+        private StubImageWorkflowService() {
             this(false);
         }
 
-        private StubGlificWebhookService(boolean rejected) {
-            super(null, null, null, null);
+        private StubImageWorkflowService(boolean rejected) {
+            super(null, null, null, null, null, null, null, null);
             this.rejected = rejected;
         }
 
@@ -1094,11 +1094,11 @@ class ReadingIngestControllerUnitTest {
         }
     }
 
-    private static final class ThrowingGlificWebhookService extends GlificWebhookService {
+    private static final class ThrowingImageWorkflowService extends GlificImageWorkflowService {
         private final ResponseStatusException failure;
 
-        private ThrowingGlificWebhookService(ResponseStatusException failure) {
-            super(null, null, null, null);
+        private ThrowingImageWorkflowService(ResponseStatusException failure) {
+            super(null, null, null, null, null, null, null, null);
             this.failure = failure;
         }
 
@@ -1108,9 +1108,9 @@ class ReadingIngestControllerUnitTest {
         }
     }
 
-    private static final class RetryGlificWebhookService extends GlificWebhookService {
-        private RetryGlificWebhookService() {
-            super(null, null, null, null);
+    private static final class RetryImageWorkflowService extends GlificImageWorkflowService {
+        private RetryImageWorkflowService() {
+            super(null, null, null, null, null, null, null, null);
         }
 
         @Override
@@ -1229,9 +1229,9 @@ class ReadingIngestControllerUnitTest {
 
     @Test
     void assamReadingsRejectsAnUnsupportedChannel() {
-        StubGlificWebhookService webhook = new StubGlificWebhookService();
+        StubImageWorkflowService imageWorkflow = new StubImageWorkflowService();
         ReadingIngestController controller = new ReadingIngestController(
-                webhook,
+                imageWorkflow,
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -1248,13 +1248,13 @@ class ReadingIngestControllerUnitTest {
         // going back to the specification.
         assertTrue(response.getBody().getData().getMessage().contains("BFM, ELM, PDU, IOT, MAN"));
         // Refused before any processing: nothing is stored, nothing is published.
-        assertEquals(0, webhook.processAssamReadingCount);
+        assertEquals(0, imageWorkflow.processAssamReadingCount);
     }
 
     @Test
     void assamReadingsDoNotEchoTheRejectedChannelBack() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -1270,7 +1270,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void assamReadingsAcceptADeclaredChannelInAnyCase() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -1285,7 +1285,7 @@ class ReadingIngestControllerUnitTest {
     @Test
     void assamReadingsAcceptASubmissionThatDeclaresNoChannel() {
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
         );
@@ -1302,7 +1302,7 @@ class ReadingIngestControllerUnitTest {
     void assamReadingsCheckTheApiKeyBeforeTheChannel() {
         // An unauthenticated caller must not learn which channels exist by probing the field.
         ReadingIngestController controller = new ReadingIngestController(
-                new StubGlificWebhookService(),
+                new StubImageWorkflowService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
                 new StubBfmReadingService(false)
         );

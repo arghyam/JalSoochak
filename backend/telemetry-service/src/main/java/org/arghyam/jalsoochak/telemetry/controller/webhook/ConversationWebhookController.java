@@ -6,7 +6,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ClosingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.TriggerWelcomeMessageRequest;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificMessageService;
 import org.arghyam.jalsoochak.telemetry.service.WelcomeMessageService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -26,19 +26,19 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/telemetry")
 public class ConversationWebhookController {
     private static final Logger log = LoggerFactory.getLogger(ConversationWebhookController.class);
-    private final GlificWebhookService glificWebhookService;
+    private final GlificMessageService messageService;
     private final WelcomeMessageService welcomeMessageService;
 
-    public ConversationWebhookController(GlificWebhookService glificWebhookService,
+    public ConversationWebhookController(GlificMessageService messageService,
                                          WelcomeMessageService welcomeMessageService) {
-        this.glificWebhookService = glificWebhookService;
+        this.messageService = messageService;
         this.welcomeMessageService = welcomeMessageService;
     }
 
     @PostMapping("/intro")
     public ResponseEntity<IntroResponse> sendIntro(@RequestBody @Valid IntroRequest introRequest) {
         try {
-            IntroResponse response = glificWebhookService.introMessage(introRequest);
+            IntroResponse response = messageService.introMessage(introRequest);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error sending intro message: {}", e.getMessage(), e);
@@ -56,7 +56,7 @@ public class ConversationWebhookController {
     @PostMapping("/closing")
     public ResponseEntity<ClosingResponse> closingMessage(@RequestBody @Valid ClosingRequest closingRequest) {
         try {
-            ClosingResponse response = glificWebhookService.closingMessage(closingRequest);
+            ClosingResponse response = messageService.closingMessage(closingRequest);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error sending closing message: {}", e.getMessage(), e);

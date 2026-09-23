@@ -4,7 +4,7 @@ import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,16 +24,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/telemetry")
 public class MeterChangeWebhookController {
     private static final Logger log = LoggerFactory.getLogger(MeterChangeWebhookController.class);
-    private final GlificWebhookService glificWebhookService;
+    private final GlificMeterWorkflowService meterWorkflowService;
 
-    public MeterChangeWebhookController(GlificWebhookService glificWebhookService) {
-        this.glificWebhookService = glificWebhookService;
+    public MeterChangeWebhookController(GlificMeterWorkflowService meterWorkflowService) {
+        this.meterWorkflowService = meterWorkflowService;
     }
 
     @PostMapping("/meter-change")
     public ResponseEntity<IntroResponse> meterChange(@RequestBody @Valid MeterChangeRequest request) {
         try {
-            IntroResponse response = glificWebhookService.meterChangeMessage(request);
+            IntroResponse response = meterWorkflowService.meterChangeMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error preparing meter change reasons: {}", e.getMessage(), e);
@@ -54,7 +54,7 @@ public class MeterChangeWebhookController {
     )
     public ResponseEntity<String> meterChangeReasons(@RequestBody @Valid IntroRequest request) {
         try {
-            String response = glificWebhookService.meterChangeReasons(request);
+            String response = meterWorkflowService.meterChangeReasons(request);
             return ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(response);
@@ -70,7 +70,7 @@ public class MeterChangeWebhookController {
     @PostMapping("/meter/meter-change/submit")
     public ResponseEntity<IntroResponse> meterChangeSubmit(@RequestBody @Valid MeterChangeRequest request) {
         try {
-            IntroResponse response = glificWebhookService.meterChangeSubmitMessage(request);
+            IntroResponse response = meterWorkflowService.meterChangeSubmitMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error saving meter change reason: {}", e.getMessage(), e);

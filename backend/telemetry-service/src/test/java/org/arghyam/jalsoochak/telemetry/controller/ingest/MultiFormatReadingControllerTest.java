@@ -11,7 +11,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.ingest.CanonicalReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapperRegistry;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.arghyam.jalsoochak.telemetry.validation.ReadingUrlTestValidation;
 import org.junit.jupiter.api.Test;
@@ -56,7 +56,7 @@ class MultiFormatReadingControllerTest {
             """;
 
     @Mock
-    private GlificWebhookService webhook;
+    private GlificImageWorkflowService imageWorkflowService;
     @Mock
     private TelemetryApiKeyService apiKeyService;
 
@@ -67,7 +67,7 @@ class MultiFormatReadingControllerTest {
                 new ThrowingMapper(),
                 new NullReturningMapper()));
         MultiFormatReadingController controller =
-                new MultiFormatReadingController(registry, apiKeyService, webhook, VALIDATOR);
+                new MultiFormatReadingController(registry, apiKeyService, imageWorkflowService, VALIDATOR);
         return MockMvcBuilders.standaloneSetup(controller)
                 .setValidator(ReadingUrlTestValidation.springValidator())
                 .build();
@@ -76,7 +76,7 @@ class MultiFormatReadingControllerTest {
     @Test
     void canonicalFormatHappyPathReturns200() throws Exception {
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(22));
-        when(webhook.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
                 .success(true).message("ok").correlationId("corr-1").build());
 
         mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
@@ -89,7 +89,7 @@ class MultiFormatReadingControllerTest {
 
         ArgumentCaptor<AssamReadingRequest> requestCaptor = ArgumentCaptor.forClass(AssamReadingRequest.class);
         ArgumentCaptor<Integer> tenantCaptor = ArgumentCaptor.forClass(Integer.class);
-        verify(webhook).processAssamReading(requestCaptor.capture(), tenantCaptor.capture());
+        verify(imageWorkflowService).processAssamReading(requestCaptor.capture(), tenantCaptor.capture());
         assertEquals(22, tenantCaptor.getValue());
         assertEquals("91XXXXXXXXXX", requestCaptor.getValue().getPhoneNumber());
         assertEquals("30178236", requestCaptor.getValue().getStateSchemeId());
@@ -98,7 +98,7 @@ class MultiFormatReadingControllerTest {
     @Test
     void customFormatIsMappedToCanonicalThenProcessed() throws Exception {
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(7));
-        when(webhook.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
                 .success(true).message("ok").correlationId("corr-x").build());
 
         // A completely different wire shape from an imaginary "stateX" IT system.
@@ -116,7 +116,7 @@ class MultiFormatReadingControllerTest {
         // Proves the core pipeline received a canonical request without any change to core code.
         ArgumentCaptor<AssamReadingRequest> requestCaptor = ArgumentCaptor.forClass(AssamReadingRequest.class);
         ArgumentCaptor<Integer> tenantCaptor = ArgumentCaptor.forClass(Integer.class);
-        verify(webhook).processAssamReading(requestCaptor.capture(), tenantCaptor.capture());
+        verify(imageWorkflowService).processAssamReading(requestCaptor.capture(), tenantCaptor.capture());
         assertEquals(7, tenantCaptor.getValue());
         assertEquals("91YYYYYYYYYY", requestCaptor.getValue().getPhoneNumber());
         assertEquals("SX-42", requestCaptor.getValue().getStateSchemeId());
@@ -127,7 +127,7 @@ class MultiFormatReadingControllerTest {
         // SUPPLY-PLAUSIBILITY: the contract an integrating client branches on. ABNORMAL_READING is
         // deliberately vaguer than the internal IMPLAUSIBLE_WATER_SUPPLY anomaly it comes from.
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(22));
-        when(webhook.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
                 .success(false)
                 .qualityStatus("REJECTED")
                 .errorCode(TelemetryErrorCode.ABNORMAL_READING)
@@ -168,7 +168,7 @@ class MultiFormatReadingControllerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.errorCode").value("BAD_REQUEST"));
 
-        verifyNoInteractions(webhook);
+        verifyNoInteractions(imageWorkflowService);
     }
 
     @Test
@@ -183,7 +183,7 @@ class MultiFormatReadingControllerTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.data.errorCode").value("INVALID_API_KEY"));
 
-        verifyNoInteractions(webhook);
+        verifyNoInteractions(imageWorkflowService);
     }
 
     @Test
@@ -214,7 +214,7 @@ class MultiFormatReadingControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.data.errorCode").value("VALIDATION_FAILED"));
 
-        verifyNoInteractions(webhook);
+        verifyNoInteractions(imageWorkflowService);
     }
 
     @Test
@@ -228,7 +228,7 @@ class MultiFormatReadingControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.data.errorCode").value("MALFORMED_REQUEST"));
 
-        verifyNoInteractions(webhook);
+        verifyNoInteractions(imageWorkflowService);
     }
 
     @Test
@@ -242,13 +242,13 @@ class MultiFormatReadingControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.data.errorCode").value("MALFORMED_REQUEST"));
 
-        verifyNoInteractions(webhook);
+        verifyNoInteractions(imageWorkflowService);
     }
 
     @Test
     void rejectedProcessingReturns400() throws Exception {
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(1));
-        when(webhook.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
                 .success(false).qualityStatus("REJECTED").message("nope").correlationId("c").build());
 
         mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
@@ -262,7 +262,7 @@ class MultiFormatReadingControllerTest {
     @Test
     void transientRetryReturns503() throws Exception {
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(1));
-        when(webhook.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
                 .success(false).qualityStatus("RETRY").message("try later").correlationId("c").build());
 
         mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
@@ -282,7 +282,7 @@ class MultiFormatReadingControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.data.errorCode").value("MALFORMED_REQUEST"));
 
-        verifyNoInteractions(webhook, apiKeyService);
+        verifyNoInteractions(imageWorkflowService, apiKeyService);
     }
 
     // ---- test doubles ----
@@ -352,13 +352,13 @@ class MultiFormatReadingControllerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.errorCode").value("CHANNEL_NOT_SUPPORTED"));
 
-        verifyNoInteractions(webhook);
+        verifyNoInteractions(imageWorkflowService);
     }
 
     @Test
     void aDeclaredChannelIsAcceptedInAnyCase() throws Exception {
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(22));
-        when(webhook.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+        when(imageWorkflowService.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
                 .success(true).message("ok").correlationId("corr-1").build());
 
         mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
@@ -368,7 +368,7 @@ class MultiFormatReadingControllerTest {
                 .andExpect(status().isOk());
 
         ArgumentCaptor<AssamReadingRequest> captor = ArgumentCaptor.forClass(AssamReadingRequest.class);
-        verify(webhook).processAssamReading(captor.capture(), any());
+        verify(imageWorkflowService).processAssamReading(captor.capture(), any());
         assertEquals("elm", captor.getValue().getChannel());
     }
 
@@ -383,7 +383,7 @@ class MultiFormatReadingControllerTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.data.errorCode").value("INVALID_API_KEY"));
 
-        verifyNoInteractions(webhook);
+        verifyNoInteractions(imageWorkflowService);
     }
 
     @Test
@@ -408,6 +408,6 @@ class MultiFormatReadingControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.data.errorCode").value("VALIDATION_FAILED"));
 
-        verifyNoInteractions(webhook);
+        verifyNoInteractions(imageWorkflowService);
     }
 }

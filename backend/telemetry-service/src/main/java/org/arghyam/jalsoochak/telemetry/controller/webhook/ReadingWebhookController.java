@@ -9,7 +9,8 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ManualReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
@@ -36,24 +37,29 @@ import java.util.UUID;
 @RequestMapping("/api/v1/telemetry")
 public class ReadingWebhookController {
     private static final Logger log = LoggerFactory.getLogger(ReadingWebhookController.class);
-    private final GlificWebhookService glificWebhookService;
+    private final GlificImageWorkflowService imageWorkflowService;
+    private final GlificMeterWorkflowService meterWorkflowService;
     private final GlificReadingsAsyncService glificReadingsAsyncService;
     private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
 
-    public ReadingWebhookController(GlificWebhookService glificWebhookService) {
-        this(glificWebhookService, null, null);
+    public ReadingWebhookController(GlificImageWorkflowService imageWorkflowService,
+                                    GlificMeterWorkflowService meterWorkflowService) {
+        this(imageWorkflowService, meterWorkflowService, null, null);
     }
 
-    public ReadingWebhookController(GlificWebhookService glificWebhookService,
+    public ReadingWebhookController(GlificImageWorkflowService imageWorkflowService,
+                                    GlificMeterWorkflowService meterWorkflowService,
                                     GlificReadingsAsyncService glificReadingsAsyncService) {
-        this(glificWebhookService, glificReadingsAsyncService, null);
+        this(imageWorkflowService, meterWorkflowService, glificReadingsAsyncService, null);
     }
 
     @Autowired
-    public ReadingWebhookController(GlificWebhookService glificWebhookService,
+    public ReadingWebhookController(GlificImageWorkflowService imageWorkflowService,
+                                    GlificMeterWorkflowService meterWorkflowService,
                                     GlificReadingsAsyncService glificReadingsAsyncService,
                                     TelemetrySubmissionAuditService telemetrySubmissionAuditService) {
-        this.glificWebhookService = glificWebhookService;
+        this.imageWorkflowService = imageWorkflowService;
+        this.meterWorkflowService = meterWorkflowService;
         this.glificReadingsAsyncService = glificReadingsAsyncService;
         this.telemetrySubmissionAuditService = telemetrySubmissionAuditService;
     }
@@ -78,7 +84,7 @@ public class ReadingWebhookController {
                         jobId,
                         maskPhone(glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null));
             } else {
-                CreateReadingResponse response = glificWebhookService.processImage(glificWebhookRequest);
+                CreateReadingResponse response = imageWorkflowService.processImage(glificWebhookRequest);
                 status = isSuccessful(response) ? "SUCCESS" : "FAILED";
                 message = response != null ? response.getMessage() : "Reading request processed.";
                 log.info("readings_glific processed jobId={} contact={} response={}",
@@ -128,7 +134,7 @@ public class ReadingWebhookController {
     @PostMapping("/take-meter-reading")
     public ResponseEntity<IntroResponse> takeMeterReading(@RequestBody @Valid MeterChangeRequest request) {
         try {
-            IntroResponse response = glificWebhookService.takeMeterReadingMessage(request);
+            IntroResponse response = meterWorkflowService.takeMeterReadingMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error preparing take meter reading prompt: {}", e.getMessage(), e);
@@ -145,7 +151,7 @@ public class ReadingWebhookController {
     @PostMapping("/manual-reading")
     public ResponseEntity<CreateReadingResponse> manualReading(@RequestBody @Valid ManualReadingRequest request) {
         try {
-            CreateReadingResponse response = glificWebhookService.manualReadingMessage(request);
+            CreateReadingResponse response = meterWorkflowService.manualReadingMessage(request);
             logReadingSubmission(
                     "/api/v1/telemetry/manual-reading",
                     request != null ? request.getContactId() : null,
@@ -176,7 +182,7 @@ public class ReadingWebhookController {
     @PostMapping("/location")
     public ResponseEntity<CreateReadingResponse> location(@RequestBody @Valid LocationReadingRequest request) {
         try {
-            CreateReadingResponse response = glificWebhookService.locationReadingMessage(request);
+            CreateReadingResponse response = meterWorkflowService.locationReadingMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             String safeContactId = request != null ? request.resolveContactId() : null;
@@ -196,7 +202,7 @@ public class ReadingWebhookController {
     @PostMapping("/update-previous-reading")
     public ResponseEntity<CreateReadingResponse> updatedPreviousReading(@RequestBody @Valid UpdatedPreviousReadingRequest request) {
         try {
-            CreateReadingResponse response = glificWebhookService.updatePreviousReadingMessage(request);
+            CreateReadingResponse response = meterWorkflowService.updatePreviousReadingMessage(request);
             logReadingSubmission(
                     "/api/v1/telemetry/update-previous-reading",
                     request != null ? request.getContactId() : null,

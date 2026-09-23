@@ -15,7 +15,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.dto.response.UpdateYesterdayFinalReadingBySchemeResponse;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySchemeReadingService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
@@ -51,25 +51,25 @@ public class ReadingIngestController {
     private static final String SCHEME_TOKEN = "scheme";
     private static final String OPERATOR_TOKEN = "operator";
 
-    private final GlificWebhookService glificWebhookService;
+    private final GlificImageWorkflowService imageWorkflowService;
     private final TelemetryApiKeyService telemetryApiKeyService;
     private final BfmReadingService bfmReadingService;
     private final TelemetrySchemeReadingService telemetrySchemeReadingService;
     private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
 
-    public ReadingIngestController(GlificWebhookService glificWebhookService,
-                                           TelemetryApiKeyService telemetryApiKeyService,
-                                           BfmReadingService bfmReadingService) {
-        this(glificWebhookService, telemetryApiKeyService, bfmReadingService, null, null);
+    public ReadingIngestController(GlificImageWorkflowService imageWorkflowService,
+                                   TelemetryApiKeyService telemetryApiKeyService,
+                                   BfmReadingService bfmReadingService) {
+        this(imageWorkflowService, telemetryApiKeyService, bfmReadingService, null, null);
     }
 
     @Autowired
-    public ReadingIngestController(GlificWebhookService glificWebhookService,
-                                           TelemetryApiKeyService telemetryApiKeyService,
-                                           BfmReadingService bfmReadingService,
-                                           TelemetrySchemeReadingService telemetrySchemeReadingService,
-                                           TelemetrySubmissionAuditService telemetrySubmissionAuditService) {
-        this.glificWebhookService = glificWebhookService;
+    public ReadingIngestController(GlificImageWorkflowService imageWorkflowService,
+                                   TelemetryApiKeyService telemetryApiKeyService,
+                                   BfmReadingService bfmReadingService,
+                                   TelemetrySchemeReadingService telemetrySchemeReadingService,
+                                   TelemetrySubmissionAuditService telemetrySubmissionAuditService) {
+        this.imageWorkflowService = imageWorkflowService;
         this.telemetryApiKeyService = telemetryApiKeyService;
         this.bfmReadingService = bfmReadingService;
         this.telemetrySchemeReadingService = telemetrySchemeReadingService;
@@ -216,7 +216,7 @@ public class ReadingIngestController {
             log.info("POST /api/v1/telemetry/readings processing tenantId={} request={}",
                     tenantId,
                     summarizeAssamReadingRequest(request));
-            CreateReadingResponse response = glificWebhookService.processAssamReading(request, tenantId);
+            CreateReadingResponse response = imageWorkflowService.processAssamReading(request, tenantId);
             // A transient OCR outage is signalled by qualityStatus=RETRY (success=false). It is a server-side,
             // retryable condition — not a client error — so surface it as 503 Service Unavailable, not 400.
             boolean retry = response != null

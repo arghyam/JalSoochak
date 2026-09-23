@@ -2,7 +2,7 @@ package org.arghyam.jalsoochak.telemetry.controller.webhook;
 
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -40,10 +40,10 @@ class WebhookValidationExceptionHandlerTest {
     private static final String OTHERS_SUBMIT = "/api/v1/telemetry/others/submitted";
 
     @Mock
-    private GlificWebhookService webhookService;
+    private GlificMeterWorkflowService meterWorkflowService;
 
     private MockMvc mockMvc() {
-        return MockMvcBuilders.standaloneSetup(new IssueReportWebhookController(webhookService))
+        return MockMvcBuilders.standaloneSetup(new IssueReportWebhookController(meterWorkflowService))
                 .setControllerAdvice(new WebhookValidationExceptionHandler())
                 .build();
     }
@@ -61,7 +61,7 @@ class WebhookValidationExceptionHandlerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message").value("issueReason must not exceed 255 characters"));
 
-        verify(webhookService, never()).issueReportSubmitMessage(any());
+        verify(meterWorkflowService, never()).issueReportSubmitMessage(any());
     }
 
     @ParameterizedTest
@@ -75,7 +75,7 @@ class WebhookValidationExceptionHandlerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false));
 
-        verify(webhookService, never()).issueReportSubmitMessage(any());
+        verify(meterWorkflowService, never()).issueReportSubmitMessage(any());
     }
 
     @Test
@@ -90,13 +90,13 @@ class WebhookValidationExceptionHandlerTest {
                         .content(body("issueReason", "a".repeat(256))))
                 .andExpect(status().isBadRequest());
 
-        verify(webhookService, never()).issueReportTelemetrySubmitMessage(any());
-        verify(webhookService, never()).othersSubmittedMessage(any());
+        verify(meterWorkflowService, never()).issueReportTelemetrySubmitMessage(any());
+        verify(meterWorkflowService, never()).othersSubmittedMessage(any());
     }
 
     @Test
     void aReasonAtExactlyTheCapPassesThroughToTheService() throws Exception {
-        when(webhookService.issueReportSubmitMessage(any()))
+        when(meterWorkflowService.issueReportSubmitMessage(any()))
                 .thenReturn(IntroResponse.builder().success(true).message("saved").build());
 
         mockMvc().perform(post(SUBMIT)
@@ -105,7 +105,7 @@ class WebhookValidationExceptionHandlerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
 
-        verify(webhookService).issueReportSubmitMessage(any());
+        verify(meterWorkflowService).issueReportSubmitMessage(any());
     }
 
     @Test
@@ -114,7 +114,7 @@ class WebhookValidationExceptionHandlerTest {
         // "issuereason", but no Jackson case-insensitivity is configured and the DTO ignores
         // unknown properties, so that key is silently discarded and issueReason stays null. The
         // 200 the auditors observed proves a null reason is tolerated, not a 10,000-char one.
-        when(webhookService.issueReportSubmitMessage(any()))
+        when(meterWorkflowService.issueReportSubmitMessage(any()))
                 .thenReturn(IntroResponse.builder().success(false).message("Issue reason is required.").build());
 
         mockMvc().perform(post(SUBMIT)
@@ -122,14 +122,14 @@ class WebhookValidationExceptionHandlerTest {
                         .content(body("issuereason", "a".repeat(10_000))))
                 .andExpect(status().isOk());
 
-        verify(webhookService).issueReportSubmitMessage(any());
+        verify(meterWorkflowService).issueReportSubmitMessage(any());
     }
 
     @Test
     void aReasonWithDisallowedCharactersIsNotA400BecauseThatCheckStaysInTheService() throws Exception {
         // Character validation deliberately does not come through this advice — it must stay a
         // localised 200 so a real operator typo does not stall the Glific flow.
-        when(webhookService.issueReportSubmitMessage(any()))
+        when(meterWorkflowService.issueReportSubmitMessage(any()))
                 .thenReturn(IntroResponse.builder()
                         .success(false)
                         .message("Issue reason can only contain letters, numbers, and spaces.")
@@ -141,6 +141,6 @@ class WebhookValidationExceptionHandlerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(false));
 
-        verify(webhookService).issueReportSubmitMessage(any());
+        verify(meterWorkflowService).issueReportSubmitMessage(any());
     }
 }

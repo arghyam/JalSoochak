@@ -4,7 +4,7 @@ import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,16 +24,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/telemetry")
 public class IssueReportWebhookController {
     private static final Logger log = LoggerFactory.getLogger(IssueReportWebhookController.class);
-    private final GlificWebhookService glificWebhookService;
+    private final GlificMeterWorkflowService meterWorkflowService;
 
-    public IssueReportWebhookController(GlificWebhookService glificWebhookService) {
-        this.glificWebhookService = glificWebhookService;
+    public IssueReportWebhookController(GlificMeterWorkflowService meterWorkflowService) {
+        this.meterWorkflowService = meterWorkflowService;
     }
 
     @PostMapping("/issue-report")
     public ResponseEntity<IntroResponse> issueReportPrompt(@RequestBody @Valid IntroRequest request) {
         try {
-            IntroResponse response = glificWebhookService.issueReportPromptMessage(request);
+            IntroResponse response = meterWorkflowService.issueReportPromptMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error preparing issue report prompt: {}", e.getMessage(), e);
@@ -50,7 +50,7 @@ public class IssueReportWebhookController {
     @PostMapping("/issue-report/submit")
     public ResponseEntity<IntroResponse> issueReportSubmit(@RequestBody @Valid IssueReportRequest request) {
         try {
-            IntroResponse response = glificWebhookService.issueReportSubmitMessage(request);
+            IntroResponse response = meterWorkflowService.issueReportSubmitMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error saving issue report: {}", e.getMessage(), e);
@@ -67,7 +67,7 @@ public class IssueReportWebhookController {
     @PostMapping("/issue-report/telemetry")
     public ResponseEntity<IntroResponse> issueReportTelemetryPrompt(@RequestBody @Valid IntroRequest request) {
         try {
-            IntroResponse response = glificWebhookService.issueReportTelemetryPromptMessage(request);
+            IntroResponse response = meterWorkflowService.issueReportTelemetryPromptMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error preparing telemetry issue report prompt: {}", e.getMessage(), e);
@@ -84,7 +84,7 @@ public class IssueReportWebhookController {
     @PostMapping("/issue-report/telemetry/submit")
     public ResponseEntity<IntroResponse> issueReportTelemetrySubmit(@RequestBody @Valid IssueReportRequest request) {
         try {
-            IntroResponse response = glificWebhookService.issueReportTelemetrySubmitMessage(request);
+            IntroResponse response = meterWorkflowService.issueReportTelemetrySubmitMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error saving telemetry issue report: {}", e.getMessage(), e);
@@ -105,7 +105,7 @@ public class IssueReportWebhookController {
     )
     public ResponseEntity<String> issueReportTelemetryReasons(@RequestBody @Valid IntroRequest request) {
         try {
-            String response = glificWebhookService.issueReportTelemetryReasons(request);
+            String response = meterWorkflowService.issueReportTelemetryReasons(request);
             return ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(response);
@@ -121,7 +121,7 @@ public class IssueReportWebhookController {
     @PostMapping("/others")
     public ResponseEntity<IntroResponse> othersPrompt(@RequestBody @Valid IntroRequest request) {
         try {
-            IntroResponse response = glificWebhookService.othersPromptMessage(request);
+            IntroResponse response = meterWorkflowService.othersPromptMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error preparing others prompt: {}", e.getMessage(), e);
@@ -138,7 +138,7 @@ public class IssueReportWebhookController {
     @PostMapping("/others/submitted")
     public ResponseEntity<IntroResponse> othersSubmitted(@RequestBody @Valid IssueReportRequest request) {
         try {
-            IntroResponse response = glificWebhookService.othersSubmittedMessage(request);
+            IntroResponse response = meterWorkflowService.othersSubmittedMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error saving others issue report: {}", e.getMessage(), e);

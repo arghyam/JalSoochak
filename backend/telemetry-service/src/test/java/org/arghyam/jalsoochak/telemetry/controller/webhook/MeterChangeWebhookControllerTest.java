@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.telemetry.controller.webhook;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,7 +29,7 @@ class MeterChangeWebhookControllerTest {
     private static final RuntimeException BOOM = new IllegalStateException("downstream failure");
 
     @Mock
-    private GlificWebhookService glificWebhookService;
+    private GlificMeterWorkflowService meterWorkflowService;
 
     private MeterChangeWebhookController controller;
 
@@ -37,7 +37,7 @@ class MeterChangeWebhookControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new MeterChangeWebhookController(glificWebhookService);
+        controller = new MeterChangeWebhookController(meterWorkflowService);
     }
 
     private static IntroRequest introRequest() {
@@ -54,24 +54,24 @@ class MeterChangeWebhookControllerTest {
 
     @Test
     void meterChangePassesThroughAndFallsBack() {
-        when(glificWebhookService.meterChangeMessage(any(MeterChangeRequest.class))).thenReturn(okIntro);
+        when(meterWorkflowService.meterChangeMessage(any(MeterChangeRequest.class))).thenReturn(okIntro);
         assertThat(controller.meterChange(meterChangeRequest()).getBody()).isSameAs(okIntro);
 
-        when(glificWebhookService.meterChangeMessage(any(MeterChangeRequest.class))).thenThrow(BOOM);
+        when(meterWorkflowService.meterChangeMessage(any(MeterChangeRequest.class))).thenThrow(BOOM);
         assertThat(controller.meterChange(meterChangeRequest()).getStatusCode())
                 .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     @Test
     void meterChangeReasonsReturnsTheRawJsonBody() {
-        when(glificWebhookService.meterChangeReasons(any())).thenReturn("{\"reasons\":[]}");
+        when(meterWorkflowService.meterChangeReasons(any())).thenReturn("{\"reasons\":[]}");
 
         assertThat(controller.meterChangeReasons(introRequest()).getBody()).isEqualTo("{\"reasons\":[]}");
     }
 
     @Test
     void meterChangeReasonsFallsBackToAJsonErrorBody() {
-        when(glificWebhookService.meterChangeReasons(any())).thenThrow(BOOM);
+        when(meterWorkflowService.meterChangeReasons(any())).thenThrow(BOOM);
 
         var response = controller.meterChangeReasons(introRequest());
 
@@ -82,10 +82,10 @@ class MeterChangeWebhookControllerTest {
 
     @Test
     void meterChangeSubmitPassesThroughAndFallsBack() {
-        when(glificWebhookService.meterChangeSubmitMessage(any())).thenReturn(okIntro);
+        when(meterWorkflowService.meterChangeSubmitMessage(any())).thenReturn(okIntro);
         assertThat(controller.meterChangeSubmit(meterChangeRequest()).getBody()).isSameAs(okIntro);
 
-        when(glificWebhookService.meterChangeSubmitMessage(any())).thenThrow(BOOM);
+        when(meterWorkflowService.meterChangeSubmitMessage(any())).thenThrow(BOOM);
         assertThat(controller.meterChangeSubmit(meterChangeRequest()).getStatusCode())
                 .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
     }

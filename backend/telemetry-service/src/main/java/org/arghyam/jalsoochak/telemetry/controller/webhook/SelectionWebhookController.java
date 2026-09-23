@@ -8,7 +8,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificSelectionService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,16 +27,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/telemetry")
 public class SelectionWebhookController {
     private static final Logger log = LoggerFactory.getLogger(SelectionWebhookController.class);
-    private final GlificWebhookService glificWebhookService;
+    private final GlificSelectionService selectionService;
 
-    public SelectionWebhookController(GlificWebhookService glificWebhookService) {
-        this.glificWebhookService = glificWebhookService;
+    public SelectionWebhookController(GlificSelectionService selectionService) {
+        this.selectionService = selectionService;
     }
 
     @PostMapping("/language/selection")
     public ResponseEntity<IntroResponse> languageSelection(@RequestBody @Valid IntroRequest request) {
         try {
-            IntroResponse response = glificWebhookService.languageSelectionMessage(request);
+            IntroResponse response = selectionService.languageSelectionMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error preparing language selection: {}", e.getMessage(), e);
@@ -53,7 +53,7 @@ public class SelectionWebhookController {
     @PostMapping("/selected/language")
     public ResponseEntity<IntroResponse> selectedLanguage(@RequestBody @Valid SelectedLanguageRequest request) {
         try {
-            IntroResponse response = glificWebhookService.selectedLanguageMessage(request);
+            IntroResponse response = selectionService.selectedLanguageMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error processing selected language: {}", e.getMessage(), e);
@@ -70,7 +70,7 @@ public class SelectionWebhookController {
     @PostMapping("/channel/selection")
     public ResponseEntity<IntroResponse> channelSelection(@RequestBody @Valid IntroRequest request) {
         try {
-            IntroResponse response = glificWebhookService.channelSelectionMessage(request);
+            IntroResponse response = selectionService.channelSelectionMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error preparing channel selection: {}", e.getMessage(), e);
@@ -87,7 +87,7 @@ public class SelectionWebhookController {
     @PostMapping("/selected/channel")
     public ResponseEntity<IntroResponse> selectedChannel(@RequestBody @Valid SelectedChannelRequest request) {
         try {
-            IntroResponse response = glificWebhookService.selectedChannelMessage(request);
+            IntroResponse response = selectionService.selectedChannelMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error processing selected channel: {}", e.getMessage(), e);
@@ -104,7 +104,7 @@ public class SelectionWebhookController {
     @PostMapping("/schemes")
     public ResponseEntity<IntroResponse> schemes(@RequestBody @Valid IntroRequest request) {
         try {
-            IntroResponse response = glificWebhookService.schemeSelectionMessage(request);
+            IntroResponse response = selectionService.schemeSelectionMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error preparing scheme selection: {}", e.getMessage(), e);
@@ -121,7 +121,7 @@ public class SelectionWebhookController {
     @PostMapping("/scheme/selected")
     public ResponseEntity<IntroResponse> selectedScheme(@RequestBody @Valid SelectedSchemeRequest request) {
         try {
-            IntroResponse response = glificWebhookService.selectedSchemeMessage(request);
+            IntroResponse response = selectionService.selectedSchemeMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error processing selected scheme: {}", e.getMessage(), e);
@@ -138,7 +138,7 @@ public class SelectionWebhookController {
     @PostMapping("/item/selection")
     public ResponseEntity<IntroResponse> itemSelection(@RequestBody @Valid IntroRequest request) {
         try {
-            IntroResponse response = glificWebhookService.itemSelectionMessage(request);
+            IntroResponse response = selectionService.itemSelectionMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error preparing item selection: {}", e.getMessage(), e);
@@ -155,7 +155,7 @@ public class SelectionWebhookController {
     @PostMapping("/selected/item")
     public ResponseEntity<SelectionResponse> selectedItem(@RequestBody @Valid SelectedItemRequest request) {
         try {
-            SelectionResponse response = glificWebhookService.selectedItemMessage(request);
+            SelectionResponse response = selectionService.selectedItemMessage(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error processing selected item: {}", e.getMessage(), e);

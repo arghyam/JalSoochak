@@ -12,14 +12,14 @@ import java.util.concurrent.Executor;
 @Slf4j
 public class GlificReadingsAsyncService {
 
-    private final GlificWebhookService glificWebhookService;
+    private final GlificImageWorkflowService imageWorkflowService;
     private final GlificFlowResumeService glificFlowResumeService;
     private final Executor glificSyncExecutor;
 
-    public GlificReadingsAsyncService(GlificWebhookService glificWebhookService,
+    public GlificReadingsAsyncService(GlificImageWorkflowService imageWorkflowService,
                                       GlificFlowResumeService glificFlowResumeService,
                                       @Qualifier("glificSyncExecutor") Executor glificSyncExecutor) {
-        this.glificWebhookService = glificWebhookService;
+        this.imageWorkflowService = imageWorkflowService;
         this.glificFlowResumeService = glificFlowResumeService;
         this.glificSyncExecutor = glificSyncExecutor;
     }
@@ -33,7 +33,7 @@ public class GlificReadingsAsyncService {
         CreateReadingResponse result;
 
         try {
-            result = glificWebhookService.processImage(request);
+            result = imageWorkflowService.processImage(request);
             log.info("readings_glific async_processed jobId={} contact={} result={}",
                     jobId,
                     maskPhone(contactId),

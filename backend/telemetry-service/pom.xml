@@ -51,7 +51,6 @@
             **/org/arghyam/jalsoochak/telemetry/service/GlificMeterWorkflowService.java,
             **/org/arghyam/jalsoochak/telemetry/service/GlificOperatorContextService.java,
             **/org/arghyam/jalsoochak/telemetry/service/GlificSelectionService.java,
-            **/org/arghyam/jalsoochak/telemetry/service/GlificWebhookService.java,
             **/org/arghyam/jalsoochak/telemetry/service/MinioService.java,
             **/org/arghyam/jalsoochak/telemetry/TelemetryServiceApplication.java
         </sonar.coverage.exclusions>

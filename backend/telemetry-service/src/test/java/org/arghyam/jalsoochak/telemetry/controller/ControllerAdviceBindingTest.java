@@ -19,7 +19,10 @@ import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.ingest.CanonicalReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapperRegistry;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.GlificMessageService;
+import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.GlificSelectionService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.arghyam.jalsoochak.telemetry.service.WelcomeMessageService;
@@ -95,7 +98,13 @@ class ControllerAdviceBindingTest {
     private static List<ControllerAdviceBean> adviceBeans;
 
     @Mock
-    private GlificWebhookService webhookService;
+    private GlificImageWorkflowService imageWorkflowService;
+    @Mock
+    private GlificMeterWorkflowService meterWorkflowService;
+    @Mock
+    private GlificSelectionService selectionService;
+    @Mock
+    private GlificMessageService messageService;
     @Mock
     private TelemetryApiKeyService apiKeyService;
     @Mock
@@ -139,13 +148,13 @@ class ControllerAdviceBindingTest {
         ReadingRequestMapperRegistry registry = new ReadingRequestMapperRegistry(List.of(
                 new CanonicalReadingRequestMapper(JsonMapper.builder().addModule(new JavaTimeModule()).build())));
         mockMvc = MockMvcBuilders.standaloneSetup(
-                        new ReadingWebhookController(webhookService),
-                        new SelectionWebhookController(webhookService),
-                        new IssueReportWebhookController(webhookService),
-                        new MeterChangeWebhookController(webhookService),
-                        new ConversationWebhookController(webhookService, welcomeMessageService),
-                        new ReadingIngestController(webhookService, apiKeyService, bfmReadingService),
-                        new MultiFormatReadingController(registry, apiKeyService, webhookService,
+                        new ReadingWebhookController(imageWorkflowService, meterWorkflowService),
+                        new SelectionWebhookController(selectionService),
+                        new IssueReportWebhookController(meterWorkflowService),
+                        new MeterChangeWebhookController(meterWorkflowService),
+                        new ConversationWebhookController(messageService, welcomeMessageService),
+                        new ReadingIngestController(imageWorkflowService, apiKeyService, bfmReadingService),
+                        new MultiFormatReadingController(registry, apiKeyService, imageWorkflowService,
                                 ReadingUrlTestValidation.validator()))
                 .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(
@@ -207,7 +216,7 @@ class ControllerAdviceBindingTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message").value(containsString("must not be null")));
 
-        verify(webhookService, never()).locationReadingMessage(any());
+        verify(meterWorkflowService, never()).locationReadingMessage(any());
     }
 
     @Test
@@ -220,7 +229,7 @@ class ControllerAdviceBindingTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message").value("issueReason must not exceed 255 characters"));
 
-        verify(webhookService, never()).issueReportSubmitMessage(any());
+        verify(meterWorkflowService, never()).issueReportSubmitMessage(any());
     }
 
     // ---- Ingest envelope and reject capture, end to end ----

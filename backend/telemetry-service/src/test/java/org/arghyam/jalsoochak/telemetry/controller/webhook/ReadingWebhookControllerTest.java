@@ -11,8 +11,9 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
+import org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService;
+import org.arghyam.jalsoochak.telemetry.service.GlificMeterWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
-import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -53,7 +54,9 @@ class ReadingWebhookControllerTest {
     private static final RuntimeException BOOM = new IllegalStateException("downstream failure");
 
     @Mock
-    private GlificWebhookService glificWebhookService;
+    private GlificImageWorkflowService imageWorkflowService;
+    @Mock
+    private GlificMeterWorkflowService meterWorkflowService;
     @Mock
     private GlificReadingsAsyncService glificReadingsAsyncService;
     @Mock
@@ -67,7 +70,8 @@ class ReadingWebhookControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new ReadingWebhookController(glificWebhookService, glificReadingsAsyncService, auditService);
+        controller = new ReadingWebhookController(
+                imageWorkflowService, meterWorkflowService, glificReadingsAsyncService, auditService);
         // any() rather than anyString(): the controller passes a null contactId straight through when
         // the webhook body is missing, and the real audit service handles that.
         when(auditService.captureForContact(any()))
@@ -97,24 +101,24 @@ class ReadingWebhookControllerTest {
             assertThat(response.getBody().getJobId()).isNotBlank();
             verify(glificReadingsAsyncService)
                     .enqueueProcessAndResume(same(request), eq(response.getBody().getJobId()));
-            verify(glificWebhookService, never()).processImage(any());
+            verify(imageWorkflowService, never()).processImage(any());
         }
 
         @Test
         void processesSynchronouslyWhenNoAsyncServiceIsWired() {
-            var syncOnly = new ReadingWebhookController(glificWebhookService);
-            when(glificWebhookService.processImage(any())).thenReturn(okReading);
+            var syncOnly = new ReadingWebhookController(imageWorkflowService, meterWorkflowService);
+            when(imageWorkflowService.processImage(any())).thenReturn(okReading);
 
             var response = syncOnly.receive(request());
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-            verify(glificWebhookService).processImage(any());
+            verify(imageWorkflowService).processImage(any());
         }
 
         @Test
         void stillAcksWhenSynchronousProcessingReportsFailure() {
-            var syncOnly = new ReadingWebhookController(glificWebhookService);
-            when(glificWebhookService.processImage(any()))
+            var syncOnly = new ReadingWebhookController(imageWorkflowService, meterWorkflowService);
+            when(imageWorkflowService.processImage(any()))
                     .thenReturn(CreateReadingResponse.builder().success(false).message("rejected").build());
 
             assertThat(syncOnly.receive(request()).getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -122,8 +126,8 @@ class ReadingWebhookControllerTest {
 
         @Test
         void stillAcksWhenSynchronousProcessingReturnsNothing() {
-            var syncOnly = new ReadingWebhookController(glificWebhookService);
-            when(glificWebhookService.processImage(any())).thenReturn(null);
+            var syncOnly = new ReadingWebhookController(imageWorkflowService, meterWorkflowService);
+            when(imageWorkflowService.processImage(any())).thenReturn(null);
 
             assertThat(syncOnly.receive(request()).getStatusCode()).isEqualTo(HttpStatus.OK);
         }
@@ -149,10 +153,11 @@ class ReadingWebhookControllerTest {
         }
 
         @Test
-        void worksWithTheTwoArgumentConstructor() {
-            var twoArg = new ReadingWebhookController(glificWebhookService, glificReadingsAsyncService);
+        void worksWithoutAnAuditService() {
+            var noAudit = new ReadingWebhookController(
+                    imageWorkflowService, meterWorkflowService, glificReadingsAsyncService);
 
-            assertThat(twoArg.receive(request()).getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(noAudit.receive(request()).getStatusCode()).isEqualTo(HttpStatus.OK);
         }
 
         @Test
@@ -197,10 +202,10 @@ class ReadingWebhookControllerTest {
             MeterChangeRequest request = new MeterChangeRequest();
             request.setContactId(CONTACT);
 
-            when(glificWebhookService.takeMeterReadingMessage(any())).thenReturn(okIntro);
+            when(meterWorkflowService.takeMeterReadingMessage(any())).thenReturn(okIntro);
             assertThat(controller.takeMeterReading(request).getBody()).isSameAs(okIntro);
 
-            when(glificWebhookService.takeMeterReadingMessage(any())).thenThrow(BOOM);
+            when(meterWorkflowService.takeMeterReadingMessage(any())).thenThrow(BOOM);
             assertThat(controller.takeMeterReading(request).getStatusCode())
                     .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         }
@@ -209,7 +214,7 @@ class ReadingWebhookControllerTest {
         void manualReadingPassesThroughTheServiceResponse() {
             ManualReadingRequest request = new ManualReadingRequest();
             request.setContactId(CONTACT);
-            when(glificWebhookService.manualReadingMessage(any())).thenReturn(okReading);
+            when(meterWorkflowService.manualReadingMessage(any())).thenReturn(okReading);
 
             assertThat(controller.manualReading(request).getBody()).isSameAs(okReading);
         }
@@ -218,7 +223,7 @@ class ReadingWebhookControllerTest {
         void manualReadingLogsAFailedResponseWithoutChangingTheStatus() {
             ManualReadingRequest request = new ManualReadingRequest();
             request.setContactId(CONTACT);
-            when(glificWebhookService.manualReadingMessage(any()))
+            when(meterWorkflowService.manualReadingMessage(any()))
                     .thenReturn(CreateReadingResponse.builder().success(false).message("too low").build());
 
             assertThat(controller.manualReading(request).getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -228,7 +233,7 @@ class ReadingWebhookControllerTest {
         void manualReadingFallsBackWithARejectedEnvelope() {
             ManualReadingRequest request = new ManualReadingRequest();
             request.setContactId(CONTACT);
-            when(glificWebhookService.manualReadingMessage(any())).thenThrow(BOOM);
+            when(meterWorkflowService.manualReadingMessage(any())).thenThrow(BOOM);
 
             var response = controller.manualReading(request);
 
@@ -241,10 +246,10 @@ class ReadingWebhookControllerTest {
         @Test
         void locationPassesThroughAndFallsBack() {
             LocationReadingRequest request = new LocationReadingRequest();
-            when(glificWebhookService.locationReadingMessage(any())).thenReturn(okReading);
+            when(meterWorkflowService.locationReadingMessage(any())).thenReturn(okReading);
             assertThat(controller.location(request).getBody()).isSameAs(okReading);
 
-            when(glificWebhookService.locationReadingMessage(any())).thenThrow(BOOM);
+            when(meterWorkflowService.locationReadingMessage(any())).thenThrow(BOOM);
             var response = controller.location(request);
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
             assertThat(response.getBody().getMessage()).isEqualTo("Location could not be saved.");
@@ -256,10 +261,10 @@ class ReadingWebhookControllerTest {
             UpdatedPreviousReadingRequest request = new UpdatedPreviousReadingRequest();
             request.setContactId(CONTACT);
 
-            when(glificWebhookService.updatePreviousReadingMessage(any())).thenReturn(okReading);
+            when(meterWorkflowService.updatePreviousReadingMessage(any())).thenReturn(okReading);
             assertThat(controller.updatedPreviousReading(request).getBody()).isSameAs(okReading);
 
-            when(glificWebhookService.updatePreviousReadingMessage(any())).thenThrow(BOOM);
+            when(meterWorkflowService.updatePreviousReadingMessage(any())).thenThrow(BOOM);
             var response = controller.updatedPreviousReading(request);
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
             assertThat(response.getBody().getMessage()).isEqualTo("Previous reading could not be updated.");
@@ -269,7 +274,7 @@ class ReadingWebhookControllerTest {
         void updatePreviousReadingLogsANullServiceResponse() {
             UpdatedPreviousReadingRequest request = new UpdatedPreviousReadingRequest();
             request.setContactId(CONTACT);
-            when(glificWebhookService.updatePreviousReadingMessage(any())).thenReturn(null);
+            when(meterWorkflowService.updatePreviousReadingMessage(any())).thenReturn(null);
 
             assertThat(controller.updatedPreviousReading(request).getStatusCode()).isEqualTo(HttpStatus.OK);
         }
