@@ -2,7 +2,7 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
-import org.arghyam.jalsoochak.analytics.service.DateDimensionService;
+import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,7 +18,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(controllers = AnalyticsWaterSupplyNationalController.class)
-@Import(GlobalExceptionHandler.class)
+@Import({GlobalExceptionHandler.class, SingleTenantModeGuard.class})
 @AutoConfigureMockMvc(addFilters = false)
 @TestPropertySource(properties = "analytics.single-tenant-mode=true")
 class AnalyticsWaterSupplyNationalControllerSingleTenantModeAccessTest {
@@ -30,9 +30,6 @@ class AnalyticsWaterSupplyNationalControllerSingleTenantModeAccessTest {
 
     @MockBean
     private SchemeRegularityService schemeRegularityService;
-
-    @MockBean
-    private DateDimensionService dateDimensionService;
 
     @MockBean
     private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;

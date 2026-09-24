@@ -4,7 +4,6 @@ import org.arghyam.jalsoochak.analytics.config.JwtAuthConverter;
 import org.arghyam.jalsoochak.analytics.config.SecurityConfig;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
-import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
@@ -68,8 +67,6 @@ class AnalyticsUserScopedEndpointSecurityTest {
     private UserAlertTotalsService userAlertTotalsService;
     @MockBean
     private AuthenticatedRequestContextService authenticatedRequestContextService;
-    @MockBean
-    private DimUserRepository dimUserRepository;
     @MockBean
     private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
 

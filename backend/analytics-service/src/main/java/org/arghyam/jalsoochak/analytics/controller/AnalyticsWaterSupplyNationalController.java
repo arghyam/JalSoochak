@@ -8,9 +8,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
-import org.arghyam.jalsoochak.analytics.exception.SingleTenantModeAccessException;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
-import org.arghyam.jalsoochak.analytics.service.DateDimensionService;
+import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -20,7 +19,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -39,20 +37,8 @@ import java.time.LocalDate;
 public class AnalyticsWaterSupplyNationalController {
 
     private final SchemeRegularityService schemeRegularityService;
-    private final DateDimensionService dateDimensionService;
     private final DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
-
-    @Value("${analytics.single-tenant-mode:false}")
-    private boolean singleTenantMode;
-
-    private void rejectIfSingleTenantMode(String apiName) {
-        if (!singleTenantMode) {
-            return;
-        }
-        String message = "API '" + apiName + "' cannot be accessed when single-tenant mode is enabled";
-        log.warn(message);
-        throw new SingleTenantModeAccessException(message);
-    }
+    private final SingleTenantModeGuard singleTenantModeGuard;
 
     @GetMapping("/national/dashboard/boundary")
     @Operation(
@@ -73,7 +59,7 @@ public class AnalyticsWaterSupplyNationalController {
             }
     )
     public ResponseEntity<ApiResponse<NationalDashboardBoundaryResponse>> getNationalDashboardBoundaries() {
-        rejectIfSingleTenantMode("national/dashboard/boundary");
+        singleTenantModeGuard.rejectIfSingleTenantMode("national/dashboard/boundary");
         try {
             return ResponseEntity.ok(ApiResponse.<NationalDashboardBoundaryResponse>builder()
                     .success(true)
@@ -107,7 +93,7 @@ public class AnalyticsWaterSupplyNationalController {
             }
     )
     public ResponseEntity<ApiResponse<NationalDashboardLevel2BoundaryResponse>> getNationalDashboardLevel2Boundaries() {
-        rejectIfSingleTenantMode("national/dashboard/boundary/district");
+        singleTenantModeGuard.rejectIfSingleTenantMode("national/dashboard/boundary/district");
         try {
             return ResponseEntity.ok(ApiResponse.<NationalDashboardLevel2BoundaryResponse>builder()
                     .success(true)
@@ -143,7 +129,7 @@ public class AnalyticsWaterSupplyNationalController {
     public ResponseEntity<ApiResponse<NationalDashboardResponse>> getNationalDashboard(
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        rejectIfSingleTenantMode("national/dashboard");
+        singleTenantModeGuard.rejectIfSingleTenantMode("national/dashboard");
         try {
             return ResponseEntity.ok(ApiResponse.<NationalDashboardResponse>builder()
                     .success(true)
@@ -181,7 +167,7 @@ public class AnalyticsWaterSupplyNationalController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        rejectIfSingleTenantMode("national/dashboard/district");
+        singleTenantModeGuard.rejectIfSingleTenantMode("national/dashboard/district");
         try {
             if (startDate == null && endDate == null) {
                 DefaultAnalyticsDateWindowProvider.DateWindow window =
@@ -251,7 +237,7 @@ public class AnalyticsWaterSupplyNationalController {
                     required = true,
                     schema = @Schema(type = "string", allowableValues = {"day", "week", "month", "quarter", "year"}))
                     @RequestParam(name = "scale") String scale) {
-        rejectIfSingleTenantMode("scheme-regularity/periodic/national");
+        singleTenantModeGuard.rejectIfSingleTenantMode("scheme-regularity/periodic/national");
         try {
             PeriodScale periodScale = PeriodScale.fromValue(scale);
             return ResponseEntity.ok(ApiResponse.<PeriodicNationalSchemeRegularityResponse>builder()
@@ -271,40 +257,5 @@ public class AnalyticsWaterSupplyNationalController {
                     .build());
         }
     }
-
-//     @PostMapping("/date-dimension")
-//     @Operation(
-//             summary = "Pre-populate the date dimension for a given range",
-//             responses = {
-//                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
-//                             responseCode = "200",
-//                             description = "Date dimension populated successfully",
-//                             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
-//                                     examples = @ExampleObject(name = "success", value = SwaggerExamples.DATE_DIMENSION_POPULATE_SUCCESS))
-//                     ),
-//                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
-//                             responseCode = "500",
-//                             description = "Unexpected error",
-//                             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
-//                                     examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
-//                     )
-//             }
-//     )
-//     public ResponseEntity<ApiResponse<String>> populateDateDimension(
-//             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-//             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-//         try {
-//             dateDimensionService.populateDateRange(startDate, endDate);
-//             return ResponseEntity.ok(ApiResponse.<String>builder()
-//                     .success(true)
-//                     .data("Date dimension populated from " + startDate + " to " + endDate)
-//                     .build());
-//         } catch (Exception e) {
-//             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<String>builder()
-//                     .success(false)
-//                     .data(null)
-//                     .build());
-//         }
-//     }
 }
 

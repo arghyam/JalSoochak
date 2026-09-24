@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.analytics.controller;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
-import org.arghyam.jalsoochak.analytics.service.DateDimensionService;
+import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -54,9 +54,6 @@ class AnalyticsWaterSupplyNationalControllerGzipIntegrationTest {
 
     @MockBean
     private SchemeRegularityService schemeRegularityService;
-
-    @MockBean
-    private DateDimensionService dateDimensionService;
 
     @MockBean
     private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
@@ -130,7 +127,7 @@ class AnalyticsWaterSupplyNationalControllerGzipIntegrationTest {
             OAuth2ResourceServerAutoConfiguration.class,
             ManagementWebSecurityAutoConfiguration.class
     })
-    @Import({AnalyticsWaterSupplyNationalController.class, GlobalExceptionHandler.class})
+    @Import({AnalyticsWaterSupplyNationalController.class, GlobalExceptionHandler.class, SingleTenantModeGuard.class})
     static class MinimalTestApplication {
     }
 }

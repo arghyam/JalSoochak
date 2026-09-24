@@ -12,7 +12,6 @@ import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
-import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
@@ -73,14 +72,7 @@ public class AnalyticsSchemeReportingController {
     private final OperatorAttendanceQueryService operatorAttendanceQueryService;
     private final UserAlertTotalsService userAlertTotalsService;
     private final AuthenticatedRequestContextService authenticatedRequestContextService;
-    private final DimUserRepository dimUserRepository;
     private final DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
-
-    private Integer resolveUserIdByUuid(Integer tenantId, UUID userUuid) {
-        return dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(tenantId, userUuid)
-                .map(u -> u.getUserId())
-                .orElseThrow(() -> new IllegalArgumentException("No user found for uuid: " + userUuid));
-    }
 
     @GetMapping("/schemes/status-count")
     @Operation(
@@ -484,7 +476,7 @@ public class AnalyticsSchemeReportingController {
             }
             Integer userId = userRef.userId() != null
                     ? userRef.userId()
-                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+                    : authenticatedRequestContextService.resolveUserIdByUuid(tenantId, userRef.userUuid());
 
             ContinuousSchemesResponse data =
                     schemeRegularityService.getContinuousSchemesByUser(tenantId, userId, startDate, endDate, list, page, limit);
@@ -776,7 +768,7 @@ public class AnalyticsSchemeReportingController {
             }
             Integer userId = userRef.userId() != null
                     ? userRef.userId()
-                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+                    : authenticatedRequestContextService.resolveUserIdByUuid(tenantId, userRef.userUuid());
 
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
             Page<EscalationListItemDto> page = escalationQueryService.getEscalations(
@@ -932,7 +924,7 @@ public class AnalyticsSchemeReportingController {
             }
             Integer mappedUserId = userRef.userId() != null
                     ? userRef.userId()
-                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+                    : authenticatedRequestContextService.resolveUserIdByUuid(tenantId, userRef.userUuid());
 
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
             Page<AnomalyListItemDto> page = anomalyQueryService.getAnomaliesForUserSchemes(
@@ -1023,7 +1015,7 @@ public class AnalyticsSchemeReportingController {
             }
             Integer userId = userRef.userId() != null
                     ? userRef.userId()
-                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+                    : authenticatedRequestContextService.resolveUserIdByUuid(tenantId, userRef.userUuid());
 
             UserAlertTotalsResponse data = userAlertTotalsService.getTotals(tenantId, userId, startDate, endDate);
             return ResponseEntity.ok(ApiResponse.<UserAlertTotalsResponse>builder()

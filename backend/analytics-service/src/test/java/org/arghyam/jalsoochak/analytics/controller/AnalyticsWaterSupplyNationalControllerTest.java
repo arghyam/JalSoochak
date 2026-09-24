@@ -8,7 +8,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegul
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
-import org.arghyam.jalsoochak.analytics.service.DateDimensionService;
+import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -39,7 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(controllers = AnalyticsWaterSupplyNationalController.class)
-@Import(GlobalExceptionHandler.class)
+@Import({GlobalExceptionHandler.class, SingleTenantModeGuard.class})
 @AutoConfigureMockMvc(addFilters = false)
 class AnalyticsWaterSupplyNationalControllerTest {
 
@@ -53,23 +53,9 @@ class AnalyticsWaterSupplyNationalControllerTest {
 
     @MockBean
     private SchemeRegularityService schemeRegularityService;
-    @MockBean
-    private DateDimensionService dateDimensionService;
 
     @MockBean
     private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
-
-//     @Test
-//     void populateDateDimension_validDateRange_returnsOkAndCallsService() throws Exception {
-//         mockMvc.perform(post(BASE + "/date-dimension")
-//                         .param("startDate", START.toString())
-//                         .param("endDate", END.toString()))
-//                 .andExpect(status().isOk())
-//                 .andExpect(jsonPath("$.success").value(true))
-//                 .andExpect(jsonPath("$.data").value("Date dimension populated from " + START + " to " + END));
-
-//         verify(dateDimensionService, times(1)).populateDateRange(START, END);
-//     }
 
     @ParameterizedTest
     @MethodSource("periodicNationalSchemeRegularityValidRoutes")

@@ -7,9 +7,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusDTO;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
-import org.arghyam.jalsoochak.analytics.entity.DimUser;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
-import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
@@ -48,7 +46,6 @@ import java.time.ZoneOffset;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -97,8 +94,6 @@ class AnalyticsSchemeReportingControllerTest {
     private UserAlertTotalsService userAlertTotalsService;
     @MockBean
     private AuthenticatedRequestContextService authenticatedRequestContextService;
-    @MockBean
-    private DimUserRepository dimUserRepository;
     @MockBean
     private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
 
@@ -1249,8 +1244,8 @@ class AnalyticsSchemeReportingControllerTest {
         UUID uuid = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
         when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
                 .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(null, uuid, 10));
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
+        when(authenticatedRequestContextService.resolveUserIdByUuid(eq(10), eq(uuid)))
+                .thenReturn(9001);
 
         Page<EscalationListItemDto> page = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
         when(escalationQueryService.getEscalations(
@@ -1265,8 +1260,8 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.limit").value(10))
                 .andExpect(jsonPath("$.total_count").value(0));
 
-        verify(dimUserRepository, times(1))
-                .findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid));
+        verify(authenticatedRequestContextService, times(1))
+                .resolveUserIdByUuid(eq(10), eq(uuid));
     }
 
     @Test
@@ -1531,10 +1526,8 @@ class AnalyticsSchemeReportingControllerTest {
         UUID uuid = UUID.fromString("3f1a9c22-5b7e-4d38-9a10-8c4b2e6f0d71");
         when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
                 .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(null, uuid, TENANT_ID));
-        DimUser user = new DimUser();
-        user.setUserId(77);
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(TENANT_ID, uuid))
-                .thenReturn(Optional.of(user));
+        when(authenticatedRequestContextService.resolveUserIdByUuid(TENANT_ID, uuid))
+                .thenReturn(77);
         when(schemeRegularityService.getContinuousSchemesByUser(
                 eq(TENANT_ID), eq(77), eq(START), eq(END), eq(false), isNull(), isNull()))
                 .thenReturn(ContinuousSchemesResponse.builder()
