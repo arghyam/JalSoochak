@@ -93,7 +93,6 @@ ALLOWED_TOKENS="$(cat <<'RULES'
 
 # Rule LEGACY_ALIAS — deprecated names still served, read or emitted for one release, so that each
 # side of the contract can move on its own. They go when the aliases are removed.
-.  readings/glific|READINGS_PREFIX \+ "/glific"
 .  GLIFIC_MESSAGE_TEMPLATES
 .  glific_welcome_flow_id
 .  \bglific_id\b|\bgetGlificId\b

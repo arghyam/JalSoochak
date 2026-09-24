@@ -48,10 +48,9 @@ A fail-closed servlet filter, deny-by-default over the server-to-server prefixes
 
 - **Protected:** `/api/v1/telemetry/readings` and everything below it; every sub-path of
   `/api/v1/telemetry/schemes/`.
-- **Exempt:** an explicit allowlist — `POST /readings/whatsapp`, its deprecated alias
-  `POST /readings/glific`, and `POST /schemes` — the chatbot webhook routes that fall inside those
-  prefixes. They remain unauthenticated (see §4) and are now listed where a reviewer can see them,
-  instead of being exempt by omission.
+- **Exempt:** an explicit allowlist — `POST /readings/whatsapp` and `POST /schemes` — the two
+  chatbot webhook routes that fall inside those prefixes. They remain unauthenticated (see §4) and are
+  now listed where a reviewer can see them, instead of being exempt by omission.
 
 Consequences worth stating plainly: a new `/readings/**` endpoint is authenticated the moment it is
 mapped, and making one public takes a deliberate edit to a named allowlist. The filter normalises the
@@ -111,9 +110,8 @@ without a Docker daemon — environmental, unrelated.)
 ## 4. Not fixed here — still open
 
 - **The chatbot webhook routes are unauthenticated at the application layer**, including
-  `POST /readings/whatsapp` (and its deprecated alias `POST /readings/glific`) and
-  `POST /manual-reading`, which write readings. Their only protection is network placement. This is
-  a larger change (it needs a webhook authentication scheme and a
+  `POST /readings/whatsapp` and `POST /manual-reading`, which write readings. Their only protection
+  is network placement. This is a larger change (it needs a webhook authentication scheme and a
   coordinated bot rollout) and is already recorded in
   `security-audit-non-dashboard-apis.md` §1.
 - **No rate limiting** on the reading routes. The audit log makes a mass reset detectable; it does

@@ -52,8 +52,7 @@ All APIs are RESTful and versioned under `/api/v1/`. Clients reach services thro
 ### 9.4 Field Submission APIs (Chatbot Flow Webhooks)
 
 The WhatsApp submission journey is a multi-step chatbot flow; the WhatsApp provider calls a webhook at
-each step, all under `/api/v1/telemetry`. There are **27** such endpoints, every one a `POST`, counting
-the deprecated `/readings/glific` alias.
+each step, all under `/api/v1/telemetry`. There are **26** such endpoints, every one a `POST`.
 
 **Authentication.** Each request must carry the shared secret header:
 
@@ -79,7 +78,6 @@ The endpoints:
 * `POST /api/v1/telemetry/item/selection`, `/selected/item` — item prompt and choice
 * `POST /api/v1/telemetry/take-meter-reading` — receive meter photo → OCR provider
 * `POST /api/v1/telemetry/readings/whatsapp` — async image submission, returns a job ack
-  (`/readings/glific` is its deprecated alias, served for one release)
 * `POST /api/v1/telemetry/manual-reading`, `/location`, `/update-previous-reading` — enter, geotag or
   correct a reading
 * `POST /api/v1/telemetry/meter-change`, `/meter/meter-change`, `/meter/meter-change/submit` — meter

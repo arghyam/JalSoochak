@@ -31,8 +31,6 @@ public final class WebhookRoutes {
      */
     private static final Set<String> RELATIVE_PATHS = Set.of(
             "/readings/whatsapp",
-            // Deprecated alias of /readings/whatsapp; protected for as long as it is served.
-            "/readings/glific",
             "/intro",
             "/closing",
             "/language/selection",
