@@ -132,15 +132,15 @@ pii:
   hmac-key: ${PII_HMAC_KEY}
 
 # ──────────────────────────────────────────────────────────────
-# Object Storage (S3-compatible — AWS S3 / MinIO / R2 / DO Spaces / …)
+# Object Storage (S3-compatible — AWS S3 or any store that speaks the S3 API)
 # Used by the staff-report cache to persist generated CSV/XLSX files
 # and serve them via short-lived presigned URLs.
 # ──────────────────────────────────────────────────────────────
 storage:
   enabled:       ${STORAGE_ENABLED:false}      # true to activate S3-compatible storage
   provider:      ${STORAGE_PROVIDER:s3}
-  endpoint:      ${STORAGE_ENDPOINT:}          # blank = real AWS S3; set to MinIO/R2/etc. URL for custom providers
-  presigned-base-url: ${STORAGE_PRESIGNED_BASE_URL:}  # public-facing base URL for presigned URLs (e.g. https://minio.example.com); leave blank to use storage.endpoint
+  endpoint:      ${STORAGE_ENDPOINT:}          # blank = real AWS S3; set to the URL of any other S3-compatible store
+  presigned-base-url: ${STORAGE_PRESIGNED_BASE_URL:}  # public-facing base URL for presigned URLs (e.g. https://storage.example.com); leave blank to use storage.endpoint
   region:        ${STORAGE_REGION:ap-south-1}
   access-key:    ${STORAGE_ACCESS_KEY:}
   secret-key:    ${STORAGE_SECRET_KEY:}

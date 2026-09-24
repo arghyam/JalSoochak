@@ -9,6 +9,18 @@ import java.net.URI;
 public interface ObjectStorageService {
 
     /**
+     * Creates {@code bucket} if it does not exist yet. Safe to call concurrently for the same bucket:
+     * losing the race to create it counts as success.
+     *
+     * <p>Grants no anonymous read. A bucket created here serves no public URL until that is granted
+     * out of band, because the objects in it are reports that carry personal data.
+     *
+     * @throws org.arghyam.jalsoochak.message.exception.StorageException when the store cannot be
+     *         asked about the bucket, or refuses to create it
+     */
+    void ensureBucket(String bucket);
+
+    /**
      * Uploads an object.
      *
      * @param bucket        target bucket

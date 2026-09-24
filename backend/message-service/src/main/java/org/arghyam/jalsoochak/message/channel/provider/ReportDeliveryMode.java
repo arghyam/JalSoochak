@@ -7,9 +7,10 @@ import java.util.Locale;
  *
  * <p>{@link #DOCUMENT} is the original path: the PDF is registered with the WhatsApp provider via
  * {@code createMessageMedia} and sent as a document HSM, which requires <em>Meta</em> to download the
- * MinIO URL from its own network. Production MinIO answers Indian source addresses only, so that
- * download fails inside Meta with {@code (#131053) Media upload error — Your server hosting media
- * content did not respond back in time} and the officer receives an attachment that will not open.</p>
+ * report URL from its own network. The production object store answers Indian source addresses only,
+ * so that download fails inside Meta with {@code (#131053) Media upload error — Your server hosting
+ * media content did not respond back in time} and the officer receives an attachment that will not
+ * open.</p>
  *
  * <p>{@link #LINK} sends a text HSM carrying a dynamic-URL button instead. Meta never fetches the
  * file: the button's prefix is frozen in the approved template and only the bucket-and-filename
@@ -18,10 +19,10 @@ import java.util.Locale;
  */
 public enum ReportDeliveryMode {
 
-    /** PDF attachment. Meta downloads the MinIO URL itself. */
+    /** PDF attachment. Meta downloads the report URL itself. */
     DOCUMENT,
 
-    /** Text HSM with a dynamic-URL button. The recipient's phone downloads the MinIO URL. */
+    /** Text HSM with a dynamic-URL button. The recipient's phone downloads the report URL. */
     LINK;
 
     /**

@@ -27,8 +27,8 @@ public class StorageConfig {
 
     /**
      * S3Client bean — created only when {@code storage.access-key} is configured.
-     * Setting {@code storage.endpoint} activates path-style access for MinIO and
-     * other S3-compatible providers that require it.
+     * Setting {@code storage.endpoint} activates path-style access for the
+     * S3-compatible stores that require it.
      */
     @Bean
     @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")
@@ -59,7 +59,7 @@ public class StorageConfig {
 
     /**
      * S3-compatible storage service — activated when {@code storage.access-key} is set.
-     * Covers AWS S3, MinIO, Cloudflare R2, DigitalOcean Spaces, GCS (interop mode), etc.
+     * Covers AWS S3 and any other store that speaks the S3 API.
      */
     @Bean
     @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")

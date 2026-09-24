@@ -63,7 +63,7 @@ public class GlificWhatsAppConfig {
     @Value("${whatsapp.flow.welcome-id:}")
     private String welcomeFlowId;
 
-    @Value("${minio.base-url:}")
+    @Value("${storage.public-base-url:}")
     private String mediaBaseUrl;
 
     @Value("${whatsapp.media.escalation-caption:Escalations}")

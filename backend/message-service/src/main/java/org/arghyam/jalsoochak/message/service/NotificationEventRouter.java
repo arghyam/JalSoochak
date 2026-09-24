@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
+import org.arghyam.jalsoochak.message.config.StorageProperties;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
@@ -17,6 +18,7 @@ import org.arghyam.jalsoochak.message.event.InviteEmailEvent;
 import org.arghyam.jalsoochak.message.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.message.event.WhatsAppContactRegisteredEvent;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
+import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -27,6 +29,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import reactor.core.publisher.Mono;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -50,7 +54,7 @@ import java.util.UUID;
  * <ul>
  *   <li>{@code NUDGE} — fetches the localized message from tenant config and
  *       sends it as a WhatsApp HSM to the operator.</li>
- *   <li>{@code ESCALATION} — generates a PDF, uploads it to MinIO, fetches
+ *   <li>{@code ESCALATION} — generates a PDF, uploads it to object storage, fetches
  *       the localized body text, and sends a document HSM to the officer.</li>
  *   <li>{@code STAFF_SYNC_COMPLETED} — onboards pump operators into the WhatsApp provider and
  *       publishes {@code WHATSAPP_CONTACT_REGISTERED} events so tenant-service
@@ -126,7 +130,8 @@ public class NotificationEventRouter {
     private final EscalationPdfService escalationPdfService;
     private final DailyReportPdfService dailyReportPdfService;
     private final WeeklyReportPdfService weeklyReportPdfService;
-    private final MinioStorageService minioStorageService;
+    private final ObjectStorageService objectStorageService;
+    private final StorageProperties storageProperties;
     private final MessageTemplateService messageTemplateService;
     private final AccountEmailService accountEmailService;
     private final JdbcTemplate jdbcTemplate;
@@ -141,8 +146,10 @@ public class NotificationEventRouter {
 
     private static final String SCHEMA_PATTERN = "^[a-z0-9_]+$";
 
-    /** The presigned query string on a MinIO URL — stripped before any URL is logged. */
+    /** Any query string on a report URL — stripped before the URL is logged. */
     private static final String URL_QUERY_SUFFIX = "\\?.*$";
+
+    private static final String PDF_CONTENT_TYPE = "application/pdf";
 
     @PostConstruct
     void validateBaseUrl() {
@@ -850,11 +857,11 @@ public class NotificationEventRouter {
 
         String filename = escalationPdfService.generate(operators, level, officerName, officerUserType, correlationId);
         java.nio.file.Path localPath = Paths.get(reportDir, filename);
-        String minioUrl;
+        String reportUrl;
         try {
-            minioUrl = minioStorageService.upload(localPath);
+            reportUrl = uploadPdf(localPath, storageProperties.getBucket(), localPath.getFileName().toString());
         } catch (Exception uploadEx) {
-            log.error("[Router/ESCALATION] MinIO upload failed, retaining local PDF for recovery: {} — {}",
+            log.error("[Router/ESCALATION] Storage upload failed, retaining local PDF for recovery: {} — {}",
                     localPath, uploadEx.getMessage());
             throw uploadEx;
         }
@@ -881,11 +888,11 @@ public class NotificationEventRouter {
             }
         }
 
-        boolean sent = whatsAppChannel.sendDocument(contactId, minioUrl);
+        boolean sent = whatsAppChannel.sendDocument(contactId, reportUrl);
         if (!sent) {
             throw new IllegalStateException("[Router/ESCALATION] WhatsApp escalation delivery failed");
         }
-        String loggableUrl = loggableUrl(minioUrl);
+        String loggableUrl = loggableUrl(reportUrl);
         log.info("[Router/ESCALATION] level={} → {} ({})", level, sent ? "SENT" : "FAILED", loggableUrl);
         log.debug("[Router/ESCALATION] officer={} level={} → {} ({})", officerPhone, level,
                 sent ? "SENT" : "FAILED", loggableUrl);
@@ -893,8 +900,9 @@ public class NotificationEventRouter {
 
     /**
      * Handles a {@code DAILY_REPORT_KPIS} event: resolves the officer's contact from the operational
-     * {@code user_table} (analytics never sees PII), renders the report PDF, uploads it to MinIO, and
-     * sends the document HSM through the WhatsApp provider. Mirrors {@link #handleEscalation}.
+     * {@code user_table} (analytics never sees PII), renders the report PDF, uploads it to object
+     * storage, and sends the document HSM through the WhatsApp provider. Mirrors
+     * {@link #handleEscalation}.
      *
      * <p>Every terminal outcome — one per officer — is logged with a {@code result=} tag and a
      * {@code role=} field so daily-report delivery can be counted per role straight from the logs.
@@ -963,7 +971,7 @@ public class NotificationEventRouter {
         // Resolved before the report is built. A contact id of 0 while delivery is live means the opt-in
         // never produced a WhatsApp contact, and nothing downstream can recover from that: sending anyway
         // comes back as "Receiver does not exist", and retrying cannot conjure a contact id while it
-        // stalls the whole partition. Doing it here means the dead end costs no PDF render and no MinIO
+        // stalls the whole partition. Doing it here means the dead end costs no PDF render and no storage
         // upload — the previous order paid for both, then deleted the file and gave up.
         long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
         if (contactId <= 0 && whatsAppSender.isDailyReportDeliveryEnabled()) {
@@ -999,9 +1007,9 @@ public class NotificationEventRouter {
         // daily report has its own DAILY_REPORT_DIR, and re-deriving the path sent the upload looking
         // in the wrong directory in any environment that set it.
         String filename = localPath.getFileName().toString();
-        String minioUrl;
+        String reportUrl;
         try {
-            minioUrl = minioStorageService.upload(localPath, ReportFileNaming.DAILY_BUCKET,
+            reportUrl = uploadWaterReport(localPath, ReportFileNaming.DAILY_BUCKET,
                     ReportFileNaming.dailyObjectKey(officerUserType, filename, reportDate));
         } catch (Exception uploadEx) {
             log.error("[Router/DAILY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
@@ -1013,13 +1021,13 @@ public class NotificationEventRouter {
 
         ReportLogCtx logCtx = new ReportLogCtx(ReportKind.DAILY, corr, role, tenantId, officerUserId);
         ReportSendOutcome outcome =
-                whatsAppChannel.sendDailyReport(contactId, minioUrl, officerUserType, reportDate, officerName);
+                whatsAppChannel.sendDailyReport(contactId, reportUrl, officerUserType, reportDate, officerName);
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
         if (!outcome.accepted()) {
-            reportFailedDelivery(logCtx, outcome.failure(), reportDate, loggableUrl(minioUrl));
+            reportFailedDelivery(logCtx, outcome.failure(), reportDate, loggableUrl(reportUrl));
             return;
         }
-        logSendResult(logCtx, outcome.result(), contactId, noSupplyRows.size(), tookMs, loggableUrl(minioUrl));
+        logSendResult(logCtx, outcome.result(), contactId, noSupplyRows.size(), tookMs, loggableUrl(reportUrl));
     }
 
     /**
@@ -1028,7 +1036,7 @@ public class NotificationEventRouter {
      *
      * <p>Mirrors the daily handler's order deliberately: validate, resolve the officer, resolve the
      * WhatsApp contact id <em>before</em> rendering, then build → upload → send. Resolving the contact
-     * first means a dead end costs no PDF render and no MinIO upload.</p>
+     * first means a dead end costs no PDF render and no storage upload.</p>
      */
     private void handleWeeklySituationReport(JsonNode root) throws Exception {
         int tenantId = root.path("tenantId").asInt(0);
@@ -1108,9 +1116,9 @@ public class NotificationEventRouter {
         // weekly-report.report.dir → daily-report.report.dir → escalation.report.dir, so only the
         // service that wrote the file knows where it landed.
         String filename = localPath.getFileName().toString();
-        String minioUrl;
+        String reportUrl;
         try {
-            minioUrl = minioStorageService.upload(localPath, ReportFileNaming.WEEKLY_BUCKET,
+            reportUrl = uploadWaterReport(localPath, ReportFileNaming.WEEKLY_BUCKET,
                     ReportFileNaming.weeklyObjectKey(officerUserType, filename, weekStart, weekEnd));
         } catch (Exception uploadEx) {
             log.error("[Router/WEEKLY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
@@ -1125,13 +1133,13 @@ public class NotificationEventRouter {
         // the daily prefix the shared helpers are also used by.
         ReportLogCtx logCtx = new ReportLogCtx(ReportKind.WEEKLY, corr, role, tenantId, officerUserId);
         ReportSendOutcome outcome =
-                whatsAppChannel.sendWeeklyReport(contactId, minioUrl, officerUserType, weekStart, officerName);
+                whatsAppChannel.sendWeeklyReport(contactId, reportUrl, officerUserType, weekStart, officerName);
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
         if (!outcome.accepted()) {
-            reportFailedDelivery(logCtx, outcome.failure(), weekStart, loggableUrl(minioUrl));
+            reportFailedDelivery(logCtx, outcome.failure(), weekStart, loggableUrl(reportUrl));
             return;
         }
-        logSendResult(logCtx, outcome.result(), contactId, noSupplyRows.size(), tookMs, loggableUrl(minioUrl));
+        logSendResult(logCtx, outcome.result(), contactId, noSupplyRows.size(), tookMs, loggableUrl(reportUrl));
     }
 
     /**
@@ -1197,7 +1205,7 @@ public class NotificationEventRouter {
      *       the same report, which is worse than the missing confirmation it was trying to fix.
      *       Recorded as {@code DELIVERY_UNCONFIRMED} for reconciliation.</li>
      *   <li>{@link WhatsAppSendStage#CONFIG} — a definite rejection that never reached the provider, and
-     *       one no retry can repair: the template id, contact id or MinIO URL prefix is wrong on our side.
+     *       one no retry can repair: the template id, contact id or report URL prefix is wrong on our side.
      *       Retrying only stalls the partition until the configuration changes, so it is terminal.</li>
      *   <li>Everything else ({@code MEDIA_REGISTER}, {@code SEND}) — a definite rejection a retry can
      *       plausibly repair, so it rethrows for the Kafka container's retry policy.</li>
@@ -1223,7 +1231,7 @@ public class NotificationEventRouter {
                 failure.stage(), failure.errorKeyForLog());
         if (failure.stage() == WhatsAppSendStage.CONFIG) {
             log.error("[Router/{}] corr={} stage=CONFIG {}={} (non-retryable) — the send"
-                            + " never reached the provider because our own template id, contact id or MinIO URL"
+                            + " never reached the provider because our own template id, contact id or report URL"
                             + " prefix is wrong. A retry cannot repair that, so the event is not redriven:"
                             + " fix the configuration, then replay this officer's report ({})",
                     tag, ctx.corr(), ctx.kind().periodField(), period, loggableUrl);
@@ -1274,9 +1282,30 @@ public class NotificationEventRouter {
         return stage == WhatsAppSendStage.TIMEOUT || stage == WhatsAppSendStage.SEND_NO_MESSAGE_ID;
     }
 
-    /** A MinIO URL with any presigned query string stripped, so a signature never reaches a log line. */
+    /** A report URL with any query string stripped, so a signature never reaches a log line. */
     private static String loggableUrl(String url) {
         return url.replaceFirst(URL_QUERY_SUFFIX, "");
+    }
+
+    /**
+     * Uploads a rendered PDF and returns the permanent public URL handed to the WhatsApp provider,
+     * which Meta or the officer's phone fetches without credentials.
+     */
+    private String uploadPdf(java.nio.file.Path localPath, String bucket, String objectKey) throws IOException {
+        try (InputStream content = Files.newInputStream(localPath)) {
+            objectStorageService.upload(bucket, objectKey, content, Files.size(localPath), PDF_CONTENT_TYPE);
+        }
+        return objectStorageService.publicUrl(bucket, objectKey).toString();
+    }
+
+    /**
+     * As {@link #uploadPdf}, into one of the water-report buckets, which is created first when a new
+     * environment does not have it yet. Its anonymous read is still granted out of band.
+     */
+    private String uploadWaterReport(java.nio.file.Path localPath, String bucket, String objectKey)
+            throws IOException {
+        objectStorageService.ensureBucket(bucket);
+        return uploadPdf(localPath, bucket, objectKey);
     }
 
     /**
@@ -1463,9 +1492,9 @@ public class NotificationEventRouter {
     }
 
     /**
-     * Deletes the rendered PDF once it is safely in MinIO. A failure here is logged and swallowed: the
-     * upload already succeeded, so the officer's report is on its way, and the reaper sweeps whatever
-     * is left behind.
+     * Deletes the rendered PDF once it is safely in object storage. A failure here is logged and
+     * swallowed: the upload already succeeded, so the officer's report is on its way, and the reaper
+     * sweeps whatever is left behind.
      */
     private void deleteLocalReport(java.nio.file.Path localPath, String corr, String tag) {
         try {

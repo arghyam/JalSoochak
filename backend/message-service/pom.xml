@@ -151,12 +151,6 @@
             <artifactId>pdfbox</artifactId>
             <version>3.0.2</version>
         </dependency>
-        <!-- MinIO client for escalation PDF upload -->
-        <dependency>
-            <groupId>io.minio</groupId>
-            <artifactId>minio</artifactId>
-            <version>8.5.9</version>
-        </dependency>
         <!-- AWS SDK v2 S3 (provider-agnostic object storage — works with any S3-compatible
              store). Includes the S3Presigner used for presigned download URLs. -->
         <dependency>

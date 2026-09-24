@@ -146,29 +146,30 @@ Message text is fetched from `common_schema.tenant_config_master_table` using th
 - Template keys: `nudge_message_{langKey}`, `escalation_message_{langKey}` (fallback: `_english` → generic)
 - Add per-tenant rows in `tenant_config_master_table` with these keys before running.
 
-### MinIO + WhatsApp provider
-- Escalation PDFs are generated locally (PDFBox), uploaded to MinIO, then the MinIO URL is registered
-  with the WhatsApp provider via `createMessageMedia` to get a `mediaId`
+### Object storage + WhatsApp provider
+- Escalation PDFs are generated locally (PDFBox), uploaded to the S3-compatible store through
+  `ObjectStorageService`, then the PDF's public URL is registered with the WhatsApp provider via
+  `createMessageMedia` to get a `mediaId`
 - WhatsApp template for nudge: uses `sendHsmMessage`; body `{{1}}` = operator name, `{{2}}` = date
 - WhatsApp template for escalation (two-step):
   1. `createMessageMedia(url, source_url)` → `mediaId`
   2. `createAndSendMessage(templateId, mediaId, receiverId, parameters=[bodyText])` — the document
      header attachment is provided via `mediaId`; the body parameter is the localized text
 - Required env vars: `WHATSAPP_API_URL`, `WHATSAPP_USERNAME`, `WHATSAPP_PASSWORD`,
-  `WHATSAPP_NUDGE_TEMPLATE_ID`, `WHATSAPP_ESCALATION_TEMPLATE_ID`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`,
-  `MINIO_SECRET_KEY`, `MINIO_BUCKET`, `MINIO_BASE_URL`
+  `WHATSAPP_NUDGE_TEMPLATE_ID`, `WHATSAPP_ESCALATION_TEMPLATE_ID`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`,
+  `STORAGE_SECRET_KEY`, `STORAGE_BUCKET`, `STORAGE_PUBLIC_BASE_URL`
 
 ### Daily report delivery mode (DOCUMENT | LINK)
 
 `NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE` — both paths in
-`GlificWhatsAppSender.sendDailyReportHsm`, behind the `WhatsAppSender` port. `minio.base-url` must be
-public and anonymously readable either way.
+`GlificWhatsAppSender.sendDailyReportHsm`, behind the `WhatsAppSender` port. `storage.public-base-url`
+must be public and anonymously readable either way.
 
-- `DOCUMENT` (default) — two-step media send. Meta fetches `minio.base-url` itself, which the
-  India-only firewall in front of production MinIO blocks.
+- `DOCUMENT` (default) — two-step media send. Meta fetches `storage.public-base-url` itself, which
+  the India-only firewall in front of the production object store blocks.
 - `LINK` — one `sendHsmMessage` with a "View Report" button, no media step. `parameters =
 [officerName, reportDate (dd-MM-yyyy), urlSuffix]` — the URL suffix must come **last**. The
-  button's prefix is frozen at Meta approval and must equal `minio.base-url` + `/`, so each
+  button's prefix is frozen at Meta approval and must equal `storage.public-base-url` + `/`, so each
   environment needs its own approved template (`WHATSAPP_DAILY_REPORT_SO_LINK_TEMPLATE_ID`); set
   `DAILY_REPORT_LINK_BUTTON_BASE_URL` to have that checked at startup.
 

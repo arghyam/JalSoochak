@@ -788,7 +788,7 @@ class TenantControllerTest {
         void getTenantLogo_storageFailure_returns500() throws Exception {
             Integer tenantId = 1;
             when(tenantManagementService.resolveTenantLogo(tenantId))
-                    .thenThrow(new StorageException("MinIO unreachable"));
+                    .thenThrow(new StorageException("Storage unreachable"));
 
             mockMvc.perform(get("/api/v1/tenants/{tenantId}/logo", tenantId))
                     .andExpect(status().isInternalServerError());

@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Unit tests for {@link PublicUrlValidator}.
  *
- * <p>The values that matter most are the two real ones from the incident: the internal MinIO address
+ * <p>The values that matter most are the two real ones from the incident: the internal storage address
  * that Meta refused with {@code (#131053) … blocked by a destination filter}, and the public URL that
  * replaces it.</p>
  */
@@ -18,7 +18,7 @@ class PublicUrlValidatorTest {
     // ─────────────────────── the addresses from production ──────────────────────
 
     @Test
-    void rejectsTheInternalMinioAddressThatMetaRefused() {
+    void rejectsTheInternalStorageAddressThatMetaRefused() {
         String reason = PublicUrlValidator.unreachableReason(
                 "http://192.168.20.143:9000/escalation-reports/daily_report_SECTION_OFFICER_16363_2026-08-19.pdf");
 
@@ -109,7 +109,7 @@ class PublicUrlValidatorTest {
 
     /**
      * A bracketed IPv6 literal carries no dots, so the single-label rule — which exists to catch
-     * container names like {@code minio} — must not apply to it. Only the private-range check does.
+     * container names like {@code storage} — must not apply to it. Only the private-range check does.
      */
     @ParameterizedTest
     @ValueSource(strings = {

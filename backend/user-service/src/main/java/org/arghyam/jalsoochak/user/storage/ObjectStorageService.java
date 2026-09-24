@@ -6,8 +6,8 @@ import java.time.Duration;
 
 /**
  * Provider-agnostic abstraction over object storage.
- * The default implementation is S3-compatible (AWS S3, MinIO, Cloudflare R2,
- * DigitalOcean Spaces, GCS interop mode, …).
+ * The default implementation works with AWS S3 and any other store that
+ * speaks the S3 API.
  *
  * <p>All methods take an explicit {@code bucket} so a single service instance
  * can route objects to different buckets (e.g. assets vs. report cache)

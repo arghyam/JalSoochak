@@ -64,12 +64,6 @@ OPERATIONAL_SCRIPTS=(
   'scripts/**'
 )
 
-# Rule PENDING_STORAGE_RENAME (files) — the Minio* classes are replaced by the S3-compatible storage
-# port, and their names and contents go with them. The rule lapses on its own once no file matches.
-PENDING_STORAGE_FILES=(
-  'backend/**/*Minio*.java'
-)
-
 # Rule GUARD_SELF — this script has to name what it forbids.
 GUARD_SELF=.github/scripts/vendor-neutrality-guard.sh
 
@@ -111,11 +105,9 @@ ALLOWED_TOKENS="$(cat <<'RULES'
 # this value in their ocr_provider config, so it is stored data rather than a name we choose.
 .  "flowvision"|OCR_DEFAULT_PROVIDER:flowvision
 
-# Rule PENDING_STORAGE_RENAME — the MinIO client is replaced by the S3-compatible storage port. Until
-# then, the services it has not reached still name it, and so do the docs that describe their
-# configuration.
-^backend/(?:message|tenant|user)-service/  minio
-\.md$  minio
+# Rule TEST_CONTAINER_IMAGE — an integration test runs the object store's own image as its S3
+# endpoint, so it names the image, the image's default credential and its readiness path.
+/src/test/  "minio/minio:[^"\n]*"|"minioadmin"|"/minio/health/\w+"
 
 # Rule TEST_FIXTURE — the test tenant is modelled on a real state deployment, so a string literal in
 # a test may carry that state's name as data ("tenant_assam", "Assam PHED").
@@ -132,8 +124,7 @@ ADAPTER_TYPES="$(git ls-files -- "${ADAPTER_PATHS[@]/#/:(glob)}" \
 
 # Only tracked files are scanned, which keeps target/ and local logs out.
 pathspecs=(.)
-for path in "${ADAPTER_PATHS[@]}" "${HISTORICAL_RECORDS[@]}" "${OPERATIONAL_SCRIPTS[@]}" \
-    "${PENDING_STORAGE_FILES[@]}"; do
+for path in "${ADAPTER_PATHS[@]}" "${HISTORICAL_RECORDS[@]}" "${OPERATIONAL_SCRIPTS[@]}"; do
   pathspecs+=(":(exclude,glob)$path")
 done
 for path in "${APPLIED_MIGRATIONS[@]}" "${DEPLOYMENT_DESCRIPTIONS[@]}" "$GUARD_SELF"; do

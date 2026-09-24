@@ -39,7 +39,7 @@ The platform is deployed as a **multi-tenant** system, with each state onboarded
 * Runs on any **Kubernetes** cluster — on-premises or any cloud provider
 * **PostgreSQL** for operational and analytics data (no proprietary extensions)
 * **Apache Kafka** in KRaft mode (no ZooKeeper) for asynchronous events
-* **S3-compatible** object storage (MinIO or any cloud equivalent) for images and reports
+* **S3-compatible** object storage, self-hosted or from any cloud provider, for images and reports
 
 ### 2.3 Accessibility
 

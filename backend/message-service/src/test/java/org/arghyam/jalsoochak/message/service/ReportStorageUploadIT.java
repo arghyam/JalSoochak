@@ -1,11 +1,13 @@
 package org.arghyam.jalsoochak.message.service;
 
-import io.minio.BucketExistsArgs;
-import io.minio.GetObjectArgs;
-import io.minio.MinioClient;
+import org.arghyam.jalsoochak.message.config.StorageConfig;
+import org.arghyam.jalsoochak.message.config.StorageProperties;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
+import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -14,49 +16,73 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
+import software.amazon.awssdk.core.ResponseBytes;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Integration test: renders the water-report PDFs and uploads them to a throwaway MinIO started via
- * Testcontainers — no Kafka, Postgres or Glific. Requires Docker.
+ * Integration test: renders the water-report PDFs and uploads them through the storage port to a
+ * throwaway S3-compatible store started via Testcontainers — no Kafka, Postgres or WhatsApp provider.
+ * Requires Docker.
  *
- * <p>Covers the half of the contract a mocked MinIO client cannot: that the bucket is created when
- * absent, that a folder-structured object key survives the round trip as a real path, and that the
- * URL handed onward addresses the object that was actually stored.</p>
+ * <p>Covers the half of the contract a mocked S3 client cannot: that a missing bucket is detected
+ * and created, that a folder-structured object key survives the round trip as a real path, and that
+ * the URL handed onward addresses the object that was actually stored. The client is built by
+ * {@link StorageConfig}, so the path-style wiring a non-AWS store needs is exercised too.</p>
  */
 @Testcontainers
-class DailyReportMinioUploadIT {
+class ReportStorageUploadIT {
 
-    private static final String ACCESS_KEY = "minioadmin";
-    private static final String SECRET_KEY = "minioadmin";
+    /** The image's default root credentials. */
+    private static final String CREDENTIAL = "minioadmin";
 
     @Container
-    static final GenericContainer<?> MINIO =
+    static final GenericContainer<?> STORE =
             new GenericContainer<>(DockerImageName.parse("minio/minio:latest"))
                     .withExposedPorts(9000)
-                    .withEnv("MINIO_ROOT_USER", ACCESS_KEY)
-                    .withEnv("MINIO_ROOT_PASSWORD", SECRET_KEY)
                     .withCommand("server /data")
                     .waitingFor(Wait.forHttp("/minio/health/ready").forPort(9000));
 
     @TempDir
     Path tempDir;
 
-    private String endpoint() {
-        return "http://" + MINIO.getHost() + ":" + MINIO.getMappedPort(9000);
+    private S3Client s3Client;
+    private ObjectStorageService storage;
+
+    @BeforeEach
+    void setUp() {
+        StorageProperties props = new StorageProperties();
+        props.setEnabled(true);
+        props.setEndpoint(endpoint());
+        props.setAccessKey(CREDENTIAL);
+        props.setSecretKey(CREDENTIAL);
+        props.setPublicBaseUrl(endpoint());
+        StorageConfig config = new StorageConfig();
+        s3Client = config.s3Client(props);
+        storage = config.objectStorageService(s3Client, props);
     }
 
-    private MinioStorageService storageService() {
-        MinioStorageService minio = new MinioStorageService(endpoint(), ACCESS_KEY, SECRET_KEY);
-        ReflectionTestUtils.setField(minio, "bucket", "escalation-reports");
-        ReflectionTestUtils.setField(minio, "minioBaseUrl", endpoint());
-        return minio;
+    @AfterEach
+    void tearDown() {
+        s3Client.close();
+    }
+
+    private static String endpoint() {
+        return "http://" + STORE.getHost() + ":" + STORE.getMappedPort(9000);
     }
 
     @Test
@@ -77,10 +103,10 @@ class DailyReportMinioUploadIT {
         assertThat(localPdf.toFile()).exists();
 
         String objectKey = ReportFileNaming.dailyObjectKey("SECTION_OFFICER", filename, reportDate);
-        String url = storageService().upload(localPdf, ReportFileNaming.DAILY_BUCKET, objectKey);
+        String url = uploadReport(localPdf, ReportFileNaming.DAILY_BUCKET, objectKey);
 
         assertThat(objectKey).isEqualTo("SO/2026-07-19/" + filename);
-        assertThat(url).endsWith("/" + ReportFileNaming.DAILY_BUCKET + "/" + objectKey);
+        assertThat(url).isEqualTo(endpoint() + "/" + ReportFileNaming.DAILY_BUCKET + "/" + objectKey);
         // The slashes must stay slashes: percent-encoding the whole key would store one object literally
         // named "SO%2F2026-07-19%2F…", and the URL would then address something that is not there.
         assertThat(url).doesNotContain("%2F");
@@ -102,7 +128,7 @@ class DailyReportMinioUploadIT {
         assertThat(localPdf.toFile()).exists();
 
         String objectKey = ReportFileNaming.weeklyObjectKey("SUB_DIVISIONAL_OFFICER", filename, weekStart, weekEnd);
-        String url = storageService().upload(localPdf, ReportFileNaming.WEEKLY_BUCKET, objectKey);
+        String url = uploadReport(localPdf, ReportFileNaming.WEEKLY_BUCKET, objectKey);
 
         assertThat(objectKey).isEqualTo("SDO/2026-07-13_to_2026-07-19/" + filename);
         assertThat(url).endsWith("/" + ReportFileNaming.WEEKLY_BUCKET + "/" + objectKey);
@@ -110,29 +136,36 @@ class DailyReportMinioUploadIT {
     }
 
     @Test
-    void createsTheBucketWhenItDoesNotExistYet() throws Exception {
+    void createsTheBucketWhenItDoesNotExistYet() {
         // A fresh environment has neither water bucket, and a first run that failed on a missing one
         // would lose that day's reports for every officer. Uses its own bucket name so the assertion
         // holds regardless of what the other tests in this class have already created.
         String freshBucket = "probe-water-reports";
-        MinioClient admin = MinioClient.builder().endpoint(endpoint())
-                .credentials(ACCESS_KEY, SECRET_KEY).build();
-        assertThat(admin.bucketExists(BucketExistsArgs.builder().bucket(freshBucket).build())).isFalse();
+        HeadBucketRequest head = HeadBucketRequest.builder().bucket(freshBucket).build();
+        assertThatThrownBy(() -> s3Client.headBucket(head)).isInstanceOf(NoSuchBucketException.class);
 
-        Path pdf = java.nio.file.Files.writeString(tempDir.resolve("probe.pdf"), "%PDF-1.4 test");
-        storageService().upload(pdf, freshBucket, "SO/2026-01-01/probe.pdf");
+        storage.ensureBucket(freshBucket);
 
-        assertThat(admin.bucketExists(BucketExistsArgs.builder().bucket(freshBucket).build())).isTrue();
+        assertThatCode(() -> s3Client.headBucket(head)).doesNotThrowAnyException();
+        // Every report upload asks again, so a bucket that already exists must be left alone.
+        assertThatCode(() -> storage.ensureBucket(freshBucket)).doesNotThrowAnyException();
     }
 
-    /** Fetches the object back, so the assertion is about what MinIO holds rather than what we sent. */
-    private void assertStoredAt(String bucket, String objectKey) throws Exception {
-        MinioClient client = MinioClient.builder().endpoint(endpoint())
-                .credentials(ACCESS_KEY, SECRET_KEY).build();
-        try (InputStream in = client.getObject(
-                GetObjectArgs.builder().bucket(bucket).object(objectKey).build())) {
-            assertThat(in.readNBytes(4)).isEqualTo("%PDF".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+    /** Uploads the way the router does: bucket first, then the PDF, then the URL it hands onward. */
+    private String uploadReport(Path pdf, String bucket, String objectKey) throws IOException {
+        storage.ensureBucket(bucket);
+        try (InputStream content = Files.newInputStream(pdf)) {
+            storage.upload(bucket, objectKey, content, Files.size(pdf), "application/pdf");
         }
+        return storage.publicUrl(bucket, objectKey).toString();
+    }
+
+    /** Fetches the object back, so the assertion is about what the store holds rather than what we sent. */
+    private void assertStoredAt(String bucket, String objectKey) {
+        ResponseBytes<GetObjectResponse> stored =
+                s3Client.getObjectAsBytes(request -> request.bucket(bucket).key(objectKey));
+        assertThat(stored.response().contentType()).isEqualTo("application/pdf");
+        assertThat(new String(stored.asByteArray(), 0, 4, StandardCharsets.US_ASCII)).isEqualTo("%PDF");
     }
 
     private DailyReportKpis dailyKpis() {

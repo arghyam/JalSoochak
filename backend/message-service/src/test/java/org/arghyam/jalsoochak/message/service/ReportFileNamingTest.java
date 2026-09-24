@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Pins the filenames and object keys the water reports are stored under.
  *
  * <p>These are asserted literally because three separate things have to agree on them: the file
- * written to disk, the MinIO object uploaded, and the suffix Meta appends to the approved WhatsApp
+ * written to disk, the storage object uploaded, and the suffix Meta appends to the approved WhatsApp
  * template's frozen URL prefix. A drift between them produces a button the officer taps to nothing —
  * a failure invisible on our side, because both the upload and the send succeed.</p>
  */

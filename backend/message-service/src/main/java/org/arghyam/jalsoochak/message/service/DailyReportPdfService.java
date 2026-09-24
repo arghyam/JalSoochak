@@ -64,7 +64,7 @@ public class DailyReportPdfService {
      * re-derive and no way for the two to drift.</p>
      *
      * @param officerUserId the filename discriminator. Deliberately the id and not the officer's
-     *                      name: names collide, and the reports share one MinIO bucket, so a
+     *                      name: names collide, and the reports share one storage bucket, so a
      *                      collision would expose one officer's report to another.
      */
     public Path generate(DailyReportKpis kpis, long officerUserId, String officerName, String officerUserType,

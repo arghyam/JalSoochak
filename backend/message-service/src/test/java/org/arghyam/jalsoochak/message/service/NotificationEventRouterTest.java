@@ -18,6 +18,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.sql.ResultSet;
@@ -31,11 +35,14 @@ import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
+import org.arghyam.jalsoochak.message.config.StorageProperties;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.TenantRef;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
+import org.arghyam.jalsoochak.message.exception.StorageException;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
+import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
 import reactor.core.publisher.Mono;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +51,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -79,7 +87,11 @@ class NotificationEventRouterTest {
     private WeeklyReportPdfService weeklyReportPdfService;
 
     @Mock
-    private MinioStorageService minioStorageService;
+    private ObjectStorageService objectStorageService;
+
+    /** The shipped defaults, so escalations upload to {@code escalation-reports}. */
+    @Spy
+    private StorageProperties storageProperties = new StorageProperties();
 
     @Mock
     private MessageTemplateService messageTemplateService;
@@ -112,6 +124,9 @@ class NotificationEventRouterTest {
 
     @TempDir
     Path tempDir;
+
+    /** Bytes of the stand-in PDF the stubbed PDF services leave on disk. */
+    private static final byte[] PDF_BYTES = "%PDF-1.4 test".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
 
     @BeforeEach
     void setUp() {
@@ -174,7 +189,7 @@ class NotificationEventRouterTest {
         verify(whatsAppChannel).sendNudgeViaFlow(eq(42L), eq("Ramesh"), anyString());
         verify(whatsAppSender, never()).optIn(anyString());
         verify(kafkaProducer, never()).publishJson(anyString(), any());
-        verifyNoInteractions(escalationPdfService, minioStorageService, messageTemplateService);
+        verifyNoInteractions(escalationPdfService, objectStorageService, messageTemplateService);
     }
 
     @Test
@@ -233,8 +248,8 @@ class NotificationEventRouterTest {
 
     @Test
     void route_generatesAndSendsEscalation_usingStoredContactId_whenPresent() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenReturn("report.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/report.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenAnswer(inv -> escalationPdf("report.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/report.pdf"));
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
 
         router.route("""
@@ -248,17 +263,20 @@ class NotificationEventRouterTest {
                 """);
 
         verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq("JE"), eq("corr-stored"));
-        // Escalations keep the original flat single-bucket upload; only the water reports are foldered.
-        verify(minioStorageService).upload(any(Path.class));
-        verify(whatsAppChannel).sendDocument(eq(77L), eq("https://minio.example.com/report.pdf"));
+        // Escalations keep the original flat single-bucket upload; only the water reports are foldered,
+        // and only their buckets are created on demand.
+        verify(objectStorageService).upload(eq("escalation-reports"), eq("report.pdf"), any(InputStream.class),
+                eq((long) PDF_BYTES.length), eq("application/pdf"));
+        verify(objectStorageService, never()).ensureBucket(anyString());
+        verify(whatsAppChannel).sendDocument(eq(77L), eq("https://storage.example.org/report.pdf"));
         verify(whatsAppSender, never()).optIn(anyString());
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
 
     @Test
     void route_passesEmptyOfficerUserType_toGeneratePdf_whenFieldAbsentInPayload() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenReturn("report.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/report.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenAnswer(inv -> escalationPdf("report.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/report.pdf"));
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
 
         router.route("""
@@ -276,8 +294,8 @@ class NotificationEventRouterTest {
 
     @Test
     void route_passesEmptyCorrelationId_toGeneratePdf_whenFieldAbsentInPayload() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq(""))).thenReturn("report.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/report.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq(""))).thenAnswer(inv -> escalationPdf("report.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/report.pdf"));
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
 
         router.route("""
@@ -295,8 +313,8 @@ class NotificationEventRouterTest {
 
     @Test
     void route_fallsBackToOptIn_andPublishesEvent_forEscalation_whenNoStoredContactId() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenReturn("r.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/r.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenAnswer(inv -> escalationPdf("r.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/r.pdf"));
         when(whatsAppSender.optIn("919876500000")).thenReturn(88L);
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
 
@@ -326,7 +344,7 @@ class NotificationEventRouterTest {
                                "soName":"SO","consecutiveDaysMissed":5,"lastRecordedBfmDate":"2024-01-01"}]}
                 """);
 
-        verifyNoInteractions(escalationPdfService, minioStorageService, whatsAppChannel);
+        verifyNoInteractions(escalationPdfService, objectStorageService, whatsAppChannel);
     }
 
     @Test
@@ -336,13 +354,13 @@ class NotificationEventRouterTest {
                  "escalationLevel":1,"tenantId":1,"officerLanguageId":0,"operators":[]}
                 """);
 
-        verifyNoInteractions(escalationPdfService, minioStorageService, whatsAppChannel);
+        verifyNoInteractions(escalationPdfService, objectStorageService, whatsAppChannel);
     }
 
     @Test
     void route_isCaseInsensitive_forEscalationEventType() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq("corr-case"))).thenReturn("r.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/r.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq("corr-case"))).thenAnswer(inv -> escalationPdf("r.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/r.pdf"));
         when(whatsAppSender.optIn(anyString())).thenReturn(11L);
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
 
@@ -364,7 +382,7 @@ class NotificationEventRouterTest {
                 {"eventType":"SOME_UNKNOWN_TYPE","data":"irrelevant"}
                 """);
 
-        verifyNoInteractions(whatsAppChannel, escalationPdfService, minioStorageService);
+        verifyNoInteractions(whatsAppChannel, escalationPdfService, objectStorageService);
     }
 
     @Test
@@ -396,13 +414,14 @@ class NotificationEventRouterTest {
     }
 
     @Test
-    void route_rethrowsException_forKafkaRetry_whenMinioUploadFails() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq("corr-minio-fail"))).thenReturn("r.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenThrow(new Exception("MinIO error"));
+    void route_rethrowsException_forKafkaRetry_whenStorageUploadFails() throws Exception {
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq("corr-upload-fail"))).thenAnswer(inv -> escalationPdf("r.pdf"));
+        doThrow(new StorageException("Upload failed for key: r.pdf"))
+                .when(objectStorageService).upload(anyString(), anyString(), any(InputStream.class), anyLong(), anyString());
 
         assertThatThrownBy(() -> router.route("""
                 {"eventType":"ESCALATION","officerPhone":"919876500004","officerName":"DO",
-                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,"correlationId":"corr-minio-fail",
+                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,"correlationId":"corr-upload-fail",
                  "operators":[{"name":"Op","phoneNumber":"911111111114","schemeName":"S","schemeId":"1",
                                "soName":"SO","consecutiveDaysMissed":4,"lastRecordedBfmDate":"2024-01-01"}]}
                 """))
@@ -426,7 +445,7 @@ class NotificationEventRouterTest {
         verify(whatsAppChannel).onboardOperator("919876543210", 2);
         verify(whatsAppChannel).onboardOperator("919123456789", 2);
         verify(kafkaProducer, times(2)).publishJson(eq("common-topic"), any());
-        verifyNoInteractions(escalationPdfService, minioStorageService, messageTemplateService);
+        verifyNoInteractions(escalationPdfService, objectStorageService, messageTemplateService);
     }
 
     @Test
@@ -1299,16 +1318,18 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn(Path.of("daily_report_x.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
-        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
+        when(whatsAppChannel.sendDailyReport(12345L, "https://storage.example.org/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
                 .thenReturn(acceptedSend());
 
         router.route(DAILY_REPORT_JSON);
 
         verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
-        verify(minioStorageService).upload(any(Path.class), eq(ReportFileNaming.DAILY_BUCKET), anyString());
-        verify(whatsAppChannel).sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli");
+        verify(objectStorageService).ensureBucket(ReportFileNaming.DAILY_BUCKET);
+        verify(objectStorageService).upload(eq(ReportFileNaming.DAILY_BUCKET), anyString(), any(InputStream.class),
+                eq((long) PDF_BYTES.length), eq("application/pdf"));
+        verify(whatsAppChannel).sendDailyReport(12345L, "https://storage.example.org/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli");
         // Stored contact present → no opt-in, no contact-registered event.
         verify(whatsAppSender, never()).optIn(anyString());
     }
@@ -1340,7 +1361,7 @@ class NotificationEventRouterTest {
         // A generation failure must be counted like every other terminal outcome.
         assertThat(appender.list).anySatisfy(event -> assertThat(event.getFormattedMessage())
                 .contains("result=FAILED_GENERATION role=SECTION_OFFICER tenant=1 officer=500"));
-        verify(minioStorageService, never()).upload(any(Path.class));
+        verify(objectStorageService, never()).upload(anyString(), anyString(), any(), anyLong(), anyString());
         verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any(), any());
     }
 
@@ -1375,17 +1396,17 @@ class NotificationEventRouterTest {
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(piiEncryptionService.safeDecrypt("enc-phone")).thenReturn("919876500024");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn(Path.of("daily_report_x.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppSender.optIn("919876500024")).thenReturn(88L);
-        when(whatsAppChannel.sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
+        when(whatsAppChannel.sendDailyReport(88L, "https://storage.example.org/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
                 .thenReturn(acceptedSend());
 
         router.route(DAILY_REPORT_JSON);
 
         verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
         verify(whatsAppSender).optIn("919876500024");
-        verify(whatsAppChannel).sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli");
+        verify(whatsAppChannel).sendDailyReport(88L, "https://storage.example.org/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli");
         verify(kafkaProducer).publishJson(eq("common-topic"), argThat(event -> {
             String s = event.toString();
             return s.contains("WHATSAPP_CONTACT_REGISTERED") && s.contains("88");
@@ -1399,7 +1420,7 @@ class NotificationEventRouterTest {
      * stalled every other event on the partition.
      *
      * <p>The stop happens before the report is built: no PDF is rendered and nothing is uploaded, so a
-     * dead end costs neither a render nor a MinIO round-trip. The absent {@code generate}/{@code upload}
+     * dead end costs neither a render nor a storage round-trip. The absent {@code generate}/{@code upload}
      * stubs are part of the assertion — strict stubbing would flag them if the router still ran them.</p>
      */
     @Test
@@ -1413,7 +1434,7 @@ class NotificationEventRouterTest {
         router.route(DAILY_REPORT_JSON);
 
         verifyNoInteractions(dailyReportPdfService);
-        verify(minioStorageService, never()).upload(any(Path.class));
+        verify(objectStorageService, never()).upload(anyString(), anyString(), any(), anyLong(), anyString());
         verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any(), any());
         verify(kafkaProducer, never()).publishJson(eq("common-topic"), any());
     }
@@ -1483,9 +1504,9 @@ class NotificationEventRouterTest {
             };
         });
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn(Path.of("f.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/f.pdf");
-        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod"))
+                .thenAnswer(inv -> reportPdf("f.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/f.pdf"));
+        when(whatsAppChannel.sendDailyReport(12345L, "https://storage.example.org/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod"))
                 .thenReturn(acceptedSend());
 
         router.route(json);
@@ -1517,8 +1538,8 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn(Path.of("daily_report_x.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(acceptedSend());
 
@@ -1542,8 +1563,8 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn(Path.of("daily_report_x.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(acceptedSend());
 
@@ -1561,8 +1582,8 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn(Path.of("daily_report_x.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(ReportSendOutcome.failed(
                         WhatsAppSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
@@ -1576,7 +1597,7 @@ class NotificationEventRouterTest {
     }
 
     /**
-     * A {@code CONFIG} failure never reached the provider: the template id, contact id or MinIO URL prefix is
+     * A {@code CONFIG} failure never reached the provider: the template id, contact id or report URL prefix is
      * wrong on our side. It is a definite rejection — so it keeps {@code result=FAILED_DELIVERY} — but
      * one no retry can repair, so redriving it only stalls the partition until someone changes
      * configuration. Terminal, not rethrown.
@@ -1586,8 +1607,8 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn(Path.of("daily_report_x.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(ReportSendOutcome.failed(
                         WhatsAppSendStage.CONFIG, null, "daily report LINK template id is not configured"));
@@ -1614,8 +1635,8 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn(Path.of("daily_report_x.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(ReportSendOutcome.accepted(
                         WhatsAppSendResult.suppressed(ReportDeliveryMode.LINK)));
@@ -1641,8 +1662,8 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn(Path.of("daily_report_x.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(ReportSendOutcome.failed(
                         WhatsAppSendStage.TIMEOUT, null, "Timeout on blocking read for 30000 MILLISECONDS"));
@@ -1669,8 +1690,8 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn(Path.of("daily_report_x.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(ReportSendOutcome.failed(WhatsAppSendStage.SEND_NO_MESSAGE_ID, null,
                         "provider accepted sendHsmMessage but returned no message.id"));
@@ -1689,8 +1710,8 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn(Path.of("daily_report_x.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(ReportSendOutcome.failed(
                         WhatsAppSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
@@ -1799,10 +1820,10 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(weeklyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"),
-                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
-                .thenReturn("https://minio/weekly.pdf");
-        when(whatsAppChannel.sendWeeklyReport(12345L, "https://minio/weekly.pdf", "SECTION_OFFICER",
+                anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString()))
+                .thenReturn(URI.create("https://storage.example.org/weekly.pdf"));
+        when(whatsAppChannel.sendWeeklyReport(12345L, "https://storage.example.org/weekly.pdf", "SECTION_OFFICER",
                 LocalDate.of(2026, 7, 13), "Binod Nimoli")).thenReturn(acceptedSend());
 
         router.route(WEEKLY_SO_JSON);
@@ -1810,8 +1831,10 @@ class NotificationEventRouterTest {
         verify(weeklyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"),
                 anyList(), anyList(), anyList(), anyList());
         // The weekly bucket, not the daily one — they are separate stores.
-        verify(minioStorageService).upload(any(Path.class), eq(ReportFileNaming.WEEKLY_BUCKET), anyString());
-        verify(whatsAppChannel).sendWeeklyReport(12345L, "https://minio/weekly.pdf", "SECTION_OFFICER",
+        verify(objectStorageService).ensureBucket(ReportFileNaming.WEEKLY_BUCKET);
+        verify(objectStorageService).upload(eq(ReportFileNaming.WEEKLY_BUCKET), anyString(), any(InputStream.class),
+                eq((long) PDF_BYTES.length), eq("application/pdf"));
+        verify(whatsAppChannel).sendWeeklyReport(12345L, "https://storage.example.org/weekly.pdf", "SECTION_OFFICER",
                 LocalDate.of(2026, 7, 13), "Binod Nimoli");
         verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any(), any());
     }
@@ -1821,16 +1844,17 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
-                .thenReturn("https://minio/weekly.pdf");
+                anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString()))
+                .thenReturn(URI.create("https://storage.example.org/weekly.pdf"));
         when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))
                 .thenReturn(acceptedSend());
 
         router.route(WEEKLY_SO_JSON);
 
         ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
-        verify(minioStorageService).upload(any(Path.class), eq(ReportFileNaming.WEEKLY_BUCKET), key.capture());
+        verify(objectStorageService).upload(eq(ReportFileNaming.WEEKLY_BUCKET), key.capture(), any(InputStream.class),
+                anyLong(), anyString());
         assertThat(key.getValue()).isEqualTo("SO/2026-07-13_to_2026-07-19/weekly.pdf");
     }
 
@@ -1840,16 +1864,17 @@ class NotificationEventRouterTest {
         stubOfficerContact(999L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("SDO Kumar");
         when(weeklyReportPdfService.generate(any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"),
-                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly_sdo.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
-                .thenReturn("https://minio/weekly_sdo.pdf");
+                anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly_sdo.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString()))
+                .thenReturn(URI.create("https://storage.example.org/weekly_sdo.pdf"));
         when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))
                 .thenReturn(acceptedSend());
 
         router.route(WEEKLY_SO_JSON.replace("SECTION_OFFICER", "SUB_DIVISIONAL_OFFICER"));
 
         ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
-        verify(minioStorageService).upload(any(Path.class), eq(ReportFileNaming.WEEKLY_BUCKET), key.capture());
+        verify(objectStorageService).upload(eq(ReportFileNaming.WEEKLY_BUCKET), key.capture(), any(InputStream.class),
+                anyLong(), anyString());
         assertThat(key.getValue()).startsWith("SDO/");
     }
 
@@ -1902,7 +1927,7 @@ class NotificationEventRouterTest {
         router.route(WEEKLY_SO_JSON.replace("tenant_mp", "tenant_mp; DROP TABLE user_table"));
 
         verifyNoInteractions(weeklyReportPdfService);
-        verifyNoInteractions(minioStorageService);
+        verifyNoInteractions(objectStorageService);
     }
 
     @Test
@@ -1910,9 +1935,9 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
-                .thenThrow(new IllegalStateException("MinIO down"));
+                anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
+        doThrow(new StorageException("Upload failed for key: weekly.pdf"))
+                .when(objectStorageService).upload(anyString(), anyString(), any(InputStream.class), anyLong(), anyString());
 
         assertThatThrownBy(() -> router.route(WEEKLY_SO_JSON)).isInstanceOf(RuntimeException.class);
 
@@ -2007,9 +2032,9 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"),
-                anyList(), anyList())).thenReturn(Path.of("daily_report_x.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
-                .thenReturn("https://minio/daily_report_x.pdf");
+                anyList(), anyList())).thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString()))
+                .thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(ReportSendOutcome.failed(WhatsAppSendStage.TIMEOUT, null,
                         "Timeout on blocking read for 30000 MILLISECONDS"));
@@ -2193,10 +2218,26 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly.pdf"));
-        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
-                .thenReturn("https://minio/weekly.pdf");
+                anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString()))
+                .thenReturn(URI.create("https://storage.example.org/weekly.pdf"));
         when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))
                 .thenReturn(outcome);
+    }
+
+    /**
+     * Writes a stand-in escalation PDF under the report directory, where the router resolves the
+     * filename {@code EscalationPdfService} returns, and returns that filename. Used as the stub's
+     * answer, so each call writes the file afresh, as the real service does: the router deletes it
+     * once it is uploaded.
+     */
+    private String escalationPdf(String filename) throws IOException {
+        Files.write(tempDir.resolve(filename), PDF_BYTES);
+        return filename;
+    }
+
+    /** Writes a stand-in water-report PDF and returns its path, as the report PDF services do. */
+    private Path reportPdf(String filename) throws IOException {
+        return Files.write(tempDir.resolve(filename), PDF_BYTES);
     }
 }

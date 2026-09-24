@@ -5,7 +5,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.message.exception.StorageException;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.BucketAlreadyOwnedByYouException;
+import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
+import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import java.io.InputStream;
@@ -23,6 +28,48 @@ public class S3CompatibleStorageService implements ObjectStorageService {
     private final S3Client s3Client;
     /** {@code storage.public-base-url} — the address report links handed to the WhatsApp provider are built on. */
     private final String publicBaseUrl;
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The check-then-create pair is not atomic, and the report jobs upload one PDF per officer
+     * concurrently: on the first run after a bucket is added, several uploads see it missing and all
+     * of them try to create it. The losers get {@code BucketAlreadyOwnedByYou}, which is the state
+     * wanted, not a failure. {@code BucketAlreadyExists} is different: the name belongs to another
+     * account, so it propagates.
+     */
+    @Override
+    public void ensureBucket(String bucket) {
+        try {
+            s3Client.headBucket(HeadBucketRequest.builder().bucket(bucket).build());
+            return;
+        } catch (NoSuchBucketException e) {
+            log.info("[Storage] Bucket '{}' does not exist — creating it. Grant it anonymous read"
+                    + " separately, or the report link will 403 on the officer's phone.", bucket);
+        } catch (SdkException e) {
+            throw new StorageException("Could not check bucket: " + bucket, e);
+        }
+        try {
+            s3Client.createBucket(createBucketRequest(bucket));
+        } catch (BucketAlreadyOwnedByYouException e) {
+            log.debug("[Storage] Bucket '{}' was created concurrently — continuing.", bucket);
+        } catch (SdkException e) {
+            throw new StorageException("Could not create bucket: " + bucket, e);
+        }
+    }
+
+    /**
+     * Outside {@code us-east-1}, AWS refuses a create request that does not name the client's own
+     * region as the bucket's location.
+     */
+    private CreateBucketRequest createBucketRequest(String bucket) {
+        CreateBucketRequest.Builder request = CreateBucketRequest.builder().bucket(bucket);
+        Region region = s3Client.serviceClientConfiguration().region();
+        if (region != null && !Region.US_EAST_1.equals(region)) {
+            request.createBucketConfiguration(config -> config.locationConstraint(region.id()));
+        }
+        return request.build();
+    }
 
     @Override
     public void upload(String bucket, String objectKey, InputStream content, long contentLength, String contentType) {

@@ -40,7 +40,9 @@ public class StorageProperties {
     /**
      * Base URL of the anonymously readable address that
      * {@code ObjectStorageService.publicUrl} builds on:
-     * {@code <publicBaseUrl>/<bucket>/<objectKey>}.
+     * {@code <publicBaseUrl>/<bucket>/<objectKey>}. Required while storage is enabled, as an
+     * absolute {@code http(s)} URL with a host and no user-info, query or fragment, or startup fails.
+     * Meta downloads report URLs built on it from its own network, so it must be public.
      */
     private String publicBaseUrl;
 }

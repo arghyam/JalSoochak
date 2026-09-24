@@ -116,10 +116,10 @@ class WhatsAppChannelTest {
 
     @Test
     void sendDocument_returnsTrueAndSendsEscalationHsm_onSuccess() {
-        boolean result = whatsAppChannel.sendDocument(77L, "https://minio.example.com/report.pdf");
+        boolean result = whatsAppChannel.sendDocument(77L, "https://storage.example.org/report.pdf");
 
         assertThat(result).isTrue();
-        verify(whatsAppSender).sendEscalationHsm(77L, "https://minio.example.com/report.pdf");
+        verify(whatsAppSender).sendEscalationHsm(77L, "https://storage.example.org/report.pdf");
         verify(whatsAppSender, never()).optIn(anyString());
     }
 
@@ -128,19 +128,19 @@ class WhatsAppChannelTest {
         doThrow(new RuntimeException("HSM delivery failed"))
                 .when(whatsAppSender).sendEscalationHsm(anyLong(), anyString());
 
-        boolean result = whatsAppChannel.sendDocument(88L, "https://minio.example.com/r2.pdf");
+        boolean result = whatsAppChannel.sendDocument(88L, "https://storage.example.org/r2.pdf");
 
         assertThat(result).isFalse();
         verify(whatsAppSender, never()).optIn(anyString());
     }
 
     @Test
-    void sendDocument_passesMinioUrl_toEscalationHsm() {
-        String minioUrl = "https://minio.example.com/escalation_L2_report.pdf";
+    void sendDocument_passesDocumentUrl_toEscalationHsm() {
+        String documentUrl = "https://storage.example.org/escalation_L2_report.pdf";
 
-        whatsAppChannel.sendDocument(33L, minioUrl);
+        whatsAppChannel.sendDocument(33L, documentUrl);
 
-        verify(whatsAppSender).sendEscalationHsm(eq(33L), eq(minioUrl));
+        verify(whatsAppSender).sendEscalationHsm(eq(33L), eq(documentUrl));
     }
 
     // ────────────────────────── onboardOperator ────────────────────────────────
@@ -193,11 +193,11 @@ class WhatsAppChannelTest {
     void sendDailyReport_returnsProvidersMessageIdOnAcceptance() {
         WhatsAppSendResult providerResult =
                 new WhatsAppSendResult("241952654", "880557", ReportDeliveryMode.LINK);
-        when(whatsAppSender.sendDailyReportHsm(42L, "https://minio/r.pdf", "SECTION_OFFICER",
+        when(whatsAppSender.sendDailyReportHsm(42L, "https://storage.example.org/r.pdf", "SECTION_OFFICER",
                 LocalDate.of(2026, 8, 27), "Binod")).thenReturn(providerResult);
 
         ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
-                42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
+                42L, "https://storage.example.org/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
 
         assertThat(outcome.accepted()).isTrue();
         assertThat(outcome.result().messageId()).isEqualTo("241952654");
@@ -211,10 +211,10 @@ class WhatsAppChannelTest {
                 .thenReturn(new WhatsAppSendResult("1", "880557", ReportDeliveryMode.LINK));
 
         ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
-                42L, "https://minio/r.pdf", "  ", LocalDate.of(2026, 8, 27), "Binod");
+                42L, "https://storage.example.org/r.pdf", "  ", LocalDate.of(2026, 8, 27), "Binod");
 
         assertThat(outcome.accepted()).isTrue();
-        verify(whatsAppSender).sendDailyReportHsm(42L, "https://minio/r.pdf", "UNKNOWN",
+        verify(whatsAppSender).sendDailyReportHsm(42L, "https://storage.example.org/r.pdf", "UNKNOWN",
                 LocalDate.of(2026, 8, 27), "Binod");
     }
 
@@ -225,7 +225,7 @@ class WhatsAppChannelTest {
                 .thenReturn(WhatsAppSendResult.suppressed(ReportDeliveryMode.LINK));
 
         ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
-                42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
+                42L, "https://storage.example.org/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
 
         assertThat(outcome.accepted()).isTrue();
         assertThat(outcome.result().hasMessageId()).isFalse();
@@ -238,7 +238,7 @@ class WhatsAppChannelTest {
                 .thenThrow(new RuntimeException("provider unreachable"));
 
         ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
-                42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
+                42L, "https://storage.example.org/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
 
         assertThat(outcome.accepted()).isFalse();
         assertThat(outcome.failure().message()).contains("provider unreachable");
@@ -255,7 +255,7 @@ class WhatsAppChannelTest {
                         "(#131053) Media upload error"));
 
         ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
-                42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
+                42L, "https://storage.example.org/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
 
         assertThat(outcome.accepted()).isFalse();
         assertThat(outcome.failure().stage()).isEqualTo(WhatsAppSendStage.MEDIA_REGISTER);
@@ -270,7 +270,7 @@ class WhatsAppChannelTest {
                 .thenThrow(new IllegalArgumentException("requires a resolved contact id"));
 
         ReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
-                42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
+                42L, "https://storage.example.org/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
 
         assertThat(outcome.failure().stage()).isEqualTo(WhatsAppSendStage.CONFIG);
         assertThat(outcome.failure().errorKey()).isNull();
@@ -283,7 +283,7 @@ class WhatsAppChannelTest {
                         "Receiver does not exist"));
 
         ReportSendOutcome outcome = whatsAppChannel.sendWeeklyReport(
-                42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 24), "Binod");
+                42L, "https://storage.example.org/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 24), "Binod");
 
         assertThat(outcome.accepted()).isFalse();
         assertThat(outcome.failure().stage()).isEqualTo(WhatsAppSendStage.SEND);

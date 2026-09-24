@@ -116,7 +116,7 @@ public record GlificWhatsAppSettings(
     }
 
     /**
-     * @param baseUrl             the prefix of every media URL handed to Glific ({@code minio.base-url}).
+     * @param baseUrl             the prefix of every media URL handed to Glific ({@code storage.public-base-url}).
      *                            Read by the sender — not only by the storage service — because the
      *                            sender owns the Glific contract and is the only class that knows
      *                            whether a document-sending purpose is live. Meta downloads the URL from

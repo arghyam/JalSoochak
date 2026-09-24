@@ -61,7 +61,7 @@ public final class PublicUrlValidator {
         if (host == null || host.isBlank()) {
             return "URL has no host — it must be absolute";
         }
-        // A fully-qualified name may carry the DNS root dot ("localhost.", "minio.svc.cluster.local.").
+        // A fully-qualified name may carry the DNS root dot ("localhost.", "storage.svc.cluster.local.").
         // It resolves exactly like the dot-less form, so drop it before classifying — otherwise the
         // suffix list misses it and the trailing dot alone satisfies the multi-label check below.
         String lowerHost = stripRootDot(host.toLowerCase());
@@ -74,7 +74,7 @@ public final class PublicUrlValidator {
                 return "host " + host + " uses the private suffix '" + suffix + "'";
             }
         }
-        // A single-label host ("minio", "localhost") is a container or LAN name, never public DNS. Only
+        // A single-label host ("storage", "localhost") is a container or LAN name, never public DNS. Only
         // DNS names are labelled — an IPv6 literal carries no dots, and a public one is fine to fetch.
         if (!isIpv6Literal(lowerHost) && !lowerHost.contains(".")) {
             return "host " + host + " is a single-label name, resolvable only inside the local network";

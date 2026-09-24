@@ -21,7 +21,7 @@ import java.util.Map;
  * WhatsApp channel, sending HSM templates through the {@link WhatsAppSender} port.
  *
  * <p>Nudges use a text HSM template with {@code {{1}}} = operator name and {@code {{2}}} = today's date.</p>
- * <p>Escalations use a document HSM template with {@code {{1}}} = MinIO URL
+ * <p>Escalations use a document HSM template with {@code {{1}}} = the PDF's public URL
  * and {@code {{2}}} = localized body text.</p>
  *
  * <p>Configure the WhatsApp provider's credentials and template IDs via environment variables:
@@ -144,7 +144,7 @@ public class WhatsAppChannel implements NotificationChannel {
      * WhatsApp contact ID.
      *
      * @param contactId   WhatsApp contact ID of the officer
-     * @param documentUrl publicly reachable MinIO URL of the escalation PDF
+     * @param documentUrl publicly reachable URL of the stored escalation PDF
      * @return {@code true} if the message was accepted by the WhatsApp provider
      */
     public boolean sendDocument(long contactId, String documentUrl) {
@@ -165,7 +165,7 @@ public class WhatsAppChannel implements NotificationChannel {
      * "View Report" link button — by {@code notifications.daily-report.delivery-mode}.
      *
      * @param contactId       WhatsApp contact ID of the officer
-     * @param documentUrl     publicly reachable MinIO URL of the report PDF
+     * @param documentUrl     publicly reachable URL of the stored report PDF
      * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
      * @param reportDate      the day the report's data covers (D-1); shown in the document name the
      *                        officer sees in WhatsApp, and template variable {{2}} in link mode

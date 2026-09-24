@@ -274,8 +274,8 @@ daily-report:
   link:
     # Optional mirror of the URL prefix frozen into the approved LINK template, e.g.
     # https://jalsoochak.jjmbrain.in/minio/ (mind the trailing slash). When set it must equal
-    # minio.base-url + "/" or the service refuses to start. This is the only check that catches an
-    # environment deployed with another environment's template id or MINIO_BASE_URL: the provider accepts
+    # storage.public-base-url + "/" or the service refuses to start. This is the only check that catches an
+    # environment deployed with another environment's template id or STORAGE_PUBLIC_BASE_URL: the provider accepts
     # the send either way, so otherwise the officer is the first to notice the button leads nowhere.
     # Leave blank to skip the check (a startup warning is logged instead).
     button-base-url: ${DAILY_REPORT_LINK_BUTTON_BASE_URL:}
@@ -336,10 +336,10 @@ notifications:
     
     # How the report PDF reaches the officer. DOCUMENT | LINK (case-insensitive).
     #
-    #   DOCUMENT — the PDF as a WhatsApp document. The provider registers the MinIO URL and META
-    #              DOWNLOADS IT ITSELF. Production MinIO answers Indian source addresses only, so
-    #              that download fails inside Meta
-    #   LINK     — a text HSM whose "View Report" button carries the MinIO path. Meta fetches
+    #   DOCUMENT — the PDF as a WhatsApp document. The provider registers the report URL and META
+    #              DOWNLOADS IT ITSELF. The production object store answers Indian source addresses
+    #              only, so that download fails inside Meta
+    #   LINK     — a text HSM whose "View Report" button carries the report's path. Meta fetches
     #              nothing; the officer's phone opens the PDF, from inside India, when they tap it.
     #              Requires an approved link template (whatsapp.template.daily-report-*-link-id).
     #
@@ -348,7 +348,7 @@ notifications:
   weekly-report:
     # Defaults to SUPPRESSED: the weekly report needs its own Meta-approved templates (the body text
     # says "Weekly", and SO and SDO get different wording), and until those exist there is nothing to
-    # send. While suppressed the PDFs are still generated and uploaded to MinIO, so the whole pipeline
+    # send. While suppressed the PDFs are still generated and uploaded to storage, so the whole pipeline
     # can be verified end to end before delivery goes live. Set to false once the template ids below
     # are configured — startup then refuses to proceed if they are still blank.
     dry-run: ${NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN:false}
@@ -374,7 +374,7 @@ whatsapp:
     # Link templates — used only when notifications.daily-report.delivery-mode=LINK. These are text
     # HSMs with a dynamic-URL button, NOT document templates, so they are separate approvals.
     # Variables: {{1}} officer name, {{2}} report date (dd-MM-yyyy), then the button's URL suffix.
-    # The button's fixed prefix is frozen at approval and must equal MINIO_BASE_URL + "/", which is
+    # The button's fixed prefix is frozen at approval and must equal STORAGE_PUBLIC_BASE_URL + "/", which is
     # why staging and production each need their own template id.
     daily-report-so-link-id: ${WHATSAPP_DAILY_REPORT_SO_LINK_TEMPLATE_ID:}
     # Optional — falls back to the SO link template when blank.
@@ -474,38 +474,44 @@ smscountry:
   dlt-header-id: ${SMSCOUNTRY_DLT_HEADER_ID:1705177444898758356}
 
 # ──────────────────────────────────────────────────────────────
-# MinIO Object Storage (escalation + daily report PDF hosting)
+# Object storage, S3-compatible (escalation, daily and weekly report PDF hosting)
 #
-# endpoint and base-url are two DIFFERENT addresses. Setting them to the same
+# endpoint and public-base-url are two DIFFERENT addresses. Setting them to the same
 # internal value is the mistake to avoid:
 #
-#   endpoint → where THIS SERVICE uploads to. Internal is correct
-#              (cluster IP, container name, localhost).
-#   base-url → the prefix of the URL handed to the WhatsApp provider, which registers it and
-#              META DOWNLOADS IT FROM THE PUBLIC INTERNET. Must be publicly
-#              reachable AND anonymously readable.
+#   endpoint        → where THIS SERVICE uploads to. Internal is correct
+#                     (cluster IP, container name, localhost). Blank means AWS S3.
+#   public-base-url → the prefix of the URL handed to the WhatsApp provider, which registers it and
+#                     META DOWNLOADS IT FROM THE PUBLIC INTERNET. Must be publicly
+#                     reachable AND anonymously readable.
 #
-# Production: MINIO_BASE_URL=https://jalsoochak.jjmbrain.in/minio
+# Production: STORAGE_PUBLIC_BASE_URL=https://jalsoochak.jjmbrain.in/minio
 #   → https://jalsoochak.jjmbrain.in/minio/escalation-reports/<file>.pdf
 #
 # An internal address here uploads fine and returns a provider media id, then fails
 # inside Meta with "(#131053) Media upload error … blocked by a destination
-# filter" — the officer gets a document that will not open. The service now
-# refuses to start when a document-sending purpose is live and base-url is a
-# private, loopback or single-label address.
+# filter" — the officer gets a document that will not open. Startup fails when
+# public-base-url is unset or not an absolute http(s) URL, warns when it is a private,
+# loopback or single-label address, and refuses outright in that case once a
+# document-sending purpose is live.
 #
-# The bucket must allow anonymous GET (Meta sends no credentials):
+# bucket holds the escalations. The daily and weekly reports go to daily-water-reports
+# and weekly-water-reports, which are created on first upload if missing. No bucket is
+# ever made public by this service: each must allow anonymous GET (Meta and the officer's
+# phone send no credentials), e.g. with the store's own client:
 #   mc anonymous set download <alias>/escalation-reports
 # Verify from OUTSIDE the network before enabling delivery:
 #   curl -sSI https://jalsoochak.jjmbrain.in/minio/escalation-reports/<file>.pdf
 # ──────────────────────────────────────────────────────────────
 
-minio:
-  endpoint: ${MINIO_ENDPOINT:https://localhost:9000}
-  access-key: ${MINIO_ACCESS_KEY}
-  secret-key: ${MINIO_SECRET_KEY}
-  bucket: ${MINIO_BUCKET:escalation-reports}
-  base-url: ${MINIO_BASE_URL:https://localhost:9000}
+storage:
+  enabled: ${STORAGE_ENABLED:true}
+  endpoint: ${STORAGE_ENDPOINT:} # blank = real AWS S3; set to the URL of any other S3-compatible store
+  region: ${STORAGE_REGION:us-east-1}
+  access-key: ${STORAGE_ACCESS_KEY:}
+  secret-key: ${STORAGE_SECRET_KEY:}
+  bucket: ${STORAGE_BUCKET:escalation-reports}
+  public-base-url: ${STORAGE_PUBLIC_BASE_URL:} # required; public prefix of report URLs, fetched by Meta
 
 logging:
   file:

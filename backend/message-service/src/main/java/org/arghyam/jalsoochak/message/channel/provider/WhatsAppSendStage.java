@@ -6,14 +6,14 @@ package org.arghyam.jalsoochak.message.channel.provider;
  *
  * <p>The distinction is operational, not cosmetic. The 20 Aug 2026 incident
  * ({@code (#131053) Media upload error}) failed at {@link #MEDIA_REGISTER} — Meta could not fetch the
- * MinIO URL — which is a completely different fix from a template or receiver problem at
+ * report URL — which is a completely different fix from a template or receiver problem at
  * {@link #SEND}. Both looked identical in the logs at the time.</p>
  */
 public enum WhatsAppSendStage {
 
     /**
      * {@code createMessageMedia} rejected the PDF. DOCUMENT mode only: the provider validates the media URL
-     * with the BSP before accepting it, so an unreachable or geo-blocked MinIO surfaces here.
+     * with the BSP before accepting it, so an unreachable or geo-blocked object store surfaces here.
      */
     MEDIA_REGISTER,
 
@@ -41,7 +41,7 @@ public enum WhatsAppSendStage {
 
     /**
      * The send never reached the provider because our own configuration or inputs were wrong — a missing
-     * template id, an unresolved contact id, or a MinIO URL that does not sit under the prefix the
+     * template id, an unresolved contact id, or a report URL that does not sit under the prefix the
      * approved template froze. Retrying cannot help until configuration changes.
      */
     CONFIG

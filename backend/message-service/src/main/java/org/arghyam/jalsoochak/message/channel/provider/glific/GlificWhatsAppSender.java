@@ -26,7 +26,7 @@ import java.util.Map;
  * <p>Nudge HSM: {{1}} = operator name, {{2}} = today's date.</p>
  * <p>Escalation HSM (document type, two-step):
  * <ol>
- *   <li>Upload the MinIO PDF URL via {@code createMessageMedia} → receive {@code mediaId}.</li>
+ *   <li>Upload the stored PDF's public URL via {@code createMessageMedia} → receive {@code mediaId}.</li>
  *   <li>Send via {@code createAndSendMessage} with {@code mediaId} (document header)
  *       and {@code parameters[0]} = localized body text.</li>
  * </ol>
@@ -239,18 +239,19 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         if (!expected.equals(settings.linkButtonBaseUrl().trim())) {
             throw new IllegalStateException(
                     "daily-report.link.button-base-url is '" + settings.linkButtonBaseUrl().trim()
-                    + "' but minio.base-url yields the prefix '" + expected + "'. These must be identical:"
-                    + " the first is the prefix frozen into the approved WhatsApp template, the second is"
-                    + " what this service strips off the MinIO URL to build the button's variable."
+                    + "' but storage.public-base-url yields the prefix '" + expected + "'. These must be"
+                    + " identical: the first is the prefix frozen into the approved WhatsApp template, the"
+                    + " second is what this service strips off the report URL to build the button's variable."
                     + " A mismatch delivers a button pointing at the wrong host or path — most likely one"
-                    + " environment was deployed with another environment's template id or MINIO_BASE_URL.");
+                    + " environment was deployed with another environment's template id or"
+                    + " STORAGE_PUBLIC_BASE_URL.");
         }
     }
 
     /**
-     * Refuses to start when a purpose that hands out a MinIO URL is live but {@code minio.base-url}
-     * is an address the recipient cannot reach. The escalation and the daily report attach a MinIO
-     * PDF, and a wrong prefix here is invisible on our side: the upload succeeds,
+     * Refuses to start when a purpose that hands out a report URL is live but
+     * {@code storage.public-base-url} is an address the recipient cannot reach. The escalation and the
+     * daily report attach a stored PDF, and a wrong prefix here is invisible on our side: the upload succeeds,
      * {@code createMessageMedia} returns a media id, the send is accepted, and only the recipient
      * discovers the document will not open. Failing at startup keeps that from reaching officers at
      * all.
@@ -263,19 +264,19 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      */
     private void validateMediaBaseUrl() {
         GlificWhatsAppSettings.DryRun dryRun = settings.dryRun();
-        boolean handsOutMinioUrls = !dryRun.dailyReport() || !dryRun.escalation() || !dryRun.weeklyReport();
-        if (!handsOutMinioUrls) {
+        boolean handsOutReportUrls = !dryRun.dailyReport() || !dryRun.escalation() || !dryRun.weeklyReport();
+        if (!handsOutReportUrls) {
             return;
         }
         String reason = PublicUrlValidator.unreachableReason(settings.media().baseUrl());
         if (reason != null) {
             throw new IllegalStateException(
-                    "minio.base-url must be a publicly reachable URL when WhatsApp document delivery is"
+                    "storage.public-base-url must be a publicly reachable URL when WhatsApp document delivery is"
                     + " enabled, but '" + settings.media().baseUrl() + "' is unusable: " + reason
                     + ". Glific hands this URL to Meta, which downloads it from the public internet and"
                     + " rejects internal addresses with '(#131053) … blocked by a destination filter'."
-                    + " Set MINIO_BASE_URL to the public URL (e.g. https://jalsoochak.jjmbrain.in/minio)"
-                    + " — note minio.endpoint stays internal, it is only the upload address."
+                    + " Set STORAGE_PUBLIC_BASE_URL to the public URL (e.g. https://jalsoochak.jjmbrain.in/minio)"
+                    + " — note storage.endpoint stays internal, it is only the upload address."
                     + " In LINK mode Meta no longer downloads the file, but this same prefix is what the"
                     + " officer's phone opens and what is frozen into the approved template, so it must be"
                     + " publicly reachable there too.");
@@ -417,8 +418,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         if (reason != null) {
             throw new IllegalStateException(
                     "Refusing to register media URL '" + publicUrl + "' with Glific: " + reason
-                    + ". Meta downloads this URL from the public internet — set MINIO_BASE_URL to the"
-                    + " public MinIO address.");
+                    + ". Meta downloads this URL from the public internet — set STORAGE_PUBLIC_BASE_URL to"
+                    + " the public address of the object store.");
         }
         log.debug("[WhatsApp] Uploading media");
         JsonNode response = client.execute(CREATE_MESSAGE_MEDIA_MUTATION, Map.of(
@@ -439,15 +440,16 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * {@code notifications.daily-report.delivery-mode} selects:
      * <ul>
      *   <li>{@link ReportDeliveryMode#DOCUMENT} — the PDF as a document HSM. Meta downloads the
-     *       MinIO URL itself, which the India-only firewall in front of production MinIO blocks.</li>
+     *       report URL itself, which the India-only firewall in front of the production object store
+     *       blocks.</li>
      *   <li>{@link ReportDeliveryMode#LINK} — a text HSM whose "View Report" button carries the
-     *       MinIO path. Meta fetches nothing; the officer's phone opens the PDF when they tap it.</li>
+     *       report's path. Meta fetches nothing; the officer's phone opens the PDF when they tap it.</li>
      * </ul>
      * The dry-run guard and the contact-id check are shared, so a suppressed report costs no work and
      * a missing contact id costs no Glific round-trip in either mode.
      *
      * @param contactId       Glific contact id of the officer
-     * @param minioUrl        publicly reachable URL of the report PDF
+     * @param documentUrl     publicly reachable URL of the report PDF
      * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
      * @param reportDate      the day the report's data covers (D-1). In DOCUMENT mode it is appended
      *                        to the document name the recipient sees, and null falls back to the bare
@@ -459,7 +461,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      *         officer. A dry-run returns {@link WhatsAppSendResult#suppressed} with a null message id
      */
     @Override
-    public WhatsAppSendResult sendDailyReportHsm(Long contactId, String minioUrl, String officerUserType,
+    public WhatsAppSendResult sendDailyReportHsm(Long contactId, String documentUrl, String officerUserType,
                                                  LocalDate reportDate, String officerName) {
         if (isDryRun(settings.dryRun().dailyReport(), "sendDailyReportHsm")) {
             // Reported leniently: a suppressed send must not start failing because the mode property
@@ -470,16 +472,16 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         requireContactId(contactId, "sendDailyReportHsm");
 
         return switch (deliveryMode()) {
-            case DOCUMENT -> sendDailyReportDocumentHsm(contactId, minioUrl, officerUserType, reportDate);
-            case LINK -> sendDailyReportLinkHsm(contactId, minioUrl, officerUserType, reportDate, officerName);
+            case DOCUMENT -> sendDailyReportDocumentHsm(contactId, documentUrl, officerUserType, reportDate);
+            case LINK -> sendDailyReportLinkHsm(contactId, documentUrl, officerUserType, reportDate, officerName);
         };
     }
 
     /** The original two-step document send: register the PDF as media, then send it as the header. */
-    private WhatsAppSendResult sendDailyReportDocumentHsm(Long contactId, String minioUrl, String officerUserType,
+    private WhatsAppSendResult sendDailyReportDocumentHsm(Long contactId, String documentUrl, String officerUserType,
                                                           LocalDate reportDate) {
         String templateId = resolveDailyReportTemplateId(officerUserType);
-        String mediaId = uploadMedia(minioUrl, dailyReportDocumentName(reportDate));
+        String mediaId = uploadMedia(documentUrl, dailyReportDocumentName(reportDate));
 
         Map<String, Object> input = new HashMap<>();
         input.put("templateId", Integer.parseInt(templateId));
@@ -508,7 +510,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * flat {@code params} array filled in order of occurrence, body variables first and the button's
      * URL suffix last.</p>
      */
-    private WhatsAppSendResult sendDailyReportLinkHsm(Long contactId, String minioUrl, String officerUserType,
+    private WhatsAppSendResult sendDailyReportLinkHsm(Long contactId, String documentUrl, String officerUserType,
                                                       LocalDate reportDate, String officerName) {
         String templateId = resolveDailyReportLinkTemplateId(officerUserType);
         if (isBlank(templateId)) {
@@ -521,7 +523,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
             throw new IllegalArgumentException(
                     "sendDailyReportHsm in LINK mode requires the report date — it is template variable {{2}}");
         }
-        String urlSuffix = linkSuffix(minioUrl);
+        String urlSuffix = linkSuffix(documentUrl);
         String name = isBlank(officerName) ? "Officer" : officerName.trim();
         String role = isBlank(officerUserType) ? "UNKNOWN" : officerUserType.trim();
 
@@ -538,7 +540,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
     }
 
     /**
-     * The value of the LINK template's dynamic-URL variable: the MinIO URL with the prefix the template
+     * The value of the LINK template's dynamic-URL variable: the report URL with the prefix the template
      * already owns stripped off, e.g.
      * {@code escalation-reports/daily_report_SECTION_OFFICER_16714_2026-08-19.pdf}.
      *
@@ -547,30 +549,30 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * produce a button pointing at a path that does not exist — and Glific would accept the send.
      * Refusing here turns that into a failed delivery that gets logged and retried.</p>
      */
-    String linkSuffix(String minioUrl) {
+    String linkSuffix(String documentUrl) {
         String prefix = mediaUrlPrefix();
-        if (minioUrl == null || !minioUrl.startsWith(prefix)) {
+        if (documentUrl == null || !documentUrl.startsWith(prefix)) {
             throw new IllegalStateException(
-                    "Cannot build the daily report link: '" + minioUrl + "' does not start with the"
-                    + " template's URL prefix '" + prefix + "' (from minio.base-url). Meta appends the"
+                    "Cannot build the daily report link: '" + documentUrl + "' does not start with the"
+                    + " template's URL prefix '" + prefix + "' (from storage.public-base-url). Meta appends the"
                     + " remainder to that prefix verbatim, so the button would point somewhere that does"
-                    + " not exist. Check MINIO_BASE_URL against the approved template.");
+                    + " not exist. Check STORAGE_PUBLIC_BASE_URL against the approved template.");
         }
-        String suffix = minioUrl.substring(prefix.length());
+        String suffix = documentUrl.substring(prefix.length());
         if (suffix.isBlank()) {
             throw new IllegalStateException(
-                    "Cannot build the daily report link: '" + minioUrl + "' is the bare prefix '" + prefix
+                    "Cannot build the daily report link: '" + documentUrl + "' is the bare prefix '" + prefix
                     + "' with no object path after it");
         }
         return suffix;
     }
 
     /**
-     * {@code minio.base-url} with exactly one trailing slash — the prefix the LINK template owns.
-     * Mirrors the trailing-slash trimming in {@code MinioStorageService.publicUrlFor}, because the two
-     * have to agree on where the prefix ends for {@link #linkSuffix(String)} to strip it: that value is
-     * hand-written per environment and one ending in {@code /minio/} would otherwise leave a leading
-     * slash on the suffix.
+     * {@code storage.public-base-url} with exactly one trailing slash — the prefix the LINK template
+     * owns. Mirrors the trailing-slash trimming in {@code ObjectStorageService.publicUrl}, because the
+     * two have to agree on where the prefix ends for {@link #linkSuffix(String)} to strip it: that value
+     * is hand-written per environment and one ending in {@code /} would otherwise leave a leading slash
+     * on the suffix.
      */
     private String mediaUrlPrefix() {
         String prefix = settings.media().baseUrl() == null ? "" : settings.media().baseUrl().trim();
@@ -653,7 +655,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * Sends the Weekly Water Service Situation Report as a dynamic-URL button HSM.
      *
      * <p>LINK only, with no DOCUMENT counterpart: the attachment path requires Meta to fetch the PDF
-     * from our MinIO, which the India-only firewall in front of production blocks
+     * from our object store, which the India-only firewall in front of production blocks
      * ({@code (#131053)}). The daily report keeps DOCUMENT mode for environments where that works;
      * there is no reason to introduce the same trap for a new report.</p>
      *
@@ -664,7 +666,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      *         {@link WhatsAppSendResult#suppressed}
      */
     @Override
-    public WhatsAppSendResult sendWeeklyReportHsm(Long contactId, String minioUrl, String officerUserType,
+    public WhatsAppSendResult sendWeeklyReportHsm(Long contactId, String documentUrl, String officerUserType,
                                                   LocalDate weekStart, String officerName) {
         if (isDryRun(settings.dryRun().weeklyReport(), "sendWeeklyReportHsm")) {
             return WhatsAppSendResult.suppressed(ReportDeliveryMode.LINK);
@@ -682,7 +684,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
             throw new IllegalArgumentException(
                     "sendWeeklyReportHsm requires the week start — it is template variable {{2}}");
         }
-        String urlSuffix = linkSuffix(minioUrl);
+        String urlSuffix = linkSuffix(documentUrl);
         String name = isBlank(officerName) ? "Officer" : officerName.trim();
         String role = isBlank(officerUserType) ? "UNKNOWN" : officerUserType.trim();
 
@@ -718,21 +720,21 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      *
      * <p>Two-step process:
      * <ol>
-     *   <li>Upload {@code minioUrl} via {@code createMessageMedia} → {@code mediaId}</li>
+     *   <li>Upload {@code documentUrl} via {@code createMessageMedia} → {@code mediaId}</li>
      *   <li>Send {@code createAndSendMessage} with the {@code mediaId} as the document
      *       header attachment and {@code bodyText} as the body template parameter.</li>
      * </ol>
      *
-     * @param contactId Glific contact ID of the officer
-     * @param minioUrl  publicly reachable URL of the escalation PDF
+     * @param contactId   Glific contact ID of the officer
+     * @param documentUrl publicly reachable URL of the escalation PDF
      */
     @Override
-    public void sendEscalationHsm(Long contactId, String minioUrl) {
+    public void sendEscalationHsm(Long contactId, String documentUrl) {
         if (isDryRun(settings.dryRun().escalation(), "sendEscalationHsm")) return;
         // Checked before the media upload so a missing contact id costs no Glific round-trip.
         requireContactId(contactId, "sendEscalationHsm");
 
-        String mediaId = uploadMedia(minioUrl, settings.media().escalationCaption());
+        String mediaId = uploadMedia(documentUrl, settings.media().escalationCaption());
 
         Map<String, Object> input = new HashMap<>();
         input.put("templateId", Integer.parseInt(settings.templates().escalation()));

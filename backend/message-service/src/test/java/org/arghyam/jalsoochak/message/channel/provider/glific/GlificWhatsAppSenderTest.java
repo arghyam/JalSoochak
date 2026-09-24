@@ -228,12 +228,12 @@ class GlificWhatsAppSenderTest {
     @Test
     void sendEscalationHsm_doesNotCallCreateAndSend_whenUploadFails() {
         when(client.execute(contains("createMessageMedia"), anyMap()))
-                .thenThrow(new RuntimeException("MinIO URL unreachable"));
+                .thenThrow(new RuntimeException("Report URL unreachable"));
 
         assertThatThrownBy(() ->
                 sender().sendEscalationHsm(88L, "https://minio.example.com/r.pdf"))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("MinIO URL unreachable");
+                .hasMessageContaining("Report URL unreachable");
 
         verify(client, never()).execute(contains("createAndSendMessage"), anyMap());
     }
@@ -1017,8 +1017,8 @@ class GlificWhatsAppSenderTest {
 
             assertThatThrownBy(() -> sender().validateTemplates())
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("minio.base-url")
-                    .hasMessageContaining("MINIO_BASE_URL");
+                    .hasMessageContaining("storage.public-base-url")
+                    .hasMessageContaining("STORAGE_PUBLIC_BASE_URL");
         }
 
         @Test
@@ -1031,7 +1031,7 @@ class GlificWhatsAppSenderTest {
 
             assertThatThrownBy(() -> sender().validateTemplates())
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("minio.base-url");
+                    .hasMessageContaining("storage.public-base-url");
         }
 
         @Test
@@ -1062,8 +1062,8 @@ class GlificWhatsAppSenderTest {
 
             assertThatThrownBy(() -> sender().validateTemplates())
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("minio.base-url")
-                    .hasMessageContaining("MINIO_BASE_URL");
+                    .hasMessageContaining("storage.public-base-url")
+                    .hasMessageContaining("STORAGE_PUBLIC_BASE_URL");
         }
 
         @Test
@@ -1079,7 +1079,7 @@ class GlificWhatsAppSenderTest {
             assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
         }
 
-        /** A localhost MinIO is normal for local and CI runs, where nothing is delivered. */
+        /** A localhost object store is normal for local and CI runs, where nothing is delivered. */
         @Test
         void validateTemplates_toleratesAnInternalBaseUrl_whenNoDocumentIsEverSent() {
             settings.whatsappDryRun = true;
@@ -1100,7 +1100,7 @@ class GlificWhatsAppSenderTest {
                     "http://192.168.20.143:9000/escalation-reports/daily_report.pdf",
                     "SECTION_OFFICER", LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("MINIO_BASE_URL");
+                    .hasMessageContaining("STORAGE_PUBLIC_BASE_URL");
 
             verifyNoInteractions(client);
         }
@@ -1110,7 +1110,7 @@ class GlificWhatsAppSenderTest {
             assertThatThrownBy(() -> sender().sendEscalationHsm(55L,
                     "http://minio:9000/escalation-reports/escalation.pdf"))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("MINIO_BASE_URL");
+                    .hasMessageContaining("STORAGE_PUBLIC_BASE_URL");
 
             verifyNoInteractions(client);
         }
@@ -1146,9 +1146,9 @@ class GlificWhatsAppSenderTest {
 
     /**
      * {@code notifications.daily-report.delivery-mode=LINK} sends a text HSM whose "View Report"
-     * button carries the MinIO path, instead of a document HSM Meta has to download itself. The
+     * button carries the report's path, instead of a document HSM Meta has to download itself. The
      * behaviour that matters is that no media is registered at all — that round trip is exactly what
-     * fails with {@code (#131053)} behind the India-only firewall in front of production MinIO.
+     * fails with {@code (#131053)} behind the India-only firewall in front of the production object store.
      */
 @Nested
     @DisplayName("weekly report")
@@ -1450,12 +1450,12 @@ class GlificWhatsAppSenderTest {
         }
 
         @Test
-        void validateTemplates_failsWhenTheButtonBaseUrlDoesNotMatchMinioBaseUrl() {
+        void validateTemplates_failsWhenTheButtonBaseUrlDoesNotMatchThePublicBaseUrl() {
             settings.whatsappDryRun = true;
             settings.nudgeDryRun = true;
             settings.escalationDryRun = true;
             settings.dailyReportDryRun = false;
-            // The staging template's prefix against a production MINIO_BASE_URL — the mistake this
+            // The staging template's prefix against a production STORAGE_PUBLIC_BASE_URL — the mistake this
             // guard exists for, because Glific accepts the send and only the officer sees the dead link.
             settings.dailyReportLinkButtonBaseUrl = "https://jalsoochak.in/minio/";
 
