@@ -16,6 +16,7 @@ import org.arghyam.jalsoochak.tenant.dto.response.TenantConfigStatusResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum;
 import org.arghyam.jalsoochak.tenant.service.TenantManagementService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -42,6 +43,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequestMapping("/api/v1/tenants")
 @RequiredArgsConstructor
 @Slf4j
+@Validated
 @Tag(name = "Tenant Configuration", description = "Per-tenant configuration values and their completeness")
 @CommonApiResponses
 public class TenantConfigController {

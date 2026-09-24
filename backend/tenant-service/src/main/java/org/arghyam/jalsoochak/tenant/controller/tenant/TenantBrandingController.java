@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.tenant.service.TenantManagementService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -38,6 +39,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequestMapping("/api/v1/tenants")
 @RequiredArgsConstructor
 @Slf4j
+@Validated
 @Tag(name = "Tenant Branding", description = "Tenant logo upload and retrieval")
 @CommonApiResponses
 public class TenantBrandingController {

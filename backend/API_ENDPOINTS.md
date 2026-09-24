@@ -173,7 +173,6 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/analytics/water-supply/average-per-region` | Average water supply per region |
 | GET | `/api/v1/analytics/national/dashboard` | National dashboard data |
 | GET | `/api/v1/analytics/scheme-regularity/periodic/national` | National periodic scheme regularity |
-| POST | `/api/v1/analytics/date-dimension/populate` | Populate date dimension table |
 | GET | `/api/v1/analytics/schemes/status-count` | Scheme status counts |
 | GET | `/api/v1/analytics/schemes/dashboard` | Scheme dashboard |
 | GET | `/api/v1/analytics/schemes/region-report` | Scheme region report |

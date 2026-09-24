@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.user.service.UserManagementService;
 import org.arghyam.jalsoochak.user.util.SecurityUtils;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -33,6 +34,7 @@ import lombok.extern.slf4j.Slf4j;
 @RestController
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
+@Validated
 @Tag(name = "Account", description = "The authenticated user's own profile and password")
 @CommonApiResponses
 public class AccountController {
