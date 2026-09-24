@@ -674,6 +674,35 @@ class TenantManagementServiceImplTest {
     class GetTenantConfigsTests {
 
         @Test
+        @DisplayName("Should skip stored config keys that are not UI-managed instead of failing the request")
+        void testGetTenantConfigs_UnknownStoredKeyIsSkipped() {
+            // tenant_config_master_table is shared: alongside the UI-managed TenantConfigKeyEnum keys it
+            // also holds runtime keys other services read (ocr_provider/ocr_url/ocr_api_key, language_N,
+            // nudge_message_*). Those are not UI config and must not make this endpoint 400.
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+            List<ConfigDTO> configsList = Arrays.asList(
+                    ConfigDTO.builder()
+                            .configKey("ocr_url")
+                            .configValue("https://flowvision-assam.example/v1/extract-reading")
+                            .build(),
+                    ConfigDTO.builder()
+                            .configKey(TenantConfigKeyEnum.TENANT_LOGO.name())
+                            .configValue("{\"value\":\"https://brand.com/logo.png\"}")
+                            .build()
+            );
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(tenantId)).thenReturn(configsList);
+
+            TenantConfigResponseDTO result = tenantManagementService.getTenantConfigs(tenantId, null);
+
+            assertNotNull(result);
+            assertTrue(result.getConfigs().containsKey(TenantConfigKeyEnum.TENANT_LOGO));
+            assertEquals(1, result.getConfigs().size());
+        }
+
+        @Test
         @DisplayName("Should retrieve all tenant configurations without key filter")
         void testGetTenantConfigs_AllConfigs() {
             // Arrange
