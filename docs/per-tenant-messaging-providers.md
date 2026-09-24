@@ -13,7 +13,7 @@ This is the per-tenant layer. The platform-wide layer underneath it — the `Ema
 unchanged in shape; what changed is that several accounts now coexist in one process instead of
 one bean being selected at startup.
 
-**Not included:** WhatsApp. Every tenant shares one Glific organisation, so there is no
+**Not included:** WhatsApp. Every tenant shares one WhatsApp provider account, so there is no
 per-tenant WhatsApp credential to store. `WHATSAPP` is reserved as a string in the
 `tenant_provider_secret.channel` column but is **not** a constant of the `MessagingChannel` enum
 in either service, so it is not addressable through the API.
@@ -597,7 +597,7 @@ services. The ones worth knowing about:
 
 ## 12. Known limitations
 
-- **WhatsApp is not covered.** Every tenant shares one Glific organisation.
+- **WhatsApp is not covered.** Every tenant shares one WhatsApp provider account.
 - **`TenantSecrets` values are `String`s and are not zeroised.** Every consumer — a SendGrid
   `Authorization` header, `JavaMailSenderImpl.setPassword`, SMSCountry's basic-auth pair — takes a
   `String`, so a `char[]` would be converted at the first use site and leave an identical copy on

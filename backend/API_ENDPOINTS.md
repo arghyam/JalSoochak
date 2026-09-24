@@ -29,10 +29,11 @@ clamped page rather than `400`.
 
 Set the following environment variables before running the Telemetry services:
 
-- `GLIFIC_API_URL`
-- `GLIFIC_API_KEY`
-- `GLIFIC_NUDGE_TEMPLATE_ID`
-- `GLIFIC_ESCALATION_TEMPLATE_ID`
+- `WHATSAPP_API_URL`
+- `WHATSAPP_USERNAME`
+- `WHATSAPP_PASSWORD`
+- `WHATSAPP_NUDGE_TEMPLATE_ID`
+- `WHATSAPP_ESCALATION_TEMPLATE_ID`
 - `MINIO_ENDPOINT`
 - `MINIO_ACCESS_KEY`
 - `MINIO_SECRET_KEY`
@@ -255,12 +256,12 @@ The tables below list every endpoint that changed across all services. If your f
 
 ---
 
-### Telemetry service — webhook base URL (affects all 26 Glific webhook endpoints)
+### Telemetry service — webhook base URL (affects all 27 chatbot webhook endpoints)
 
 > ## Telemetry · Webhook (`telemetry-service` · port 8989)
-> These endpoints are called by **Glific** (WhatsApp bot platform), not by the frontend.
+> These endpoints are called by the **WhatsApp chatbot platform**, not by the frontend.
 >
-> **All 26 require the `X-Webhook-Token: <token>` header.** Ingress exposes them publicly, bypassing
+> **All 27 require the `X-Webhook-Token: <token>` header.** Ingress exposes them publicly, bypassing
 > the API gateway, so this shared secret is the only thing in front of them. Requests without a valid
 > token get `401 {"success":false,"message":"Unauthorized"}`. Configure via
 > `TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES` (comma-separated SHA-256 hex of the accepted tokens);
@@ -284,7 +285,8 @@ recorded when the reading was first submitted.
 
 | Method | Endpoint                                          | Description |
 |--------|---------------------------------------------------|-------------|
-| POST | `/api/v1/telemetry/readings/glific`               | Receive the generic Glific webhook payload for image-based meter readings |
+| POST | `/api/v1/telemetry/readings/whatsapp`             | Receive the chatbot webhook payload for image-based meter readings |
+| POST | `/api/v1/telemetry/readings/glific`               | **Deprecated** alias of `/readings/whatsapp`, served for one release |
 | POST | `/api/v1/telemetry/intro`                         | Send the flow intro message for a contact |
 | POST | `/api/v1/telemetry/closing`                       | Send the flow closing message for a contact |
 | POST | `/api/v1/telemetry/language/selection`            | Return the language selection prompt/options for a contact |

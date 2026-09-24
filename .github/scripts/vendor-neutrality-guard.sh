@@ -1,31 +1,19 @@
 #!/usr/bin/env bash
 #
-# Fails when a vendor name (Glific, FlowVision, MinIO) or a state name (Assam) appears in a path
-# that has been made vendor- and state-neutral. Run from the repository root:
+# Fails when a vendor name (Glific, FlowVision, MinIO) or a state name (Assam) appears anywhere in the
+# tracked tree outside the places the rules below allow. Run from the repository root:
 #
 #   bash .github/scripts/vendor-neutrality-guard.sh
 #
 # Ports and business code stay generic; a vendor name belongs only in the adapter that speaks that
-# vendor's protocol. This guard keeps a cleaned path clean.
+# vendor's protocol. This guard keeps it that way.
 #
-# Identifiers and prose are renamed, never exempted. What the rules below let through is only what
-# cannot change yet — a wire name, a stored value, an applied migration — each under a named rule
-# that says why, so that the list reads as a set of decisions rather than a set of oversights.
+# Identifiers and prose are renamed, never exempted for convenience. What the rules below let through
+# is either what cannot change yet — a wire name, a stored value, an applied migration — or what has
+# to keep the real name — a historical record, a description of the deployment, a script run against
+# one. Each sits under a named rule that says why, so that the list reads as a set of decisions rather
+# than a set of oversights.
 set -euo pipefail
-
-# Paths the guard enforces. It starts with what is already clean and widens as each area is cleaned,
-# so that it guards the work while the names are still moving rather than only once they have
-# settled. Only tracked files are scanned, which keeps target/ and local logs out.
-SCOPE=(
-  .github
-  backend
-)
-
-# Paths inside SCOPE that have not been cleaned yet. Each entry leaves this list in the commit that
-# cleans it.
-NOT_YET_CLEAN=(
-  'backend/**/*.md'  # the backend's documentation, cleaned with the rest of the docs
-)
 
 # Rule VENDOR_ADAPTER — the adapter that speaks a vendor's protocol is where that vendor's name
 # belongs, so these paths are not scanned.
@@ -48,6 +36,32 @@ APPLIED_MIGRATIONS=(
   backend/database/V43__add_flow_reading_id_to_anomaly_table.sql
   backend/analytics-service/src/main/resources/db/migration/V47__widen_fact_meter_reading_to_numeric.sql
   backend/analytics-service/src/main/resources/db/migration/V48__add_submission_linkage_to_anomaly_and_fact_meter_reading.sql
+)
+
+# Rule HISTORICAL_RECORD — completed plans, code reviews and architecture decision records record
+# decisions made under the old names. Rewriting them would change what they record.
+HISTORICAL_RECORDS=(
+  '**/*_PLAN.md'
+  'docs/CODE_REVIEW_*.md'
+  'docs/*-plan.md'
+  '.claude/plans/**'
+  gitbook/architecture-decision-records.md
+)
+
+# Rule DEPLOYMENT_DESCRIPTION — these pages describe what is actually deployed and installed: the
+# products, Helm releases and hosts an operator has to recognise. Other pages link to them rather than
+# naming the products.
+DEPLOYMENT_DESCRIPTIONS=(
+  gitbook/deployment-architecture.md
+  gitbook/installation-guide.md
+  gitbook/technology-stack.md
+)
+
+# Rule OPERATIONAL_SCRIPT — benchmark harnesses, master-data ingestion jobs and one-off data fixes,
+# each run against a particular deployment. They name that deployment's state and vendors because they
+# act on them.
+OPERATIONAL_SCRIPTS=(
+  'scripts/**'
 )
 
 # Rule PENDING_STORAGE_RENAME (files) — the Minio* classes are replaced by the S3-compatible storage
@@ -98,8 +112,10 @@ ALLOWED_TOKENS="$(cat <<'RULES'
 .  "flowvision"|OCR_DEFAULT_PROVIDER:flowvision
 
 # Rule PENDING_STORAGE_RENAME — the MinIO client is replaced by the S3-compatible storage port. Until
-# then, the services it has not reached still name it.
+# then, the services it has not reached still name it, and so do the docs that describe their
+# configuration.
 ^backend/(?:message|scheme|telemetry|tenant|user)-service/  minio
+\.md$  minio
 
 # Rule TEST_FIXTURE — the test tenant is modelled on a real state deployment, so a string literal in
 # a test may carry that state's name as data ("tenant_assam", "Assam PHED").
@@ -108,16 +124,19 @@ RULES
 )"
 
 # Rule ADAPTER_REFERENCE — a wiring test or a @MockBean has to name the adapter class it wires or
-# silences. Tests only: production code outside the adapter reaches it through a port. The class
-# names are read from the adapter paths, so the rule follows the adapters as they change.
+# silences, and a document may point at the adapter that implements a port. Tests and documents only:
+# production code outside the adapter reaches it through a port. The class names are read from the
+# adapter paths, so the rule follows the adapters as they change.
 ADAPTER_TYPES="$(git ls-files -- "${ADAPTER_PATHS[@]/#/:(glob)}" \
   | sed -n 's#^.*/src/main/java/\(.*\)\.java$#\1#p' | tr '/' '.')"
 
-pathspecs=("${SCOPE[@]}")
-for path in "${NOT_YET_CLEAN[@]}" "${ADAPTER_PATHS[@]}" "${PENDING_STORAGE_FILES[@]}"; do
+# Only tracked files are scanned, which keeps target/ and local logs out.
+pathspecs=(.)
+for path in "${ADAPTER_PATHS[@]}" "${HISTORICAL_RECORDS[@]}" "${OPERATIONAL_SCRIPTS[@]}" \
+    "${PENDING_STORAGE_FILES[@]}"; do
   pathspecs+=(":(exclude,glob)$path")
 done
-for path in "${APPLIED_MIGRATIONS[@]}" "$GUARD_SELF"; do
+for path in "${APPLIED_MIGRATIONS[@]}" "${DEPLOYMENT_DESCRIPTIONS[@]}" "$GUARD_SELF"; do
   pathspecs+=(":(exclude)$path")
 done
 
@@ -134,7 +153,7 @@ violations="$(printf '%s\n' "$candidates" \
     }
     for my $type (split /\n/, $ENV{ADAPTER_TYPES}) {
       (my $simple = $type) =~ s/.*\.//;
-      push @rules, [qr{/src/test/}, qr/\b(?:\Q$type\E|\Q$simple\E|\Q${\ lcfirst $simple}\E)\b/];
+      push @rules, [qr{/src/test/|\.md$}, qr/\b(?:\Q$type\E|\Q$simple\E|\Q${\ lcfirst $simple}\E)\b/];
     }
   }
   chomp;
@@ -148,12 +167,12 @@ violations="$(printf '%s\n' "$candidates" \
 ')"
 
 if [[ -n "$violations" ]]; then
-  echo "Vendor- or state-specific names found in a vendor-neutral path:" >&2
+  echo "Vendor- or state-specific names found outside the places this guard allows:" >&2
   echo "$violations" >&2
   echo >&2
-  echo "Use the generic name (WhatsApp, OCR, storage, canonical). A vendor name is allowed only" >&2
-  echo "in the adapter for that vendor, and none of the paths above is one." >&2
+  echo "Use the generic name (WhatsApp, OCR, storage, canonical). A vendor name belongs in the adapter" >&2
+  echo "for that vendor; the few other places that keep one are the rules in $GUARD_SELF." >&2
   exit 1
 fi
 
-echo "Vendor-neutrality guard passed for: ${SCOPE[*]}"
+echo "Vendor-neutrality guard passed."

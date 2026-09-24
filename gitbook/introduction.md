@@ -7,8 +7,8 @@
 **JalSoochak** is a **Digital Public Good (DPG)** for monitoring rural drinking-water service delivery under India's **Jal Jeevan Mission (JJM)**. It closes a key operational gap — the daily monitoring of actual water supply at the field level — by combining:
 
 * A **microservices** backend (Java 21 + Spring Boot) with a clear service-per-domain split
-* **WhatsApp-driven field data collection** via Glific, so pump operators submit daily meter readings without a smartphone app
-* **AI-assisted reading extraction** (FlowVision) that reads the meter value from a submitted photo
+* **WhatsApp-driven field data collection**, so pump operators submit daily meter readings without a smartphone app
+* **AI-assisted reading extraction** that reads the meter value from a submitted photo
 * **Automated nudge and escalation** notifications for missed readings
 * **Public analytics dashboards** for programme officers at scheme, district, state, and national levels
 
@@ -16,7 +16,7 @@
 
 ### 1.2 Scope
 
-* **WhatsApp interactions** via Glific for operator data submission and notifications
+* **WhatsApp interactions** for operator data submission and notifications
 * **Public dashboards** and a BI/analytics layer for compliance, water quantity, and scheme performance
 * **Configuration services** for per-tenant (per-state) customisation
 * **Field-operations tracking** — schemes, operators, readings, anomalies, escalations
