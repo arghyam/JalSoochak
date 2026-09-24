@@ -38,10 +38,12 @@ APPLIED_MIGRATIONS=(
   backend/analytics-service/src/main/resources/db/migration/V48__add_submission_linkage_to_anomaly_and_fact_meter_reading.sql
 )
 
-# Rule RENAMING_MIGRATION — a migration that renames a vendor-named column, index or function body
-# has to name what it renames in order to find it.
+# Rule RENAMING_MIGRATION — a migration that renames or retires a vendor-named column, index,
+# function body or stored config key has to name what it changes in order to find it.
 RENAMING_MIGRATIONS=(
+  backend/database/V45__rename_whatsapp_message_templates_config_key.sql
   backend/database/V46__rename_ocr_correlation_id_column.sql
+  backend/database/V47__retire_legacy_message_templates_config_key.sql
 )
 
 # Rule HISTORICAL_RECORD — completed plans, code reviews and architecture decision records record
@@ -93,11 +95,14 @@ ALLOWED_TOKENS="$(cat <<'RULES'
 
 # Rule LEGACY_ALIAS — deprecated names still served, read or emitted for one release, so that each
 # side of the contract can move on its own. They go when the aliases are removed.
-.  GLIFIC_MESSAGE_TEMPLATES
 .  glific_welcome_flow_id
 .  \bglific_id\b|\bgetGlificId\b
 .  glificLanguageId
 .  flowvision_correlation_id
+
+# Rule RENAMING_MIGRATION_TEST — the integration test of a RENAMING_MIGRATION seeds the rows it
+# changes under the name they had before the migration ran.
+/src/test/.*MigrationIntegrationTest\.java$  GLIFIC_MESSAGE_TEMPLATES
 
 # Rule PUBLIC_ERROR_CODE — error codes returned to API callers. Renaming one is a contract change
 # that needs its own transition.
