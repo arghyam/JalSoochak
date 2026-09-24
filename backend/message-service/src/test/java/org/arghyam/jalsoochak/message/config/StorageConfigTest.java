@@ -73,9 +73,9 @@ class StorageConfigTest {
     }
 
     @ParameterizedTest(name = "storage.{0} blank")
-    @ValueSource(strings = {"access-key", "secret-key"})
-    @DisplayName("enabled with a blank credential fails startup, naming the property")
-    void blankCredentialFailsStartup(String key) {
+    @ValueSource(strings = {"endpoint", "access-key", "secret-key"})
+    @DisplayName("enabled with a blank endpoint or credential fails startup, naming the property")
+    void blankEndpointOrCredentialFailsStartup(String key) {
         enabled()
                 .withPropertyValues("storage." + key + "=")
                 .run(context -> assertThat(context).hasFailed()
@@ -213,7 +213,7 @@ class StorageConfigTest {
         assertThat(props.isEnabled()).isTrue();
         assertThat(props.getBucket()).isEqualTo("escalation-reports");
         assertThat(props.getRegion()).isEqualTo("us-east-1");
-        assertThat(props.getEndpoint()).isEmpty();
+        assertThat(props.getEndpoint()).as("blank, so an unset endpoint fails startup").isEmpty();
         assertThat(props.getPublicBaseUrl()).as("blank, so an unset base URL fails startup").isEmpty();
         assertThat(props.getAccessKey()).as("blank, so an unset credential fails startup").isEmpty();
         assertThat(props.getSecretKey()).as("blank, so an unset credential fails startup").isEmpty();

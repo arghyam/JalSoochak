@@ -10,9 +10,8 @@ import org.springframework.validation.annotation.Validated;
  * Configuration properties for object storage.
  * Bound from the {@code storage.*} namespace in application.yml.
  *
- * <p>Setting {@code storage.endpoint} to a non-blank URL activates path-style
- * access and endpoint override, required by most non-AWS S3-compatible
- * stores. Leave it blank to use real AWS S3.
+ * <p>{@code storage.endpoint} is required while storage is enabled, and is
+ * reached with path-style access. There is no implicit AWS default.
  */
 @ConfigurationProperties(prefix = "storage")
 @Data
@@ -25,7 +24,7 @@ public class StorageProperties {
     /** Storage provider key. Currently only {@code s3} is supported. */
     private String provider = "s3";
 
-    /** Custom endpoint URL of a non-AWS S3-compatible store. Leave blank for real AWS S3. */
+    /** URL of the S3-compatible store. Required while storage is enabled, or startup fails. */
     private String endpoint;
 
     /** Signing region (a placeholder like {@code us-east-1} for a store that ignores it). */

@@ -28,8 +28,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ConversationTemplateService {
     public static final String CONFIG_KEY = "WHATSAPP_MESSAGE_TEMPLATES";
     /**
-     * The key's previous name, read only when {@link #CONFIG_KEY} is absent. tenant-service renames
-     * stored rows in a migration, and this service cannot know whether that migration has run yet.
+     * The key's previous name, read only when {@link #CONFIG_KEY} is absent. tenant-service copies
+     * stored rows to the new name in a migration, and this service cannot know whether it has run yet.
      */
     static final String LEGACY_CONFIG_KEY = "GLIFIC_MESSAGE_TEMPLATES";
 

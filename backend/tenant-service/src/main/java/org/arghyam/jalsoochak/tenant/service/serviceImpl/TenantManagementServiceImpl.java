@@ -269,22 +269,18 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             // ocr_api_key for the pluggable OCR provider, language_N, nudge_message_*, channel_*). Those
             // are not UI config, so they are skipped here. Previously any such row made this endpoint
             // fail with 400 for the whole tenant, even when the caller asked only for UI keys.
-            TenantConfigKeyEnum key = parseUiConfigKey(cfg.getConfigKey());
-            if (key == null || !effectiveKeys.contains(key)) {
+            TenantConfigKeyEnum storedKey = parseUiConfigKey(cfg.getConfigKey());
+            if (storedKey == null) {
+                continue;
+            }
+            TenantConfigKeyEnum key = storedKey.canonical();
+            // A row stored under a legacy alias (kept by V45, or written by an instance still on the old
+            // name) is read as its canonical key, but never over a row stored under the canonical name.
+            boolean shadowed = storedKey.isLegacyAlias() && configMap.containsKey(key);
+            if (!effectiveKeys.contains(key) || shadowed) {
                 continue;
             }
             try {
-                TenantConfigKeyEnum storedKey = TenantConfigKeyEnum.valueOf(cfg.getConfigKey());
-                TenantConfigKeyEnum key = storedKey.canonical();
-                // A row stored under a legacy alias (written by an instance still on the old name) is
-                // read as its canonical key, but never over a row stored under the canonical name.
-                boolean shadowed = storedKey.isLegacyAlias() && configMap.containsKey(key);
-                if (effectiveKeys.contains(key) && !shadowed) {
-                    configMap.put(key, objectMapper.readValue(cfg.getConfigValue(), key.getDtoClass()));
-                }
-            } catch (IllegalArgumentException e) {
-                log.error("Invalid tenant config key [key={}]", cfg.getConfigKey(), e);
-                throw new InvalidConfigKeyException("Invalid tenant config key: " + cfg.getConfigKey(), e);
                 configMap.put(key, objectMapper.readValue(cfg.getConfigValue(), key.getDtoClass()));
             } catch (JsonProcessingException e) {
                 log.error("Malformed config value for key [key={}]", cfg.getConfigKey(), e);

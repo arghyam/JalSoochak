@@ -94,8 +94,8 @@ public enum TenantConfigKeyEnum implements ConfigKey {
 
     /**
      * Deprecated name of {@link #WHATSAPP_MESSAGE_TEMPLATES}. It is still accepted in requests, but
-     * resolved to the canonical key before anything is read or stored, so the table only ever holds
-     * the canonical name. Responses that carry the canonical key also carry this name, with the same
+     * resolved to the canonical key before anything is read or stored, so this service only ever
+     * writes the canonical name. Responses that carry the canonical key also carry this name, with the same
      * value.
      */
     @Deprecated(forRemoval = true)

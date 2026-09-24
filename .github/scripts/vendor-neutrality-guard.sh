@@ -79,7 +79,10 @@ FORBIDDEN_MARKER='glif+ic|flow[\s_-]?vision|minio|assam(?!ese)'
 # Tokens removed from a line before the marker is looked for; the rest of the line is still checked.
 # One per line: a Perl regex on the file path, whitespace, then a case-insensitive Perl regex for the
 # token.
-ALLOWED_TOKENS="$(cat <<'RULES'
+#
+# Read with `read` rather than "$(cat <<'RULES' …)": bash 3.2, the default on macOS, mis-parses a
+# here-document inside $(…) and fails on the quote characters in these rules.
+IFS= read -r -d '' ALLOWED_TOKENS <<'RULES' || true
 # Rule URL_OR_HOST — a marker inside a URL or a hostname names a real endpoint
 # (https://api.arghyam.glific.com/api, flowvision-test.s3.ap-south-1.amazonaws.com), not our code.
 .  [a-z][a-z0-9+.-]*://[^\s"'<>()]+
@@ -88,6 +91,8 @@ ALLOWED_TOKENS="$(cat <<'RULES'
 # Rule LEGACY_ALIAS — deprecated names still served, read or emitted for one release, so that each
 # side of the contract can move on its own. They go when the aliases are removed.
 .  readings/glific|READINGS_PREFIX \+ "/glific"
+# Migrations name this key as stored data (V45 copies its rows). The change that removes this token
+# has to add each of them to APPLIED_MIGRATIONS, or they fail this guard.
 .  GLIFIC_MESSAGE_TEMPLATES
 .  glific_welcome_flow_id
 .  \bglific_id\b|\bgetGlificId\b
@@ -113,7 +118,6 @@ ALLOWED_TOKENS="$(cat <<'RULES'
 # a test may carry that state's name as data ("tenant_assam", "Assam PHED").
 /src/test/  "[^"\n]*assam[^"\n]*"
 RULES
-)"
 
 # Rule ADAPTER_REFERENCE — a wiring test or a @MockBean has to name the adapter class it wires or
 # silences, and a document may point at the adapter that implements a port. Tests and documents only:
