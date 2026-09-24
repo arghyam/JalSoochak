@@ -1,20 +1,15 @@
-package org.arghyam.jalsoochak.analytics.controller;
+package org.arghyam.jalsoochak.analytics.controller.dashboard;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2MetricsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
-import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegularityResponse;
-import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -25,7 +20,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
@@ -38,10 +32,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(controllers = AnalyticsWaterSupplyNationalController.class)
+@WebMvcTest(controllers = AnalyticsNationalDashboardController.class)
 @Import({GlobalExceptionHandler.class, SingleTenantModeGuard.class})
 @AutoConfigureMockMvc(addFilters = false)
-class AnalyticsWaterSupplyNationalControllerTest {
+class AnalyticsNationalDashboardControllerTest {
 
     private static final String BASE = "/api/v1/analytics";
     private static final LocalDate START = LocalDate.of(2026, 1, 1);
@@ -56,22 +50,6 @@ class AnalyticsWaterSupplyNationalControllerTest {
 
     @MockBean
     private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
-
-    @ParameterizedTest
-    @MethodSource("periodicNationalSchemeRegularityValidRoutes")
-    void getPeriodicNationalSchemeRegularity_validRoutes(String scale) throws Exception {
-        when(schemeRegularityService.getPeriodicSchemeRegularityForNationForApi(
-                START, END, PeriodScale.fromValue(scale)))
-                .thenReturn(periodicNationalSchemeRegularityResponse());
-
-        mockMvc.perform(get(BASE + "/scheme-regularity/periodic/national")
-                        .param("start_date", START.toString())
-                        .param("end_date", END.toString())
-                        .param("scale", scale))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").exists());
-    }
 
     @Test
     void getNationalDashboard_validDateRange_returnsOk() throws Exception {
@@ -230,48 +208,4 @@ class AnalyticsWaterSupplyNationalControllerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));
     }
-
-    @Test
-    void getPeriodicNationalSchemeRegularity_withUnsupportedScale_returnsBadRequest() throws Exception {
-        mockMvc.perform(get(BASE + "/scheme-regularity/periodic/national")
-                        .param("start_date", START.toString())
-                        .param("end_date", END.toString())
-                        .param("scale", "decade"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
-    }
-
-    @Test
-    void getPeriodicNationalSchemeRegularity_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
-        when(schemeRegularityService.getPeriodicSchemeRegularityForNationForApi(eq(START), eq(END), any()))
-                .thenThrow(new RuntimeException("boom"));
-
-        mockMvc.perform(get(BASE + "/scheme-regularity/periodic/national")
-                        .param("start_date", START.toString())
-                        .param("end_date", END.toString())
-                        .param("scale", "day"))
-                .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
-    }
-
-    private static Stream<Arguments> periodicNationalSchemeRegularityValidRoutes() {
-        return Stream.of(
-                Arguments.of("day"),
-                Arguments.of("week"),
-                Arguments.of("month"),
-                Arguments.of("quarter"),
-                Arguments.of("year"));
-    }
-
-    private static PeriodicNationalSchemeRegularityResponse periodicNationalSchemeRegularityResponse() {
-        return PeriodicNationalSchemeRegularityResponse.builder()
-                .schemeCount(0)
-                .totalAchievedFhtcCount(0L)
-                .periodCount(0)
-                .metrics(List.of())
-                .build();
-    }
 }
-

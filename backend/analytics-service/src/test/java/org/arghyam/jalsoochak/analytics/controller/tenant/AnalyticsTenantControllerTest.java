@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.analytics.controller;
+package org.arghyam.jalsoochak.analytics.controller.tenant;
 
 import org.arghyam.jalsoochak.analytics.dto.response.TenantDetailsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.TenantPerformanceChildRegionDetails;
@@ -6,15 +6,13 @@ import org.arghyam.jalsoochak.analytics.dto.response.TenantPerformanceScoreRespo
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
-import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
-import org.arghyam.jalsoochak.analytics.repository.DimSchemeRepository;
-import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
-import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
+import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
+import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.service.TenantDetailsService;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -36,18 +34,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(controllers = AnalyticsTenantSchemeController.class)
+@WebMvcTest(controllers = AnalyticsTenantController.class)
 @Import(GlobalExceptionHandler.class)
 @AutoConfigureMockMvc(addFilters = false)
-class AnalyticsTenantSchemeControllerTest {
+class AnalyticsTenantControllerTest {
 
     private static final String BASE = "/api/v1/analytics";
-    private static final LocalDate START = LocalDate.of(2026, 1, 1);
-    private static final LocalDate END = LocalDate.of(2026, 1, 31);
 
     @Autowired
     private MockMvc mockMvc;
@@ -56,10 +51,6 @@ class AnalyticsTenantSchemeControllerTest {
     private DimTenantRepository dimTenantRepository;
     @MockBean
     private DimLgdLocationRepository dimLgdLocationRepository;
-    @MockBean
-    private DimSchemeRepository dimSchemeRepository;
-    @MockBean
-    private FactMeterReadingRepository meterReadingRepository;
     @MockBean
     private TenantDetailsService tenantDetailsService;
 
@@ -290,99 +281,4 @@ class AnalyticsTenantSchemeControllerTest {
 
         verifyNoInteractions(tenantDetailsService, schemeRegularityService);
     }
-
-    @Test
-    void getSchemes_withTenantId_routesToTenantFilter() throws Exception {
-        when(dimSchemeRepository.findByTenantId(10)).thenReturn(List.of());
-
-        mockMvc.perform(get(BASE + "/schemes").param("tenantId", "10"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
-
-        verify(dimSchemeRepository, times(1)).findByTenantId(10);
-        verify(dimSchemeRepository, never()).findAll();
-    }
-
-    @Test
-    void getSchemes_withoutTenantId_returnsAll() throws Exception {
-        when(dimSchemeRepository.findAll()).thenReturn(List.of());
-
-        mockMvc.perform(get(BASE + "/schemes"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
-
-        verify(dimSchemeRepository, times(1)).findAll();
-        verify(dimSchemeRepository, never()).findByTenantId(any());
-    }
-
-    @Test
-    void getMeterReadings_withTenantAndScheme_andDates_routesToTenantSchemeDateBranch() throws Exception {
-        when(meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, END, START))
-                .thenReturn(List.of());
-
-        mockMvc.perform(get(BASE + "/meter-readings")
-                        .param("tenant_id", "10")
-                        .param("scheme_id", "11")
-                        .param("start_date", END.toString())
-                        .param("end_date", START.toString()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
-
-        verify(meterReadingRepository, times(1))
-                .findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, END, START);
-    }
-
-    @Test
-    void getMeterReadings_withTenantAndScheme_withoutDates_defaultsToYesterdayAnd30DayWindow() throws Exception {
-        // Controller defaults are anchored to "yesterday" in the configured zone (Asia/Kolkata by default)
-        // to keep the window stable across the daily (midnight) warm-cache cycle.
-        java.time.ZoneId zone = java.time.ZoneId.of("Asia/Kolkata");
-        LocalDate defaultStart = LocalDate.now(zone).minusDays(1);
-        LocalDate defaultEnd = defaultStart.minusDays(29);
-        when(meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, defaultStart, defaultEnd))
-                .thenReturn(List.of());
-
-        mockMvc.perform(get(BASE + "/meter-readings")
-                        .param("tenant_id", "10")
-                        .param("scheme_id", "11"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
-
-        verify(meterReadingRepository, times(1))
-                .findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, defaultStart, defaultEnd);
-    }
-
-    @Test
-    void getMeterReadings_missingTenantId_returnsBadRequest() throws Exception {
-        mockMvc.perform(get(BASE + "/meter-readings").param("scheme_id", "11"))
-                .andExpect(status().isBadRequest());
-
-        verifyNoInteractions(meterReadingRepository);
-    }
-
-    @Test
-    void getMeterReadings_missingSchemeId_returnsBadRequest() throws Exception {
-        mockMvc.perform(get(BASE + "/meter-readings").param("tenant_id", "10"))
-                .andExpect(status().isBadRequest());
-
-        verifyNoInteractions(meterReadingRepository);
-    }
-
-    @Test
-    void getMeterReadings_onlyOneDateProvided_returnsBadRequestWrapper() throws Exception {
-        mockMvc.perform(get(BASE + "/meter-readings")
-                        .param("tenant_id", "10")
-                        .param("scheme_id", "11")
-                        .param("start_date", START.toString()))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
-
-        verifyNoInteractions(meterReadingRepository);
-    }
 }
-

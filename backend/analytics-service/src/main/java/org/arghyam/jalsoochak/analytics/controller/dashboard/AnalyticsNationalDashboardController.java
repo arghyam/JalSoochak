@@ -1,18 +1,15 @@
-package org.arghyam.jalsoochak.analytics.controller;
+package org.arghyam.jalsoochak.analytics.controller.dashboard;
 
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2MetricsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
-import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
-import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -29,12 +26,17 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 
+/**
+ * The national dashboard: state-wise and district-wise aggregates and their map boundaries.
+ *
+ * <p>Every route is refused in single-tenant mode by {@link SingleTenantModeGuard}.
+ */
 @RestController
 @RequestMapping("/api/v1/analytics")
 @RequiredArgsConstructor
+@Tag(name = "Analytics - National Dashboard", description = "National dashboard aggregates and map boundaries, state-wise and district-wise")
 @Slf4j
-@Tag(name = "Analytics - Water Supply & National Dashboard", description = "Water supply metrics, national dashboard aggregates, and date dimension utilities")
-public class AnalyticsWaterSupplyNationalController {
+public class AnalyticsNationalDashboardController {
 
     private final SchemeRegularityService schemeRegularityService;
     private final DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
@@ -197,65 +199,4 @@ public class AnalyticsWaterSupplyNationalController {
                     .build());
         }
     }
-
-    @GetMapping("/scheme-regularity/periodic/national")
-    @Operation(
-            summary = "Get periodic average scheme regularity for national level (all tenants)",
-            responses = {
-                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                            responseCode = "200",
-                            description = "National periodic scheme regularity fetched successfully",
-                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
-                                    examples = @ExampleObject(name = "success", value = SwaggerExamples.SCHEME_REGULARITY_PERIODIC_NATIONAL_SUCCESS))
-                    ),
-                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                            responseCode = "400",
-                            description = "Bad request",
-                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
-                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
-                    ),
-                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                            responseCode = "500",
-                            description = "Unexpected error",
-                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
-                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
-                    )
-            }
-    )
-    public ResponseEntity<ApiResponse<PeriodicNationalSchemeRegularityResponse>> getPeriodicNationalSchemeRegularity(
-            @RequestParam(name = "start_date")
-                    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam(name = "end_date")
-                    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @Parameter(
-                    description = """
-                            Time aggregation scale.
-                            - day: per-day buckets
-                            - week: rolling 7-day buckets anchored to start_date (not ISO-week aligned)
-                            - month/quarter/year: calendar-aligned buckets (month=Jan/Feb..., quarter=Jan-Mar/Apr-Jun..., year=Jan 1-Dec 31)
-                            """,
-                    required = true,
-                    schema = @Schema(type = "string", allowableValues = {"day", "week", "month", "quarter", "year"}))
-                    @RequestParam(name = "scale") String scale) {
-        singleTenantModeGuard.rejectIfSingleTenantMode("scheme-regularity/periodic/national");
-        try {
-            PeriodScale periodScale = PeriodScale.fromValue(scale);
-            return ResponseEntity.ok(ApiResponse.<PeriodicNationalSchemeRegularityResponse>builder()
-                    .success(true)
-                    .data(schemeRegularityService.getPeriodicSchemeRegularityForNationForApi(
-                            startDate, endDate, periodScale))
-                    .build());
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(ApiResponse.<PeriodicNationalSchemeRegularityResponse>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<PeriodicNationalSchemeRegularityResponse>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        }
-    }
 }
-

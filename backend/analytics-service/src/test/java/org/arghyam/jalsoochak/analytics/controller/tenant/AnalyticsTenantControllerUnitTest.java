@@ -1,17 +1,13 @@
-package org.arghyam.jalsoochak.analytics.controller;
+package org.arghyam.jalsoochak.analytics.controller.tenant;
 
 import org.arghyam.jalsoochak.analytics.dto.response.TenantBoundaryGeoJsonResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.TenantDetailsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.TenantPerformanceScoreResponse;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
-import org.arghyam.jalsoochak.analytics.entity.DimScheme;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
-import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
-import org.arghyam.jalsoochak.analytics.repository.DimSchemeRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
-import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
 import org.arghyam.jalsoochak.analytics.service.TenantDetailsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -38,7 +34,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Tenant/scheme dimension endpoints.
+ * Tenant endpoints.
  *
  * <p>Each endpoint validates its date window and its mutually exclusive parent filter before
  * delegating, answering 400 for a bad request and 500 for anything unexpected — the dashboard relies
@@ -46,8 +42,8 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("AnalyticsTenantSchemeController — direct invocation")
-class AnalyticsTenantSchemeControllerUnitTest {
+@DisplayName("AnalyticsTenantController — direct invocation")
+class AnalyticsTenantControllerUnitTest {
 
     private static final int TENANT = 1;
     private static final LocalDate START = LocalDate.of(2026, 2, 1);
@@ -58,16 +54,12 @@ class AnalyticsTenantSchemeControllerUnitTest {
     @Mock
     private DimLgdLocationRepository dimLgdLocationRepository;
     @Mock
-    private DimSchemeRepository dimSchemeRepository;
-    @Mock
-    private FactMeterReadingRepository meterReadingRepository;
-    @Mock
     private TenantDetailsService tenantDetailsService;
     @Mock
     private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
 
     @InjectMocks
-    private AnalyticsTenantSchemeController controller;
+    private AnalyticsTenantController controller;
 
     private static DimLgdLocation lgd(int lgdId) {
         DimLgdLocation location = new DimLgdLocation();
@@ -315,95 +307,6 @@ class AnalyticsTenantSchemeControllerUnitTest {
                     .thenThrow(new IllegalStateException("db down"));
 
             assertThat(controller.getTenantPerformanceScore(TENANT, 101, null, START, END).getStatusCode())
-                    .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    @Nested
-    @DisplayName("GET /schemes")
-    class Schemes {
-
-        @Test
-        void scopesToATenantWhenOneIsGiven() {
-            List<DimScheme> schemes = List.of(new DimScheme());
-            when(dimSchemeRepository.findByTenantId(TENANT)).thenReturn(schemes);
-
-            assertThat(controller.getSchemes(TENANT).getBody().getData()).isSameAs(schemes);
-            verify(dimSchemeRepository, never()).findAll();
-        }
-
-        @Test
-        void returnsEverySchemeWhenNoTenantIsGiven() {
-            List<DimScheme> schemes = List.of(new DimScheme());
-            when(dimSchemeRepository.findAll()).thenReturn(schemes);
-
-            assertThat(controller.getSchemes(null).getBody().getData()).isSameAs(schemes);
-        }
-
-        @Test
-        void answersFiveHundredWhenTheLookupFails() {
-            when(dimSchemeRepository.findAll()).thenThrow(new IllegalStateException("db down"));
-
-            assertThat(controller.getSchemes(null).getStatusCode())
-                    .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    @Nested
-    @DisplayName("GET /meter-readings")
-    class MeterReadings {
-
-        /**
-         * This endpoint is descending-ordered: it validates {@code start_date} is strictly AFTER
-         * {@code end_date}, and its default window is applied in that same reversed order. Pinned here
-         * because the parameter names read the other way round.
-         */
-        @Test
-        void requiresStartDateStrictlyAfterEndDate() {
-            List<FactMeterReading> readings = List.of(new FactMeterReading());
-            when(meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateBetween(
-                    TENANT, 7, END, START)).thenReturn(readings);
-
-            var response = controller.getMeterReadings(TENANT, 7, END, START);
-
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-            assertThat(response.getBody().getData()).isSameAs(readings);
-        }
-
-        @Test
-        void rejectsAnAscendingWindow() {
-            assertThat(controller.getMeterReadings(TENANT, 7, START, END).getStatusCode())
-                    .isEqualTo(HttpStatus.BAD_REQUEST);
-        }
-
-        @Test
-        void rejectsEqualDates() {
-            assertThat(controller.getMeterReadings(TENANT, 7, START, START).getStatusCode())
-                    .isEqualTo(HttpStatus.BAD_REQUEST);
-        }
-
-        @Test
-        void appliesTheDefaultWindowReversed() {
-            controller.getMeterReadings(TENANT, 7, null, null);
-
-            verify(meterReadingRepository)
-                    .findByTenantIdAndSchemeIdAndReadingDateBetween(TENANT, 7, END, START);
-        }
-
-        @Test
-        void rejectsAHalfSuppliedDateWindow() {
-            assertThat(controller.getMeterReadings(TENANT, 7, END, null).getStatusCode())
-                    .isEqualTo(HttpStatus.BAD_REQUEST);
-            assertThat(controller.getMeterReadings(TENANT, 7, null, START).getStatusCode())
-                    .isEqualTo(HttpStatus.BAD_REQUEST);
-        }
-
-        @Test
-        void answersFiveHundredWhenTheLookupFails() {
-            when(meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateBetween(
-                    anyInt(), anyInt(), any(), any())).thenThrow(new IllegalStateException("db down"));
-
-            assertThat(controller.getMeterReadings(TENANT, 7, END, START).getStatusCode())
                     .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }

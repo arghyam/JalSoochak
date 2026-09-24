@@ -1,10 +1,11 @@
-package org.arghyam.jalsoochak.analytics.controller;
+package org.arghyam.jalsoochak.analytics.controller.regularity;
 
 import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicSchemeRegularityResponse;
-import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
+import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -25,6 +26,7 @@ import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -32,10 +34,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(controllers = AnalyticsRegularityAndReadingController.class)
-@Import(GlobalExceptionHandler.class)
+@WebMvcTest(controllers = AnalyticsRegularityController.class)
+@Import({GlobalExceptionHandler.class, SingleTenantModeGuard.class})
 @AutoConfigureMockMvc(addFilters = false)
-class AnalyticsRegularityAndReadingControllerTest {
+class AnalyticsRegularityControllerTest {
 
     private static final String BASE = "/api/v1/analytics";
     private static final int TENANT_ID = 12;
@@ -131,83 +133,6 @@ class AnalyticsRegularityAndReadingControllerTest {
     @Test
     void getAverageSchemeRegularity_withoutTenantId_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/scheme-regularity/average")
-                        .param("scope", "current")
-                        .param("start_date", START.toString())
-                        .param("end_date", END.toString())
-                        .param("parent_lgd_id", "101"))
-                .andExpect(status().isBadRequest());
-    }
-
-    @ParameterizedTest
-    @MethodSource("readingSubmissionValidRoutes")
-    void getReadingSubmissionRate_validScopeAndIdCombinations(
-            String scope,
-            String idParam,
-            String idValue,
-            int expectedServiceCall) throws Exception {
-        Mockito.reset(schemeRegularityService);
-        when(schemeRegularityService.getReadingSubmissionRateByLgd(any(), any(), any(), any()))
-                .thenReturn(readingSubmissionResponse());
-        when(schemeRegularityService.getReadingSubmissionRateByDepartment(any(), any(), any(), any()))
-                .thenReturn(readingSubmissionResponse());
-        when(schemeRegularityService.getReadingSubmissionRateByLgdForChildRegions(any(), any(), any(), any()))
-                .thenReturn(readingSubmissionResponse());
-        when(schemeRegularityService.getReadingSubmissionRateByDepartmentForChildRegions(any(), any(), any(), any()))
-                .thenReturn(readingSubmissionResponse());
-
-        mockMvc.perform(get(BASE + "/reading-submission-rate")
-                        .param("tenant_id", String.valueOf(TENANT_ID))
-                        .param("scope", scope)
-                        .param("start_date", START.toString())
-                        .param("end_date", END.toString())
-                        .param(idParam, idValue))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.readingSubmissionRate").exists());
-
-        int value = Integer.parseInt(idValue);
-        if (expectedServiceCall == 1) {
-            verify(schemeRegularityService, times(1)).getReadingSubmissionRateByLgd(TENANT_ID, value, START, END);
-        } else if (expectedServiceCall == 2) {
-            verify(schemeRegularityService, times(1)).getReadingSubmissionRateByDepartment(TENANT_ID, value, START, END);
-        } else if (expectedServiceCall == 3) {
-            verify(schemeRegularityService, times(1)).getReadingSubmissionRateByLgdForChildRegions(TENANT_ID, value, START, END);
-        } else {
-            verify(schemeRegularityService, times(1))
-                    .getReadingSubmissionRateByDepartmentForChildRegions(TENANT_ID, value, START, END);
-        }
-    }
-
-    @Test
-    void getReadingSubmissionRate_withBothParentIds_returnsBadRequest() throws Exception {
-        mockMvc.perform(get(BASE + "/reading-submission-rate")
-                        .param("tenant_id", String.valueOf(TENANT_ID))
-                        .param("scope", "current")
-                        .param("start_date", START.toString())
-                        .param("end_date", END.toString())
-                        .param("parent_lgd_id", "101")
-                        .param("parent_department_id", "201"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
-    }
-
-    @Test
-    void getReadingSubmissionRate_invalidScope_returnsBadRequest() throws Exception {
-        mockMvc.perform(get(BASE + "/reading-submission-rate")
-                        .param("tenant_id", String.valueOf(TENANT_ID))
-                        .param("scope", "invalid")
-                        .param("start_date", START.toString())
-                        .param("end_date", END.toString())
-                        .param("parent_lgd_id", "101"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
-    }
-
-    @Test
-    void getReadingSubmissionRate_withoutTenantId_returnsBadRequest() throws Exception {
-        mockMvc.perform(get(BASE + "/reading-submission-rate")
                         .param("scope", "current")
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
@@ -331,17 +256,42 @@ class AnalyticsRegularityAndReadingControllerTest {
                 .andExpect(jsonPath("$.data").value(nullValue()));
     }
 
-    @Test
-    void getReadingSubmissionRate_serviceThrows_returnsServerError() throws Exception {
-        when(schemeRegularityService.getReadingSubmissionRateByLgd(TENANT_ID, 101, START, END))
-                .thenThrow(new RuntimeException("unexpected"));
+    @ParameterizedTest
+    @MethodSource("periodicNationalSchemeRegularityValidRoutes")
+    void getPeriodicNationalSchemeRegularity_validRoutes(String scale) throws Exception {
+        when(schemeRegularityService.getPeriodicSchemeRegularityForNationForApi(
+                START, END, PeriodScale.fromValue(scale)))
+                .thenReturn(periodicNationalSchemeRegularityResponse());
 
-        mockMvc.perform(get(BASE + "/reading-submission-rate")
-                        .param("tenant_id", String.valueOf(TENANT_ID))
-                        .param("scope", "current")
+        mockMvc.perform(get(BASE + "/scheme-regularity/periodic/national")
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
-                        .param("parent_lgd_id", "101"))
+                        .param("scale", scale))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").exists());
+    }
+
+    @Test
+    void getPeriodicNationalSchemeRegularity_withUnsupportedScale_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/scheme-regularity/periodic/national")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("scale", "decade"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getPeriodicNationalSchemeRegularity_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getPeriodicSchemeRegularityForNationForApi(eq(START), eq(END), any()))
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/scheme-regularity/periodic/national")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("scale", "day"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));
@@ -356,24 +306,9 @@ class AnalyticsRegularityAndReadingControllerTest {
         );
     }
 
-    private static Stream<Arguments> readingSubmissionValidRoutes() {
-        return Stream.of(
-                Arguments.of("current", "parent_lgd_id", "101", 1),
-                Arguments.of("current", "parent_department_id", "201", 2),
-                Arguments.of("child", "parent_lgd_id", "101", 3),
-                Arguments.of("child", "parent_department_id", "201", 4)
-        );
-    }
-
     private static AverageSchemeRegularityResponse averageRegularityResponse() {
         return AverageSchemeRegularityResponse.builder()
                 .averageRegularity(BigDecimal.valueOf(0.75))
-                .build();
-    }
-
-    private static ReadingSubmissionRateResponse readingSubmissionResponse() {
-        return ReadingSubmissionRateResponse.builder()
-                .readingSubmissionRate(BigDecimal.valueOf(0.84))
                 .build();
     }
 
@@ -388,5 +323,22 @@ class AnalyticsRegularityAndReadingControllerTest {
                 .metrics(List.of())
                 .build();
     }
-}
 
+    private static Stream<Arguments> periodicNationalSchemeRegularityValidRoutes() {
+        return Stream.of(
+                Arguments.of("day"),
+                Arguments.of("week"),
+                Arguments.of("month"),
+                Arguments.of("quarter"),
+                Arguments.of("year"));
+    }
+
+    private static PeriodicNationalSchemeRegularityResponse periodicNationalSchemeRegularityResponse() {
+        return PeriodicNationalSchemeRegularityResponse.builder()
+                .schemeCount(0)
+                .totalAchievedFhtcCount(0L)
+                .periodCount(0)
+                .metrics(List.of())
+                .build();
+    }
+}

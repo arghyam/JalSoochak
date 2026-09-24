@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.analytics.controller;
+package org.arghyam.jalsoochak.analytics.controller.dashboard;
 
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(
-        classes = AnalyticsWaterSupplyNationalControllerGzipIntegrationTest.MinimalTestApplication.class,
+        classes = AnalyticsNationalDashboardControllerGzipIntegrationTest.MinimalTestApplication.class,
         webEnvironment = WebEnvironment.RANDOM_PORT
 )
 @TestPropertySource(properties = {
@@ -47,7 +47,7 @@ import static org.mockito.Mockito.when;
         "server.compression.enabled=true",
         "server.compression.min-response-size=1"
 })
-class AnalyticsWaterSupplyNationalControllerGzipIntegrationTest {
+class AnalyticsNationalDashboardControllerGzipIntegrationTest {
 
     @LocalServerPort
     private int port;
@@ -127,7 +127,7 @@ class AnalyticsWaterSupplyNationalControllerGzipIntegrationTest {
             OAuth2ResourceServerAutoConfiguration.class,
             ManagementWebSecurityAutoConfiguration.class
     })
-    @Import({AnalyticsWaterSupplyNationalController.class, GlobalExceptionHandler.class, SingleTenantModeGuard.class})
+    @Import({AnalyticsNationalDashboardController.class, GlobalExceptionHandler.class, SingleTenantModeGuard.class})
     static class MinimalTestApplication {
     }
 }

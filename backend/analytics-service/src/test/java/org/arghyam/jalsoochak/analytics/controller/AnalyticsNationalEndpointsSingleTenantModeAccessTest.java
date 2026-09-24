@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.analytics.controller;
 
+import org.arghyam.jalsoochak.analytics.controller.dashboard.AnalyticsNationalDashboardController;
+import org.arghyam.jalsoochak.analytics.controller.regularity.AnalyticsRegularityController;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
@@ -17,11 +19,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(controllers = AnalyticsWaterSupplyNationalController.class)
+/**
+ * Pins that all five national routes, across the two controllers that serve them, answer 403 in
+ * single-tenant mode.
+ */
+@WebMvcTest(controllers = {AnalyticsNationalDashboardController.class, AnalyticsRegularityController.class})
 @Import({GlobalExceptionHandler.class, SingleTenantModeGuard.class})
 @AutoConfigureMockMvc(addFilters = false)
 @TestPropertySource(properties = "analytics.single-tenant-mode=true")
-class AnalyticsWaterSupplyNationalControllerSingleTenantModeAccessTest {
+class AnalyticsNationalEndpointsSingleTenantModeAccessTest {
 
     private static final String BASE = "/api/v1/analytics";
 
