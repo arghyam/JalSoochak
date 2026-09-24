@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.user.controller;
+package org.arghyam.jalsoochak.user.controller.operator;
 
 import org.arghyam.jalsoochak.user.config.JwtAuthConverter;
 import org.arghyam.jalsoochak.user.config.SecurityConfig;
@@ -55,11 +55,11 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
  * scoping tests pin that its verdicts reach the response — 403 for a tenant or role problem, 404 for
  * an out-of-scope id — and the public routes assert they never consult it.
  */
-@WebMvcTest(PublicPumpOperatorController.class)
+@WebMvcTest(PumpOperatorQueryController.class)
 @Import({SecurityConfig.class, JwtAuthConverter.class})
 @TestPropertySource(properties = "cors.allowed-origins=http://localhost")
-@DisplayName("PublicPumpOperatorController Security Tests")
-class PublicPumpOperatorControllerSecurityTest {
+@DisplayName("PumpOperatorQueryController Security Tests")
+class PumpOperatorQueryControllerSecurityTest {
 
     private static final String OPERATOR_UUID = "3f1a9c22-5b7e-4d38-9a10-8c4b2e6f0d71";
     private static final CallerScope ADMIN_SCOPE = new CallerScope("MP", "tenant_mp", true, null);
@@ -131,7 +131,7 @@ class PublicPumpOperatorControllerSecurityTest {
     class AuthenticatedRoutes {
 
         /**
-         * The routes the audit walked, plus the person- and scheme-scoped reads. All are called only
+         * The routes the audit walked, plus the person-scoped reads. All are called only
          * by the Section Officer console, which already sends a bearer token.
          */
         static Stream<String> authenticatedEndpoints() {
@@ -145,9 +145,7 @@ class PublicPumpOperatorControllerSecurityTest {
                     "/api/v1/pumpoperator/pump-operators/1/readings",
                     "/api/v1/pumpoperator/person/10/schemes",
                     "/api/v1/pumpoperator/person/10/schemes/count",
-                    "/api/v1/pumpoperator/person/10/pump-operators",
-                    "/api/v1/pumpoperator/schemes/5/details",
-                    "/api/v1/pumpoperator/schemes/5/reading-submissions"
+                    "/api/v1/pumpoperator/person/10/pump-operators"
             );
         }
 

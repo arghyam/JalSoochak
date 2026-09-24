@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.user.controller;
+package org.arghyam.jalsoochak.user.controller.auth;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;

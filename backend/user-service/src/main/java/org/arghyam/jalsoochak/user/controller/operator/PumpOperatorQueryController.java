@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.user.controller;
+package org.arghyam.jalsoochak.user.controller.operator;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -16,12 +16,9 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRow
 import org.arghyam.jalsoochak.user.dto.response.SchemeReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSummaryWithMetricsDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeCountDTO;
-import org.arghyam.jalsoochak.user.dto.response.SchemeDetailsWithReportingDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemePumpOperatorsDTO;
-import org.arghyam.jalsoochak.user.dto.response.SchemeReadingSubmissionDTO;
 import org.arghyam.jalsoochak.user.service.PublicPumpOperatorService;
 import org.arghyam.jalsoochak.user.service.PersonSchemeService;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.core.Authentication;
@@ -31,13 +28,12 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.util.List;
 
 /**
- * Pump operator and scheme reads for two audiences.
+ * Pump operator and person-scoped reads for two audiences.
  *
  * <p><b>Three routes are public</b> — {@code by-uuid/{uuid}}, {@code by-scheme} and
  * {@code by-scheme/reading-compliance} — because the anonymous village dashboard calls them. They
@@ -55,7 +51,7 @@ import java.util.List;
 @RequestMapping("/api/v1/pumpoperator")
 @RequiredArgsConstructor
 @Validated
-public class PublicPumpOperatorController {
+public class PumpOperatorQueryController {
 
     private static final int MAX_PAGE_SIZE = 100;
 
@@ -361,41 +357,5 @@ public class PublicPumpOperatorController {
                 size
         );
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Pump operators retrieved", rows));
-    }
-
-    @GetMapping("/schemes/{schemeId}/details")
-    public ResponseEntity<ApiResponseDTO<SchemeDetailsWithReportingDTO>> getSchemeDetails(
-            @PathVariable long schemeId,
-            @RequestParam(required = false) String tenantCode,
-            Authentication authentication
-    ) {
-        CallerScope scope = accessGuard.resolve(authentication, tenantCode);
-        accessGuard.requireSchemeAccess(scope, schemeId);
-
-        SchemeDetailsWithReportingDTO dto = personSchemeService.getSchemeDetails(scope.tenantCode(), schemeId);
-        if (dto == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Scheme not found");
-        }
-        return ResponseEntity.ok(ApiResponseDTO.of(200, "Scheme details retrieved", dto));
-    }
-
-    @GetMapping("/schemes/{schemeId}/reading-submissions")
-    public ResponseEntity<ApiResponseDTO<PageResponseDTO<SchemeReadingSubmissionDTO>>> listSchemeReadings(
-            @PathVariable long schemeId,
-            @RequestParam(required = false) String tenantCode,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size,
-            Authentication authentication
-    ) {
-        CallerScope scope = accessGuard.resolve(authentication, tenantCode);
-        accessGuard.requireSchemeAccess(scope, schemeId);
-
-        PageResponseDTO<SchemeReadingSubmissionDTO> rows = personSchemeService.listSchemeReadings(
-                scope.tenantCode(),
-                schemeId,
-                page,
-                size
-        );
-        return ResponseEntity.ok(ApiResponseDTO.of(200, "Scheme readings retrieved", rows));
     }
 }

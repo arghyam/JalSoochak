@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.user.controller;
+package org.arghyam.jalsoochak.user.controller.auth;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;

@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.user.controller;
+package org.arghyam.jalsoochak.user.controller.operator;
 
 import org.arghyam.jalsoochak.user.config.PumpOperatorAccessGuard;
 import org.arghyam.jalsoochak.user.config.properties.AppProperties;
@@ -11,8 +11,6 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRow
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingDetailDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSummaryWithMetricsDTO;
-import org.arghyam.jalsoochak.user.dto.response.SchemeDetailsWithReportingDTO;
-import org.arghyam.jalsoochak.user.dto.response.SchemeReadingSubmissionDTO;
 import org.arghyam.jalsoochak.user.service.PersonSchemeService;
 import org.arghyam.jalsoochak.user.service.PublicPumpOperatorService;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,10 +40,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(PublicPumpOperatorController.class)
+@WebMvcTest(PumpOperatorQueryController.class)
 @AutoConfigureMockMvc(addFilters = false)
-@DisplayName("PublicPumpOperatorController Tests")
-class PublicPumpOperatorControllerTest {
+@DisplayName("PumpOperatorQueryController Tests")
+class PumpOperatorQueryControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
@@ -442,51 +440,6 @@ class PublicPumpOperatorControllerTest {
     }
 
     @Nested
-    @DisplayName("GET /schemes/{id}/details")
-    class GetSchemeDetails {
-
-        @Test
-        @DisplayName("returns 200 with scheme details")
-        void returns200() throws Exception {
-            SchemeDetailsWithReportingDTO dto = SchemeDetailsWithReportingDTO.builder().build();
-            when(personSchemeService.getSchemeDetails(anyString(), anyLong())).thenReturn(dto);
-
-            mockMvc.perform(get("/api/v1/pumpoperator/schemes/5/details")
-                            .param("tenantCode", "mp"))
-                    .andExpect(status().isOk());
-        }
-
-        @Test
-        @DisplayName("returns 404 when scheme not found")
-        void returns404WhenNull() throws Exception {
-            when(personSchemeService.getSchemeDetails(anyString(), anyLong())).thenReturn(null);
-
-            mockMvc.perform(get("/api/v1/pumpoperator/schemes/99/details")
-                            .param("tenantCode", "mp"))
-                    .andExpect(status().isNotFound());
-        }
-    }
-
-    @Nested
-    @DisplayName("GET /schemes/{id}/reading-submissions")
-    class ListSchemeReadings {
-
-        @Test
-        @DisplayName("returns 200 with paginated submissions")
-        void returns200() throws Exception {
-            PageResponseDTO<SchemeReadingSubmissionDTO> page =
-                    PageResponseDTO.<SchemeReadingSubmissionDTO>builder()
-                            .content(List.of()).totalElements(0L).totalPages(0).number(0).size(20).build();
-            when(personSchemeService.listSchemeReadings(anyString(), anyLong(), anyInt(), anyInt()))
-                    .thenReturn(page);
-
-            mockMvc.perform(get("/api/v1/pumpoperator/schemes/5/reading-submissions")
-                            .param("tenantCode", "mp"))
-                    .andExpect(status().isOk());
-        }
-    }
-
-    @Nested
     @DisplayName("Pagination boundary validation")
     class PaginationValidation {
 
@@ -500,8 +453,7 @@ class PublicPumpOperatorControllerTest {
                     "/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance",
                     "/api/v1/pumpoperator/pump-operators/1/readings",
                     "/api/v1/pumpoperator/person/10/schemes",
-                    "/api/v1/pumpoperator/person/10/pump-operators",
-                    "/api/v1/pumpoperator/schemes/5/reading-submissions"
+                    "/api/v1/pumpoperator/person/10/pump-operators"
             );
         }
 

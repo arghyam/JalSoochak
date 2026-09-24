@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.user.controller;
+package org.arghyam.jalsoochak.user.controller.admin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.user.config.JwtAuthConverter;
@@ -7,6 +7,9 @@ import org.arghyam.jalsoochak.user.config.UserSecurityEvaluator;
 import org.arghyam.jalsoochak.user.config.properties.AppProperties;
 import org.arghyam.jalsoochak.user.dto.request.UpdateStaffRoleRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.WelcomeMessageRequestDTO;
+import org.arghyam.jalsoochak.user.dto.response.ReportResponseDTO;
+import org.arghyam.jalsoochak.user.enums.ReportFormat;
+import org.arghyam.jalsoochak.user.service.StaffReportService;
 import org.arghyam.jalsoochak.user.service.TenantStaffService;
 import org.arghyam.jalsoochak.user.service.WelcomeMessageService;
 import org.junit.jupiter.api.DisplayName;
@@ -22,7 +25,10 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -39,14 +45,18 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Security boundary tests for TenantStaffController.
+ * Security boundary tests for StaffAdminController.
  * Filters are enabled (no addFilters = false) to exercise the real security chain.
+ *
+ * <p>The {@link UserSecurityEvaluator} (bean name {@code userSecurity}) is mocked
+ * here; its internal logic is exercised separately in
+ * {@code UserSecurityEvaluatorTest}.
  */
-@WebMvcTest(TenantStaffController.class)
+@WebMvcTest(StaffAdminController.class)
 @Import({SecurityConfig.class, JwtAuthConverter.class})
 @TestPropertySource(properties = "cors.allowed-origins=http://localhost")
-@DisplayName("TenantStaffController Security Tests")
-class TenantStaffControllerSecurityTest {
+@DisplayName("StaffAdminController Security Tests")
+class StaffAdminControllerSecurityTest {
 
     @Autowired
     private MockMvc mockMvc;
@@ -62,6 +72,9 @@ class TenantStaffControllerSecurityTest {
 
     @MockBean
     private WelcomeMessageService welcomeMessageService;
+
+    @MockBean
+    private StaffReportService staffReportService;
 
     @MockBean(name = "userSecurity")
     private UserSecurityEvaluator userSecurity;
@@ -316,6 +329,112 @@ class TenantStaffControllerSecurityTest {
                     .andExpect(status().isForbidden());
 
             verify(tenantStaffService, never()).countStaffByRole(anyString(), any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/v1/tenant/user/staff/reports — requires STATE_ADMIN of the requested tenant")
+    class GenerateStaffReportSecurity {
+
+        private static final String URL = "/api/v1/tenant/user/staff/reports";
+
+        private static ReportResponseDTO okResponse() {
+            return ReportResponseDTO.builder()
+                    .reportId(UUID.randomUUID()).format("CSV")
+                    .generatedAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .dataVersion(1L)
+                    .downloadUrl("https://example/x").urlExpiresAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .cached(false).build();
+        }
+
+        @Test
+        @DisplayName("unauthenticated → 401")
+        void unauthenticated_returns401() throws Exception {
+            mockMvc.perform(post(URL)
+                            .param("tenantCode", "mp")
+                            .param("format", "CSV")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isUnauthorized());
+
+            verify(staffReportService, never()).generate(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("authenticated without STATE_ADMIN → 403")
+        void wrongRole_returns403() throws Exception {
+            mockMvc.perform(post(URL)
+                            .param("tenantCode", "mp")
+                            .param("format", "CSV")
+                            .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_SECTION_OFFICER")))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isForbidden());
+
+            verify(staffReportService, never()).generate(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("SUPER_USER → 403 (endpoint is STATE_ADMIN-only)")
+        void superUser_returns403() throws Exception {
+            mockMvc.perform(post(URL)
+                            .param("tenantCode", "mp")
+                            .param("format", "CSV")
+                            .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_SUPER_USER")))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isForbidden());
+
+            verify(staffReportService, never()).generate(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN of the matching tenant → 200")
+        void stateAdmin_sameTenant_returns200() throws Exception {
+            when(userSecurity.canAccessTenant(eq("mp"), any(Authentication.class))).thenReturn(true);
+            when(staffReportService.generate(eq("mp"), eq(ReportFormat.CSV), any(), any()))
+                    .thenReturn(okResponse());
+
+            mockMvc.perform(post(URL)
+                            .param("tenantCode", "mp")
+                            .param("format", "CSV")
+                            .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN")))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN requesting another tenant → 403, service not invoked")
+        void stateAdmin_crossTenant_returns403() throws Exception {
+            when(userSecurity.canAccessTenant(eq("tr"), any(Authentication.class))).thenReturn(false);
+
+            mockMvc.perform(post(URL)
+                            .param("tenantCode", "tr")
+                            .param("format", "CSV")
+                            .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN")))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isForbidden());
+
+            verify(staffReportService, never()).generate(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("evaluator is consulted with the exact request tenantCode")
+        void evaluatorReceivesRequestTenantCode() throws Exception {
+            when(userSecurity.canAccessTenant(anyString(), any(Authentication.class))).thenReturn(true);
+            when(staffReportService.generate(any(), any(), any(), any())).thenReturn(okResponse());
+
+            mockMvc.perform(post(URL)
+                            .param("tenantCode", "MP")
+                            .param("format", "CSV")
+                            .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN")))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isOk());
+
+            verify(userSecurity).canAccessTenant(eq("MP"), any(Authentication.class));
         }
     }
 }

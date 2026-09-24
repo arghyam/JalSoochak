@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.user.controller;
+package org.arghyam.jalsoochak.user.controller.auth;
 
 import org.arghyam.jalsoochak.user.dto.common.ApiErrorResponseDTO;
 import org.arghyam.jalsoochak.user.dto.common.ApiResponseDTO;

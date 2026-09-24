@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.user.controller;
+package org.arghyam.jalsoochak.user.controller.admin;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -8,11 +8,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.user.dto.common.ApiResponseDTO;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
+import org.arghyam.jalsoochak.user.dto.request.StaffReportRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.UpdateStaffRoleRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.WelcomeMessageRequestDTO;
+import org.arghyam.jalsoochak.user.dto.response.ReportResponseDTO;
 import org.arghyam.jalsoochak.user.dto.response.RoleCountDTO;
 import org.arghyam.jalsoochak.user.dto.response.TenantStaffResponseDTO;
 import org.arghyam.jalsoochak.user.dto.response.WelcomeMessageResponseDTO;
+import org.arghyam.jalsoochak.user.enums.ReportFormat;
+import org.arghyam.jalsoochak.user.service.StaffReportService;
 import org.arghyam.jalsoochak.user.service.TenantStaffService;
 import org.arghyam.jalsoochak.user.service.WelcomeMessageService;
 import org.springframework.http.ResponseEntity;
@@ -32,17 +36,21 @@ import jakarta.validation.constraints.NotBlank;
 
 import java.util.List;
 
+/**
+ * A tenant's staff: the directory, role changes, activation, the staff report and welcome messages.
+ */
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/tenant/user")
 @RequiredArgsConstructor
 @Validated
-public class TenantStaffController {
+public class StaffAdminController {
 
     private static final int MAX_PAGE_SIZE = 100;
 
     private final TenantStaffService tenantStaffService;
     private final WelcomeMessageService welcomeMessageService;
+    private final StaffReportService staffReportService;
 
     /**
      * Staff directory for a tenant. Returns names, emails and phone numbers, so it is restricted
@@ -110,6 +118,26 @@ public class TenantStaffController {
                 id, tenantCode, authentication != null ? authentication.getName() : "anonymous");
         tenantStaffService.activateStaff(id, tenantCode, authentication);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Staff user activated successfully"));
+    }
+
+    /**
+     * Generate (or return cached) a staff export in the requested format.
+     * Body filters mirror {@code GET /staff} so the file content matches
+     * what STATE_ADMIN sees in the UI for the same filters.
+     */
+    @PostMapping("/staff/reports")
+    @PreAuthorize("hasRole('STATE_ADMIN') and @userSecurity.canAccessTenant(#tenantCode, authentication)")
+    public ResponseEntity<ApiResponseDTO<ReportResponseDTO>> generateStaffReport(
+            @RequestParam @NotBlank String tenantCode,
+            @RequestParam(defaultValue = "CSV") String format,
+            @RequestBody(required = false) StaffReportRequestDTO request,
+            Authentication authentication
+    ) {
+        ReportFormat fmt = ReportFormat.fromString(format);
+        log.info("POST /api/v1/tenant/user/staff/reports tenantCode={} format={}", tenantCode, fmt.key());
+        log.debug("POST /api/v1/tenant/user/staff/reports caller={}", authentication != null ? authentication.getName() : "anonymous");
+        ReportResponseDTO response = staffReportService.generate(tenantCode, fmt, request, authentication);
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Staff report ready", response));
     }
 
     @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")

@@ -1,17 +1,15 @@
-package org.arghyam.jalsoochak.user.controller;
+package org.arghyam.jalsoochak.user.controller.admin;
 
 import org.arghyam.jalsoochak.user.config.CommonApiResponses;
 import org.arghyam.jalsoochak.user.config.RequiresUserAccess;
 import org.arghyam.jalsoochak.user.dto.common.ApiErrorResponseDTO;
 import org.arghyam.jalsoochak.user.dto.common.ApiResponseDTO;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
-import org.arghyam.jalsoochak.user.dto.request.ChangePasswordRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.InviteRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.UpdateProfileRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.AdminUserResponseDTO;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.service.UserManagementService;
-import org.arghyam.jalsoochak.user.util.SecurityUtils;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -38,14 +36,18 @@ import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * Administers SUPER_USER and STATE_ADMIN accounts: invitations, listing, profile updates,
+ * activation and deactivation.
+ */
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
 @Validated
-@Tag(name = "User Management", description = "Admin user lifecycle: invite, profile management, activation and deactivation")
+@Tag(name = "User Administration", description = "Admin user lifecycle: invite, profile management, activation and deactivation")
 @CommonApiResponses
-public class UserController {
+public class UserAdminController {
 
     private final UserManagementService userManagementService;
 
@@ -67,49 +69,6 @@ public class UserController {
         log.debug("POST /api/v1/users/invitations – tenantCode={}", request.getTenantCode());
         userManagementService.inviteUser(request, authentication);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Invitation sent successfully"));
-    }
-
-    @Operation(summary = "Get own profile", description = "Retrieve the authenticated user's profile")
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Profile retrieved"),
-        @ApiResponse(responseCode = "404", description = "User not found",
-            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
-    })
-    @GetMapping("/me")
-    public ResponseEntity<ApiResponseDTO<AdminUserResponseDTO>> getMe(Authentication authentication) {
-        log.info("GET /api/v1/users/me");
-        return ResponseEntity.ok(ApiResponseDTO.of(200, "Profile retrieved",
-                userManagementService.getMe(SecurityUtils.getKeycloakId(authentication))));
-    }
-
-    @Operation(summary = "Update own profile", description = "Update first name, last name, or phone number of the authenticated user")
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Profile updated"),
-        @ApiResponse(responseCode = "400", description = "Validation error or account deactivated",
-            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
-    })
-    @PatchMapping("/me")
-    public ResponseEntity<ApiResponseDTO<AdminUserResponseDTO>> updateMe(Authentication authentication,
-                                                                         @Valid @RequestBody UpdateProfileRequestDTO request) {
-        log.info("PATCH /api/v1/users/me");
-        return ResponseEntity.ok(ApiResponseDTO.of(200, "Profile updated",
-                userManagementService.updateMe(SecurityUtils.getKeycloakId(authentication), request)));
-    }
-
-    @Operation(summary = "Change own password")
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Password changed"),
-        @ApiResponse(responseCode = "400", description = "Validation error",
-            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
-        @ApiResponse(responseCode = "401", description = "Current password is incorrect",
-            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
-    })
-    @PatchMapping("/me/password")
-    public ResponseEntity<ApiResponseDTO<Void>> changePassword(Authentication authentication,
-                                                               @Valid @RequestBody ChangePasswordRequestDTO request) {
-        log.info("PATCH /api/v1/users/me/password");
-        userManagementService.changePassword(SecurityUtils.getKeycloakId(authentication), request);
-        return ResponseEntity.ok(ApiResponseDTO.of(200, "Password changed successfully"));
     }
 
     @Operation(summary = "List super users", description = "Paginated list of all SUPER_USER accounts")

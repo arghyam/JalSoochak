@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.user.controller;
+package org.arghyam.jalsoochak.user.controller.bulk;
 
 import org.arghyam.jalsoochak.user.config.properties.AppProperties;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorUploadResponseDTO;
@@ -22,10 +22,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(PumpOperatorUploadController.class)
+@WebMvcTest(BulkUploadController.class)
 @AutoConfigureMockMvc(addFilters = false)
-@DisplayName("PumpOperatorUploadController Tests")
-class PumpOperatorUploadControllerTest {
+@DisplayName("BulkUploadController Tests")
+class BulkUploadControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
@@ -38,7 +38,7 @@ class PumpOperatorUploadControllerTest {
 
     @Nested
     @DisplayName("POST /api/v1/state-admin/pump-operators/upload")
-    class Upload {
+    class PumpOperatorUpload {
 
         @Test
         @DisplayName("returns 200 with upload result for a valid CSV file")
@@ -68,6 +68,43 @@ class PumpOperatorUploadControllerTest {
                     "file", "bad.csv", MediaType.TEXT_PLAIN_VALUE, "data".getBytes());
 
             mockMvc.perform(multipart("/api/v1/state-admin/pump-operators/upload")
+                            .file(file)
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer test-token"))
+                    .andExpect(status().isInternalServerError());
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/v1/state-admin/user-scheme-mappings/upload")
+    class UserSchemeMappingUpload {
+
+        @Test
+        @DisplayName("returns 200 with upload result for a valid file")
+        void returns200ForValidUpload() throws Exception {
+            PumpOperatorUploadResponseDTO response = PumpOperatorUploadResponseDTO.builder()
+                    .totalRows(3).uploadedRows(3).skippedRows(0).message("Upload complete").build();
+            when(pumpOperatorUploadService.uploadUserSchemeMappings(any(), anyString())).thenReturn(response);
+
+            MockMultipartFile file = new MockMultipartFile(
+                    "file", "mappings.csv", MediaType.TEXT_PLAIN_VALUE, "header\nrow1".getBytes());
+
+            mockMvc.perform(multipart("/api/v1/state-admin/user-scheme-mappings/upload")
+                            .file(file)
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer test-token"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.uploadedRows").value(3));
+        }
+
+        @Test
+        @DisplayName("propagates exceptions thrown by the service")
+        void propagatesServiceException() throws Exception {
+            when(pumpOperatorUploadService.uploadUserSchemeMappings(any(), anyString()))
+                    .thenThrow(new RuntimeException("mapping upload failed"));
+
+            MockMultipartFile file = new MockMultipartFile(
+                    "file", "bad.csv", MediaType.TEXT_PLAIN_VALUE, "data".getBytes());
+
+            mockMvc.perform(multipart("/api/v1/state-admin/user-scheme-mappings/upload")
                             .file(file)
                             .header(HttpHeaders.AUTHORIZATION, "Bearer test-token"))
                     .andExpect(status().isInternalServerError());
