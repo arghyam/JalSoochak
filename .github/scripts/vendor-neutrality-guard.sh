@@ -44,6 +44,7 @@ RENAMING_MIGRATIONS=(
   backend/database/V45__rename_whatsapp_message_templates_config_key.sql
   backend/database/V46__rename_ocr_correlation_id_column.sql
   backend/database/V47__retire_legacy_message_templates_config_key.sql
+  backend/database/V48__retire_legacy_welcome_flow_id_config_key.sql
 )
 
 # Rule HISTORICAL_RECORD — completed plans, code reviews and architecture decision records record
@@ -95,12 +96,12 @@ ALLOWED_TOKENS="$(cat <<'RULES'
 
 # Rule LEGACY_ALIAS — deprecated names still served, read or emitted for one release, so that each
 # side of the contract can move on its own. They go when the aliases are removed.
-.  glific_welcome_flow_id
 .  flowvision_correlation_id
 
 # Rule RENAMING_MIGRATION_TEST — the integration test of a RENAMING_MIGRATION seeds the rows it
 # changes under the name they had before the migration ran.
 /src/test/.*MigrationIntegrationTest\.java$  GLIFIC_MESSAGE_TEMPLATES
+/src/test/.*MigrationIntegrationTest\.java$  glific_welcome_flow_id
 
 # Rule PUBLIC_ERROR_CODE — error codes returned to API callers. Renaming one is a contract change
 # that needs its own transition.
