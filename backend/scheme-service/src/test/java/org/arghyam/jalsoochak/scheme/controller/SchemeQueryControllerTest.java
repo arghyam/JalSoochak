@@ -3,9 +3,6 @@ package org.arghyam.jalsoochak.scheme.controller;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusBreakdownDTO;
-import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
-import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
-import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.scheme.service.SchemeService;
 import org.junit.jupiter.api.Test;
@@ -13,22 +10,20 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.mock.web.MockMultipartFile;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class SchemeControllerTest {
+class SchemeQueryControllerTest {
 
     @Mock
     SchemeService schemeService;
 
     @InjectMocks
-    SchemeController controller;
+    SchemeQueryController controller;
 
     @Test
     void listSchemes_usesFallbackQueryParams() {
@@ -78,42 +73,5 @@ class SchemeControllerTest {
                 List.of("1"), List.of("2"), "123", "sub").getBody())
                 .isEqualTo(mappings);
         assertThat(controller.getSchemeStatusCounts("ka").getBody()).isEqualTo(byStatus);
-    }
-
-    @Test
-    void uploadEndpoints_delegateToService() {
-        MockMultipartFile file = new MockMultipartFile("file", "f.csv", "text/csv", "a".getBytes());
-        SchemeUploadResponseDTO response = SchemeUploadResponseDTO.builder().message("ok").build();
-        when(schemeService.uploadSchemes(file)).thenReturn(response);
-        when(schemeService.uploadSchemeMappings(file)).thenReturn(response);
-
-        assertThat(controller.uploadSchemes(file).getBody()).isEqualTo(response);
-        assertThat(controller.uploadSchemeMappings(file).getBody()).isEqualTo(response);
-        verify(schemeService).uploadSchemes(file);
-        verify(schemeService).uploadSchemeMappings(file);
-    }
-
-    @Test
-    void updateSchemeStatuses_delegatesToService() {
-        SchemeStatusUpdateRequestDTO request = new SchemeStatusUpdateRequestDTO();
-        request.setWorkStatus("Completed");
-        request.setOperatingStatus("Operative");
-
-        assertThat(controller.updateSchemeStatuses("ka", 11, request).getStatusCode().value()).isEqualTo(204);
-        verify(schemeService).updateSchemeStatuses("ka", 11, request);
-    }
-
-    @Test
-    void getSchemeStatuses_delegatesToService() {
-        SchemeStatusesResponseDTO response = SchemeStatusesResponseDTO.builder()
-                .workStatus(2)
-                .operatingStatus(1)
-                .build();
-        when(schemeService.getSchemeStatuses(22, 11)).thenReturn(response);
-
-        SchemeStatusesResponseDTO body = controller.getSchemeStatuses(11, 22).getBody();
-
-        assertThat(body).isEqualTo(response);
-        verify(schemeService).getSchemeStatuses(22, 11);
     }
 }

@@ -35,7 +35,7 @@ public class PublicSchemeController {
      * deliberately not accepted — it would be a second selector carrying no authority of its own,
      * which invites callers to believe a request was scoped when only {@code tenantCode} scoped it.
      * Endpoints that address a tenant by id instead (see
-     * {@code SchemeController#getSchemeStatuses}) authorize it through
+     * {@code SchemeStatusController#getSchemeStatuses}) authorize it through
      * {@code SchemeSecurityEvaluator#canAccessTenantId}.
      */
     @RequiresTenantAccess
