@@ -114,7 +114,7 @@ ALLOWED_TOKENS="$(cat <<'RULES'
 # Rule PENDING_STORAGE_RENAME — the MinIO client is replaced by the S3-compatible storage port. Until
 # then, the services it has not reached still name it, and so do the docs that describe their
 # configuration.
-^backend/(?:message|telemetry|tenant|user)-service/  minio
+^backend/(?:message|tenant|user)-service/  minio
 \.md$  minio
 
 # Rule TEST_FIXTURE — the test tenant is modelled on a real state deployment, so a string literal in

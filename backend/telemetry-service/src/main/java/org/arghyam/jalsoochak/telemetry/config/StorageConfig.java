@@ -15,6 +15,7 @@ import software.amazon.awssdk.services.s3.S3ClientBuilder;
 import software.amazon.awssdk.services.s3.S3Configuration;
 
 import java.net.URI;
+import java.net.URISyntaxException;
 
 /**
  * Wires the S3-compatible {@link ObjectStorageService} when {@code storage.enabled=true}.
@@ -54,10 +55,11 @@ public class StorageConfig {
     @Bean
     @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")
     public ObjectStorageService objectStorageService(S3Client s3Client, StorageProperties props) {
+        validatePublicBaseUrl(props.getPublicBaseUrl());
         log.info("[Storage] Activating S3-compatible storage [bucket={}, endpoint={}, publicBaseUrl={}]",
                 props.getBucket(),
                 hasCustomEndpoint(props) ? sanitizeEndpoint(props.getEndpoint()) : "AWS default",
-                props.getPublicBaseUrl() != null ? props.getPublicBaseUrl() : "none");
+                props.getPublicBaseUrl());
         return new S3CompatibleStorageService(s3Client, props.getPublicBaseUrl());
     }
 
@@ -70,6 +72,35 @@ public class StorageConfig {
             throw new IllegalStateException(
                     "[Storage] storage.secret-key must be provided when storage.enabled=true");
         }
+    }
+
+    /**
+     * Every stored image URL is built on this base and fetched by the OCR provider, so a missing or
+     * malformed value would fail each upload after the object is already stored. Checked here instead,
+     * so the deployment stops rather than the readings.
+     */
+    private static void validatePublicBaseUrl(String publicBaseUrl) {
+        if (publicBaseUrl == null || publicBaseUrl.isBlank()) {
+            throw new IllegalStateException(
+                    "[Storage] storage.public-base-url must be provided when storage.enabled=true");
+        }
+        URI base;
+        try {
+            base = new URI(publicBaseUrl.strip());
+        } catch (URISyntaxException e) {
+            throw invalidPublicBaseUrl();
+        }
+        boolean httpScheme = "http".equalsIgnoreCase(base.getScheme()) || "https".equalsIgnoreCase(base.getScheme());
+        if (!httpScheme || base.getHost() == null || base.getRawUserInfo() != null
+                || base.getRawQuery() != null || base.getRawFragment() != null) {
+            throw invalidPublicBaseUrl();
+        }
+    }
+
+    /** Does not echo the value, which may carry credentials in its user-info. */
+    private static IllegalStateException invalidPublicBaseUrl() {
+        return new IllegalStateException("[Storage] storage.public-base-url must be an absolute http(s) URL "
+                + "with a host and no user-info, query or fragment");
     }
 
     private static boolean hasCustomEndpoint(StorageProperties props) {

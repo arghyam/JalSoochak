@@ -120,13 +120,8 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
-        <dependency>
-            <groupId>io.minio</groupId>
-            <artifactId>minio</artifactId>
-            <version>8.5.7</version>
-        </dependency>
         <!-- AWS SDK v2 S3 (provider-agnostic object storage — works with any S3-compatible
-             store). Includes the S3Presigner used for presigned download URLs. -->
+             store). -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>

@@ -353,13 +353,13 @@ class TelemetryEventPublisherTest {
         void publishesTheReadingWithItsDerivedDate() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L,
                     new BigDecimal("1234"), new BigDecimal("1234"), new BigDecimal("0.92"),
-                    "https://minio/img.jpg", LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, "flow-corr-1");
+                    "https://storage.example.org/img.jpg", LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, "flow-corr-1");
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getEventType()).isEqualTo("METER_READING_RECORDED");
             assertThat(event.getExtractedReading()).isEqualByComparingTo("1234");
             assertThat(event.getConfirmedReading()).isEqualByComparingTo("1234");
-            assertThat(event.getImageUrl()).isEqualTo("https://minio/img.jpg");
+            assertThat(event.getImageUrl()).isEqualTo("https://storage.example.org/img.jpg");
             assertThat(event.getReadingAt()).isEqualTo("2026-03-01T06:30");
             assertThat(event.getChannel()).isEqualTo(1);
             assertThat(event.getReadingDate()).isEqualTo("2026-03-01");

@@ -14,6 +14,9 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * {@link ObjectStorageService} over any store that speaks the AWS S3 API.
+ *
+ * <p>Exception messages name the bucket but never the object key: callers log them above
+ * {@code DEBUG}, and a meter image's key carries the operator's phone number.
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -37,7 +40,7 @@ public class S3CompatibleStorageService implements ObjectStorageService {
                             .build(),
                     RequestBody.fromInputStream(content, contentLength));
         } catch (SdkException e) {
-            throw new StorageException("Upload failed for key: " + objectKey, e);
+            throw new StorageException("Upload failed to bucket: " + bucket, e);
         }
     }
 
@@ -60,7 +63,7 @@ public class S3CompatibleStorageService implements ObjectStorageService {
         try {
             return URI.create(prefix + "/" + bucket + "/" + encodeObjectKey(objectKey));
         } catch (IllegalArgumentException e) {
-            throw new StorageException("Failed to build public URL for key: " + objectKey, e);
+            throw new StorageException("Failed to build public URL in bucket: " + bucket, e);
         }
     }
 

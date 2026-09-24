@@ -127,7 +127,7 @@ class MeterImageWorkflowServiceStorageOrderTest {
         when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(anyString(), any(), any(LocalDate.class)))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser(anyString(), any())).thenReturn(Optional.of(101L));
-        when(inboundMediaService.uploadImage(CONTACT_ID, IMAGE)).thenReturn("https://minio/bfm/x.jpg");
+        when(inboundMediaService.uploadImage(CONTACT_ID, IMAGE)).thenReturn("https://storage.example.org/bfm/x.jpg");
         when(bfmReadingService.createReading(any(), anyString(), any(), anyString(), anyBoolean(), any()))
                 .thenReturn(CreateReadingResponse.builder().success(true).message("ok").build());
         when(localizationService.localizeMessage("ok", "english")).thenReturn("ok");
@@ -140,6 +140,6 @@ class MeterImageWorkflowServiceStorageOrderTest {
 
         ArgumentCaptor<CreateReadingRequest> captor = ArgumentCaptor.forClass(CreateReadingRequest.class);
         verify(bfmReadingService).createReading(captor.capture(), anyString(), any(), anyString(), anyBoolean(), any());
-        assertThat(captor.getValue().getReadingUrl()).isEqualTo("https://minio/bfm/x.jpg");
+        assertThat(captor.getValue().getReadingUrl()).isEqualTo("https://storage.example.org/bfm/x.jpg");
     }
 }

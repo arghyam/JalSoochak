@@ -1,8 +1,12 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import org.arghyam.jalsoochak.telemetry.config.StorageProperties;
 import org.arghyam.jalsoochak.telemetry.provider.whatsapp.InboundMediaFetcher;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlNotAllowedException;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
+import org.arghyam.jalsoochak.telemetry.storage.ObjectStorageService;
+import org.arghyam.jalsoochak.telemetry.storage.StorageException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -25,13 +29,19 @@ import org.springframework.web.client.ResponseExtractor;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -39,8 +49,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * Meter-image retrieval: from the WhatsApp provider by media id, or straight from a pre-signed URL,
- * plus the upload to MinIO. Transient failures are retried with a bounded backoff; a 4xx is not,
- * since retrying a rejected request only delays the operator's reply.
+ * plus the upload to object storage. Transient failures are retried with a bounded backoff; a 4xx is
+ * not, since retrying a rejected request only delays the operator's reply.
  *
  * <p>The two sources go out on different clients on purpose — a media id goes to the provider
  * through {@link InboundMediaFetcher}, while a URL is caller-controlled and goes out on the guarded
@@ -53,9 +63,10 @@ class InboundMediaServiceDownloadTest {
 
     private static final byte[] IMAGE = {1, 2, 3, 4};
     private static final String MEDIA_URL = "https://example.org/img.jpg";
+    private static final String IMAGE_BUCKET = "meter-images-under-test";
 
     @Mock
-    private MinioService minioService;
+    private ObjectStorageService objectStorageService;
     @Mock
     private InboundMediaFetcher inboundMediaFetcher;
     @Mock
@@ -66,8 +77,14 @@ class InboundMediaServiceDownloadTest {
     private InboundMediaService service() {
         when(mediaUrlValidator.validate(anyString()))
                 .thenAnswer(invocation -> URI.create(invocation.getArgument(0)));
-        return new InboundMediaService(minioService, inboundMediaFetcher, mediaFetchRestTemplate,
-                mediaUrlValidator, 3, 1L, 1L, 5L, 20_971_520L);
+        return new InboundMediaService(objectStorageService, storageProperties(), inboundMediaFetcher,
+                mediaFetchRestTemplate, mediaUrlValidator, 3, 1L, 1L, 5L, 20_971_520L);
+    }
+
+    private static StorageProperties storageProperties() {
+        StorageProperties properties = new StorageProperties();
+        properties.setBucket(IMAGE_BUCKET);
+        return properties;
     }
 
     /** Stubs the guarded fetch with the given outcomes in order: a ResponseEntity, or a Throwable. */
@@ -221,8 +238,8 @@ class InboundMediaServiceDownloadTest {
 
         @Test
         void makesASingleAttemptWhenRetriesAreDisabled() {
-            var noRetries = new InboundMediaService(minioService, inboundMediaFetcher, mediaFetchRestTemplate,
-                    mediaUrlValidator, 0, 0L, 0L, 0L, 20_971_520L);
+            var noRetries = new InboundMediaService(objectStorageService, storageProperties(), inboundMediaFetcher,
+                    mediaFetchRestTemplate, mediaUrlValidator, 0, 0L, 0L, 0L, 20_971_520L);
             when(inboundMediaFetcher.fetch(anyString()))
                     .thenThrow(new ResourceAccessException("connection reset"));
 
@@ -312,18 +329,61 @@ class InboundMediaServiceDownloadTest {
     @DisplayName("upload")
     class Upload {
 
+        private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+
+        @BeforeEach
+        void publicUrlsResolve() {
+            when(objectStorageService.publicUrl(anyString(), anyString()))
+                    .thenReturn(URI.create("https://storage.example.org/meter-images/image.jpg"));
+        }
+
         @Test
-        void uploadsUnderAContactScopedObjectKeyAndReturnsThePublicUrl() {
-            when(minioService.upload(any(), anyString()))
-                    .thenReturn("https://minio/telemetry/bfm/919999900001/1.jpg");
+        void uploadsTheImageUnderAContactScopedKeyInTheConfiguredBucketAndReturnsItsPublicUrl() {
+            AtomicReference<byte[]> uploaded = new AtomicReference<>();
+            doAnswer(invocation -> {
+                uploaded.set(invocation.<InputStream>getArgument(2).readAllBytes());
+                return null;
+            }).when(objectStorageService).upload(anyString(), anyString(), any(InputStream.class), anyLong(),
+                    anyString());
+            when(objectStorageService.publicUrl(eq(IMAGE_BUCKET), anyString()))
+                    .thenReturn(URI.create("https://storage.example.org/meter-images/bfm/919999900001/1.jpg"));
 
             String url = service().uploadImage("919999900001", IMAGE);
 
-            assertThat(url).isEqualTo("https://minio/telemetry/bfm/919999900001/1.jpg");
-
+            assertThat(url).isEqualTo("https://storage.example.org/meter-images/bfm/919999900001/1.jpg");
             ArgumentCaptor<String> objectKey = ArgumentCaptor.forClass(String.class);
-            verify(minioService).upload(eq(IMAGE), objectKey.capture());
+            verify(objectStorageService).upload(eq(IMAGE_BUCKET), objectKey.capture(), any(InputStream.class),
+                    eq((long) IMAGE.length), anyString());
             assertThat(objectKey.getValue()).startsWith("bfm/919999900001/").endsWith(".jpg");
+            assertThat(uploaded.get()).isEqualTo(IMAGE);
+            verify(objectStorageService).publicUrl(IMAGE_BUCKET, objectKey.getValue());
+        }
+
+        @Test
+        void labelsTheImageWithTheTypeItsFileSignatureShows() {
+            service().uploadImage("919999900001", PNG);
+
+            verify(objectStorageService).upload(anyString(), anyString(), any(InputStream.class), anyLong(),
+                    eq("image/png"));
+        }
+
+        @Test
+        void labelsUnrecognisableContentAsOctetStream() {
+            service().uploadImage("919999900001", IMAGE);
+
+            verify(objectStorageService).upload(anyString(), anyString(), any(InputStream.class), anyLong(),
+                    eq("application/octet-stream"));
+        }
+
+        @Test
+        void propagatesAStorageFailureWithoutBuildingAUrl() {
+            StorageException failure = new StorageException("Upload failed to bucket: " + IMAGE_BUCKET);
+            doThrow(failure).when(objectStorageService).upload(anyString(), anyString(), any(InputStream.class),
+                    anyLong(), anyString());
+
+            assertThatThrownBy(() -> service().uploadImage("919999900001", IMAGE)).isSameAs(failure);
+
+            verify(objectStorageService, never()).publicUrl(anyString(), anyString());
         }
     }
 }

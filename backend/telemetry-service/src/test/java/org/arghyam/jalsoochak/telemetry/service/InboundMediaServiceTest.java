@@ -1,7 +1,9 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import org.arghyam.jalsoochak.telemetry.config.StorageProperties;
 import org.arghyam.jalsoochak.telemetry.provider.whatsapp.InboundMediaFetcher;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
+import org.arghyam.jalsoochak.telemetry.storage.ObjectStorageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,7 +37,7 @@ class InboundMediaServiceTest {
     private static final String IMAGE_URL = "https://example.com/image.jpg";
 
     @Mock
-    private MinioService minioService;
+    private ObjectStorageService objectStorageService;
 
     @Mock
     private InboundMediaFetcher inboundMediaFetcher;
@@ -53,7 +55,8 @@ class InboundMediaServiceTest {
         when(mediaUrlValidator.validate(anyString()))
                 .thenAnswer(invocation -> URI.create(invocation.getArgument(0)));
         service = new InboundMediaService(
-                minioService,
+                objectStorageService,
+                new StorageProperties(),
                 inboundMediaFetcher,
                 mediaFetchRestTemplate,
                 mediaUrlValidator,

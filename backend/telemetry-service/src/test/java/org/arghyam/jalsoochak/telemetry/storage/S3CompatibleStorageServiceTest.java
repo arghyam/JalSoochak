@@ -31,6 +31,9 @@ import static org.mockito.Mockito.when;
 @DisplayName("S3CompatibleStorageService")
 class S3CompatibleStorageServiceTest {
 
+    /** Shaped like a meter image's key, which carries the operator's phone number. */
+    private static final String PHONE_BEARING_KEY = "bfm/919999900001/1.jpg";
+
     @Mock S3Client s3Client;
 
     private S3CompatibleStorageService service;
@@ -61,15 +64,16 @@ class S3CompatibleStorageServiceTest {
         }
 
         @Test
-        @DisplayName("wraps SdkException into StorageException")
+        @DisplayName("wraps SdkException into StorageException naming the bucket but not the key")
         void wrapsSdkFailure() {
             when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
                     .thenThrow(AwsServiceException.builder().message("boom").build());
 
-            assertThatThrownBy(() -> service.upload("b", "k",
+            assertThatThrownBy(() -> service.upload("b", PHONE_BEARING_KEY,
                     new ByteArrayInputStream(new byte[]{1}), 1L, "image/jpeg"))
                     .isInstanceOf(StorageException.class)
-                    .hasMessageContaining("Upload failed for key: k");
+                    .hasMessage("Upload failed to bucket: b")
+                    .hasMessageNotContaining("919999900001");
         }
     }
 
@@ -121,13 +125,14 @@ class S3CompatibleStorageServiceTest {
         }
 
         @Test
-        @DisplayName("malformed base URL is wrapped in StorageException")
+        @DisplayName("malformed base URL is wrapped in StorageException naming the bucket but not the key")
         void malformedBaseUrlWrapped() {
             S3CompatibleStorageService svc = withPublicBaseUrl("https://jalsoochak.in/a path");
 
-            assertThatThrownBy(() -> svc.publicUrl("b", "k"))
+            assertThatThrownBy(() -> svc.publicUrl("b", PHONE_BEARING_KEY))
                     .isInstanceOf(StorageException.class)
-                    .hasMessageContaining("Failed to build public URL for key: k")
+                    .hasMessage("Failed to build public URL in bucket: b")
+                    .hasMessageNotContaining("919999900001")
                     .hasCauseInstanceOf(IllegalArgumentException.class);
         }
     }

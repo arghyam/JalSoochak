@@ -40,7 +40,8 @@ public class StorageProperties {
     /**
      * Base URL of the anonymously readable address that
      * {@code ObjectStorageService.publicUrl} builds on:
-     * {@code <publicBaseUrl>/<bucket>/<objectKey>}.
+     * {@code <publicBaseUrl>/<bucket>/<objectKey>}. Required while storage is enabled, as an
+     * absolute {@code http(s)} URL with a host and no user-info, query or fragment, or startup fails.
      */
     private String publicBaseUrl;
 }

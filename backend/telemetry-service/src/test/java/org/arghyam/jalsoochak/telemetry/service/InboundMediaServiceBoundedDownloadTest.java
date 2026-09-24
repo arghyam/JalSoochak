@@ -3,9 +3,11 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.arghyam.jalsoochak.telemetry.config.MediaFetchRestTemplateConfig;
+import org.arghyam.jalsoochak.telemetry.config.StorageProperties;
 import org.arghyam.jalsoochak.telemetry.provider.whatsapp.InboundMediaFetcher;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
 import org.arghyam.jalsoochak.telemetry.security.SsrfAddressPolicy;
+import org.arghyam.jalsoochak.telemetry.storage.ObjectStorageService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,7 +36,7 @@ class InboundMediaServiceBoundedDownloadTest {
     private static final int LIMIT_BYTES = 4096;
 
     @Mock
-    private MinioService minioService;
+    private ObjectStorageService objectStorageService;
     @Mock
     private InboundMediaFetcher inboundMediaFetcher;
 
@@ -86,7 +88,7 @@ class InboundMediaServiceBoundedDownloadTest {
                 true, false, true, "", 3, 2000, 2000);
         SsrfAddressPolicy addressPolicy = new SsrfAddressPolicy(true);
         MediaUrlValidator validator = config.mediaUrlValidator(addressPolicy);
-        return new InboundMediaService(minioService, inboundMediaFetcher,
+        return new InboundMediaService(objectStorageService, new StorageProperties(), inboundMediaFetcher,
                 config.mediaFetchRestTemplate(addressPolicy, validator), validator,
                 1, 0L, 0L, 0L, maxBytes);
     }
@@ -146,7 +148,7 @@ class InboundMediaServiceBoundedDownloadTest {
                 true, false, true, "127.0.0.1", 3, 2000, 2000);
         SsrfAddressPolicy addressPolicy = new SsrfAddressPolicy(true);
         MediaUrlValidator validator = config.mediaUrlValidator(addressPolicy);
-        return new InboundMediaService(minioService, inboundMediaFetcher,
+        return new InboundMediaService(objectStorageService, new StorageProperties(), inboundMediaFetcher,
                 config.mediaFetchRestTemplate(addressPolicy, validator), validator,
                 3, 0L, 0L, 0L, LIMIT_BYTES);
     }

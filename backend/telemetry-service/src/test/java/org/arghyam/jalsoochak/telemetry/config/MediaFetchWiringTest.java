@@ -4,7 +4,7 @@ import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExt
 import org.arghyam.jalsoochak.telemetry.provider.whatsapp.glific.GlificMediaFetcher;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
 import org.arghyam.jalsoochak.telemetry.service.InboundMediaService;
-import org.arghyam.jalsoochak.telemetry.service.MinioService;
+import org.arghyam.jalsoochak.telemetry.storage.ObjectStorageService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -29,8 +29,13 @@ class MediaFetchWiringTest {
     @Configuration(proxyBeanMethods = false)
     static class StubCollaborators {
         @Bean
-        MinioService minioService() {
-            return Mockito.mock(MinioService.class);
+        ObjectStorageService objectStorageService() {
+            return Mockito.mock(ObjectStorageService.class);
+        }
+
+        @Bean
+        StorageProperties storageProperties() {
+            return new StorageProperties();
         }
     }
 

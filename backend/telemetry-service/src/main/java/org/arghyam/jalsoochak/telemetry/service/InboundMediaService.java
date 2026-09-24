@@ -1,9 +1,11 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.config.StorageProperties;
 import org.arghyam.jalsoochak.telemetry.provider.whatsapp.InboundMediaFetcher;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlNotAllowedException;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
+import org.arghyam.jalsoochak.telemetry.storage.ObjectStorageService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -17,10 +19,12 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -40,7 +44,8 @@ public class InboundMediaService {
     /** Far deeper than any wrapping the HTTP client and {@code RestTemplate} apply; a cycle guard only. */
     private static final int MAX_CAUSE_CHAIN_DEPTH = 16;
 
-    private final MinioService minioService;
+    private final ObjectStorageService objectStorageService;
+    private final String imageBucket;
     private final InboundMediaFetcher inboundMediaFetcher;
     private final RestTemplate mediaFetchRestTemplate;
     private final MediaUrlValidator mediaUrlValidator;
@@ -50,7 +55,8 @@ public class InboundMediaService {
     private final long mediaDownloadRetryMaxTotalBackoffMs;
     private final long mediaDownloadMaxBytes;
 
-    public InboundMediaService(MinioService minioService,
+    public InboundMediaService(ObjectStorageService objectStorageService,
+                               StorageProperties storageProperties,
                                InboundMediaFetcher inboundMediaFetcher,
                                @Qualifier("mediaFetchRestTemplate") RestTemplate mediaFetchRestTemplate,
                                MediaUrlValidator mediaUrlValidator,
@@ -59,7 +65,8 @@ public class InboundMediaService {
                                @Value("${media-download.retry.max-backoff-ms:200}") long mediaDownloadRetryMaxBackoffMs,
                                @Value("${media-download.retry.max-total-backoff-ms:400}") long mediaDownloadRetryMaxTotalBackoffMs,
                                @Value("${media-download.max-bytes:20971520}") long mediaDownloadMaxBytes) {
-        this.minioService = minioService;
+        this.objectStorageService = objectStorageService;
+        this.imageBucket = storageProperties.getBucket();
         this.inboundMediaFetcher = inboundMediaFetcher;
         this.mediaFetchRestTemplate = mediaFetchRestTemplate;
         this.mediaUrlValidator = mediaUrlValidator;
@@ -89,10 +96,26 @@ public class InboundMediaService {
 
     public String uploadImage(String contactId, byte[] imageBytes) {
         String objectKey = "bfm/" + contactId + "/" + System.currentTimeMillis() + ".jpg";
-        String imageStorageUrl = minioService.upload(imageBytes, objectKey);
+        objectStorageService.upload(imageBucket, objectKey, new ByteArrayInputStream(imageBytes), imageBytes.length,
+                contentTypeOf(imageBytes));
+        String imageStorageUrl = objectStorageService.publicUrl(imageBucket, objectKey).toString();
         log.info("imageStorageUrl: {}", imageStorageUrl);
         log.debug("Image uploaded for contactId {} with objectKey {}", contactId, objectKey);
         return imageStorageUrl;
+    }
+
+    /**
+     * Reads the type from the file signature rather than from whatever the sender declared, falling
+     * back to {@code application/octet-stream} for content it does not recognise.
+     */
+    private static String contentTypeOf(byte[] imageBytes) {
+        try {
+            String sniffed = URLConnection.guessContentTypeFromStream(new ByteArrayInputStream(imageBytes));
+            return sniffed != null ? sniffed : "application/octet-stream";
+        } catch (IOException e) {
+            // An in-memory stream does not fail to read.
+            return "application/octet-stream";
+        }
     }
 
     private byte[] downloadImageFromProvider(String mediaId) throws IOException {
