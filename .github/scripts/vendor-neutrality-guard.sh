@@ -96,8 +96,6 @@ ALLOWED_TOKENS="$(cat <<'RULES'
 # Rule LEGACY_ALIAS — deprecated names still served, read or emitted for one release, so that each
 # side of the contract can move on its own. They go when the aliases are removed.
 .  glific_welcome_flow_id
-.  \bglific_id\b|\bgetGlificId\b
-.  glificLanguageId
 .  flowvision_correlation_id
 
 # Rule RENAMING_MIGRATION_TEST — the integration test of a RENAMING_MIGRATION seeds the rows it

@@ -285,8 +285,8 @@ class EventDtoTest {
         }
 
         @Test
-        @DisplayName("contact id is emitted under both whatsapp_contact_id and the legacy glific_id")
-        void contactIdEmittedUnderBothKeys() {
+        @DisplayName("contact id is emitted under whatsapp_contact_id and no other key")
+        void contactIdEmittedUnderOneKey() {
             SendLoginOtpEvent event = SendLoginOtpEvent.builder()
                     .eventType("SEND_LOGIN_OTP")
                     .officerPhoneNumber("91XXXXXXXXXX")
@@ -299,12 +299,14 @@ class EventDtoTest {
             JsonNode json = new ObjectMapper().valueToTree(event);
 
             assertThat(json.path("whatsapp_contact_id").asLong()).isEqualTo(42L);
-            assertThat(json.path("glific_id").asLong()).isEqualTo(42L);
+            assertThat(json.fieldNames()).toIterable().containsExactlyInAnyOrder(
+                    "eventType", "officerPhoneNumber", "whatsapp_contact_id", "OTP", "expiryMinutes",
+                    "deliveryChannel");
         }
 
         @Test
-        @DisplayName("both contact-id keys are omitted from JSON when null")
-        void contactIdKeysOmittedFromJsonWhenNull() throws Exception {
+        @DisplayName("contact id is omitted from JSON when null")
+        void contactIdOmittedFromJsonWhenNull() throws Exception {
             SendLoginOtpEvent event = SendLoginOtpEvent.builder()
                     .eventType("SEND_LOGIN_OTP")
                     .officerPhoneNumber("91XXXXXXXXXX")
@@ -314,8 +316,7 @@ class EventDtoTest {
                     .build();
 
             assertThat(new ObjectMapper().writeValueAsString(event))
-                    .doesNotContain("whatsapp_contact_id")
-                    .doesNotContain("glific_id");
+                    .doesNotContain("whatsapp_contact_id");
         }
 
         @Test
@@ -511,8 +512,8 @@ class EventDtoTest {
         }
 
         @Test
-        @DisplayName("language id is emitted under both whatsappLanguageId and the legacy glificLanguageId")
-        void languageIdEmittedUnderBothKeys() {
+        @DisplayName("language id is emitted under whatsappLanguageId and no other key")
+        void languageIdEmittedUnderOneKey() {
             PumpOperatorMessagingEvent event = PumpOperatorMessagingEvent.builder()
                     .eventType("UPDATE_USER_LANGUAGE").tenantCode("MP").tenantId(1)
                     .whatsappLanguageId("2").pumpOperatorPhones(List.of("91XXXXXXXXXX")).build();
@@ -520,12 +521,14 @@ class EventDtoTest {
             JsonNode json = new ObjectMapper().valueToTree(event);
 
             assertThat(json.path("whatsappLanguageId").asText()).isEqualTo("2");
-            assertThat(json.path("glificLanguageId").asText()).isEqualTo("2");
+            assertThat(json.fieldNames()).toIterable().containsExactlyInAnyOrder(
+                    "eventType", "tenantCode", "tenantId", "triggeredAt", "whatsappLanguageId",
+                    "pumpOperatorPhones");
         }
 
         @Test
-        @DisplayName("neither language-id key carries a value when the language id is null")
-        void languageIdKeysCarryNoValueWhenNull() {
+        @DisplayName("language id carries no value when null")
+        void languageIdCarriesNoValueWhenNull() {
             PumpOperatorMessagingEvent event = PumpOperatorMessagingEvent.builder()
                     .eventType("SEND_WELCOME_MESSAGE").tenantCode("MP").tenantId(1)
                     .pumpOperatorPhones(List.of("91XXXXXXXXXX")).build();
@@ -533,7 +536,6 @@ class EventDtoTest {
             JsonNode json = new ObjectMapper().valueToTree(event);
 
             assertThat(json.hasNonNull("whatsappLanguageId")).isFalse();
-            assertThat(json.hasNonNull("glificLanguageId")).isFalse();
         }
     }
 }
