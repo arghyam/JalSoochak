@@ -722,16 +722,6 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
         }
 
         @Test
-        void findReadingByCorrelationIdMatchesThePreV46ColumnUntilItIsRenamed() {
-            onColumnsExisting("flowvision_correlation_id");
-            onQuery("flow_reading_table", row("id", 5L, "correlation_id", "corr-1", "created_by", 2L));
-
-            assertThat(repository.findReadingByCorrelationId(SCHEMA, "corr-1")).isPresent();
-            assertThat(allQuerySql())
-                    .anySatisfy(sql -> assertThat(sql).contains("OR flowvision_correlation_id = ?"));
-        }
-
-        @Test
         void findReadingByCorrelationIdUsesSinglePredicateOnLegacySchema() {
             onColumnExists(false);
             onQuery("flow_reading_table", row("id", 5L, "correlation_id", "corr-1", "created_by", 2L));
@@ -744,25 +734,14 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
         }
 
         @Test
-        void findFlowReadingDetailsByCorrelationIdPrefersTheOcrCorrelationColumn() {
+        void findFlowReadingDetailsByCorrelationIdAlsoMatchesOcrCorrelationIdWhenColumnExists() {
             onColumnExists(true);
             onQuery("AS reading_time", row("id", 5L, "correlation_id", "corr-1"));
 
             repository.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1");
 
             assertThat(allQuerySql())
-                    .anySatisfy(sql -> assertThat(sql).contains("OR ocr_correlation_id = ?"))
-                    .allSatisfy(sql -> assertThat(sql).doesNotContain("flowvision_correlation_id"));
-        }
-
-        @Test
-        void findFlowReadingDetailsByCorrelationIdMatchesThePreV46ColumnUntilItIsRenamed() {
-            onColumnsExisting("flowvision_correlation_id");
-            onQuery("AS reading_time", row("id", 5L, "correlation_id", "corr-1"));
-
-            assertThat(repository.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1")).isPresent();
-            assertThat(allQuerySql())
-                    .anySatisfy(sql -> assertThat(sql).contains("OR flowvision_correlation_id = ?"));
+                    .anySatisfy(sql -> assertThat(sql).contains("OR ocr_correlation_id = ?"));
         }
 
         @Test

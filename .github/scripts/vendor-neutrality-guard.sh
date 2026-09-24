@@ -94,14 +94,11 @@ ALLOWED_TOKENS="$(cat <<'RULES'
 .  [a-z][a-z0-9+.-]*://[^\s"'<>()]+
 .  (?<![\w.-])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|in|example)(?![\w.-])
 
-# Rule LEGACY_ALIAS — deprecated names still served, read or emitted for one release, so that each
-# side of the contract can move on its own. They go when the aliases are removed.
-.  flowvision_correlation_id
-
-# Rule RENAMING_MIGRATION_TEST — the integration test of a RENAMING_MIGRATION seeds the rows it
-# changes under the name they had before the migration ran.
+# Rule RENAMING_MIGRATION_TEST — the integration test of a RENAMING_MIGRATION refers to what it
+# changes by the name it had before the migration ran, to set it up and to check it is gone.
 /src/test/.*MigrationIntegrationTest\.java$  GLIFIC_MESSAGE_TEMPLATES
 /src/test/.*MigrationIntegrationTest\.java$  glific_welcome_flow_id
+/src/test/.*MigrationIntegrationTest\.java$  flowvision_correlation_id
 
 # Rule PUBLIC_ERROR_CODE — error codes returned to API callers. Renaming one is a contract change
 # that needs its own transition.

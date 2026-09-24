@@ -30,11 +30,6 @@ public class TelemetryTenantRepository {
     private final PiiEncryptionService piiEncryptionService;
     private static final String SCHEME_SELECTION_CORRELATION_PREFIX = "scheme-selection-";
     private static final String OCR_CORRELATION_COLUMN = "ocr_correlation_id";
-    /** The pre-V46 name of {@link #OCR_CORRELATION_COLUMN}; drop it once V46 has run everywhere. */
-    private static final String LEGACY_OCR_CORRELATION_COLUMN = "flowvision_correlation_id";
-    /** The locks a read and a write of flow_reading_table take; see {@link #lockAndResolveOcrCorrelationColumn}. */
-    private static final String READ_LOCK = "ACCESS SHARE";
-    private static final String WRITE_LOCK = "ROW EXCLUSIVE";
     private static final int OPERATOR_LOOKUP_CACHE_SIZE = 10_000;
     /** Mirrors {@code IngestionSource.NORMAL} — the column default, so it needs no tracking UPDATE. */
     private static final int NORMAL_INGESTION_SOURCE = 0;
@@ -959,7 +954,6 @@ public class TelemetryTenantRepository {
         return jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("user_id")), schemeId, userType);
     }
 
-    @org.springframework.transaction.annotation.Transactional
     public Long createFlowReading(String schemaName,
                                   Long schemeId,
                                   Long operatorId,
@@ -973,7 +967,6 @@ public class TelemetryTenantRepository {
                 correlationId, null, imageUrl, meterChangeReason);
     }
 
-    @org.springframework.transaction.annotation.Transactional
     public Long createFlowReading(String schemaName,
                                   Long schemeId,
                                   Long operatorId,
@@ -987,7 +980,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
-        String ocrCorrelationColumn = lockAndResolveOcrCorrelationColumn(schemaName, WRITE_LOCK);
+        String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
         boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
         String ocrColumn = hasOcrCorrelationId ? ", " + ocrCorrelationColumn : "";
         String ocrPlaceholder = hasOcrCorrelationId ? ", ?" : "";
@@ -1559,26 +1552,11 @@ public class TelemetryTenantRepository {
 
     /**
      * The column holding the OCR provider's own correlation id, or {@code null} on a pre-V32 schema that
-     * has none. A schema V46 has not yet reached still carries the legacy name, and falling back to it
-     * keeps the id from being dropped while this code runs ahead of the migration. Callers are handed
-     * that id as the reading's correlation id and confirm the reading with it later, so a row written
-     * without it could never be confirmed.
-     *
-     * <p>{@code lockMode} is the lock the caller's statement takes on flow_reading_table anyway, taken
-     * here before the check. V46 renames the column under ACCESS EXCLUSIVE, so this stops the rename
-     * committing between the check and that statement, which would then name a column that no longer
-     * exists; a rename already queued is waited out, and the check sees its outcome. The lock lasts
-     * until the transaction ends, so callers must run in one. The check is only current with the
-     * metadata cache off, as V46 requires. Once {@link #LEGACY_OCR_CORRELATION_COLUMN} goes, the name
-     * can no longer change under a caller, and the lock can go with it.
+     * has none.
      */
-    private String lockAndResolveOcrCorrelationColumn(String schemaName, String lockMode) {
-        jdbcTemplate.execute(String.format("LOCK TABLE %s.flow_reading_table IN %s MODE", schemaName, lockMode));
-        if (columnExists(schemaName, "flow_reading_table", OCR_CORRELATION_COLUMN)) {
-            return OCR_CORRELATION_COLUMN;
-        }
-        return columnExists(schemaName, "flow_reading_table", LEGACY_OCR_CORRELATION_COLUMN)
-                ? LEGACY_OCR_CORRELATION_COLUMN
+    private String resolveOcrCorrelationColumn(String schemaName) {
+        return columnExists(schemaName, "flow_reading_table", OCR_CORRELATION_COLUMN)
+                ? OCR_CORRELATION_COLUMN
                 : null;
     }
 
@@ -1826,10 +1804,9 @@ public class TelemetryTenantRepository {
         return String.join(", ", Collections.nCopies(count, "?"));
     }
 
-    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public Optional<TelemetryReadingRecord> findReadingByCorrelationId(String schemaName, String correlationId) {
         validateSchemaName(schemaName);
-        String ocrCorrelationColumn = lockAndResolveOcrCorrelationColumn(schemaName, READ_LOCK);
+        String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
         boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
         String predicate = hasOcrCorrelationId
                 ? "(correlation_id = ? OR " + ocrCorrelationColumn + " = ?)"
@@ -1854,12 +1831,11 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
-    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public Optional<TelemetryLatestFlowReadingRecord> findFlowReadingDetailsByCorrelationId(String schemaName,
                                                                                             String correlationId) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
-        String ocrCorrelationColumn = lockAndResolveOcrCorrelationColumn(schemaName, READ_LOCK);
+        String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
         boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
         String predicate = hasOcrCorrelationId
                 ? "(correlation_id = ? OR " + ocrCorrelationColumn + " = ?)"
@@ -2459,7 +2435,6 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
-    @org.springframework.transaction.annotation.Transactional
     public void updateFlowReadingFromIngestion(String schemaName,
                                                Long readingId,
                                                LocalDateTime readingAt,
@@ -2473,7 +2448,6 @@ public class TelemetryTenantRepository {
                 correlationId, null, imageUrl, meterChangeReason, updatedBy);
     }
 
-    @org.springframework.transaction.annotation.Transactional
     public void updateFlowReadingFromIngestion(String schemaName,
                                                Long readingId,
                                                LocalDateTime readingAt,
@@ -2487,7 +2461,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
-        String ocrCorrelationColumn = lockAndResolveOcrCorrelationColumn(schemaName, WRITE_LOCK);
+        String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
         boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
         String correlationAssignment = String.format("""
                             correlation_id = CASE
