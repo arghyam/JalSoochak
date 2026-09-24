@@ -29,10 +29,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * Testcontainers.
  *
  * <p>Flyway runs the <b>real migrations</b> from {@code classpath:db/migration/} up to V45, so the
- * {@code create_tenant_schema()} wrapper chain V46 has to patch is the one production holds. Two
- * tenant schemas are then provisioned — one fully, one left bare — and V46 runs while another session
- * holds a lock on the full tenant's {@code flow_reading_table} for longer than V46's
- * {@code lock_timeout}, so the migration only succeeds if it retries.
+ * {@code create_tenant_schema()} wrapper chain V46 has to patch is the one production holds. Three
+ * tenant schemas are then provisioned — two fully, one left bare — and V46 runs while another session
+ * holds a lock on the later full tenant's {@code flow_reading_table} for longer than V46's
+ * {@code lock_timeout}, so the migration only succeeds if it retries. PostgreSQL logs notices here,
+ * so the retry can be read back from its log.
  */
 @Testcontainers
 @DisplayName("V46 OCR correlation column rename migration")
@@ -41,8 +42,10 @@ class OcrCorrelationIdColumnMigrationIntegrationTest {
     private static final String PRE_V46_COLUMN = "flowvision_correlation_id";
     private static final String COLUMN = "ocr_correlation_id";
 
-    /** Provisioned before V46, so it carries the pre-V46 column and index. */
+    /** Provisioned before V46, so it carries the pre-V46 column and index; locked while V46 renames it. */
     private static final String EXISTING_TENANT = "tenant_aa";
+    /** Provisioned before V46 and ordered before {@link #EXISTING_TENANT}, so V46 renames it first. */
+    private static final String EARLIER_TENANT = "tenant_a0";
     /** A partially provisioned schema with no flow_reading_table, which V46 must skip. */
     private static final String BARE_TENANT = "tenant_bb";
     /** Provisioned after V46, through the patched function chain. */
@@ -54,11 +57,13 @@ class OcrCorrelationIdColumnMigrationIntegrationTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
+            .withCommand("postgres", "-c", "fsync=off", "-c", "log_min_messages=notice");
 
     private static JdbcTemplate jdbcTemplate;
     private static Integer preV46AttributeNumber;
     private static Duration v46Duration;
+    private static boolean earlierTenantRenamedWhileV46Waited;
 
     @BeforeAll
     static void provisionThenMigrate() throws Exception {
@@ -66,6 +71,7 @@ class OcrCorrelationIdColumnMigrationIntegrationTest {
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()));
 
         flyway(MigrationVersion.fromVersion("45")).migrate();
+        jdbcTemplate.execute("SELECT common_schema.create_tenant_schema('" + EARLIER_TENANT + "')");
         jdbcTemplate.execute("SELECT common_schema.create_tenant_schema('" + EXISTING_TENANT + "')");
         jdbcTemplate.execute("CREATE SCHEMA " + BARE_TENANT);
         preV46AttributeNumber = attributeNumber(EXISTING_TENANT, PRE_V46_COLUMN);
@@ -75,7 +81,11 @@ class OcrCorrelationIdColumnMigrationIntegrationTest {
         assertThat(locked.await(10, TimeUnit.SECONDS)).as("lock acquired").isTrue();
 
         long start = System.nanoTime();
-        flyway(MigrationVersion.LATEST).migrate();
+        CompletableFuture<Void> migration =
+                CompletableFuture.runAsync(() -> flyway(MigrationVersion.LATEST).migrate());
+        earlierTenantRenamedWhileV46Waited = awaitLockWaiterOn(EXISTING_TENANT, migration)
+                && attributeNumber(EARLIER_TENANT, COLUMN) != null;
+        migration.join();
         v46Duration = Duration.ofNanos(System.nanoTime() - start);
         lockHolder.join();
 
@@ -107,6 +117,24 @@ class OcrCorrelationIdColumnMigrationIntegrationTest {
         } catch (SQLException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    /** Whether a session queued for a lock on the schema's flow_reading_table before the migration ended. */
+    private static boolean awaitLockWaiterOn(String schema, CompletableFuture<Void> migration)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + LOCK_HELD_FOR.toNanos();
+        while (!migration.isDone() && System.nanoTime() < deadline) {
+            if (Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_locks
+                        WHERE relation = to_regclass(format('%I.flow_reading_table', ?::text))
+                          AND NOT granted)
+                    """, Boolean.class, schema))) {
+                return true;
+            }
+            Thread.sleep(50);
+        }
+        return false;
     }
 
     private static Integer attributeNumber(String schema, String column) {
@@ -179,6 +207,17 @@ class OcrCorrelationIdColumnMigrationIntegrationTest {
                 "SELECT success FROM common_schema.flyway_schema_history WHERE version = '46'", Boolean.class);
 
         assertThat(succeeded).isTrue();
+        assertThat(postgres.getLogs()).as("V46 timed out on the held lock and retried")
+                .contains("V46: lock not available for \"ALTER TABLE " + EXISTING_TENANT
+                        + ".flow_reading_table RENAME COLUMN");
         assertThat(v46Duration).as("V46 waited on the held lock").isGreaterThan(LOCK_TIMEOUT);
+    }
+
+    @Test
+    @DisplayName("Each tenant's renames commit before V46 waits on the next tenant's lock")
+    void commitsEachTenantBeforeTheNext() {
+        assertThat(earlierTenantRenamedWhileV46Waited)
+                .as("%s renamed and visible while V46 waited on %s", EARLIER_TENANT, EXISTING_TENANT)
+                .isTrue();
     }
 }

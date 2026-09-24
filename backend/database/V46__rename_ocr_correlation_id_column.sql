@@ -14,14 +14,21 @@
 -- each rename takes a brief ACCESS EXCLUSIVE lock. lock_timeout stops
 -- a rename queued behind a long reader from blocking every reader and
 -- writer behind it; a timed-out rename is retried a few times before
--- the migration gives up and rolls back as a whole.
+-- the migration gives up.
+--
+-- The .sql.conf beside this file runs it outside Flyway's transaction,
+-- so each tenant's renames commit, releasing their locks, before the
+-- next tenant's are taken. A failure leaves the tenants before it
+-- renamed. Every step skips what is already done, so after
+-- `flyway repair` a re-run carries on from the failed tenant.
 --
 -- telemetry-service reads either name, preferring ocr_correlation_id,
 -- so it must be deployed before this runs. It caches whether a column
 -- exists, so run this with that cache off (TELEMETRY_CACHE_METADATA_ENABLED=false).
 -- ============================================================
 
-SET LOCAL lock_timeout = '3s';
+-- Session-level: SET LOCAL would not outlive the statement outside a transaction.
+SET lock_timeout = '3s';
 
 -- ── Part A: Rename in existing tenant schemas ───────────────────────────────
 DO $$
@@ -34,6 +41,7 @@ DECLARE
 BEGIN
     FOR tenant_schema IN
         SELECT nspname FROM pg_namespace WHERE nspname LIKE 'tenant\_%' ESCAPE '\'
+        ORDER BY nspname
     LOOP
         renames := ARRAY[]::TEXT[];
 
@@ -71,8 +79,12 @@ BEGIN
                 END;
             END LOOP;
         END LOOP;
+
+        COMMIT;
     END LOOP;
 END $$;
+
+RESET lock_timeout;
 
 -- ── Part B: Ensure new tenant schemas get the new names ─────────────────────
 -- V32 appended the provisioning to create_tenant_schema() by patching its source, and V34 then

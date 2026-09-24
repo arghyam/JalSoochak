@@ -168,6 +168,8 @@
                 <targetPath>db/migration</targetPath>
                 <includes>
                     <include>V*.sql</include>
+                    <!-- Flyway script config files, e.g. executeInTransaction=false -->
+                    <include>V*.sql.conf</include>
                 </includes>
             </resource>
         </resources>
