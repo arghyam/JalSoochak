@@ -2,13 +2,11 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.config.JwtAuthConverter;
 import org.arghyam.jalsoochak.analytics.config.SecurityConfig;
+import org.arghyam.jalsoochak.analytics.controller.dashboard.AnalyticsOfficerDashboardController;
+import org.arghyam.jalsoochak.analytics.controller.scheme.AnalyticsSchemeSegmentController;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
-import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
-import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
-import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
-import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
 import org.arghyam.jalsoochak.analytics.service.OperatorAttendanceQueryService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.service.UserAlertTotalsService;
@@ -30,17 +28,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Enforces the role check on the two user-scoped analytics endpoints.
  *
- * <p>{@code AnalyticsSchemeReportingControllerTest} runs with {@code addFilters = false} and does
- * not import {@link SecurityConfig}, so method security is inert there and a missing
- * {@code @PreAuthorize} would go unnoticed. This slice imports the real config, which carries
- * {@code @EnableMethodSecurity}, so the annotation is actually evaluated.
+ * <p>{@code AnalyticsSchemeSegmentControllerTest} and {@code AnalyticsOfficerDashboardControllerTest}
+ * run with {@code addFilters = false} and do not import {@link SecurityConfig}, so method security
+ * is inert there and a missing {@code @PreAuthorize} would go unnoticed. This slice imports the real
+ * config, which carries {@code @EnableMethodSecurity}, so the annotation is actually evaluated.
  *
  * <p>The SA report covered only the anonymous case on {@code /continuous-schemes/user}. Both
  * endpoints took {@code tenant_id} and {@code user_id} from the query string, so authenticating
  * them alone would have left any signed-in user — a pump operator, or an officer in another state —
  * able to read someone else's figures. The role check is the second half of that fix.
  */
-@WebMvcTest(controllers = AnalyticsSchemeReportingController.class)
+@WebMvcTest(controllers = {AnalyticsSchemeSegmentController.class, AnalyticsOfficerDashboardController.class})
 @Import({SecurityConfig.class, JwtAuthConverter.class, GlobalExceptionHandler.class})
 @TestPropertySource(properties = "spring.profiles.active=test")
 @DisplayName("User-scoped analytics endpoint security")
@@ -55,21 +53,13 @@ class AnalyticsUserScopedEndpointSecurityTest {
     @MockBean
     private JwtDecoder jwtDecoder;
     @MockBean
-    private FactSchemePerformanceRepository schemePerformanceRepository;
-    @MockBean
     private SchemeRegularityService schemeRegularityService;
-    @MockBean
-    private EscalationQueryService escalationQueryService;
-    @MockBean
-    private AnomalyQueryService anomalyQueryService;
     @MockBean
     private OperatorAttendanceQueryService operatorAttendanceQueryService;
     @MockBean
     private UserAlertTotalsService userAlertTotalsService;
     @MockBean
     private AuthenticatedRequestContextService authenticatedRequestContextService;
-    @MockBean
-    private DimUserRepository dimUserRepository;
     @MockBean
     private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
 

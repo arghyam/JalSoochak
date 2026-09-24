@@ -497,7 +497,6 @@ curl "http://localhost:8080/analytics/api/v1/analytics/tenants"
 | GET    | `/api/v1/analytics/water-quantity`        | Query water quantity data                |
 | GET    | `/api/v1/analytics/escalations`           | Query escalations (filters: tenantId, schemeId, resolutionStatus) |
 | GET    | `/api/v1/analytics/scheme-performance`    | Query scheme performance data            |
-| POST   | `/api/v1/analytics/date-dimension/populate` | Pre-populate dim_date for a date range |
 
 ### Kafka Publishing (All Services)
 
