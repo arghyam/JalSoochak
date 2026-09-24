@@ -9,7 +9,7 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
@@ -46,17 +46,17 @@ import java.util.UUID;
 public class BfmReadingService {
 
     private final TelemetryTenantRepository telemetryTenantRepository;
-    private final FlowVisionService flowVisionService;
+    private final MeterReadingExtractor defaultOcrExtractor;
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
-    private final GlificOperatorContextService glificOperatorContextService;
-    private final FlowVisionReadingsRetryService flowVisionReadingsRetryService;
+    private final OperatorContextService operatorContextService;
+    private final OcrReadingsRetryService ocrReadingsRetryService;
     private final ReadingChannelResolver readingChannelResolver;
     private final RolloverResolutionService rolloverResolutionService;
     private final SupplyPlausibilityGuard supplyPlausibilityGuard;
     // Per-tenant OCR provider selection. Nullable so unit tests that construct BfmReadingService with only
-    // the collaborators they exercise (passing null here) fall back to the built-in FlowVision path.
+    // the collaborators they exercise (passing null here) fall back to the built-in OCR provider path.
     private final OcrProviderResolver ocrProviderResolver;
     private final OcrProviderRegistry ocrProviderRegistry;
     // LOCATION-AFFINITY: the scheme-boundary check. Nullable on the same terms as the OCR
@@ -81,7 +81,7 @@ public class BfmReadingService {
                                                TelemetryOperator operator,
                                                String contactId,
                                                boolean isMeterReplaced) {
-        return createReading(request, schemaName, operator, contactId, isMeterReplaced, FlowVisionRetryMode.NONE);
+        return createReading(request, schemaName, operator, contactId, isMeterReplaced, OcrRetryMode.NONE);
     }
 
     public CreateReadingResponse createReading(CreateReadingRequest request,
@@ -89,7 +89,7 @@ public class BfmReadingService {
                                                TelemetryOperator operator,
                                                String contactId,
                                                boolean isMeterReplaced,
-                                               FlowVisionRetryMode flowVisionRetryMode) {
+                                               OcrRetryMode ocrRetryMode) {
         if (!telemetryTenantRepository.existsSchemeById(schemaName, request.getSchemeId())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "State scheme not found");
         }
@@ -111,7 +111,7 @@ public class BfmReadingService {
         if (!belongsToScheme && !lenientIngestion) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Operator does not belong to the specified scheme");
         }
-        FlowVisionResult ocrResult = null;
+        OcrReadingResult ocrResult = null;
         BigDecimal finalReading = request.getReadingValue();
         BigDecimal confidenceLevel = null;
         String message = "Reading created successfully";
@@ -124,12 +124,12 @@ public class BfmReadingService {
             try {
                 OcrProviderSettings ocrSettings =
                         ocrProviderResolver == null ? null : ocrProviderResolver.resolve(tenantId);
-                ocrResult = extractReading(request.getReadingUrl(), ocrSettings, flowVisionRetryMode);
-                log.info("readings_glific flowvision_result operatorId={} schemeId={} imageUrlHash={} result={}",
+                ocrResult = extractReading(request.getReadingUrl(), ocrSettings, ocrRetryMode);
+                log.info("readings_ocr ocr_result operatorId={} schemeId={} imageUrlHash={} result={}",
                         operatorInRequest.id(),
                         request.getSchemeId(),
                         imageUrlHash(request.getReadingUrl()),
-                        summarizeFlowVisionResult(ocrResult));
+                        summarizeOcrResult(ocrResult));
                 if (ocrResult == null || ocrResult.getAdjustedReading() == null) {
                     String anomalyCorrelationId = buildImageAnomalyCorrelationId(
                             AnomalyConstants.TYPE_UNREADABLE_IMAGE,
@@ -167,15 +167,15 @@ public class BfmReadingService {
                 }
                 finalReading = ocrResult.getAdjustedReading();
                 confidenceLevel = ocrResult.getQualityConfidence();
-                log.info("readings_glific ocr_accepted operatorId={} schemeId={} correlationId={} adjustedReading={} confidence={} qualityStatus={}",
+                log.info("readings_ocr ocr_accepted operatorId={} schemeId={} correlationId={} adjustedReading={} confidence={} qualityStatus={}",
                         operatorInRequest.id(),
                         request.getSchemeId(),
                         sanitizeLogValue(ocrResult.getCorrelationId()),
                         finalReading,
                         confidenceLevel,
                         sanitizeLogValue(ocrResult.getQualityStatus()));
-            } catch (FlowVisionReadingsUnavailableException ex) {
-                log.warn("FlowVision OCR temporarily unavailable for imageUrlHash={}: {}",
+            } catch (OcrReadingsUnavailableException ex) {
+                log.warn("OCR temporarily unavailable for imageUrlHash={}: {}",
                         imageUrlHash(request.getReadingUrl()),
                         ex.getMessage());
                 return CreateReadingResponse.builder()
@@ -185,9 +185,9 @@ public class BfmReadingService {
                         .qualityStatus("RETRY")
                         .build();
             } catch (Exception ex) {
-                log.error("FlowVision OCR failed for imageUrlHash={}: {}", imageUrlHash(request.getReadingUrl()), ex.getMessage(), ex);
+                log.error("OCR failed for imageUrlHash={}: {}", imageUrlHash(request.getReadingUrl()), ex.getMessage(), ex);
                 if (log.isDebugEnabled()) {
-                    log.debug("FlowVision OCR failed for URL: {}", request.getReadingUrl());
+                    log.debug("OCR failed for URL: {}", request.getReadingUrl());
                 }
                 String anomalyCorrelationId = buildImageAnomalyCorrelationId(
                         AnomalyConstants.TYPE_UNREADABLE_IMAGE,
@@ -231,20 +231,20 @@ public class BfmReadingService {
         boolean isValid = hasPositiveReading && hasAcceptableConfidence;
 
         String storageCorrelationId = Optional.ofNullable(ocrResult)
-                .map(FlowVisionResult::getRequestId)
+                .map(OcrReadingResult::getRequestId)
                 .filter(value -> !value.isBlank())
                 .orElse(UUID.randomUUID().toString());
         String responseCorrelationId = Optional.ofNullable(ocrResult)
-                .map(FlowVisionResult::getCorrelationId)
+                .map(OcrReadingResult::getCorrelationId)
                 .filter(value -> !value.isBlank())
                 .orElse(storageCorrelationId);
         String flowVisionCorrelationId = Optional.ofNullable(ocrResult)
-                .map(FlowVisionResult::getCorrelationId)
+                .map(OcrReadingResult::getCorrelationId)
                 .filter(value -> !value.isBlank())
                 .orElse(null);
         LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(ReadingTime.now());
 
-        // READING-PROVENANCE: extracted_reading records what FlowVision read off the meter photo. The
+        // READING-PROVENANCE: extracted_reading records what the OCR provider read off the meter photo. The
         // OCR gate above runs only when the caller supplied no value, so on an API-asserted submission
         // nothing extracted anything — echoing the caller's own number back into extracted_reading made
         // such a row indistinguishable from an AI-extracted one, fed the duplicate-image guard below a
@@ -358,7 +358,7 @@ public class BfmReadingService {
 //                    .build();
 //        }
 
-        // A duplicate *image* is one FlowVision re-read to the previous confirmed value. An asserted
+        // A duplicate *image* is one the OCR provider re-read to the previous confirmed value. An asserted
         // value carries no extraction, so ocrExtractedReading is null and the guard stays out of its way
         // — otherwise a genuine zero-consumption day resubmitted through the API was rejected as a
         // duplicate photo.
@@ -400,7 +400,7 @@ public class BfmReadingService {
                     .build();
         }
 
-        // ── ROLLOVER-RESOLVE: resolve FlowVision rollover-digit ambiguity before the reading is confirmed.
+        // ── ROLLOVER-RESOLVE: resolve OCR rollover-digit ambiguity before the reading is confirmed.
         // The resolved value seeds confirmed_reading and is the number surfaced to the operator for
         // confirmation; extracted_reading stays the model value (dedup/audit). When the resolver is not
         // applicable (empty result) effectiveConfirmedReading is left untouched — byte-identical to legacy.
@@ -545,7 +545,7 @@ public class BfmReadingService {
         }
 
         // LOCATION-AFFINITY: coordinates the request carried belong on the reading row, not only in
-        // the anomaly. Only the state-IT paths supply them here — the Glific paths write them onto the
+        // the anomaly. Only the state-IT paths supply them here — the chatbot paths write them onto the
         // placeholder row from /location and leave the request null — and without this an
         // API-submitted mismatch could not be re-measured from the stored reading alone, which is what
         // the anomaly's own distance disclosure promises. Best-effort by design: createReading is not
@@ -574,7 +574,7 @@ public class BfmReadingService {
         // leaves only the placeholder row /location already wrote.
         //
         // Coordinates on the request come only from the state-IT APIs (same scoping as
-        // supplyPlausibilityChecked); the Glific paths leave them null and the service reads them
+        // supplyPlausibilityChecked); the chatbot paths leave them null and the service reads them
         // back off the reused placeholder row. That origin is what the metric's path tag records,
         // so if a future caller starts supplying coordinates the tag follows it.
         if (locationAffinityService != null) {
@@ -726,7 +726,7 @@ public class BfmReadingService {
      * Runs the rollover resolver when — and only when — it can act, returning its result or
      * {@link Optional#empty()} to signal "leave confirmed_reading exactly as the caller had it".
      *
-     * <p>The gate is kept tight for Glific-timeout hygiene: the overwhelming majority of readings have no
+     * <p>The gate is kept tight for chatbot-timeout hygiene: the overwhelming majority of readings have no
      * rollover, so the common path must add <em>zero</em> extra DB round-trips — the trailing-history fetch
      * happens only after every cheap in-memory check passes (never eagerly, relying on an in-{@code resolve}
      * short-circuit that runs after the query). The gate also requires the tenant schema to be migrated with
@@ -738,7 +738,7 @@ public class BfmReadingService {
     private Optional<RolloverResolutionService.ResolvedReading> resolveRolloverIfApplicable(
             String schemaName,
             CreateReadingRequest request,
-            FlowVisionResult ocrResult,
+            OcrReadingResult ocrResult,
             boolean isMeterReplaced,
             Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt) {
         if (!rolloverResolutionService.isEnabled()
@@ -762,20 +762,20 @@ public class BfmReadingService {
 
     /**
      * Runs OCR for {@code readingUrl}. When {@code settings} is {@code null} the tenant has no per-tenant
-     * OCR override and the built-in FlowVision path is used unchanged; otherwise the resolved provider is
+     * OCR override and the built-in provider path is used unchanged; otherwise the resolved provider is
      * dispatched via {@link OcrProviderRegistry}. Honours the resilient (retry/circuit-breaker) path.
      */
-    private FlowVisionResult extractReading(String readingUrl, OcrProviderSettings settings, FlowVisionRetryMode flowVisionRetryMode) {
-        if (flowVisionRetryMode == FlowVisionRetryMode.RESILIENT && flowVisionReadingsRetryService != null) {
+    private OcrReadingResult extractReading(String readingUrl, OcrProviderSettings settings, OcrRetryMode ocrRetryMode) {
+        if (ocrRetryMode == OcrRetryMode.RESILIENT && ocrReadingsRetryService != null) {
             return settings == null
-                    ? flowVisionReadingsRetryService.extractReading(readingUrl)
-                    : flowVisionReadingsRetryService.extractReading(readingUrl, settings);
+                    ? ocrReadingsRetryService.extractReading(readingUrl)
+                    : ocrReadingsRetryService.extractReading(readingUrl, settings);
         }
-        if (flowVisionRetryMode == FlowVisionRetryMode.RESILIENT) {
-            log.warn("FlowVision readings retry service is not available; using direct OCR path");
+        if (ocrRetryMode == OcrRetryMode.RESILIENT) {
+            log.warn("OCR readings retry service is not available; using direct OCR path");
         }
         if (settings == null) {
-            return flowVisionService.extractReading(readingUrl);
+            return defaultOcrExtractor.extractReading(readingUrl, null);
         }
         return ocrProviderRegistry.get(settings.providerId()).extractReading(readingUrl, settings);
     }
@@ -828,7 +828,7 @@ public class BfmReadingService {
         // tenantId is null only for the in-process overloads that have no authenticated caller.
         TelemetryOperatorWithSchema operatorWithSchema = tenantId != null
                 ? resolveOperatorInTenant(phoneNumber, tenantId)
-                : glificOperatorContextService.resolveOperatorWithSchema(phoneNumber);
+                : operatorContextService.resolveOperatorWithSchema(phoneNumber);
         String schemaName = operatorWithSchema.schemaName();
         TelemetryOperator operator = operatorWithSchema.operator();
 
@@ -899,7 +899,7 @@ public class BfmReadingService {
 
     /**
      * The extracted reading to publish for a stored row. {@code extracted_reading} is NOT NULL, so every
-     * row whose value did not come from FlowVision carries a 0 sentinel — an API submission that supplied
+     * row whose value did not come from OCR carries a 0 sentinel — an API submission that supplied
      * confirmed_reading, a hand-typed reading that opened the row, a reused placeholder. Republishing that
      * 0 would file the row under "operator overrode the AI" (extracted <> confirmed) on the dashboards,
      * which needs an AI reading to have existed; null keeps it out of both buckets. A row that really was
@@ -937,8 +937,8 @@ public class BfmReadingService {
      * master data or the threshold, not forcing the number through.
      *
      * <p>Unlike the submission path there is no opt-in flag: {@code createReading} is shared with the
-     * Glific image workflow and so needs one, whereas this method is reached only from
-     * {@code PUT /readings} — the Glific confirm path updates the repository directly.
+     * chatbot image workflow and so needs one, whereas this method is reached only from
+     * {@code PUT /readings} — the chatbot confirm path updates the repository directly.
      *
      * @param updatedBy     the operator credited with the correction, and the operator the anomaly
      *                      is filed against
@@ -1225,7 +1225,7 @@ public class BfmReadingService {
     private TelemetryOperatorWithSchema resolveOperatorInTenant(String phoneNumber, Integer tenantId) {
         TelemetryOperatorWithSchema operatorWithSchema;
         try {
-            operatorWithSchema = glificOperatorContextService.resolveOperatorWithSchema(phoneNumber, tenantId);
+            operatorWithSchema = operatorContextService.resolveOperatorWithSchema(phoneNumber, tenantId);
         } catch (IllegalStateException notFound) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, OPERATOR_LOOKUP_MISS);
         }
@@ -1498,7 +1498,7 @@ public class BfmReadingService {
                 .build();
     }
 
-    private String summarizeFlowVisionResult(FlowVisionResult result) {
+    private String summarizeOcrResult(OcrReadingResult result) {
         if (result == null) {
             return "null";
         }
@@ -1511,9 +1511,9 @@ public class BfmReadingService {
         );
     }
 
-    private String unreadableImageMessage(FlowVisionResult result) {
+    private String unreadableImageMessage(OcrReadingResult result) {
         String rejectionReason = Optional.ofNullable(result)
-                .map(FlowVisionResult::getRejectionReason)
+                .map(OcrReadingResult::getRejectionReason)
                 .filter(reason -> !reason.isBlank())
                 .orElse(null);
         if (rejectionReason == null) {

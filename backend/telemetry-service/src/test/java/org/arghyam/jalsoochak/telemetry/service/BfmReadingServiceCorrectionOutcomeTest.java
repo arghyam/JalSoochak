@@ -83,13 +83,13 @@ class BfmReadingServiceCorrectionOutcomeTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private ReadingChannelResolver readingChannelResolver;
 
@@ -105,8 +105,8 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
     private BfmReadingService service(SupplyPlausibilityProperties.Mode mode) {
         return new BfmReadingService(
-                repo, flowVisionService, telemetryEventPublisher, tenantConfigRepository,
-                new ObjectMapper(), glificOperatorContextService, null, readingChannelResolver,
+                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
+                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
                 null,
@@ -132,7 +132,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
         when(repo.findLatestFlowReadingByOperator(SCHEMA, OPERATOR_ID))
                 .thenReturn(Optional.of(target(quarantineReason)));
-        when(glificOperatorContextService.resolveOperatorWithSchema(CONTACT, TENANT_ID))
+        when(operatorContextService.resolveOperatorWithSchema(CONTACT, TENANT_ID))
                 .thenReturn(new TelemetryOperatorWithSchema(SCHEMA, operator));
     }
 
@@ -402,7 +402,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
         void offSkipsTheCheck() {
             when(repo.findLatestFlowReadingByOperator(SCHEMA, OPERATOR_ID))
                     .thenReturn(Optional.of(target(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY)));
-            when(glificOperatorContextService.resolveOperatorWithSchema(CONTACT, TENANT_ID))
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT, TENANT_ID))
                     .thenReturn(new TelemetryOperatorWithSchema(SCHEMA, operator));
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.OFF, IMPLAUSIBLE);
@@ -423,7 +423,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
             when(repo.supportsQuarantine(SCHEMA)).thenReturn(false);
             when(repo.findLatestFlowReadingByOperator(SCHEMA, OPERATOR_ID))
                     .thenReturn(Optional.of(target(QuarantineReason.NONE)));
-            when(glificOperatorContextService.resolveOperatorWithSchema(CONTACT, TENANT_ID))
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT, TENANT_ID))
                     .thenReturn(new TelemetryOperatorWithSchema(SCHEMA, operator));
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.ENFORCE, IMPLAUSIBLE);
@@ -447,7 +447,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
                             READING_ID, SCHEME_ID, OPERATOR_ID, CORRELATION_ID,
                             new BigDecimal("948"), STANDING, "https://img/1.jpg",
                             READING_DATE, READING_AT, ReadingChannel.ELM.name(), QuarantineReason.NONE)));
-            when(glificOperatorContextService.resolveOperatorWithSchema(CONTACT, TENANT_ID))
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT, TENANT_ID))
                     .thenReturn(new TelemetryOperatorWithSchema(SCHEMA, operator));
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.ENFORCE, IMPLAUSIBLE);

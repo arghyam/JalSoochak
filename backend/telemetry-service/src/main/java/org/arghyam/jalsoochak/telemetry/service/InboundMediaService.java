@@ -1,0 +1,306 @@
+package org.arghyam.jalsoochak.telemetry.service;
+
+import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.config.StorageProperties;
+import org.arghyam.jalsoochak.telemetry.provider.whatsapp.InboundMediaFetcher;
+import org.arghyam.jalsoochak.telemetry.security.MediaUrlNotAllowedException;
+import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
+import org.arghyam.jalsoochak.telemetry.storage.ObjectStorageService;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.RestTemplate;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
+import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.function.Supplier;
+
+/**
+ * Retrieves a meter image that came in on a webhook and stores it. The image arrives either as a
+ * media id, which the WhatsApp provider resolves through {@link InboundMediaFetcher}, or as a URL the
+ * caller chose, which goes out on the guarded client under a byte ceiling. Both sources share one
+ * retry policy.
+ */
+@Slf4j
+@Service
+public class InboundMediaService {
+
+    /** Far deeper than any wrapping the HTTP client and {@code RestTemplate} apply; a cycle guard only. */
+    private static final int MAX_CAUSE_CHAIN_DEPTH = 16;
+
+    private final ObjectStorageService objectStorageService;
+    private final String imageBucket;
+    private final InboundMediaFetcher inboundMediaFetcher;
+    private final RestTemplate mediaFetchRestTemplate;
+    private final MediaUrlValidator mediaUrlValidator;
+    private final int mediaDownloadRetryMaxAttempts;
+    private final long mediaDownloadRetryInitialBackoffMs;
+    private final long mediaDownloadRetryMaxBackoffMs;
+    private final long mediaDownloadRetryMaxTotalBackoffMs;
+    private final long mediaDownloadMaxBytes;
+
+    public InboundMediaService(ObjectStorageService objectStorageService,
+                               StorageProperties storageProperties,
+                               InboundMediaFetcher inboundMediaFetcher,
+                               @Qualifier("mediaFetchRestTemplate") RestTemplate mediaFetchRestTemplate,
+                               MediaUrlValidator mediaUrlValidator,
+                               @Value("${media-download.retry.max-attempts:3}") int mediaDownloadRetryMaxAttempts,
+                               @Value("${media-download.retry.initial-backoff-ms:300}") long mediaDownloadRetryInitialBackoffMs,
+                               @Value("${media-download.retry.max-backoff-ms:200}") long mediaDownloadRetryMaxBackoffMs,
+                               @Value("${media-download.retry.max-total-backoff-ms:400}") long mediaDownloadRetryMaxTotalBackoffMs,
+                               @Value("${media-download.max-bytes:20971520}") long mediaDownloadMaxBytes) {
+        this.objectStorageService = objectStorageService;
+        this.imageBucket = storageProperties.getBucket();
+        this.inboundMediaFetcher = inboundMediaFetcher;
+        this.mediaFetchRestTemplate = mediaFetchRestTemplate;
+        this.mediaUrlValidator = mediaUrlValidator;
+        this.mediaDownloadRetryMaxAttempts = Math.max(1, mediaDownloadRetryMaxAttempts);
+        this.mediaDownloadRetryInitialBackoffMs = Math.max(0L, mediaDownloadRetryInitialBackoffMs);
+        this.mediaDownloadRetryMaxBackoffMs = Math.max(0L, mediaDownloadRetryMaxBackoffMs);
+        this.mediaDownloadRetryMaxTotalBackoffMs = Math.max(0L, mediaDownloadRetryMaxTotalBackoffMs);
+        // Unlike the retry knobs this one is not clamped: clamping a non-positive ceiling has no safe
+        // value to clamp to, and letting it through would mean an unbounded read of a caller-chosen
+        // response. Refusing to start is the only outcome that keeps the ceiling a ceiling.
+        if (mediaDownloadMaxBytes <= 0) {
+            throw new IllegalArgumentException(
+                    "media-download.max-bytes must be greater than 0 but was " + mediaDownloadMaxBytes);
+        }
+        this.mediaDownloadMaxBytes = mediaDownloadMaxBytes;
+    }
+
+    public byte[] downloadImage(String mediaId, String mediaUrl) throws IOException {
+        boolean hasImage = (mediaId != null && !mediaId.isBlank()) || (mediaUrl != null && !mediaUrl.isBlank());
+        if (!hasImage) {
+            throw new IllegalStateException("Invalid media. Please send a clear meter image.");
+        }
+        return mediaId != null && !mediaId.isBlank()
+                ? downloadImageFromProvider(mediaId)
+                : downloadImageFromUrl(mediaUrl);
+    }
+
+    public String uploadImage(String contactId, byte[] imageBytes) {
+        String objectKey = "bfm/" + contactId + "/" + System.currentTimeMillis() + ".jpg";
+        objectStorageService.upload(imageBucket, objectKey, new ByteArrayInputStream(imageBytes), imageBytes.length,
+                contentTypeOf(imageBytes));
+        String imageStorageUrl = objectStorageService.publicUrl(imageBucket, objectKey).toString();
+        log.info("imageStorageUrl: {}", imageStorageUrl);
+        log.debug("Image uploaded for contactId {} with objectKey {}", contactId, objectKey);
+        return imageStorageUrl;
+    }
+
+    /**
+     * Reads the type from the file signature rather than from whatever the sender declared, falling
+     * back to {@code application/octet-stream} for content it does not recognise.
+     */
+    private static String contentTypeOf(byte[] imageBytes) {
+        try {
+            String sniffed = URLConnection.guessContentTypeFromStream(new ByteArrayInputStream(imageBytes));
+            return sniffed != null ? sniffed : "application/octet-stream";
+        } catch (IOException e) {
+            // An in-memory stream does not fail to read.
+            return "application/octet-stream";
+        }
+    }
+
+    private byte[] downloadImageFromProvider(String mediaId) throws IOException {
+        return executeDownloadWithRetry(
+                () -> inboundMediaFetcher.fetch(mediaId),
+                "media:" + mediaId,
+                "Failed to download image from the WhatsApp provider"
+        );
+    }
+
+    /**
+     * Fetches a meter image from a URL that came in on the webhook payload — that is, from a
+     * destination an unauthenticated caller chose. It goes through the guarded client rather than the
+     * shared one, and the URL is vetted before the request rather than only parsed by it.
+     */
+    private byte[] downloadImageFromUrl(String url) throws IOException {
+        URI mediaUri = mediaUrlValidator.validate(url);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.USER_AGENT, "WaterSupplyBot/1.0");
+
+        return executeDownloadWithRetry(
+                () -> mediaFetchRestTemplate.execute(
+                        mediaUri,
+                        HttpMethod.GET,
+                        request -> request.getHeaders().addAll(headers),
+                        this::readBoundedResponse),
+                // The media URL is pre-signed and carries access credentials, so logs get a digest of it.
+                "url:" + digest(url),
+                "Failed to download image"
+        );
+    }
+
+    /**
+     * Reads the body under a hard byte ceiling. A caller-supplied URL can point at a response of any
+     * size — including one that never ends — and buffering it whole would put the ceiling on the
+     * heap instead.
+     */
+    private ResponseEntity<byte[]> readBoundedResponse(ClientHttpResponse response) throws IOException {
+        if (response.getHeaders().getContentLength() > mediaDownloadMaxBytes) {
+            throw new MediaTooLargeException("Media exceeds the configured size limit");
+        }
+        byte[] body = readAtMost(response.getBody());
+        return ResponseEntity.status(response.getStatusCode())
+                .headers(response.getHeaders())
+                .body(body);
+    }
+
+    private byte[] readAtMost(InputStream body) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        long total = 0;
+        int read;
+        while ((read = body.read(chunk)) != -1) {
+            total += read;
+            if (total > mediaDownloadMaxBytes) {
+                throw new MediaTooLargeException("Media exceeds the configured size limit");
+            }
+            buffer.write(chunk, 0, read);
+        }
+        return buffer.toByteArray();
+    }
+
+    /**
+     * Unchecked on purpose: an oversized response is a property of the media, not a transient fault,
+     * so it must escape the retry loop instead of being attempted again.
+     */
+    static class MediaTooLargeException extends IllegalStateException {
+        MediaTooLargeException(String message) {
+            super(message);
+        }
+    }
+
+    private byte[] executeDownloadWithRetry(Supplier<ResponseEntity<byte[]>> requestSupplier,
+                                            String mediaRef,
+                                            String failurePrefix) throws IOException {
+        long totalBackoffMs = 0L;
+        for (int attempt = 1; attempt <= mediaDownloadRetryMaxAttempts; attempt++) {
+            try {
+                ResponseEntity<byte[]> response = requestSupplier.get();
+
+                if (response == null) {
+                    throw new IOException(failurePrefix + ", no response");
+                }
+                if (response.getStatusCode() != HttpStatus.OK || response.getBody() == null) {
+                    throw new IOException(failurePrefix + ", status: " + response.getStatusCode());
+                }
+                return response.getBody();
+            } catch (RestClientException e) {
+                boolean retriable = isRetriableException(e);
+                if (!retriable) {
+                    log.warn("Media download for {} failed with non-retriable error: {}", mediaRef, describe(e));
+                    throw new IOException(failurePrefix + " due to a non-retriable error", e);
+                }
+                if (attempt == mediaDownloadRetryMaxAttempts) {
+                    log.warn("Media download for {} failed after {} attempts: {}", mediaRef, attempt, describe(e));
+                    throw new IOException(failurePrefix + " after " + attempt + " attempts", e);
+                }
+                long backoffMs = computeBackoffMs(attempt, totalBackoffMs);
+                totalBackoffMs += backoffMs;
+                log.warn("Media download attempt {} failed for {}. Retrying in {} ms", attempt, mediaRef, backoffMs);
+                sleepBackoff(backoffMs);
+            }
+        }
+        throw new IOException(failurePrefix);
+    }
+
+    /**
+     * Renders an exception for logging using only metadata that cannot carry media content or credentials.
+     * The message of a {@link RestClientResponseException} embeds the response body, so it is never logged.
+     */
+    private String describe(RestClientException exception) {
+        if (exception instanceof RestClientResponseException responseException) {
+            return exception.getClass().getSimpleName() + " status=" + responseException.getStatusCode().value();
+        }
+        return exception.getClass().getSimpleName();
+    }
+
+    /**
+     * Stable short digest, so repeated failures for the same media can be correlated across log lines
+     * without the underlying value appearing in them.
+     */
+    private String digest(String value) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash, 0, 6);
+        } catch (NoSuchAlgorithmException e) {
+            return "unavailable";
+        }
+    }
+
+    private boolean isRetriableException(RestClientException exception) {
+        // Checked before the ResourceAccessException case, which this arrives wrapped in: a redirect
+        // the URL policy refused is a verdict about where the URL points, not a transient fault, so
+        // repeating the request only repeats the refusal.
+        if (isPolicyRefusal(exception)) {
+            return false;
+        }
+        if (exception instanceof ResourceAccessException) {
+            return true;
+        }
+        if (exception instanceof RestClientResponseException responseException) {
+            int statusCode = responseException.getRawStatusCode();
+            return statusCode == 429 || statusCode >= 500;
+        }
+        return true;
+    }
+
+    /**
+     * Whether the media URL policy is the reason the request failed. The verdict travels as the cause
+     * of whatever the HTTP client and {@code RestTemplate} wrapped it in, so the chain is walked
+     * rather than the top-level type inspected. The depth bound only guards a malformed cycle.
+     */
+    private static boolean isPolicyRefusal(Throwable exception) {
+        Throwable current = exception;
+        for (int depth = 0; current != null && depth < MAX_CAUSE_CHAIN_DEPTH; depth++) {
+            if (current instanceof MediaUrlNotAllowedException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private long computeBackoffMs(int attempt, long totalBackoffMs) {
+        if (mediaDownloadRetryInitialBackoffMs <= 0L || mediaDownloadRetryMaxBackoffMs <= 0L || mediaDownloadRetryMaxTotalBackoffMs <= 0L) {
+            return 0L;
+        }
+        long exponentialBackoff = mediaDownloadRetryInitialBackoffMs;
+        for (int i = 1; i < attempt; i++) {
+            exponentialBackoff = Math.min(Long.MAX_VALUE / 2, exponentialBackoff * 2);
+        }
+        long cappedPerAttemptBackoff = Math.min(exponentialBackoff, mediaDownloadRetryMaxBackoffMs);
+        long remainingBackoffBudget = Math.max(0L, mediaDownloadRetryMaxTotalBackoffMs - totalBackoffMs);
+        return Math.min(cappedPerAttemptBackoff, remainingBackoffBudget);
+    }
+
+    private void sleepBackoff(long backoffMs) {
+        if (backoffMs <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(backoffMs);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}

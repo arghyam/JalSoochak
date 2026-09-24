@@ -28,6 +28,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
@@ -35,6 +36,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelNameDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
+import org.arghyam.jalsoochak.tenant.dto.internal.WhatsAppMessagesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetTenantConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.UpdateTenantRequestDTO;
@@ -405,6 +407,28 @@ class TenantControllerTest {
         }
 
         @Test
+        @SuppressWarnings("removal")
+        void getTenantConfigs_LegacyKeyParam_BindsAndReturnsBothNames() throws Exception {
+            Integer tenantId = 1;
+            ConfigValueDTO templates = WhatsAppMessagesConfigDTO.builder().version(3).build();
+            Map<TenantConfigKeyEnum, ConfigValueDTO> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES, templates);
+            configs.put(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES, templates);
+            TenantConfigResponseDTO response = TenantConfigResponseDTO.builder().tenantId(tenantId).configs(configs).build();
+
+            when(tenantManagementService.getTenantConfigs(eq(tenantId), any())).thenReturn(response);
+
+            mockMvc.perform(get("/api/v1/tenants/" + tenantId + "/config")
+                    .param("keys", "GLIFIC_MESSAGE_TEMPLATES"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.configs.WHATSAPP_MESSAGE_TEMPLATES.version").value(3))
+                    .andExpect(jsonPath("$.data.configs.GLIFIC_MESSAGE_TEMPLATES.version").value(3));
+
+            verify(tenantManagementService).getTenantConfigs(eq(tenantId),
+                    eq(Set.of(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES)));
+        }
+
+        @Test
         void getTenantConfigs_NotFound() throws Exception {
             Integer tenantId = 999;
             when(tenantManagementService.getTenantConfigs(eq(tenantId), any()))
@@ -484,6 +508,22 @@ class TenantControllerTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @SuppressWarnings("removal")
+        void setTenantConfigs_LegacyKeyInBody_Binds() throws Exception {
+            Integer tenantId = 1;
+            when(tenantManagementService.setTenantConfigs(eq(tenantId), any()))
+                    .thenReturn(TenantConfigResponseDTO.builder().tenantId(tenantId).configs(new HashMap<>()).build());
+
+            mockMvc.perform(put("/api/v1/tenants/" + tenantId + "/config")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"configs\":{\"GLIFIC_MESSAGE_TEMPLATES\":{\"version\":1,\"screens\":{}}}}"))
+                    .andExpect(status().isOk());
+
+            verify(tenantManagementService).setTenantConfigs(eq(tenantId), argThat(request ->
+                    request.getConfigs().keySet().equals(Set.of(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES))));
         }
 
         @Test
@@ -748,7 +788,7 @@ class TenantControllerTest {
         void getTenantLogo_storageFailure_returns500() throws Exception {
             Integer tenantId = 1;
             when(tenantManagementService.resolveTenantLogo(tenantId))
-                    .thenThrow(new StorageException("MinIO unreachable"));
+                    .thenThrow(new StorageException("Storage unreachable"));
 
             mockMvc.perform(get("/api/v1/tenants/{tenantId}/logo", tenantId))
                     .andExpect(status().isInternalServerError());
@@ -799,6 +839,7 @@ class TenantControllerTest {
                 // Must NOT contain sensitive keys
                 boolean hasNoSensitiveKeys = !keys.contains(TenantConfigKeyEnum.MESSAGE_BROKER_CONNECTION_SETTINGS)
                         && !keys.contains(TenantConfigKeyEnum.STATE_IT_SYSTEM_CONNECTION)
+                        && !keys.contains(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES)
                         && !keys.contains(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES);
                 return hasPublicKeys && hasNoManagedKeys && hasNoSensitiveKeys;
             }));

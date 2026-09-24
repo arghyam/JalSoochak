@@ -35,7 +35,7 @@ class MessagingChannelTest {
     }
 
     @Test
-    @DisplayName("WHATSAPP is absent: every tenant shares one Glific organisation")
+    @DisplayName("WHATSAPP is absent: every tenant shares one WhatsApp provider organisation")
     void whatsAppIsNotAChannel() {
         assertThat(MessagingChannel.values()).hasSize(2);
     }

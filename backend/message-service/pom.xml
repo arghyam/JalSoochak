@@ -15,7 +15,7 @@
     <artifactId>message-service</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <name>Message Service</name>
-    <description>Notification microservice – Webhook, Email (SendGrid), WhatsApp (Gliffic)</description>
+    <description>Notification microservice – Webhook, Email (SendGrid), WhatsApp</description>
 
     <properties>
         <java.version>21</java.version>
@@ -25,6 +25,7 @@
         <lombok.version>1.18.36</lombok.version>
         <springdoc.version>2.6.0</springdoc.version>
         <swagger-ui.version>5.32.14</swagger-ui.version>
+        <aws-sdk.version>2.34.0</aws-sdk.version>
         <!-- Matches analytics-service. The Spring Boot 3.2 default (1.19.7) cannot detect a modern
              Docker daemon, so every @Testcontainers test here skipped silently instead of running. -->
         <testcontainers.version>1.21.4</testcontainers.version>
@@ -53,6 +54,13 @@
                 <groupId>org.webjars</groupId>
                 <artifactId>swagger-ui</artifactId>
                 <version>${swagger-ui.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws-sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -123,7 +131,7 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
-        <!-- WebClient for outbound HTTP calls (webhooks, SendGrid, Gliffic) -->
+        <!-- WebClient for outbound HTTP calls (webhooks, SendGrid, WhatsApp provider) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
@@ -143,11 +151,11 @@
             <artifactId>pdfbox</artifactId>
             <version>3.0.2</version>
         </dependency>
-        <!-- MinIO client for escalation PDF upload -->
+        <!-- AWS SDK v2 S3 (provider-agnostic object storage — works with any S3-compatible
+             store). Includes the S3Presigner used for presigned download URLs. -->
         <dependency>
-            <groupId>io.minio</groupId>
-            <artifactId>minio</artifactId>
-            <version>8.5.9</version>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
         </dependency>
         <!-- SMTP support — required when notification.mail.provider=smtp -->
         <dependency>

@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.telemetry.validation;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import org.arghyam.jalsoochak.telemetry.config.MediaFetchRestTemplateConfig;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.security.HostResolver;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
 import org.arghyam.jalsoochak.telemetry.security.SsrfAddressPolicy;
@@ -52,8 +52,8 @@ class ReadingUrlValidationWiringTest {
                     () -> new MediaUrlValidator(true, false, Set.of(),
                             new SsrfAddressPolicy(false), pinnedResolver()));
 
-    private static AssamReadingRequest submissionWith(String readingUrl) {
-        return AssamReadingRequest.builder()
+    private static CanonicalReadingRequest submissionWith(String readingUrl) {
+        return CanonicalReadingRequest.builder()
                 .stateSchemeId("SCHEME-1")
                 .readingUrl(readingUrl)
                 .build();
@@ -64,7 +64,7 @@ class ReadingUrlValidationWiringTest {
         contextRunner.run(context -> {
             Validator validator = context.getBean(Validator.class);
 
-            Set<ConstraintViolation<AssamReadingRequest>> violations =
+            Set<ConstraintViolation<CanonicalReadingRequest>> violations =
                     validator.validate(submissionWith("http://169.254.169.254/latest/meta-data/"));
 
             assertThat(violations).hasSize(1);
@@ -87,7 +87,7 @@ class ReadingUrlValidationWiringTest {
         contextRunner.run(context -> {
             Validator validator = context.getBean(Validator.class);
 
-            AssamReadingRequest manualReading = AssamReadingRequest.builder()
+            CanonicalReadingRequest manualReading = CanonicalReadingRequest.builder()
                     .stateSchemeId("SCHEME-1")
                     .confirmedReading(new BigDecimal("1234"))
                     .build();

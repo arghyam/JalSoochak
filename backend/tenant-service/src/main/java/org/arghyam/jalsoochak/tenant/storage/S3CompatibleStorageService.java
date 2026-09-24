@@ -18,14 +18,13 @@ import java.io.InputStream;
 /**
  * S3-compatible implementation of {@link ObjectStorageService}.
  *
- * <p>Works with any provider that implements the AWS S3 API:
- * AWS S3, MinIO, Cloudflare R2, DigitalOcean Spaces, Backblaze B2,
- * Wasabi, Linode Object Storage, and GCS (via S3 interoperability mode).
+ * <p>Works with AWS S3 and any other store that implements the S3 API,
+ * self-hosted or third-party.
  *
  * <p>Activated when {@code storage.access-key} is present in configuration.
  * Path-style access is enabled automatically when {@code storage.endpoint}
- * is set to a non-blank value, which is required for MinIO and most
- * self-hosted / third-party S3-compatible stores.
+ * is set to a non-blank value, which most self-hosted / third-party
+ * S3-compatible stores require.
  */
 @Slf4j
 @RequiredArgsConstructor

@@ -30,7 +30,7 @@ public class ApiController {
     // ── POST send a notification via the specified channel ────
 
     // Offloaded to boundedElastic: WebhookChannel and EmailChannel call .block() internally,
-    // which must not run on the Netty event-loop thread. GlificGraphQLClient also uses .block()
+    // which must not run on the Netty event-loop thread. The WhatsApp adapter also uses .block()
     // but is only ever called from Kafka listener threads, so it is unaffected by this change.
     @PostMapping("/notifications")
     public Mono<ResponseEntity<String>> sendNotification(@RequestBody NotificationRequest request) {

@@ -61,7 +61,7 @@ public class SingleTenantModeStartupValidator {
      * Validates the Single Tenant Mode invariant during context startup.
      *
      * <p>Package-private so unit tests can invoke it directly without standing up a Spring
-     * context, following the {@code GlificWhatsAppService.validateTemplates()} precedent.
+     * context, following the WhatsApp adapter's {@code validateTemplates()} precedent.
      *
      * @throws IllegalStateException if more than one tenant is ACTIVE while Single Tenant Mode is
      *                               on, or if the tenant table could not be read at all

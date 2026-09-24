@@ -30,31 +30,33 @@ spring:
         max.block.ms: 1000
         request.timeout.ms: 1000
 
-minio:
-  endpoint: ${MINIO_ENDPOINT}
-  bucket: ${MINIO_BUCKET}
-  access-key: ${MINIO_ACCESS_KEY}
-  secret-key: ${MINIO_SECRET_KEY}
-  region: ${MINIO_REGION:us-east-1}
+storage:
+  enabled: ${STORAGE_ENABLED:true}
+  endpoint: ${STORAGE_ENDPOINT:} # required; URL of the S3-compatible store
+  region: ${STORAGE_REGION:us-east-1}
+  access-key: ${STORAGE_ACCESS_KEY:}
+  secret-key: ${STORAGE_SECRET_KEY:}
+  bucket: ${STORAGE_BUCKET:} # required; bucket holding inbound meter images
+  public-base-url: ${STORAGE_PUBLIC_BASE_URL:} # required; public origin of stored image URLs, fetched by the OCR provider
 
-glific:
-  api-token: ${GLIFIC_API_TOKEN:}
-  media-base-url: ${GLIFIC_MEDIA_BASE_URL:https://api.glific.org/v1/media}
+whatsapp:
+  api-token: ${WHATSAPP_API_TOKEN:}
+  media-base-url: ${WHATSAPP_MEDIA_BASE_URL:https://api.glific.org/v1/media}
   sync:
-    enabled: ${GLIFIC_SYNC_ENABLED:false}
-    base-url: ${GLIFIC_SYNC_BASE_URL:https://api.arghyam.glific.com}
+    enabled: ${WHATSAPP_SYNC_ENABLED:false}
+    base-url: ${WHATSAPP_SYNC_BASE_URL:https://api.arghyam.glific.com}
     user:
-      phone: ${GLIFIC_SYNC_USER_PHONE:}
-      password: ${GLIFIC_SYNC_USER_PASSWORD:}
+      phone: ${WHATSAPP_SYNC_USER_PHONE:}
+      password: ${WHATSAPP_SYNC_USER_PASSWORD:}
   resume:
-    enabled: ${GLIFIC_RESUME_ENABLED:true}
-    base-url: ${GLIFIC_RESUME_BASE_URL:https://api.arghyam.glific.com}
-    flow-id: ${GLIFIC_RESUME_FLOW_ID:40368}
+    enabled: ${WHATSAPP_RESUME_ENABLED:true}
+    base-url: ${WHATSAPP_RESUME_BASE_URL:https://api.arghyam.glific.com}
+    flow-id: ${WHATSAPP_RESUME_FLOW_ID:40368}
     user:
-      phone: ${GLIFIC_RESUME_USER_PHONE:${GLIFIC_SYNC_USER_PHONE:}}
-      password: ${GLIFIC_RESUME_USER_PASSWORD:${GLIFIC_SYNC_USER_PASSWORD:}}
+      phone: ${WHATSAPP_RESUME_USER_PHONE:${WHATSAPP_SYNC_USER_PHONE:}}
+      password: ${WHATSAPP_RESUME_USER_PASSWORD:${WHATSAPP_SYNC_USER_PASSWORD:}}
 
-# LENIENT-INGEST: when true, Assam meter-reading submissions whose scheme id or operator phone is
+# LENIENT-INGEST: when true, canonical meter-reading submissions whose scheme id or operator phone is
 # missing from the tenant master data are still recorded (against a placeholder scheme / sentinel
 # operator) and tagged on flow_reading_table.ingestion_source, instead of being rejected. Set to
 # false to restore the original reject behaviour once the underlying data gaps are fixed.
@@ -64,14 +66,14 @@ telemetry:
   reading-url:
     validation:
       # Kill switch for the `reading_url` check on POST /readings only. The rules themselves come
-      # from media-download.ssrf-guard below, shared with the Glific media fetch; this exists so the
+      # from media-download.ssrf-guard below, shared with the WhatsApp media fetch; this exists so the
       # higher-volume of the two paths can be turned off without disarming that one.
       enabled: ${TELEMETRY_READING_URL_VALIDATION_ENABLED:true}
   webhook:
     auth:
-      # Shared-secret authentication for the 26 Glific webhook endpoints on
-      # GlificWebhookController. These are exposed publicly by ingress, bypassing the api-gateway,
-      # so this filter is the only thing standing in front of them.
+      # Shared-secret authentication for the 26 chatbot webhook endpoints on the @WebhookRoute
+      # controllers in controller/webhook/. These are exposed publicly by ingress, bypassing the
+      # api-gateway, so this filter is the only thing standing in front of them.
       #
       # ENFORCE (default) rejects with 401. AUDIT records the outcome but always serves — it is the
       # kill switch: set TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT and restart to revert without a code
@@ -82,14 +84,14 @@ telemetry:
       # field submission. The default is ENFORCE so the endpoints cannot be shipped unprotected by
       # omission. For local development, set TELEMETRY_WEBHOOK_AUTH_MODE=OFF.
       #
-      # ORDER OF OPERATIONS when rolling this out: add the header to the Glific flow webhook nodes
+      # ORDER OF OPERATIONS when rolling this out: add the header to the chatbot flow webhook nodes
       # FIRST (harmless while unauthenticated — unknown headers are ignored), and only then set
       # token-hashes and deploy. The reverse order rejects every field submission until the flows
       # catch up. Watch the telemetry.webhook.auth{result="missing"} counter on /actuator/prometheus.
       mode: ${TELEMETRY_WEBHOOK_AUTH_MODE:ENFORCE}
       header-name: ${TELEMETRY_WEBHOOK_AUTH_HEADER:X-Webhook-Token}
       # Comma-separated SHA-256 hex hashes of the accepted tokens — NOT the tokens themselves.
-      # Two entries make a rotation window: add the new hash, update Glific, drop the old one.
+      # Two entries make a rotation window: add the new hash, update the chatbot flows, drop the old one.
       # Startup fails if this is empty while mode=ENFORCE, or if an entry is not 64-char lowercase hex.
       token-hashes: ${TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES:}
   supply-plausibility:
@@ -139,49 +141,49 @@ security:
     # and a browser preflight already failed. See MethodGuardProperties.
     mode: ${SECURITY_METHOD_GUARD_MODE:ENFORCE}
 
-flowvision:
-  url: ${FLOWVISION_URL:https://jalsoochak.beehyv.com/flowvision/v1/extract-reading}
+ocr:
+  url: ${OCR_URL:https://jalsoochak.beehyv.com/flowvision/v1/extract-reading}
   # Default OCR/AI provider id used when a tenant sets no `ocr_provider` config key. Providers are
   # pluggable per state/tenant: implement MeterReadingExtractor, register it as a bean, and point the
   # tenant's `ocr_provider` (+ optional `ocr_url` / `ocr_api_key` / `ocr_auth_header`) config at its id.
-  default-provider: ${FLOWVISION_DEFAULT_PROVIDER:flowvision}
-  # Optional auth for the global-default FlowVision endpoint (per-tenant keys override via `ocr_api_key`).
-  api-key: ${FLOWVISION_API_KEY:}
-  auth-header: ${FLOWVISION_AUTH_HEADER:Authorization}
-  bypass-system-proxy: ${FLOWVISION_BYPASS_SYSTEM_PROXY:true}
+  default-provider: ${OCR_DEFAULT_PROVIDER:flowvision}
+  # Optional auth for the global-default OCR endpoint (per-tenant keys override via `ocr_api_key`).
+  api-key: ${OCR_API_KEY:}
+  auth-header: ${OCR_AUTH_HEADER:Authorization}
+  bypass-system-proxy: ${OCR_BYPASS_SYSTEM_PROXY:true}
   http:
-    connect-timeout-ms: ${FLOWVISION_CONNECT_TIMEOUT_MS:5000}
-    read-timeout-ms: ${FLOWVISION_READ_TIMEOUT_MS:10000}
+    connect-timeout-ms: ${OCR_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${OCR_READ_TIMEOUT_MS:10000}
   rollover:
     resolution:
       # Kill-switch for the rollover-digit resolver. Default OFF for a safe cutover — must only be
-      # flipped ON after the confirmed_reading history is cleaned (§6) and FlowVision is emitting the
+      # flipped ON after the confirmed_reading history is cleaned (§6) and the OCR provider is emitting the
       # new rollover payload in prod. When OFF, behaviour is byte-identical to legacy (source 0).
-      enabled: ${FLOWVISION_ROLLOVER_RESOLUTION_ENABLED:false}
+      enabled: ${OCR_ROLLOVER_RESOLUTION_ENABLED:false}
 
 resilience4j:
   retry:
     instances:
-      flowvisionReadings:
-        max-attempts: ${FLOWVISION_READINGS_RETRY_MAX_ATTEMPTS:3}
-        wait-duration: ${FLOWVISION_READINGS_RETRY_WAIT_DURATION:300ms}
+      ocrReadings:
+        max-attempts: ${OCR_READINGS_RETRY_MAX_ATTEMPTS:3}
+        wait-duration: ${OCR_READINGS_RETRY_WAIT_DURATION:300ms}
         enable-exponential-backoff: true
-        exponential-backoff-multiplier: ${FLOWVISION_READINGS_RETRY_BACKOFF_MULTIPLIER:2}
+        exponential-backoff-multiplier: ${OCR_READINGS_RETRY_BACKOFF_MULTIPLIER:2}
         enable-randomized-wait: true
-        randomized-wait-factor: ${FLOWVISION_READINGS_RETRY_RANDOMIZED_WAIT_FACTOR:0.5}
+        randomized-wait-factor: ${OCR_READINGS_RETRY_RANDOMIZED_WAIT_FACTOR:0.5}
   circuitbreaker:
     instances:
-      flowvisionReadings:
-        sliding-window-size: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_WINDOW_SIZE:100}
-        minimum-number-of-calls: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_MIN_CALLS:20}
-        failure-rate-threshold: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_FAILURE_RATE:50}
-        wait-duration-in-open-state: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_OPEN_WAIT:30s}
-        permitted-number-of-calls-in-half-open-state: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_HALF_OPEN_CALLS:10}
+      ocrReadings:
+        sliding-window-size: ${OCR_READINGS_CIRCUIT_BREAKER_WINDOW_SIZE:100}
+        minimum-number-of-calls: ${OCR_READINGS_CIRCUIT_BREAKER_MIN_CALLS:20}
+        failure-rate-threshold: ${OCR_READINGS_CIRCUIT_BREAKER_FAILURE_RATE:50}
+        wait-duration-in-open-state: ${OCR_READINGS_CIRCUIT_BREAKER_OPEN_WAIT:30s}
+        permitted-number-of-calls-in-half-open-state: ${OCR_READINGS_CIRCUIT_BREAKER_HALF_OPEN_CALLS:10}
   bulkhead:
     instances:
-      flowvisionReadings:
-        max-concurrent-calls: ${FLOWVISION_READINGS_BULKHEAD_MAX_CONCURRENT_CALLS:50}
-        max-wait-duration: ${FLOWVISION_READINGS_BULKHEAD_MAX_WAIT_DURATION:0ms}
+      ocrReadings:
+        max-concurrent-calls: ${OCR_READINGS_BULKHEAD_MAX_CONCURRENT_CALLS:50}
+        max-wait-duration: ${OCR_READINGS_BULKHEAD_MAX_WAIT_DURATION:0ms}
 
 media-download:
   retry:
@@ -194,15 +196,15 @@ media-download:
     connect-timeout-ms: ${MEDIA_DOWNLOAD_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${MEDIA_DOWNLOAD_READ_TIMEOUT_MS:10000}
   # One policy for both caller-supplied meter-image URLs: the `mediaUrl` this service fetches for
-  # readings/glific, and the `reading_url` submitted to POST /readings, which this service does not
-  # fetch but hands to FlowVision as `imageURL`. FlowVision, Glific and MinIO calls of our own go out
-  # on the shared client and are unaffected.
+  # readings/whatsapp, and the `reading_url` submitted to POST /readings, which this service does not
+  # fetch but hands to the OCR provider as `imageURL`. Our own calls to the OCR provider, the WhatsApp
+  # provider and object storage go out on the shared client and are unaffected.
   ssrf-guard:
     # Master switch: disabling this disarms both paths.
     enabled: ${MEDIA_DOWNLOAD_SSRF_GUARD_ENABLED:true}
     # Empty means any public host. Populating it turns the guard from deny-internal into
-    # allow-listed — and it governs BOTH paths, so it must hold the union: Glific's media hosts
-    # (confirm from traffic) plus the observed reading_url senders
+    # allow-listed — and it governs BOTH paths, so it must hold the union: the WhatsApp provider's
+    # media hosts (confirm from traffic) plus the observed reading_url senders
     # adc-ecos.enlightcloud.com,nyc3.digitaloceanspaces.com,flowvision-test.s3.ap-south-1.amazonaws.com,filemanager.gupshup.io
     allowed-hosts: ${MEDIA_DOWNLOAD_ALLOWED_HOSTS:}
     require-https: ${MEDIA_DOWNLOAD_REQUIRE_HTTPS:false}

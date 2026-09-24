@@ -7,7 +7,7 @@ All APIs are RESTful and versioned under `/api/v1/`. Clients reach services thro
 > **Two families of traffic do not go through the gateway and are not JWT-authenticated.** Ingress
 > routes them straight to telemetry-service, so the gateway's filter chain never sees them:
 >
-> * **Glific flow webhooks** under `/api/v1/telemetry/*` — authenticated by the `X-Webhook-Token`
+> * **Chatbot flow webhooks** under `/api/v1/telemetry/*` — authenticated by the `X-Webhook-Token`
 >   shared secret (§9.4).
 > * **Partner meter-reading ingestion** (`POST`/`PUT /api/v1/telemetry/readings`,
 >   `/readings/formats/{format}`, `PATCH /api/v1/telemetry/schemes/{id}/yesterday-final-reading`) —
@@ -49,10 +49,11 @@ All APIs are RESTful and versioned under `/api/v1/`. Clients reach services thro
 * `POST /api/v1/scheme/schemes/upload`, `/schemes/mappings/upload` — bulk CSV upload *(State Admin)*
 * `GET /api/v1/public/schemes/{id}` — public scheme detail
 
-### 9.4 Field Submission APIs (Glific Flow Webhooks)
+### 9.4 Field Submission APIs (Chatbot Flow Webhooks)
 
-The WhatsApp submission journey is a multi-step Glific flow; Glific calls a webhook at each step, all
-under `/api/v1/telemetry`. There are **26** such endpoints, every one a `POST`.
+The WhatsApp submission journey is a multi-step chatbot flow; the WhatsApp provider calls a webhook at
+each step, all under `/api/v1/telemetry`. There are **27** such endpoints, every one a `POST`, counting
+the deprecated `/readings/glific` alias.
 
 **Authentication.** Each request must carry the shared secret header:
 
@@ -60,10 +61,10 @@ under `/api/v1/telemetry`. There are **26** such endpoints, every one a `POST`.
 X-Webhook-Token: <token>
 ```
 
-`GlificWebhookAuthFilter` in telemetry-service compares the SHA-256 of the supplied token against
+`WebhookAuthFilter` in telemetry-service compares the SHA-256 of the supplied token against
 `telemetry.webhook.auth.token-hashes` and returns
 `401 {"success":false,"message":"Unauthorized"}` when it does not match. The match is a closed
-allowlist of exactly these 26 routes — *not* a prefix rule on `/api/v1/telemetry/**`, because that
+allowlist of exactly these 27 routes — *not* a prefix rule on `/api/v1/telemetry/**`, because that
 prefix is shared with the `X-Api-Key` ingestion endpoints, which use a different credential.
 
 Set `TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT` to log outcomes without rejecting (the kill switch), or
@@ -76,8 +77,9 @@ The endpoints:
 * `POST /api/v1/telemetry/channel/selection`, `/selected/channel` — channel prompt and choice
 * `POST /api/v1/telemetry/schemes`, `/scheme/selected` — scheme list and choice
 * `POST /api/v1/telemetry/item/selection`, `/selected/item` — item prompt and choice
-* `POST /api/v1/telemetry/take-meter-reading` — receive meter photo → FlowVision AI
-* `POST /api/v1/telemetry/readings/glific` — async image submission, returns a job ack
+* `POST /api/v1/telemetry/take-meter-reading` — receive meter photo → OCR provider
+* `POST /api/v1/telemetry/readings/whatsapp` — async image submission, returns a job ack
+  (`/readings/glific` is its deprecated alias, served for one release)
 * `POST /api/v1/telemetry/manual-reading`, `/location`, `/update-previous-reading` — enter, geotag or
   correct a reading
 * `POST /api/v1/telemetry/meter-change`, `/meter/meter-change`, `/meter/meter-change/submit` — meter
@@ -87,9 +89,9 @@ The endpoints:
 * `POST /api/v1/telemetry/others`, `/others/submitted` — free-text fallback
 * `POST /api/v1/telemetry/trigger-welcome-message` — operator onboarding message
 
-> Adding a webhook to `GlificWebhookController` without registering it in `GlificWebhookRoutes` fails
-> the build (`GlificWebhookRouteCoverageTest`), because it would ship unauthenticated. A new endpoint
-> also needs the header added to its Glific flow node.
+> Adding a webhook to a `@WebhookRoute` controller without registering it in `WebhookRoutes`
+> fails the build (`WebhookRouteCoverageTest`), because it would ship unauthenticated. A new endpoint
+> also needs the header added to its chatbot flow node.
 
 ```json
 // Example reading event published after a successful submission
@@ -105,7 +107,7 @@ The endpoints:
 
 * `POST /api/v1/message/notifications` — trigger a notification *(State Admin)*
 
-Nudge and escalation messages are normally produced by the tenant-service schedulers and delivered by the message service via Glific; these endpoints support manual/administrative use.
+Nudge and escalation messages are normally produced by the tenant-service schedulers and delivered by the message service via the WhatsApp provider; these endpoints support manual/administrative use.
 
 ### 9.6 Analytics & Dashboard APIs
 

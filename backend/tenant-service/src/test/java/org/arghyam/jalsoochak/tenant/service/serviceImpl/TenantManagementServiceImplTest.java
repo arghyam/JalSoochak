@@ -25,10 +25,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import org.arghyam.jalsoochak.tenant.config.properties.AppProperties;
 import org.arghyam.jalsoochak.tenant.config.properties.TenantDefaultsProperties;
@@ -43,6 +46,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonItemDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
+import org.arghyam.jalsoochak.tenant.dto.internal.WhatsAppMessagesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetTenantConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.UpdateTenantRequestDTO;
@@ -1640,14 +1644,14 @@ class TenantManagementServiceImplTest {
 
             assertNotNull(result);
             assertEquals(tenantId, result.getTenantId());
-            int total = TenantConfigKeyEnum.values().length;
+            int total = TenantConfigKeyEnum.canonicalValues().size();
             assertEquals(total, result.getSummary().getTotal());
             assertEquals(1, result.getSummary().getConfigured());
             assertEquals(total - 1, result.getSummary().getPending());
             assertEquals(ConfigStatusEnum.CONFIGURED, result.getConfigs().get(TenantConfigKeyEnum.TENANT_LOGO).getStatus());
             assertTrue(result.getConfigs().get(TenantConfigKeyEnum.TENANT_LOGO).isMandatory());
-            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES).isMandatory(),
-                    "GLIFIC_MESSAGE_TEMPLATES is optional");
+            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES).isMandatory(),
+                    "WHATSAPP_MESSAGE_TEMPLATES is optional");
             assertFalse(result.getConfigs().get(TenantConfigKeyEnum.STATE_IT_SYSTEM_CONNECTION).isMandatory(),
                     "STATE_IT_SYSTEM_CONNECTION is optional");
             assertFalse(result.getConfigs().get(TenantConfigKeyEnum.STATE_DATA_RECONCILIATION_TIME).isMandatory(),
@@ -2694,6 +2698,234 @@ class TenantManagementServiceImplTest {
 
             verify(apiKeyService, never()).generate();
             verify(tenantCommonRepository, never()).upsertApiKeyHash(anyInt(), anyString(), any());
+        }
+    }
+
+    /**
+     * {@code GLIFIC_MESSAGE_TEMPLATES} is the deprecated alias of {@code WHATSAPP_MESSAGE_TEMPLATES}:
+     * accepted on input, resolved to the canonical key before any read or write, and returned under
+     * both names.
+     */
+    @Nested
+    @DisplayName("WhatsApp message-templates key alias Tests")
+    @SuppressWarnings("removal")
+    class MessageTemplatesKeyAliasTests {
+
+        private static final Integer TENANT_ID = 1;
+        private static final String CANONICAL = "WHATSAPP_MESSAGE_TEMPLATES";
+        private static final String LEGACY = "GLIFIC_MESSAGE_TEMPLATES";
+        private static final String TEMPLATES_V1 =
+                "{\"version\":1,\"screens\":{\"INTRO_MESSAGE\":{\"message\":{\"en\":\"Hello v1\"}}}}";
+        private static final String TEMPLATES_V2 =
+                "{\"version\":2,\"screens\":{\"INTRO_MESSAGE\":{\"message\":{\"en\":\"Hello v2\"}}}}";
+
+        private final TenantResponseDTO tenant = TenantResponseDTO.builder().id(TENANT_ID).stateCode("TN")
+                .status(TenantStatusEnum.ACTIVE.name()).build();
+
+        private ConfigDTO row(String key, String value) {
+            return ConfigDTO.builder().configKey(key).configValue(value).build();
+        }
+
+        private Integer version(TenantConfigResponseDTO result, TenantConfigKeyEnum key) {
+            return ((WhatsAppMessagesConfigDTO) result.getConfigs().get(key)).getVersion();
+        }
+
+        private SetTenantConfigRequestDTO requestOf(Map<TenantConfigKeyEnum, String> configs) throws Exception {
+            Map<TenantConfigKeyEnum, JsonNode> json = new LinkedHashMap<>();
+            for (Map.Entry<TenantConfigKeyEnum, String> entry : configs.entrySet()) {
+                json.put(entry.getKey(), objectMapper.readTree(entry.getValue()));
+            }
+            return SetTenantConfigRequestDTO.builder().configs(json).build();
+        }
+
+        private void givenCurrentUser() {
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+        }
+
+        @Test
+        @DisplayName("GET with the legacy key returns the stored value under both names")
+        void getTenantConfigs_legacyKeyRequested_returnsValueUnderBothNames() {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(TENANT_ID))
+                    .thenReturn(List.of(row(CANONICAL, TEMPLATES_V1)));
+
+            TenantConfigResponseDTO result = tenantManagementService.getTenantConfigs(TENANT_ID,
+                    EnumSet.of(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES));
+
+            assertEquals(2, result.getConfigs().size());
+            assertEquals(1, version(result, TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES));
+            assertEquals(result.getConfigs().get(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES),
+                    result.getConfigs().get(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES));
+        }
+
+        @Test
+        @DisplayName("GET with the canonical key also returns the value under the legacy name")
+        void getTenantConfigs_canonicalKeyRequested_returnsValueUnderBothNames() {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(TENANT_ID))
+                    .thenReturn(List.of(row(CANONICAL, TEMPLATES_V1)));
+
+            TenantConfigResponseDTO result = tenantManagementService.getTenantConfigs(TENANT_ID,
+                    EnumSet.of(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES));
+
+            assertEquals(1, version(result, TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES));
+            assertEquals(1, version(result, TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES));
+        }
+
+        @Test
+        @DisplayName("GET without a key filter returns the templates under both names")
+        void getTenantConfigs_noKeyFilter_returnsValueUnderBothNames() {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(TENANT_ID))
+                    .thenReturn(List.of(row(CANONICAL, TEMPLATES_V1)));
+            when(tenantSchemaRepository.getSupportedLanguages("tenant_tn")).thenReturn(Collections.emptyList());
+
+            TenantConfigResponseDTO result = tenantManagementService.getTenantConfigs(TENANT_ID, null);
+
+            assertEquals(2, result.getConfigs().size());
+            assertEquals(1, version(result, TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES));
+        }
+
+        @Test
+        @DisplayName("GET returns neither name when the tenant has no templates")
+        void getTenantConfigs_noTemplates_returnsNeitherName() {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(TENANT_ID)).thenReturn(Collections.emptyList());
+
+            TenantConfigResponseDTO result = tenantManagementService.getTenantConfigs(TENANT_ID,
+                    EnumSet.of(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES));
+
+            assertTrue(result.getConfigs().isEmpty());
+        }
+
+        @Test
+        @DisplayName("GET reads a row still stored under the legacy name as the canonical key")
+        void getTenantConfigs_rowStoredUnderLegacyName_isReturnedUnderBothNames() {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(TENANT_ID))
+                    .thenReturn(List.of(row(LEGACY, TEMPLATES_V1)));
+
+            TenantConfigResponseDTO result = tenantManagementService.getTenantConfigs(TENANT_ID,
+                    EnumSet.of(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES));
+
+            assertEquals(1, version(result, TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES));
+            assertEquals(1, version(result, TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES));
+        }
+
+        @Test
+        @DisplayName("GET prefers the canonical row when the legacy row is read first")
+        void getTenantConfigs_legacyRowFirst_canonicalRowWins() {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(TENANT_ID))
+                    .thenReturn(List.of(row(LEGACY, TEMPLATES_V1), row(CANONICAL, TEMPLATES_V2)));
+
+            TenantConfigResponseDTO result = tenantManagementService.getTenantConfigs(TENANT_ID,
+                    EnumSet.of(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES));
+
+            assertEquals(2, version(result, TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES));
+            assertEquals(2, version(result, TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES));
+        }
+
+        @Test
+        @DisplayName("GET prefers the canonical row when the canonical row is read first")
+        void getTenantConfigs_canonicalRowFirst_canonicalRowWins() {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(TENANT_ID))
+                    .thenReturn(List.of(row(CANONICAL, TEMPLATES_V2), row(LEGACY, TEMPLATES_V1)));
+
+            TenantConfigResponseDTO result = tenantManagementService.getTenantConfigs(TENANT_ID,
+                    EnumSet.of(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES));
+
+            assertEquals(2, version(result, TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES));
+            assertEquals(2, version(result, TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES));
+        }
+
+        @Test
+        @DisplayName("PUT under the legacy key stores exactly one row, under the canonical key")
+        void setTenantConfigs_legacyKey_storesOneRowUnderCanonicalKey() throws Exception {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+            givenCurrentUser();
+            ArgumentCaptor<String> stored = ArgumentCaptor.forClass(String.class);
+            when(tenantCommonRepository.upsertConfig(eq(TENANT_ID), eq(CANONICAL), stored.capture(), eq(100)))
+                    .thenAnswer(inv -> Optional.of(row(CANONICAL, inv.getArgument(2))));
+
+            TenantConfigResponseDTO result = tenantManagementService.setTenantConfigs(TENANT_ID,
+                    requestOf(Map.of(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES, TEMPLATES_V2)));
+
+            verify(tenantCommonRepository).upsertConfig(eq(TENANT_ID), anyString(), anyString(), eq(100));
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), eq(LEGACY), anyString(), any());
+            assertTrue(stored.getValue().contains("Hello v2"));
+            assertEquals(2, version(result, TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES));
+            assertEquals(2, version(result, TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES));
+        }
+
+        @Test
+        @DisplayName("PUT under the legacy key announces the canonical key in TenantConfigUpdatedEvent")
+        void setTenantConfigs_legacyKey_publishesCanonicalKeyName() throws Exception {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+            givenCurrentUser();
+            when(tenantCommonRepository.upsertConfig(eq(TENANT_ID), eq(CANONICAL), anyString(), eq(100)))
+                    .thenAnswer(inv -> Optional.of(row(CANONICAL, inv.getArgument(2))));
+
+            tenantManagementService.setTenantConfigs(TENANT_ID,
+                    requestOf(Map.of(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES, TEMPLATES_V2)));
+
+            ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+            verify(eventPublisher).publishEvent(eventCaptor.capture());
+            TenantConfigUpdatedEvent event = assertInstanceOf(TenantConfigUpdatedEvent.class, eventCaptor.getValue());
+            assertEquals(Set.of(CANONICAL), event.getConfigKeys());
+        }
+
+        @Test
+        @DisplayName("PUT under both names is rejected before anything is written")
+        void setTenantConfigs_bothNames_rejectedWithoutWriting() throws Exception {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+            givenCurrentUser();
+            Map<TenantConfigKeyEnum, String> configs = new LinkedHashMap<>();
+            configs.put(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES, TEMPLATES_V1);
+            configs.put(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES, TEMPLATES_V2);
+            SetTenantConfigRequestDTO request = requestOf(configs);
+
+            InvalidConfigKeyException ex = assertThrows(InvalidConfigKeyException.class,
+                    () -> tenantManagementService.setTenantConfigs(TENANT_ID, request));
+
+            assertTrue(ex.getMessage().contains(CANONICAL));
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), any());
+            verify(eventPublisher, never()).publishEvent(any());
+        }
+
+        @Test
+        @DisplayName("Config status lists the canonical key only, and counts it once")
+        void getTenantConfigStatus_listsCanonicalKeyOnly() {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(TENANT_ID))
+                    .thenReturn(List.of(row(CANONICAL, TEMPLATES_V1)));
+            when(tenantSchemaRepository.getSupportedLanguages("tenant_tn")).thenReturn(Collections.emptyList());
+
+            TenantConfigStatusResponseDTO result = tenantManagementService.getTenantConfigStatus(TENANT_ID);
+
+            assertFalse(result.getConfigs().containsKey(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES));
+            assertEquals(ConfigStatusEnum.CONFIGURED,
+                    result.getConfigs().get(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES).getStatus());
+            assertEquals(TenantConfigKeyEnum.canonicalValues().size(), result.getSummary().getTotal());
+            assertEquals(result.getSummary().getTotal(), result.getConfigs().size());
+            assertEquals(1, result.getSummary().getConfigured());
+        }
+
+        @Test
+        @DisplayName("Config status counts a row still stored under the legacy name as the canonical key")
+        void getTenantConfigStatus_rowStoredUnderLegacyName_marksCanonicalConfigured() {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(TENANT_ID))
+                    .thenReturn(List.of(row(LEGACY, TEMPLATES_V1)));
+            when(tenantSchemaRepository.getSupportedLanguages("tenant_tn")).thenReturn(Collections.emptyList());
+
+            TenantConfigStatusResponseDTO result = tenantManagementService.getTenantConfigStatus(TENANT_ID);
+
+            assertEquals(ConfigStatusEnum.CONFIGURED,
+                    result.getConfigs().get(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES).getStatus());
+            assertEquals(1, result.getSummary().getConfigured());
         }
     }
 }

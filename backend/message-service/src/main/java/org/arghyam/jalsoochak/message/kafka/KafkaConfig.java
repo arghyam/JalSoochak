@@ -148,8 +148,8 @@ public class KafkaConfig {
      * still be replayed from the log if it matters. The payload itself stays at DEBUG and with phone
      * numbers redacted: notification events carry operator and officer mobile numbers, which are PII
      * and must never reach an INFO/WARN/ERROR line. Exception <em>messages</em> are held back for the
-     * same reason — a Glific or JDBC failure routinely echoes the payload it choked on — so ERROR
-     * carries the exception types and DEBUG carries the stack traces.</p>
+     * same reason — a WhatsApp provider or JDBC failure routinely echoes the payload it choked on — so
+     * ERROR carries the exception types and DEBUG carries the stack traces.</p>
      */
     static ConsumerRecordRecoverer neverBlockingRecoverer(ConsumerRecordRecoverer delegate) {
         return (consumerRecord, exception) -> {
@@ -175,7 +175,7 @@ public class KafkaConfig {
      * bare 10-digit mobile and the {@code 91XXXXXXXXXX} E.164 form used throughout these events —
      * keeping the last four digits so two records can still be told apart.
      *
-     * <p>Delegates to {@link PhoneRedactor}, which the Glific delivery-status reader also uses: a
+     * <p>Delegates to {@link PhoneRedactor}, which the WhatsApp delivery-status reader also uses: a
      * Gupshup failure payload carries the recipient's raw number in its {@code destination} field, so
      * the same masking is needed there. Kept as a method here so this class's existing callers and
      * tests are unaffected.</p>

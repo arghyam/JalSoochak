@@ -37,7 +37,7 @@ public enum SystemConfigKeyEnum implements ConfigKey {
 
     /**
      * BFM Image Reading Confidence Level Threshold.
-     * Minimum confidence level for AI Reader (FlowVision) meter readings.
+     * Minimum confidence level for AI Reader (OCR) meter readings.
      * Readings below this threshold are marked with low confidence flag.
      * Managed by Super User.
      */

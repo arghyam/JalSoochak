@@ -183,7 +183,7 @@ class StaffReportControllerTest {
         @DisplayName("returns 500 with masked message when storage fails")
         void storageFailureReturns500() throws Exception {
             when(staffReportService.generate(any(), any(), any(), any()))
-                    .thenThrow(new StorageException("MinIO offline"));
+                    .thenThrow(new StorageException("Storage offline"));
 
             mockMvc.perform(post(URL)
                             .param("tenantCode", "mp")

@@ -72,7 +72,7 @@ public class LocationAffinityService {
     public enum Path {
         /** {@code POST /location} — the WhatsApp location message, before any reading exists. */
         LOCATION_WEBHOOK("location_webhook"),
-        /** {@code POST /readings/glific} — an operator's meter photo. */
+        /** {@code POST /readings/whatsapp} — an operator's meter photo. */
         IMAGE_SUBMISSION("image_submission"),
         /** {@code POST /manual-reading} — an operator typing the value in. */
         MANUAL_READING("manual_reading"),

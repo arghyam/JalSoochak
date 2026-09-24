@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * else, and no response ever carries a header that enumerates the supported methods.
  *
  * <p>The other half of the contract is negative — the methods the service <i>does</i> serve must be
- * untouched — so the Glific webhook routes and the partner ingestion routes are asserted explicitly
+ * untouched — so the chatbot webhook routes and the partner ingestion routes are asserted explicitly
  * rather than left to integration testing.
  */
 @DisplayName("DisallowedHttpMethodFilter")
@@ -80,9 +80,9 @@ class DisallowedHttpMethodFilterTest {
         }
 
         @Test
-        @DisplayName("every Glific webhook path rejects OPTIONS")
-        void everyGlificWebhookPathRejectsOptions() throws Exception {
-            for (String path : GlificWebhookRoutes.absolutePaths()) {
+        @DisplayName("every chatbot webhook path rejects OPTIONS")
+        void everyWebhookPathRejectsOptions() throws Exception {
+            for (String path : WebhookRoutes.absolutePaths()) {
                 MockFilterChain chain = new MockFilterChain();
                 MockHttpServletResponse response = new MockHttpServletResponse();
 
@@ -261,9 +261,9 @@ class DisallowedHttpMethodFilterTest {
     class Passthrough {
 
         @Test
-        @DisplayName("POST to every Glific webhook path is untouched")
-        void postToEveryGlificWebhookPathIsUntouched() throws Exception {
-            for (String path : GlificWebhookRoutes.absolutePaths()) {
+        @DisplayName("POST to every chatbot webhook path is untouched")
+        void postToEveryWebhookPathIsUntouched() throws Exception {
+            for (String path : WebhookRoutes.absolutePaths()) {
                 MockFilterChain chain = new MockFilterChain();
                 MockHttpServletRequest request = request("POST", path);
 

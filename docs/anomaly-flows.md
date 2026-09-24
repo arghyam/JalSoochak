@@ -165,7 +165,7 @@ different metric and has no tenant column.
 
 ### Trigger
 
-During Glific issue-report and meter workflow flows, the operator can report issues such as no water supply or no submission reasons.
+During the WhatsApp chatbot's issue-report and meter workflow flows, the operator can report issues such as no water supply or no submission reasons.
 
 These issues eventually produce anomaly or water-quantity side effects depending on the selected workflow branch and downstream processing.
 

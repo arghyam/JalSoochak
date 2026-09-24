@@ -18,7 +18,7 @@ public class CreateReadingResponse {
 
     /**
      * LOCATION-AFFINITY: true when the submitted location is farther from the scheme than the
-     * configured {@code LOCATION_AFFINITY_THRESHOLD} metres. The Glific flow branches on this to
+     * configured {@code LOCATION_AFFINITY_THRESHOLD} metres. The chatbot flow branches on this to
      * show the operator a proceed/cancel prompt.
      *
      * <p>It is <strong>not</strong> a failure: on {@code /location} the coordinates were saved, and

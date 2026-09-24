@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
 import lombok.RequiredArgsConstructor;
-import org.arghyam.jalsoochak.message.channel.glific.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.arghyam.jalsoochak.message.dto.TriggerWelcomeMessageResponse;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -18,7 +18,7 @@ public class WelcomeMessageTriggerService {
 
     private final JdbcTemplate jdbcTemplate;
     private final MessageTemplateService messageTemplateService;
-    private final GlificWhatsAppService glificWhatsAppService;
+    private final WhatsAppSender whatsAppSender;
     private final PiiEncryptionService piiEncryptionService;
 
     public TriggerWelcomeMessageResponse triggerByPhone(String phoneInput) {
@@ -53,7 +53,7 @@ public class WelcomeMessageTriggerService {
 
         Long contactId = info.contactId;
         if (contactId == null || contactId <= 0) {
-            contactId = glificWhatsAppService.optIn(normalizedPhone);
+            contactId = whatsAppSender.optIn(normalizedPhone);
             if (contactId == null || contactId <= 0) {
                 return TriggerWelcomeMessageResponse.builder()
                         .success(false)
@@ -62,15 +62,15 @@ public class WelcomeMessageTriggerService {
                         .contactId(null)
                         .name(info.name)
                         .state(stateName)
-                        .message("Failed to create Glific contact via opt-in")
+                        .message("Failed to create WhatsApp contact via opt-in")
                         .build();
             }
         }
 
         if (welcomeFlowId.isBlank()) {
-            glificWhatsAppService.startWelcomeFlow(contactId, info.name, stateName);
+            whatsAppSender.startWelcomeFlow(contactId, info.name, stateName);
         } else {
-            glificWhatsAppService.startWelcomeFlow(contactId, welcomeFlowId, info.name, stateName);
+            whatsAppSender.startWelcomeFlow(contactId, welcomeFlowId, info.name, stateName);
         }
 
         return TriggerWelcomeMessageResponse.builder()

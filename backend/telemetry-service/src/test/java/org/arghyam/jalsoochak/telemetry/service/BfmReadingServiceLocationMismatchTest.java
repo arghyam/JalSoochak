@@ -74,13 +74,13 @@ class BfmReadingServiceLocationMismatchTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private ReadingChannelResolver readingChannelResolver;
     @Mock
@@ -115,8 +115,8 @@ class BfmReadingServiceLocationMismatchTest {
                 .thenReturn(new LocationVerdict.Outside(1201.0d, 500.0d));
 
         service = new BfmReadingService(
-                repo, flowVisionService, telemetryEventPublisher, tenantConfigRepository,
-                new ObjectMapper(), glificOperatorContextService, null, readingChannelResolver,
+                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
+                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
@@ -266,8 +266,8 @@ class BfmReadingServiceLocationMismatchTest {
         // Matches how the OCR collaborators are treated: a unit test that does not exercise the
         // boundary check may pass null, and the reading must still go through.
         BfmReadingService withoutCheck = new BfmReadingService(
-                repo, flowVisionService, telemetryEventPublisher, tenantConfigRepository,
-                new ObjectMapper(), glificOperatorContextService, null, readingChannelResolver,
+                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
+                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),

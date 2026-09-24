@@ -26,7 +26,7 @@ import java.util.Optional;
  * threshold could reach an API response. That is a structural guarantee rather than a convention,
  * and it is the reason the caller is not simply handed the {@code Quarantined} numbers: an API-key
  * holder who learns the ceiling can solve for the scheme's connection count and the per-person limit
- * in two submissions (THRESHOLD-DISCLOSURE, as documented at {@code GlificMeterWorkflowService}).
+ * in two submissions (THRESHOLD-DISCLOSURE, as documented at {@code MeterReadingConversationService}).
  *
  * <p>The mode lives here too, so {@code AUDIT} and {@code ENFORCE} run identical evaluations and
  * differ only in what the caller does afterwards. Under {@code AUDIT} a would-be rejection is logged

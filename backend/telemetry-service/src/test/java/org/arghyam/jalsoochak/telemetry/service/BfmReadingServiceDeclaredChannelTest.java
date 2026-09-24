@@ -52,13 +52,13 @@ class BfmReadingServiceDeclaredChannelTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private ReadingChannelResolver readingChannelResolver;
 
@@ -70,11 +70,11 @@ class BfmReadingServiceDeclaredChannelTest {
     void setUp() {
         service = new BfmReadingService(
                 repo,
-                flowVisionService,
+                defaultOcrExtractor,
                 telemetryEventPublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
-                glificOperatorContextService,
+                operatorContextService,
                 null,
                 readingChannelResolver,
                 new RolloverResolutionService(true, new ObjectMapper()),

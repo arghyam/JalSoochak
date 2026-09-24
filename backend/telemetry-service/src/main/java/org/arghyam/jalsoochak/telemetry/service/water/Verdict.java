@@ -14,7 +14,7 @@ import java.math.BigDecimal;
  * recorded under {@code ENFORCE}. They are for the anomaly record, the Kafka event and the server
  * log — <strong>never for the API response</strong>: echoing the ceiling back would let a caller
  * solve for the scheme's connection count and the per-person limit in two submissions
- * (THRESHOLD-DISCLOSURE, as documented at {@code GlificMeterWorkflowService}).
+ * (THRESHOLD-DISCLOSURE, as documented at {@code MeterReadingConversationService}).
  */
 public sealed interface Verdict permits Verdict.Skipped, Verdict.Accepted, Verdict.Quarantined {
 

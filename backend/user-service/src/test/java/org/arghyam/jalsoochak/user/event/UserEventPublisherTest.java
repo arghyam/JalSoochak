@@ -160,6 +160,9 @@ class UserEventPublisherTest {
                     .map(PumpOperatorMessagingEvent::getEventType)
                     .toList();
             assertThat(eventTypes).containsExactlyInAnyOrder("UPDATE_USER_LANGUAGE", "SEND_WELCOME_MESSAGE");
+            assertThat(captor.getAllValues())
+                    .extracting(PumpOperatorMessagingEvent::getWhatsappLanguageId)
+                    .containsOnly("en");
         }
 
         @Test

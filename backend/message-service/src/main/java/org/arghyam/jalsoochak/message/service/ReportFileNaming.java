@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.message.service;
 import java.time.LocalDate;
 
 /**
- * Filenames and MinIO object keys for the water reports.
+ * Filenames and storage object keys for the water reports.
  *
  * <p>Held in one place because the two halves have to agree: the PDF is written to disk under the
  * filename, uploaded under the object key, and the key's tail becomes the WhatsApp button's URL

@@ -5,7 +5,7 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
@@ -58,13 +58,13 @@ class BfmReadingServiceAssertedReadingTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private ReadingChannelResolver readingChannelResolver;
 
@@ -76,11 +76,11 @@ class BfmReadingServiceAssertedReadingTest {
     void setUp() {
         service = new BfmReadingService(
                 repo,
-                flowVisionService,
+                defaultOcrExtractor,
                 telemetryEventPublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
-                glificOperatorContextService,
+                operatorContextService,
                 null,
                 readingChannelResolver,
                 new RolloverResolutionService(true, new ObjectMapper()),
@@ -141,7 +141,7 @@ class BfmReadingServiceAssertedReadingTest {
     @Test
     @DisplayName("an image-extracted reading keeps the untouched insert path and default provenance")
     void imagePathIsUnchanged() {
-        when(flowVisionService.extractReading(anyString())).thenReturn(FlowVisionResult.builder()
+        when(defaultOcrExtractor.extractReading(anyString(), isNull())).thenReturn(OcrReadingResult.builder()
                 .adjustedReading(new BigDecimal("150"))
                 .qualityConfidence(new BigDecimal("0.95"))
                 .qualityStatus("CONFIRMED")
@@ -188,7 +188,7 @@ class BfmReadingServiceAssertedReadingTest {
         stubPersistence();
 
         // 140 is the scheme's last confirmed reading (see setUp): a genuine zero-consumption day.
-        // The duplicate-image guard compares what FlowVision read off the photo, and FlowVision never
+        // The duplicate-image guard compares what the OCR provider read off the photo, and OCR never
         // ran here, so it must not fire even though an image URL rode along with the submission.
         CreateReadingResponse response = service.createReading(
                 CreateReadingRequest.builder()
@@ -202,7 +202,7 @@ class BfmReadingServiceAssertedReadingTest {
 
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.getErrorCode()).isNull();
-        verify(flowVisionService, org.mockito.Mockito.never()).extractReading(anyString());
+        verify(defaultOcrExtractor, org.mockito.Mockito.never()).extractReading(anyString(), any());
     }
 
     private static CreateReadingRequest assertedRequest(BigDecimal value) {

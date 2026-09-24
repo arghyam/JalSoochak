@@ -46,7 +46,7 @@ public class AnomalyEvent {
      * surrogate id that means nothing in {@code analytics_schema}. This value is what the warehouse
      * joins on, against {@code fact_meter_reading_table.correlation_id}. That join is a
      * drill-down/trace rather than a counting key: the source column has no unique constraint and
-     * the Glific flows deliberately share one value across rows.
+     * the chatbot flows deliberately share one value across rows.
      */
     private String submissionCorrelationId;
 }

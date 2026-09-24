@@ -155,7 +155,7 @@ weekly-report:
 storage:
   enabled: ${STORAGE_ENABLED:false} # set to true to activate S3-compatible storage
   provider: ${STORAGE_PROVIDER:s3}
-  endpoint: ${STORAGE_ENDPOINT:} # blank = real AWS S3; set to MinIO/R2/etc. URL for custom providers
+  endpoint: ${STORAGE_ENDPOINT:} # required when enabled; URL of the S3-compatible store
   region: ${STORAGE_REGION:ap-south-1}
   access-key: ${STORAGE_ACCESS_KEY:}
   secret-key: ${STORAGE_SECRET_KEY:}

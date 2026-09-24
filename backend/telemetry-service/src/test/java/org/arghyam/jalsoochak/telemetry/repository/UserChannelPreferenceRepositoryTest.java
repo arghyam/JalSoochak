@@ -23,7 +23,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Per-contact reading-channel (BFM/ELM) preferences in {@code common_schema}. Contact ids are stored
- * and looked up in their digits-only form so the several shapes Glific sends all resolve to one row.
+ * and looked up in their digits-only form so the several shapes the chatbot sends all resolve to one row.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)

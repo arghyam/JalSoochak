@@ -155,9 +155,9 @@ public final class ReportPdfCanvas implements AutoCloseable {
      * Draws {@code uri} as an underlined, link-blue hyperlink and attaches a clickable
      * {@link PDAnnotationLink} over the same box.
      *
-     * <p>The annotation is what makes the link work in <em>every</em> viewer. Browsers and the MinIO
+     * <p>The annotation is what makes the link work in <em>every</em> viewer. Browsers and the storage
      * preview auto-detect bare URLs, but WhatsApp and most mobile PDF viewers do not — so without it
-     * the link works after a MinIO download and is dead after a WhatsApp one, which is exactly the
+     * the link works after a direct download and is dead after a WhatsApp one, which is exactly the
      * path every officer uses.</p>
      */
     public void linkText(PDFont f, float size, float x, float baselineY, String uri, float width)

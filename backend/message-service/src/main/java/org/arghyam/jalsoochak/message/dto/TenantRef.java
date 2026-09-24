@@ -14,7 +14,7 @@ import java.util.Locale;
  * such events are served by the system default provider.
  *
  * <p>This is a tenant's <em>identity</em>. The separate {@code TenantSchemaRef} inside
- * {@code GlificDeliveryReconciliationService} pairs an id with a tenant <em>schema name</em>
+ * {@code WhatsAppDeliveryReconciliationService} pairs an id with a tenant <em>schema name</em>
  * for its per-tenant queries, which is a different thing.
  */
 public record TenantRef(Integer id, String code) {

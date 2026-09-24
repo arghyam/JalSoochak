@@ -473,7 +473,7 @@ public class TelemetryTenantRepository {
      * submitted from.
      *
      * <p>Deliberately separate from {@link #schemeHasLatitudeAndLongitude}, which answers a
-     * different question for a different caller — {@code GlificSelectionService} uses that boolean
+     * different question for a different caller — {@code ConversationSelectionService} uses that boolean
      * to decide whether the flow asks for a location at all, and folding the two together would
      * couple the prompt decision to the distance check.
      *
@@ -2293,7 +2293,7 @@ public class TelemetryTenantRepository {
     /**
      * Overwrites <em>both</em> extracted_reading and confirmed_reading with the same value. No manual
      * correction may use this: a hand-typed or officer-supplied number is not an extraction, and writing
-     * it into extracted_reading destroys the only record of what FlowVision read off the meter photo and
+     * it into extracted_reading destroys the only record of what OCR read off the meter photo and
      * files the row as a "compliant" (extracted == confirmed) submission on the dashboards. Corrections
      * go through {@link #updateConfirmedReading(String, Long, BigDecimal, Long, Integer)} with a
      * {@code SOURCE_MANUAL} provenance marker. Kept only for a caller that genuinely re-states both.
@@ -2334,7 +2334,7 @@ public class TelemetryTenantRepository {
      * ROLLOVER-RESOLVE: updates confirmed_reading and, when {@code confirmedReadingSource} is non-null,
      * folds {@code confirmed_reading_source = ?} into the <em>same</em> UPDATE — so a manual confirmation
      * is a single round-trip instead of an UPDATE followed by a separate {@link #applyConfirmedReadingSource}
-     * write (this path is on the Glific confirm hot path, hit by ~every reading). A {@code null} source
+     * write (this path is on the chatbot confirm hot path, hit by ~every reading). A {@code null} source
      * leaves the provenance column untouched (callers that do not record provenance), and a non-null source
      * is a safe no-op on pre-migration tenants where the column is absent (guarded by columnExists).
      */

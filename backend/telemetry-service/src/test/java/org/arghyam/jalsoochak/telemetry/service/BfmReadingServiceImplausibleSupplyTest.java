@@ -6,7 +6,7 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
@@ -67,13 +67,13 @@ class BfmReadingServiceImplausibleSupplyTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private ReadingChannelResolver readingChannelResolver;
 
@@ -104,8 +104,8 @@ class BfmReadingServiceImplausibleSupplyTest {
 
     private BfmReadingService service(SupplyPlausibilityProperties.Mode mode) {
         return new BfmReadingService(
-                repo, flowVisionService, telemetryEventPublisher, tenantConfigRepository,
-                new ObjectMapper(), glificOperatorContextService, null, readingChannelResolver,
+                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
+                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
                 null,
@@ -275,7 +275,7 @@ class BfmReadingServiceImplausibleSupplyTest {
                 + "cannot land separately from the row")
         void imageSubmissionTakesTheTransactionalPath() {
             checkableScheme();
-            when(flowVisionService.extractReading(anyString())).thenReturn(FlowVisionResult.builder()
+            when(defaultOcrExtractor.extractReading(anyString(), isNull())).thenReturn(OcrReadingResult.builder()
                     .adjustedReading(new BigDecimal("1100"))
                     .qualityConfidence(new BigDecimal("0.95"))
                     .build());
@@ -351,7 +351,7 @@ class BfmReadingServiceImplausibleSupplyTest {
     class Scope {
 
         @Test
-        @DisplayName("a caller that did not opt in is never checked, so the Glific path is untouched")
+        @DisplayName("a caller that did not opt in is never checked, so the chatbot path is untouched")
         void unopposedCallerIsNotChecked() {
             // No checkableScheme(): under strict stubs, consulting the scheme's counts would fail.
             CreateReadingResponse response = submit(SupplyPlausibilityProperties.Mode.ENFORCE, "1100", false);
