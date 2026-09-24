@@ -260,7 +260,7 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
         }
 
         @Test
-        void nineArgumentOverloadPassesNoFlowVisionId() {
+        void nineArgumentOverloadPassesNoOcrCorrelationId() {
             onColumnExists(true);
 
             repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
