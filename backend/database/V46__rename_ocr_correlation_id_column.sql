@@ -16,6 +16,10 @@
 -- writer behind it; a timed-out rename is retried a few times before
 -- the migration gives up.
 --
+-- Provisioning is patched first, and provisioning already running the
+-- unpatched function is waited out, before the tenants to rename are
+-- listed, so no tenant can be created with the old names unseen.
+--
 -- The .sql.conf beside this file runs it outside Flyway's transaction,
 -- so each tenant's renames commit, releasing their locks, before the
 -- next tenant's are taken. A failure leaves the tenants before it
@@ -27,10 +31,59 @@
 -- exists, so run this with that cache off (TELEMETRY_CACHE_METADATA_ENABLED=false).
 -- ============================================================
 
+-- ── Part A: Ensure new tenant schemas get the new names ─────────────────────
+-- V32 appended the provisioning to create_tenant_schema() by patching its source, and V34 then
+-- renamed that function to create_tenant_schema_v34_base and wrapped it. Later migrations wrapped
+-- it again rather than copying its text, so the old names live in that one function body. It is
+-- found by content rather than by name, and patched in place from its full definition. A wrapper
+-- would leave every new tenant creating the old column only to rename it.
+DO $$
+DECLARE
+    fn          RECORD;
+    patched_def TEXT;
+    patched     INT := 0;
+BEGIN
+    FOR fn IN
+        SELECT p.oid, p.proname
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'common_schema'
+          AND p.prokind = 'f'
+          AND p.prosrc ILIKE '%flowvision%'
+    LOOP
+        patched_def := replace(replace(replace(
+            pg_get_functiondef(fn.oid),
+            'flowvision_correlation_id', 'ocr_correlation_id'),
+            '_flow_flowvision_corr', '_flow_ocr_corr'),
+            '-- FlowVision response correlation id', '-- OCR provider''s response correlation id');
+
+        IF patched_def ILIKE '%flowvision%' THEN
+            RAISE EXCEPTION 'V46 patch failed: common_schema.%() names the OCR provider in a form this migration does not rewrite',
+                fn.proname;
+        END IF;
+
+        EXECUTE patched_def;
+        patched := patched + 1;
+    END LOOP;
+
+    RAISE NOTICE 'V46: renamed the OCR correlation column in % tenant provisioning function(s)', patched;
+END $$;
+
+-- ── Part B: Wait out provisioning already running ───────────────────────────
+-- A create_tenant_schema() call that began before Part A committed runs the unpatched function, and
+-- Part C cannot see its schema until it commits. Every call runs inside the transaction of
+-- TenantManagementServiceImpl.createTenant, which writes tenant_master_table first, so a SHARE lock
+-- on that table waits for each such call to commit. It holds up only writers to that table, not
+-- readers, so it is taken before lock_timeout is set, and released as soon as it is granted.
+DO $$
+BEGIN
+    LOCK TABLE common_schema.tenant_master_table IN SHARE MODE;
+END $$;
+
 -- Session-level: SET LOCAL would not outlive the statement outside a transaction.
 SET lock_timeout = '3s';
 
--- ── Part A: Rename in existing tenant schemas ───────────────────────────────
+-- ── Part C: Rename in existing tenant schemas ───────────────────────────────
 DO $$
 DECLARE
     max_attempts  CONSTANT INT := 5;
@@ -85,41 +138,3 @@ BEGIN
 END $$;
 
 RESET lock_timeout;
-
--- ── Part B: Ensure new tenant schemas get the new names ─────────────────────
--- V32 appended the provisioning to create_tenant_schema() by patching its source, and V34 then
--- renamed that function to create_tenant_schema_v34_base and wrapped it. Later migrations wrapped
--- it again rather than copying its text, so the old names live in that one function body. It is
--- found by content rather than by name, and patched in place from its full definition. A wrapper
--- would leave every new tenant creating the old column only to rename it.
-DO $$
-DECLARE
-    fn          RECORD;
-    patched_def TEXT;
-    patched     INT := 0;
-BEGIN
-    FOR fn IN
-        SELECT p.oid, p.proname
-        FROM pg_proc p
-        JOIN pg_namespace n ON n.oid = p.pronamespace
-        WHERE n.nspname = 'common_schema'
-          AND p.prokind = 'f'
-          AND p.prosrc ILIKE '%flowvision%'
-    LOOP
-        patched_def := replace(replace(replace(
-            pg_get_functiondef(fn.oid),
-            'flowvision_correlation_id', 'ocr_correlation_id'),
-            '_flow_flowvision_corr', '_flow_ocr_corr'),
-            '-- FlowVision response correlation id', '-- OCR provider''s response correlation id');
-
-        IF patched_def ILIKE '%flowvision%' THEN
-            RAISE EXCEPTION 'V46 patch failed: common_schema.%() names the OCR provider in a form this migration does not rewrite',
-                fn.proname;
-        END IF;
-
-        EXECUTE patched_def;
-        patched := patched + 1;
-    END LOOP;
-
-    RAISE NOTICE 'V46: renamed the OCR correlation column in % tenant provisioning function(s)', patched;
-END $$;

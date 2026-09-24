@@ -33,7 +33,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * tenant schemas are then provisioned — two fully, one left bare — and V46 runs while another session
  * holds a lock on the later full tenant's {@code flow_reading_table} for longer than V46's
  * {@code lock_timeout}, so the migration only succeeds if it retries. PostgreSQL logs notices here,
- * so the retry can be read back from its log.
+ * so the retry can be read back from its log. A fourth tenant is still being provisioned, its
+ * transaction open, when V46 starts.
  */
 @Testcontainers
 @DisplayName("V46 OCR correlation column rename migration")
@@ -50,6 +51,8 @@ class OcrCorrelationIdColumnMigrationIntegrationTest {
     private static final String BARE_TENANT = "tenant_bb";
     /** Provisioned after V46, through the patched function chain. */
     private static final String NEW_TENANT = "tenant_cc";
+    /** Provisioned by the unpatched function in a transaction that commits only once V46 has started. */
+    private static final String IN_FLIGHT_TENANT = "tenant_dd";
 
     /** Longer than V46's 3s lock_timeout, and well inside its five attempts. */
     private static final Duration LOCK_HELD_FOR = Duration.ofMillis(4_500);
@@ -64,6 +67,7 @@ class OcrCorrelationIdColumnMigrationIntegrationTest {
     private static Integer preV46AttributeNumber;
     private static Duration v46Duration;
     private static boolean earlierTenantRenamedWhileV46Waited;
+    private static boolean v46WaitedForInFlightProvisioning;
 
     @BeforeAll
     static void provisionThenMigrate() throws Exception {
@@ -76,15 +80,30 @@ class OcrCorrelationIdColumnMigrationIntegrationTest {
         jdbcTemplate.execute("CREATE SCHEMA " + BARE_TENANT);
         preV46AttributeNumber = attributeNumber(EXISTING_TENANT, PRE_V46_COLUMN);
 
-        CountDownLatch locked = new CountDownLatch(1);
-        CompletableFuture<Void> lockHolder = CompletableFuture.runAsync(() -> holdLock(locked));
-        assertThat(locked.await(10, TimeUnit.SECONDS)).as("lock acquired").isTrue();
+        long start;
+        CompletableFuture<Void> migration;
+        CompletableFuture<Void> lockHolder;
+        try (Connection provisioning = DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             Statement statement = provisioning.createStatement()) {
+            // Stands in for createTenant's transaction: its tenant_master_table write, then provisioning.
+            provisioning.setAutoCommit(false);
+            statement.execute("LOCK TABLE common_schema.tenant_master_table IN ROW EXCLUSIVE MODE");
+            statement.execute("SELECT common_schema.create_tenant_schema('" + IN_FLIGHT_TENANT + "')");
 
-        long start = System.nanoTime();
-        CompletableFuture<Void> migration =
-                CompletableFuture.runAsync(() -> flyway(MigrationVersion.LATEST).migrate());
-        earlierTenantRenamedWhileV46Waited = awaitLockWaiterOn(EXISTING_TENANT, migration)
-                && attributeNumber(EARLIER_TENANT, COLUMN) != null;
+            start = System.nanoTime();
+            migration = CompletableFuture.runAsync(() -> flyway(MigrationVersion.LATEST).migrate());
+            v46WaitedForInFlightProvisioning =
+                    awaitLockWaiterOn("common_schema.tenant_master_table", migration);
+
+            CountDownLatch locked = new CountDownLatch(1);
+            lockHolder = CompletableFuture.runAsync(() -> holdLock(locked));
+            assertThat(locked.await(10, TimeUnit.SECONDS)).as("lock acquired").isTrue();
+            provisioning.commit();
+        }
+        earlierTenantRenamedWhileV46Waited =
+                awaitLockWaiterOn(EXISTING_TENANT + ".flow_reading_table", migration)
+                        && attributeNumber(EARLIER_TENANT, COLUMN) != null;
         migration.join();
         v46Duration = Duration.ofNanos(System.nanoTime() - start);
         lockHolder.join();
@@ -119,17 +138,16 @@ class OcrCorrelationIdColumnMigrationIntegrationTest {
         }
     }
 
-    /** Whether a session queued for a lock on the schema's flow_reading_table before the migration ended. */
-    private static boolean awaitLockWaiterOn(String schema, CompletableFuture<Void> migration)
+    /** Whether a session queued for a lock on the table before the migration ended. */
+    private static boolean awaitLockWaiterOn(String table, CompletableFuture<Void> migration)
             throws InterruptedException {
         long deadline = System.nanoTime() + LOCK_HELD_FOR.toNanos();
         while (!migration.isDone() && System.nanoTime() < deadline) {
             if (Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
                     SELECT EXISTS (
                         SELECT 1 FROM pg_locks
-                        WHERE relation = to_regclass(format('%I.flow_reading_table', ?::text))
-                          AND NOT granted)
-                    """, Boolean.class, schema))) {
+                        WHERE relation = to_regclass(?) AND NOT granted)
+                    """, Boolean.class, table))) {
                 return true;
             }
             Thread.sleep(50);
@@ -178,6 +196,15 @@ class OcrCorrelationIdColumnMigrationIntegrationTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT to_regclass(?) IS NULL", Boolean.class, BARE_TENANT + ".flow_reading_table"))
                 .isTrue();
+    }
+
+    @Test
+    @DisplayName("A tenant still being provisioned when V46 starts is waited for, then renamed")
+    void renamesATenantProvisionedWhileV46Starts() {
+        assertThat(attributeNumber(IN_FLIGHT_TENANT, PRE_V46_COLUMN)).isNull();
+        assertThat(attributeNumber(IN_FLIGHT_TENANT, COLUMN)).isNotNull();
+        assertThat(indexesOn(IN_FLIGHT_TENANT, COLUMN)).containsExactly("idx_tenant_dd_flow_ocr_corr");
+        assertThat(v46WaitedForInFlightProvisioning).as("V46 waited for the open provisioning").isTrue();
     }
 
     @Test
