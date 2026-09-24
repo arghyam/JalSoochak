@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.tenant.controller;
+package org.arghyam.jalsoochak.tenant.controller.messaging;
 
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
@@ -33,18 +33,18 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * MESSAGING-PROVIDER-SECRETS: security boundary tests for
- * {@link SystemMessagingSecretController}.
+ * {@link MessagingSecretController}.
  *
  * <p>Both endpoints are SUPER_USER only, the per-tenant rotation included. A STATE_ADMIN
  * reaching the rotation for their own tenant would be the wrong boundary: rotating a key is
  * an operational response to a suspected exposure, and the state admin is the party whose
  * credentials may have leaked.
  */
-@WebMvcTest(SystemMessagingSecretController.class)
+@WebMvcTest(MessagingSecretController.class)
 @Import({SecurityConfig.class, JwtAuthConverter.class, SecurityExceptionHandler.class,
         GlobalExceptionHandler.class})
-@DisplayName("System Messaging Secret Controller Security Tests")
-class SystemMessagingSecretControllerSecurityTest {
+@DisplayName("Messaging Secret Controller Security Tests")
+class MessagingSecretControllerSecurityTest {
 
     private static final String REWRAP = "/api/v1/system/messaging-secrets/rewrap";
     private static final String ROTATE = "/api/v1/system/messaging-secrets/tenants/101/rotate";

@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.tenant.controller;
+package org.arghyam.jalsoochak.tenant.controller.messaging;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;

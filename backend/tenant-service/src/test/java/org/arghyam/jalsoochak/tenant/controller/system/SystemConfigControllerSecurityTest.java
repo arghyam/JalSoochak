@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.tenant.controller;
+package org.arghyam.jalsoochak.tenant.controller.system;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -35,14 +35,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * Security boundary tests for SystemController.
+ * Security boundary tests for SystemConfigController.
  * Verifies that SUPER_USER-only endpoints enforce authentication and role authorization.
  * Filters are enabled (no addFilters = false) to exercise the real security chain.
  */
-@WebMvcTest(SystemController.class)
+@WebMvcTest(SystemConfigController.class)
 @Import({SecurityConfig.class, JwtAuthConverter.class, SecurityExceptionHandler.class})
-@DisplayName("System Controller Security Tests")
-class SystemControllerSecurityTest {
+@DisplayName("System Config Controller Security Tests")
+class SystemConfigControllerSecurityTest {
 
     @Autowired
     private MockMvc mockMvc;

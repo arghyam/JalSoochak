@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.tenant.controller;
+package org.arghyam.jalsoochak.tenant.controller.messaging;
 
 import org.arghyam.jalsoochak.tenant.config.CommonApiResponses;
 import org.arghyam.jalsoochak.tenant.dto.common.ApiErrorResponseDTO;
@@ -36,7 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 @Tag(name = "Messaging Secret Administration",
         description = "Master-key and tenant data-key rotation. Super User only.")
 @CommonApiResponses
-public class SystemMessagingSecretController {
+public class MessagingSecretController {
 
     private final TenantMessagingSecretService messagingSecretService;
 

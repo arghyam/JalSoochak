@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.tenant.controller;
+package org.arghyam.jalsoochak.tenant.controller.messaging;
 
 import org.arghyam.jalsoochak.tenant.config.CommonApiResponses;
 import org.arghyam.jalsoochak.tenant.config.RequiresTenantAccess;

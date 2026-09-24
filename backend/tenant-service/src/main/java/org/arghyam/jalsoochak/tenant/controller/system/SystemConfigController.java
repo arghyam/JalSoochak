@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.tenant.controller;
+package org.arghyam.jalsoochak.tenant.controller.system;
 
 import java.util.List;
 import java.util.Set;
@@ -33,7 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Tag(name = "System Configuration", description = "Endpoints for managing global system settings")
 @CommonApiResponses
-public class SystemController {
+public class SystemConfigController {
 
     private final SystemManagementService systemManagementService;
 

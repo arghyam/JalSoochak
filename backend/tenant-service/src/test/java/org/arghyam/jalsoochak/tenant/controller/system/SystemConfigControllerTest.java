@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.tenant.controller;
+package org.arghyam.jalsoochak.tenant.controller.system;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -35,10 +35,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-@WebMvcTest(SystemController.class)
+@WebMvcTest(SystemConfigController.class)
 @AutoConfigureMockMvc(addFilters = false)
-@DisplayName("System Controller Tests")
-class SystemControllerTest {
+@DisplayName("System Config Controller Tests")
+class SystemConfigControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
