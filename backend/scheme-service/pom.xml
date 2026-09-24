@@ -128,11 +128,6 @@
             <artifactId>commons-csv</artifactId>
             <version>1.11.0</version>
         </dependency>
-        <dependency>
-            <groupId>io.minio</groupId>
-            <artifactId>minio</artifactId>
-            <version>8.5.7</version>
-        </dependency>
         <!-- AWS SDK v2 S3 (provider-agnostic object storage — works with any S3-compatible
              store). Includes the S3Presigner used for presigned download URLs. -->
         <dependency>

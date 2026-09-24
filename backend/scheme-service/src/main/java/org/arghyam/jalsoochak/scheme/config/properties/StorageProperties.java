@@ -41,7 +41,8 @@ public class StorageProperties {
     /**
      * Public base URL for presigned GET URLs returned to clients, for a store behind a
      * reverse proxy or NAT whose internal {@code storage.endpoint} differs from its external
-     * address. Leave blank to return the URL exactly as the SDK signs it.
+     * address. Must be an absolute {@code http(s)} URL with a host and no user-info, query or
+     * fragment, or startup fails. Leave blank to return the URL exactly as the SDK signs it.
      */
     private String presignedBaseUrl;
 
