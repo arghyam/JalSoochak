@@ -29,7 +29,7 @@ public class AnomalyQueryService {
         LocalDate safeEndDate = (endDate != null) ? endDate : LocalDate.now();
         LocalDate safeStartDate = (startDate != null) ? startDate : safeEndDate.minusDays(30);
 
-        // anomaly_table.created_at is plain TIMESTAMP holding UTC, so use UTC-naive LocalDateTime bounds.
+        // fact_anomaly_table.created_at is plain TIMESTAMP holding UTC, so use UTC-naive LocalDateTime bounds.
         LocalDateTime from = safeStartDate.atStartOfDay();
         LocalDateTime to = safeEndDate.plusDays(1).atStartOfDay(); // exclusive upper bound
 

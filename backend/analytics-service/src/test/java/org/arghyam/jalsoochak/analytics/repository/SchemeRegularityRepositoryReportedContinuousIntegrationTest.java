@@ -75,7 +75,7 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
         jdbcTemplate.execute("""
                 TRUNCATE TABLE
                     analytics_schema.submission_attempt_table,
-                    analytics_schema.anomaly_table,
+                    analytics_schema.fact_anomaly_table,
                     analytics_schema.fact_meter_reading_table,
                     analytics_schema.dim_user_scheme_mapping_table,
                     analytics_schema.dim_user_table,
@@ -222,7 +222,7 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
 
     private void anomaly(int schemeId, String type, String createdAtUtc) {
         jdbcTemplate.update("""
-                INSERT INTO analytics_schema.anomaly_table
+                INSERT INTO analytics_schema.fact_anomaly_table
                 (uuid, type, scheme_id, tenant_id, status, created_at)
                 VALUES (?, ?, ?, ?, 1, ?::timestamp)
                 """, "u-" + schemeId + "-" + type, type, schemeId, TENANT, createdAtUtc);

@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ImportAutoConfiguration(FlywayAutoConfiguration.class)
-class DimOperatorAttendanceRepositoryIntegrationTest {
+class FactOperatorAttendanceRepositoryIntegrationTest {
 
     private static final UUID USER_A = UUID.fromString("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
     private static final UUID USER_B = UUID.fromString("b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a12");
@@ -56,13 +56,13 @@ class DimOperatorAttendanceRepositoryIntegrationTest {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
-    private DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
+    private FactOperatorAttendanceRepository factOperatorAttendanceRepository;
 
     @BeforeEach
     void setUp() {
         jdbcTemplate.execute("""
                 TRUNCATE TABLE
-                    analytics_schema.dim_operator_attendance_table,
+                    analytics_schema.fact_operator_attendance_table,
                     analytics_schema.fact_meter_reading_table,
                     analytics_schema.fact_water_quantity_table,
                     analytics_schema.fact_escalation_table,
@@ -124,7 +124,7 @@ class DimOperatorAttendanceRepositoryIntegrationTest {
                 """);
 
         jdbcTemplate.update("""
-                INSERT INTO analytics_schema.dim_operator_attendance_table
+                INSERT INTO analytics_schema.fact_operator_attendance_table
                 (tenant_id, date_key, user_id, scheme_id, attendance, remark, remark_by, created_at, updated_at)
                 VALUES
                 (1, 20260101, 11, 1, 1, 'present', NULL, NOW(), NOW()),
@@ -137,20 +137,20 @@ class DimOperatorAttendanceRepositoryIntegrationTest {
     @Test
     void findDayWiseByUserUuidAndDateRange_filtersByUuidAndRange_ordersByDateAndScheme() {
         List<OperatorAttendanceDayItemDto> jan1Only =
-                dimOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER_A, D1, D1);
+                factOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER_A, D1, D1);
 
         assertThat(jan1Only).hasSize(1);
         assertThat(jan1Only.getFirst().getDate()).isEqualTo(D1);
         assertThat(jan1Only.getFirst().getAttendance()).isEqualTo(1);
 
         List<OperatorAttendanceDayItemDto> jan1to2 =
-                dimOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER_A, D1, D2);
+                factOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER_A, D1, D2);
         assertThat(jan1to2).hasSize(2);
         assertThat(jan1to2.get(0).getDate()).isEqualTo(D1);
         assertThat(jan1to2.get(1).getDate()).isEqualTo(D2);
 
         List<OperatorAttendanceDayItemDto> full =
-                dimOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER_A, D1, D3);
+                factOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER_A, D1, D3);
         assertThat(full).hasSize(3);
         assertThat(full.get(2).getDate()).isEqualTo(D3);
         assertThat(full.get(2).getAttendance()).isEqualTo(1);
@@ -159,7 +159,7 @@ class DimOperatorAttendanceRepositoryIntegrationTest {
     @Test
     void findDayWiseByUserUuidAndDateRange_otherUser_doesNotSeePeerRows() {
         List<OperatorAttendanceDayItemDto> b =
-                dimOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER_B, D1, D3);
+                factOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER_B, D1, D3);
         assertThat(b).hasSize(1);
         assertThat(b.getFirst().getDate()).isEqualTo(D1);
         assertThat(b.getFirst().getAttendance()).isEqualTo(1);

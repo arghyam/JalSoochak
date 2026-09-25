@@ -14,12 +14,12 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "dim_operator_attendance_table", schema = "analytics_schema")
+@Table(name = "fact_operator_attendance_table", schema = "analytics_schema")
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class DimOperatorAttendance {
+public class FactOperatorAttendance {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

@@ -36,7 +36,7 @@ public enum EscalationType {
      * row: only {@link #WATER_ANOMALIES} do. {@link #IMPLAUSIBLE_WATER_SUPPLY} sits here despite its
      * name because it is raised against the operator who submitted the reading, and no escalation is
      * wanted for it — the rejection is already answered to the caller and recorded on
-     * {@code anomaly_table}.
+     * {@code fact_anomaly_table}.
      *
      * <p>{@link #LOCATION_MISMATCH} sits here for two reasons. There is nobody to escalate to: on the
      * WhatsApp path the operator was warned and chose to proceed, and on the state-IT API the reading

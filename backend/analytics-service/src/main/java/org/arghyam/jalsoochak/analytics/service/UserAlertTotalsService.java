@@ -32,7 +32,7 @@ public class UserAlertTotalsService {
 
         long totalEscalationCount = escalationQueryService.countEscalations(tenantId, userId, safeStartDate, safeEndDate);
 
-        // anomaly_table.created_at is plain TIMESTAMP holding UTC, so use UTC-naive LocalDateTime bounds.
+        // fact_anomaly_table.created_at is plain TIMESTAMP holding UTC, so use UTC-naive LocalDateTime bounds.
         LocalDateTime from = safeStartDate.atStartOfDay();
         LocalDateTime to = safeEndDate.plusDays(1).atStartOfDay();
         long totalAnomalyCount = anomalyRepository.countAnomaliesForMappedUserSchemesInRange(tenantId, userId, from, to);

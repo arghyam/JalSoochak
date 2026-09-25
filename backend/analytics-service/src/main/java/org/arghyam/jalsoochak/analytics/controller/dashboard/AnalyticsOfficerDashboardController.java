@@ -44,7 +44,7 @@ public class AnalyticsOfficerDashboardController {
     @GetMapping("/operator-attendance")
     @Operation(
             summary = "operator attendance for a user (by UUID) within an optional date range",
-            description = "Defaults: end_date = today, start_date = end_date minus 30 days. Returns one entry per calendar day in range; days with no rows are attendance 0 (absent). Multiple schemes on the same day use max(attendance). Source: dim_operator_attendance_table, dim_user_table (uuid), dim_date_table.",
+            description = "Defaults: end_date = today, start_date = end_date minus 30 days. Returns one entry per calendar day in range; days with no rows are attendance 0 (absent). Multiple schemes on the same day use max(attendance). Source: fact_operator_attendance_table, dim_user_table (uuid), dim_date_table.",
             responses = {
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "200",

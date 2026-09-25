@@ -15,7 +15,7 @@ import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.arghyam.jalsoochak.analytics.repository.AnomalyRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimDateRepository;
-import org.arghyam.jalsoochak.analytics.repository.DimOperatorAttendanceRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactOperatorAttendanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
@@ -67,7 +67,7 @@ class FactServiceImplTest {
     @Mock
     private DimDateRepository dimDateRepository;
     @Mock
-    private DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
+    private FactOperatorAttendanceRepository factOperatorAttendanceRepository;
     @Mock
     private org.arghyam.jalsoochak.analytics.repository.SubmissionAttemptRepository submissionAttemptRepository;
 
@@ -147,7 +147,7 @@ class FactServiceImplTest {
         event.setReadingDate("2026-01-01");
         event.setCorrelationId("flow-corr-77");
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
 
         service.ingestMeterReading(event);
@@ -169,7 +169,7 @@ class FactServiceImplTest {
         event.setReadingAt("2026-01-01T10:15:00");
         event.setReadingDate("2026-01-01");
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
 
         service.ingestMeterReading(event);
@@ -241,7 +241,7 @@ class FactServiceImplTest {
         event.setSubmissionStatus(1);
         event.setReadingType(0);
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
 
         service.ingestMeterReading(event);
@@ -273,7 +273,7 @@ class FactServiceImplTest {
 
         stubReadingLookups("95", "100");
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
         when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
                 .thenReturn(Optional.empty());
@@ -290,7 +290,7 @@ class FactServiceImplTest {
         MeterReadingEvent event = readingEvent("150", "2026-01-02");
         stubReadingLookups("150", "100");
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
         when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
                 .thenReturn(Optional.empty());
@@ -309,7 +309,7 @@ class FactServiceImplTest {
         // A first-ever reading: nothing before this date.
         stubReadingLookups("1250000", null);
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
         when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
                 .thenReturn(Optional.empty());
@@ -333,7 +333,7 @@ class FactServiceImplTest {
         MeterReadingEvent event = readingEvent("1e16", "2026-01-02");
         stubReadingLookups("1e16", "100");
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
 
         service.ingestMeterReading(event);
@@ -368,7 +368,7 @@ class FactServiceImplTest {
         MeterReadingEvent event = readingEvent("175", "2026-01-04");
         stubReadingLookups("175", "100");
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
         when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
                 .thenReturn(Optional.empty());
@@ -389,7 +389,7 @@ class FactServiceImplTest {
         MeterReadingEvent event = readingEvent("120", "2026-01-02");
         stubReadingLookups("150", "100");
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
         when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
                 .thenReturn(Optional.empty());
@@ -445,7 +445,7 @@ class FactServiceImplTest {
         event.setChannel(ReadingChannel.ELM.getCode());
 
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
 
         service.ingestMeterReading(event);
@@ -887,7 +887,7 @@ class FactServiceImplTest {
         event.setReadingDate("2026-01-01");
         event.setSubmissionStatus(null);
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.of(new org.arghyam.jalsoochak.analytics.entity.DimDate()));
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(false);
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(false);
 
         service.ingestMeterReading(event);
 
@@ -907,7 +907,7 @@ class FactServiceImplTest {
         event.setReadingType(null);
         event.setSubmissionStatus(1);
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.of(new org.arghyam.jalsoochak.analytics.entity.DimDate()));
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(false);
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(false);
 
         service.ingestMeterReading(event);
 
@@ -926,11 +926,11 @@ class FactServiceImplTest {
         event.setReadingDate("2026-01-01");
         event.setSubmissionStatus(1);
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.of(new org.arghyam.jalsoochak.analytics.entity.DimDate()));
-        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(true);
+        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(true);
 
         service.ingestMeterReading(event);
 
-        verify(dimOperatorAttendanceRepository, never()).save(any());
+        verify(factOperatorAttendanceRepository, never()).save(any());
     }
 
     @Test

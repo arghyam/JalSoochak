@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.analytics.service;
 
 import org.arghyam.jalsoochak.analytics.dto.response.OperatorAttendanceDayItemDto;
-import org.arghyam.jalsoochak.analytics.repository.DimOperatorAttendanceRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactOperatorAttendanceRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -24,7 +24,7 @@ class OperatorAttendanceQueryServiceTest {
     private static final UUID USER = UUID.fromString("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
 
     @Mock
-    private DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
+    private FactOperatorAttendanceRepository factOperatorAttendanceRepository;
 
     @InjectMocks
     private OperatorAttendanceQueryService operatorAttendanceQueryService;
@@ -33,7 +33,7 @@ class OperatorAttendanceQueryServiceTest {
     void getDayWiseAttendance_fillsMissingDaysWithAbsent() {
         LocalDate start = LocalDate.of(2026, 1, 1);
         LocalDate end = LocalDate.of(2026, 1, 3);
-        when(dimOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER, start, end))
+        when(factOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER, start, end))
                 .thenReturn(List.of(
                         OperatorAttendanceDayItemDto.builder()
                                 .date(LocalDate.of(2026, 1, 2))
@@ -56,7 +56,7 @@ class OperatorAttendanceQueryServiceTest {
     @Test
     void getDayWiseAttendance_multipleRowsSameDay_usesMaxAttendance() {
         LocalDate d = LocalDate.of(2026, 2, 10);
-        when(dimOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER, d, d))
+        when(factOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER, d, d))
                 .thenReturn(List.of(
                         OperatorAttendanceDayItemDto.builder().date(d).attendance(0).build(),
                         OperatorAttendanceDayItemDto.builder().date(d).attendance(1).build()
@@ -82,7 +82,7 @@ class OperatorAttendanceQueryServiceTest {
     @Test
     void getDayWiseAttendance_sameStartAndEnd_emptyRepo_returnsSingleAbsentDay() {
         LocalDate d = LocalDate.of(2026, 3, 15);
-        when(dimOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER, d, d))
+        when(factOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(USER, d, d))
                 .thenReturn(List.of());
 
         List<OperatorAttendanceDayItemDto> result =
@@ -90,6 +90,6 @@ class OperatorAttendanceQueryServiceTest {
 
         assertThat(result).containsExactly(
                 OperatorAttendanceDayItemDto.builder().date(d).attendance(0).build());
-        verify(dimOperatorAttendanceRepository).findDayWiseByUserUuidAndDateRange(eq(USER), eq(d), eq(d));
+        verify(factOperatorAttendanceRepository).findDayWiseByUserUuidAndDateRange(eq(USER), eq(d), eq(d));
     }
 }
