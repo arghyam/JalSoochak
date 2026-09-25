@@ -54,10 +54,14 @@ public class MessageTemplateService {
     }
 
     /**
-     * Returns the tenant-specific welcome flow ID from {@code welcome_flow_id}, if configured.
+     * Returns the tenant-specific welcome flow ID if configured.
+     *
+     * <p>Looks up the config keys in order:
+     * {@code welcome_flow_id} → {@code glific_welcome_flow_id} (legacy).</p>
      */
     public Optional<String> findWelcomeFlowId(int tenantId) {
         return findConfigValue(tenantId, "welcome_flow_id")
+                .or(() -> findConfigValue(tenantId, "glific_welcome_flow_id"))
                 .map(String::trim)
                 .filter(value -> !value.isBlank());
     }

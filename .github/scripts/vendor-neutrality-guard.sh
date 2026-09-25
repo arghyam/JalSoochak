@@ -38,13 +38,10 @@ APPLIED_MIGRATIONS=(
   backend/analytics-service/src/main/resources/db/migration/V48__add_submission_linkage_to_anomaly_and_fact_meter_reading.sql
 )
 
-# Rule RENAMING_MIGRATION — a migration that renames or retires a vendor-named column, index,
-# function body or stored config key has to name what it changes in order to find it.
+# Rule RENAMING_MIGRATION — a migration that renames a vendor-named column, index or function body
+# has to name what it renames in order to find it.
 RENAMING_MIGRATIONS=(
-  backend/database/V45__copy_message_templates_config_key_to_whatsapp_name.sql
   backend/database/V46__rename_ocr_correlation_id_column.sql
-  backend/database/V49__retire_legacy_message_templates_config_key.sql
-  backend/database/V50__retire_legacy_welcome_flow_id_config_key.sql
 )
 
 # Rule HISTORICAL_RECORD — completed plans, code reviews and architecture decision records record
@@ -97,11 +94,16 @@ IFS= read -r -d '' ALLOWED_TOKENS <<'RULES' || true
 .  [a-z][a-z0-9+.-]*://[^\s"'<>()]+
 .  (?<![\w.-])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|in|example)(?![\w.-])
 
-# Rule RENAMING_MIGRATION_TEST — the integration test of a RENAMING_MIGRATION refers to what it
-# changes by the name it had before the migration ran, to set it up and to check it is gone.
-/src/test/.*MigrationIntegrationTest\.java$  GLIFIC_MESSAGE_TEMPLATES
-/src/test/.*MigrationIntegrationTest\.java$  glific_welcome_flow_id
-/src/test/.*MigrationIntegrationTest\.java$  flowvision_correlation_id
+# Rule LEGACY_ALIAS — deprecated names still served, read or emitted for one release, so that each
+# side of the contract can move on its own. They go when the aliases are removed.
+.  readings/glific|READINGS_PREFIX \+ "/glific"
+# Migrations name this key as stored data (V45 copies its rows). The change that removes this token
+# has to add each of them to APPLIED_MIGRATIONS, or they fail this guard.
+.  GLIFIC_MESSAGE_TEMPLATES
+.  glific_welcome_flow_id
+.  \bglific_id\b|\bgetGlificId\b
+.  glificLanguageId
+.  flowvision_correlation_id
 
 # Rule PUBLIC_ERROR_CODE — error codes returned to API callers. Renaming one is a contract change
 # that needs its own transition.

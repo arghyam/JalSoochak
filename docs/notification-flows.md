@@ -239,9 +239,12 @@ Published by `user-service` (`UserEventPublisher.publishPumpOperatorOnboardedAft
   "tenantCode": "mp",
   "tenantId": 42,
   "whatsappLanguageId": "3",
+  "glificLanguageId": "3",
   "pumpOperatorPhones": ["919876543210", "919876543211"]
 }
 ```
+
+`glificLanguageId` is the deprecated spelling of `whatsappLanguageId`, emitted alongside it for one release. message-service reads `whatsappLanguageId` and falls back to `glificLanguageId` only when it is absent.
 
 ### message-service: handleSendWelcomeMessage
 
@@ -302,7 +305,7 @@ Any upstream service publishes a `SEND_LOGIN_OTP` event to `common-topic`. The e
 }
 ```
 
-Either `whatsapp_contact_id` or `officerPhoneNumber` must be present. If both are provided, `whatsapp_contact_id` takes priority.
+Either `whatsapp_contact_id` or `officerPhoneNumber` must be present. If both are provided, `whatsapp_contact_id` takes priority. The deprecated spelling `glific_id` is still accepted for one release, and is read only when `whatsapp_contact_id` is absent.
 
 ### message-service: handleSendLoginOtp
 

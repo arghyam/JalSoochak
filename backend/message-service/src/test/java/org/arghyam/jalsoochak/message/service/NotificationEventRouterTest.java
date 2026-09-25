@@ -762,20 +762,6 @@ class NotificationEventRouterTest {
     }
 
     @Test
-    void route_sendsLoginOtp_usingOptIn_whenContactIdAbsent() {
-        when(whatsAppSender.optIn("91XXXXXXXXX1")).thenReturn(77L);
-        when(whatsAppChannel.sendLoginOtp(77L, "654321")).thenReturn(true);
-
-        router.route("""
-                {"eventType":"SEND_LOGIN_OTP","OTP":"654321","deliveryChannel":"WHATSAPP",
-                 "officerPhoneNumber":"91XXXXXXXXX1"}
-                """);
-
-        verify(whatsAppSender).optIn("91XXXXXXXXX1");
-        verify(whatsAppChannel).sendLoginOtp(77L, "654321");
-    }
-
-    @Test
     void route_skipsLoginOtp_whenOtpIsBlank() {
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"","whatsapp_contact_id":"42"}
@@ -914,6 +900,116 @@ class NotificationEventRouterTest {
                 {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
                  "whatsappLanguageId":0,
                  "pumpOperatorPhones":["919777777777"]}
+                """);
+
+        verifyNoInteractions(whatsAppSender, jdbcTemplate);
+    }
+
+    // ─────────── legacy field names (glific_id, glificLanguageId) ─────────────
+    // Producers emit both spellings for one release; the router prefers the new one and falls back
+    // on presence, not value.
+
+    @Test
+    void route_sendsLoginOtp_usingLegacyContactId_whenNewFieldAbsent() {
+        when(whatsAppChannel.sendLoginOtp(42L, "654321")).thenReturn(true);
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"654321","deliveryChannel":"WHATSAPP","glific_id":42}
+                """);
+
+        verify(whatsAppChannel).sendLoginOtp(42L, "654321");
+        verify(whatsAppSender, never()).optIn(anyString());
+    }
+
+    @Test
+    void route_sendsLoginOtp_usingLegacyContactId_whenNewFieldIsNull() {
+        when(whatsAppChannel.sendLoginOtp(42L, "654321")).thenReturn(true);
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"654321","deliveryChannel":"WHATSAPP",
+                 "whatsapp_contact_id":null,"glific_id":42}
+                """);
+
+        verify(whatsAppChannel).sendLoginOtp(42L, "654321");
+    }
+
+    @Test
+    void route_sendsLoginOtp_preferringNewContactId_whenBothPresent() {
+        when(whatsAppChannel.sendLoginOtp(42L, "654321")).thenReturn(true);
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"654321","deliveryChannel":"WHATSAPP",
+                 "whatsapp_contact_id":42,"glific_id":99}
+                """);
+
+        verify(whatsAppChannel).sendLoginOtp(42L, "654321");
+        verify(whatsAppChannel, never()).sendLoginOtp(eq(99L), anyString());
+    }
+
+    @Test
+    void route_sendsLoginOtp_usingOptIn_whenNeitherContactIdFieldPresent() {
+        when(whatsAppSender.optIn("91XXXXXXXXX1")).thenReturn(77L);
+        when(whatsAppChannel.sendLoginOtp(77L, "654321")).thenReturn(true);
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"654321","deliveryChannel":"WHATSAPP",
+                 "officerPhoneNumber":"91XXXXXXXXX1"}
+                """);
+
+        verify(whatsAppSender).optIn("91XXXXXXXXX1");
+        verify(whatsAppChannel).sendLoginOtp(77L, "654321");
+    }
+
+    @Test
+    void route_onboardsStaffSync_usingLegacyLanguageId_whenNewFieldAbsent() {
+        router.route("""
+                {"eventType":"STAFF_SYNC_COMPLETED","glificLanguageId":"2","tenantSchema":"tenant_mp",
+                 "pumpOperators":[{"userId":10,"phone":"91XXXXXXXXX1"}]}
+                """);
+
+        verify(whatsAppChannel).onboardOperator("91XXXXXXXXX1", 2);
+    }
+
+    @Test
+    void route_onboardsStaffSync_preferringNewLanguageId_whenBothPresent() {
+        router.route("""
+                {"eventType":"STAFF_SYNC_COMPLETED","whatsappLanguageId":"3","glificLanguageId":"2",
+                 "tenantSchema":"tenant_mp","pumpOperators":[{"userId":10,"phone":"91XXXXXXXXX1"}]}
+                """);
+
+        verify(whatsAppChannel).onboardOperator("91XXXXXXXXX1", 3);
+        verify(whatsAppChannel, never()).onboardOperator(anyString(), eq(2));
+    }
+
+    @Test
+    void route_skipsStaffSync_whenNewLanguageIdIsZero_evenIfLegacyIsSet() {
+        router.route("""
+                {"eventType":"STAFF_SYNC_COMPLETED","whatsappLanguageId":"0","glificLanguageId":"2",
+                 "tenantSchema":"tenant_mp","pumpOperators":[{"userId":10,"phone":"91XXXXXXXXX1"}]}
+                """);
+
+        verifyNoInteractions(whatsAppChannel);
+    }
+
+    @Test
+    void route_updatesLanguage_usingLegacyLanguageId_whenNewFieldIsNull() {
+        stubUserLookup("mp", "91XXXXXXXXX1", List.of(99L));
+
+        router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
+                 "whatsappLanguageId":null,"glificLanguageId":"3",
+                 "pumpOperatorPhones":["91XXXXXXXXX1"]}
+                """);
+
+        verify(whatsAppSender).updateContactLanguage(99L, 3);
+    }
+
+    @Test
+    void route_skipsUpdateLanguage_whenNewLanguageIdIsZero_evenIfLegacyIsSet() {
+        router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
+                 "whatsappLanguageId":"0","glificLanguageId":"3",
+                 "pumpOperatorPhones":["91XXXXXXXXX1"]}
                 """);
 
         verifyNoInteractions(whatsAppSender, jdbcTemplate);

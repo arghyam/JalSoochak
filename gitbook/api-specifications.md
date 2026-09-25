@@ -52,7 +52,8 @@ All APIs are RESTful and versioned under `/api/v1/`. Clients reach services thro
 ### 9.4 Field Submission APIs (Chatbot Flow Webhooks)
 
 The WhatsApp submission journey is a multi-step chatbot flow; the WhatsApp provider calls a webhook at
-each step, all under `/api/v1/telemetry`. There are **26** such endpoints, every one a `POST`.
+each step, all under `/api/v1/telemetry`. There are **27** such endpoints, every one a `POST`, counting
+the deprecated `/readings/glific` alias.
 
 **Authentication.** Each request must carry the shared secret header:
 
@@ -63,7 +64,7 @@ X-Webhook-Token: <token>
 `WebhookAuthFilter` in telemetry-service compares the SHA-256 of the supplied token against
 `telemetry.webhook.auth.token-hashes` and returns
 `401 {"success":false,"message":"Unauthorized"}` when it does not match. The match is a closed
-allowlist of exactly these 26 routes — *not* a prefix rule on `/api/v1/telemetry/**`, because that
+allowlist of exactly these 27 routes — *not* a prefix rule on `/api/v1/telemetry/**`, because that
 prefix is shared with the `X-Api-Key` ingestion endpoints, which use a different credential.
 
 Set `TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT` to log outcomes without rejecting (the kill switch), or
@@ -78,6 +79,7 @@ The endpoints:
 * `POST /api/v1/telemetry/item/selection`, `/selected/item` — item prompt and choice
 * `POST /api/v1/telemetry/take-meter-reading` — receive meter photo → OCR provider
 * `POST /api/v1/telemetry/readings/whatsapp` — async image submission, returns a job ack
+  (`/readings/glific` is its deprecated alias, served for one release)
 * `POST /api/v1/telemetry/manual-reading`, `/location`, `/update-previous-reading` — enter, geotag or
   correct a reading
 * `POST /api/v1/telemetry/meter-change`, `/meter/meter-change`, `/meter/meter-change/submit` — meter

@@ -39,7 +39,8 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
 
             assertThat(id).isEqualTo(501L);
             String sql = capturedInsertSql();
-            assertThat(sql).contains("payload_json").contains("ocr_correlation_id");
+            assertThat(sql).contains("payload_json").contains("ocr_correlation_id")
+                    .doesNotContain("flowvision_correlation_id");
             assertThat(capturedInsertArgs()).contains("ocr-1");
         }
 
@@ -80,6 +81,18 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
 
             String sql = capturedInsertSql();
             assertThat(sql).contains("ocr_correlation_id").doesNotContain("payload_json");
+        }
+
+        @Test
+        void writesTheOcrCorrelationIdToThePreV46ColumnUntilItIsRenamed() {
+            onColumnsExisting("flowvision_correlation_id");
+            onScalar("INSERT INTO", Number.class, 506L);
+
+            repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason");
+
+            assertThat(capturedInsertSql()).contains("correlation_id, flowvision_correlation_id,");
+            assertThat(capturedInsertArgs()).contains("ocr-1");
         }
 
         @Test

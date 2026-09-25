@@ -23,6 +23,11 @@ import java.util.Optional;
 public class WhatsAppPreferredLanguageService {
 
     public static final String CONFIG_KEY = "WHATSAPP_MESSAGE_TEMPLATES";
+    /**
+     * The key's previous name, read only when {@link #CONFIG_KEY} is absent. tenant-service copies
+     * stored rows to the new name in a migration, and this service cannot know whether it has run yet.
+     */
+    static final String LEGACY_CONFIG_KEY = "GLIFIC_MESSAGE_TEMPLATES";
     private static final int FALLBACK_LANGUAGE_ID = 1;
 
     private final TenantConfigRepository tenantConfigRepository;
@@ -33,7 +38,8 @@ public class WhatsAppPreferredLanguageService {
             return FALLBACK_LANGUAGE_ID;
         }
 
-        Optional<String> rawOpt = tenantConfigRepository.findConfigValue(tenantId, CONFIG_KEY);
+        Optional<String> rawOpt = tenantConfigRepository.findConfigValue(tenantId, CONFIG_KEY)
+                .or(() -> tenantConfigRepository.findConfigValue(tenantId, LEGACY_CONFIG_KEY));
         if (rawOpt.isEmpty() || rawOpt.get() == null || rawOpt.get().isBlank()) {
             return FALLBACK_LANGUAGE_ID;
         }

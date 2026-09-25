@@ -78,6 +78,8 @@ class SecurityConfigTest {
             // telemetry-service: chatbot webhooks (X-Webhook-Token) and vendor ingestion (X-Api-Key)
             "/api/v1/telemetry/readings/whatsapp",
             "/telemetry/api/v1/telemetry/readings/whatsapp",
+            "/api/v1/telemetry/readings/glific",
+            "/telemetry/api/v1/telemetry/readings/glific",
             "/api/v1/telemetry/intro",
             "/api/v1/telemetry/take-meter-reading",
             "/api/v1/telemetry/readings",

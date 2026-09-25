@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>Fallback chain: lang-specific → english → generic → hardcoded default</li>
  *   <li>Language resolution: languageId → {@code language_N} config key → name → normalized key</li>
  *   <li>Hindi and English language normalization</li>
- *   <li>Welcome flow id: {@code welcome_flow_id}, trimmed, empty when absent or blank</li>
+ *   <li>Welcome flow id: {@code welcome_flow_id} → legacy {@code glific_welcome_flow_id}</li>
  * </ul>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -235,27 +235,44 @@ class MessageTemplateServiceIntegrationTest {
     // ─────────────────────────── welcome flow id ───────────────────────────────
 
     @Test
-    void findWelcomeFlowId_returnsConfiguredValue() {
-        insertConfig("welcome_flow_id", "tenant-flow");
+    void findWelcomeFlowId_prefersCanonicalKey_whenBothKeysHoldDifferentValues() {
+        insertConfig("glific_welcome_flow_id", "legacy-flow");
+        insertConfig("welcome_flow_id", "canonical-flow");
 
-        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).contains("tenant-flow");
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).contains("canonical-flow");
     }
 
     @Test
-    void findWelcomeFlowId_returnsEmpty_whenKeyAbsent() {
+    void findWelcomeFlowId_fallsBackToLegacyKey_whenCanonicalKeyAbsent() {
+        insertConfig("glific_welcome_flow_id", "legacy-flow");
+
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).contains("legacy-flow");
+    }
+
+    @Test
+    void findWelcomeFlowId_returnsCanonicalKey_whenLegacyKeyAbsent() {
+        insertConfig("welcome_flow_id", "canonical-flow");
+
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).contains("canonical-flow");
+    }
+
+    @Test
+    void findWelcomeFlowId_returnsEmpty_whenNeitherKeyExists() {
         assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).isEmpty();
     }
 
     @Test
     void findWelcomeFlowId_trimsValue() {
-        insertConfig("welcome_flow_id", "  tenant-flow  ");
+        insertConfig("welcome_flow_id", "  canonical-flow  ");
 
-        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).contains("tenant-flow");
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).contains("canonical-flow");
     }
 
     @Test
-    void findWelcomeFlowId_returnsEmpty_whenValueIsBlank() {
+    void findWelcomeFlowId_returnsEmpty_whenCanonicalValueIsBlank_evenIfLegacyKeyIsSet() {
+        // A present-but-blank canonical row does not fall through to the legacy key.
         insertConfig("welcome_flow_id", "   ");
+        insertConfig("glific_welcome_flow_id", "legacy-flow");
 
         assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).isEmpty();
     }

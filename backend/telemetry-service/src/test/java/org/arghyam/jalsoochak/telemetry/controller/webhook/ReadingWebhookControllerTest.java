@@ -26,6 +26,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.PostMapping;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -176,12 +177,75 @@ class ReadingWebhookControllerTest {
                     .anyMatch(line -> line.contains("reading_submission api=/api/v1/telemetry/readings/whatsapp "))
                     .anyMatch(line -> line.startsWith("readings_whatsapp queued "))
                     .anyMatch(line -> line.startsWith("readings_whatsapp ack_response "))
+                    .noneMatch(line -> line.contains("readings/glific"))
                     .noneMatch(line -> line.contains("919999912345"));
             assertThat(events)
                     .filteredOn(event -> event.getLevel() == Level.DEBUG)
                     .extracting(ILoggingEvent::getFormattedMessage)
                     .as("the raw contactId, available at DEBUG only")
                     .anyMatch(line -> line.contains("919999912345"));
+        }
+    }
+
+    /**
+     * The path the chatbot flow calls today. It must keep behaving exactly like
+     * {@code /readings/whatsapp} until the flow's webhook node is repointed, and must log the path it
+     * was reached on — the legacy path showing zero traffic is what clears it for removal.
+     */
+    @Nested
+    @DisplayName("POST /readings/glific — deprecated alias of /readings/whatsapp")
+    @SuppressWarnings("removal")
+    class LegacyReadingsWebhook {
+
+        @Test
+        void acksAndHandsTheWorkToTheAsyncServiceLikeTheCanonicalPath() {
+            MeterImageWebhookRequest request = new MeterImageWebhookRequest();
+            request.setContactId(CONTACT);
+
+            var response = controller.receiveLegacy(request);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(response.getBody().isSuccess()).isTrue();
+            assertThat(response.getBody().getStatus()).isEqualTo("accepted");
+            verify(readingsAsyncService)
+                    .enqueueProcessAndResume(same(request), eq(response.getBody().getJobId()));
+            verify(imageWorkflowService, never()).processImage(any());
+        }
+
+        @Test
+        void logsTheLegacyPathSoItsRemainingTrafficIsVisible() {
+            List<ILoggingEvent> events = captureLogs(() -> controller.receiveLegacy(MeterImageWebhookRequest.builder()
+                    .contactId("919999912345")
+                    .mediaId("media-123")
+                    .build()));
+
+            assertThat(events)
+                    .filteredOn(event -> event.getLevel() == Level.INFO)
+                    .extracting(ILoggingEvent::getFormattedMessage)
+                    .anyMatch(line -> line.contains("readings/glific received") && line.contains("hasMediaId=true"))
+                    .anyMatch(line -> line.contains("reading_submission api=/api/v1/telemetry/readings/glific "))
+                    .noneMatch(line -> line.contains("readings/whatsapp"))
+                    .noneMatch(line -> line.contains("919999912345"));
+        }
+
+        @Test
+        void acceptsAndProducesWhatTheCanonicalPathDoes() throws NoSuchMethodException {
+            PostMapping canonical = ReadingWebhookController.class
+                    .getMethod("receive", MeterImageWebhookRequest.class).getAnnotation(PostMapping.class);
+            PostMapping legacy = ReadingWebhookController.class
+                    .getMethod("receiveLegacy", MeterImageWebhookRequest.class).getAnnotation(PostMapping.class);
+
+            assertThat(legacy.consumes()).containsExactly(canonical.consumes());
+            assertThat(legacy.produces()).containsExactly(canonical.produces());
+        }
+
+        @Test
+        void isDeprecatedForRemovalSoTheApiDocsFlagIt() throws NoSuchMethodException {
+            Deprecated deprecated = ReadingWebhookController.class
+                    .getMethod("receiveLegacy", MeterImageWebhookRequest.class).getAnnotation(Deprecated.class);
+
+            assertThat(deprecated).isNotNull();
+            assertThat(deprecated.forRemoval()).isTrue();
         }
     }
 

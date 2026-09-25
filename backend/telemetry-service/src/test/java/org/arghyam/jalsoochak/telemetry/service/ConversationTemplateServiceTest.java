@@ -24,9 +24,9 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -122,13 +122,23 @@ class ConversationTemplateServiceTest {
         }
 
         @Test
-        void readsNoOtherKeyWhenTheTemplatesKeyIsAbsent() {
-            when(tenantConfigRepository.findConfigValue(TENANT, ConversationTemplateService.CONFIG_KEY))
-                    .thenReturn(Optional.empty());
+        void readsTheCanonicalKeyAndNotTheLegacyOneWhenTheCanonicalOneIsSet() {
+            when(tenantConfigRepository.findConfigValue(TENANT, "WHATSAPP_MESSAGE_TEMPLATES"))
+                    .thenReturn(Optional.of(TEMPLATES_JSON));
 
-            assertThat(service.loadTemplates(TENANT)).isEmpty();
-            verify(tenantConfigRepository).findConfigValue(TENANT, ConversationTemplateService.CONFIG_KEY);
-            verifyNoMoreInteractions(tenantConfigRepository);
+            assertThat(service.loadTemplates(TENANT)).isPresent();
+            verify(tenantConfigRepository, never()).findConfigValue(TENANT, "GLIFIC_MESSAGE_TEMPLATES");
+        }
+
+        @Test
+        void fallsBackToTheLegacyKeyWhenTheCanonicalOneIsAbsent() {
+            when(tenantConfigRepository.findConfigValue(TENANT, "WHATSAPP_MESSAGE_TEMPLATES"))
+                    .thenReturn(Optional.empty());
+            when(tenantConfigRepository.findConfigValue(TENANT, "GLIFIC_MESSAGE_TEMPLATES"))
+                    .thenReturn(Optional.of(TEMPLATES_JSON));
+
+            assertThat(service.resolveScreenMessage(TENANT, "INTRO_MESSAGE", "hindi"))
+                    .contains("नमस्ते {name}");
         }
     }
 

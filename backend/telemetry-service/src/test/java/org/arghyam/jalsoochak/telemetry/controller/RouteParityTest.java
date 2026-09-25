@@ -24,8 +24,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RouteParityTest {
 
     private static final List<String> SERVED_ROUTES = List.of(
-            // Chatbot webhooks — readings
+            // Chatbot webhooks — readings. /readings/glific is the deprecated alias of
+            // /readings/whatsapp, served until the flow's webhook node is repointed.
             "POST /api/v1/telemetry/readings/whatsapp",
+            "POST /api/v1/telemetry/readings/glific",
             "POST /api/v1/telemetry/take-meter-reading",
             "POST /api/v1/telemetry/manual-reading",
             "POST /api/v1/telemetry/location",

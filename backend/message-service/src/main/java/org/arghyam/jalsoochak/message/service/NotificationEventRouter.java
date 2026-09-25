@@ -113,8 +113,14 @@ public class NotificationEventRouter {
     /** Event field carrying the WhatsApp contact id on {@code SEND_LOGIN_OTP}. */
     private static final String CONTACT_ID_FIELD = "whatsapp_contact_id";
 
+    /** Legacy spelling of {@link #CONTACT_ID_FIELD}, read only when the new field is absent. */
+    private static final String LEGACY_CONTACT_ID_FIELD = "glific_id";
+
     /** Event field carrying the WhatsApp language id on staff-sync and language-update events. */
     private static final String LANGUAGE_ID_FIELD = "whatsappLanguageId";
+
+    /** Legacy spelling of {@link #LANGUAGE_ID_FIELD}, read only when the new field is absent. */
+    private static final String LEGACY_LANGUAGE_ID_FIELD = "glificLanguageId";
 
     private final ObjectMapper objectMapper;
     private final WhatsAppChannel whatsAppChannel;
@@ -232,7 +238,7 @@ public class NotificationEventRouter {
 
     private void handleStaffSyncCompleted(JsonNode root) {
         JsonNode operatorsNode = root.path("pumpOperators");
-        int whatsappLanguageId = root.path(LANGUAGE_ID_FIELD).asInt(0);
+        int whatsappLanguageId = fieldOrLegacy(root, LANGUAGE_ID_FIELD, LEGACY_LANGUAGE_ID_FIELD).asInt(0);
         String tenantSchema = root.path("tenantSchema").asText("");
 
         if (!operatorsNode.isArray() || operatorsNode.isEmpty()) {
@@ -281,7 +287,7 @@ public class NotificationEventRouter {
 
     private void handleUpdateUserLanguage(JsonNode root) {
         String tenantCode = root.path("tenantCode").asText("").toLowerCase();
-        int whatsappLanguageId = root.path(LANGUAGE_ID_FIELD).asInt(0);
+        int whatsappLanguageId = fieldOrLegacy(root, LANGUAGE_ID_FIELD, LEGACY_LANGUAGE_ID_FIELD).asInt(0);
         JsonNode phonesNode = root.path("pumpOperatorPhones");
 
         if (tenantCode.isBlank() || !tenantCode.matches("[a-z0-9_]+")) {
@@ -331,6 +337,15 @@ public class NotificationEventRouter {
             throw new IllegalStateException(
                     "[Router/UPDATE_LANGUAGE] " + failed + " update(s) failed (success=" + success + ")");
         }
+    }
+
+    /**
+     * Returns {@code field}'s node, or {@code legacyField}'s when {@code field} is absent or null.
+     * The node is chosen on presence, not value, so a zero in the new field is never overridden by
+     * the legacy one.
+     */
+    private static JsonNode fieldOrLegacy(JsonNode root, String field, String legacyField) {
+        return root.hasNonNull(field) ? root.get(field) : root.path(legacyField);
     }
 
     private void handleSendWelcomeMessage(JsonNode root) {
@@ -557,7 +572,7 @@ public class NotificationEventRouter {
                     .subscribe();
         } else if ("WHATSAPP".equals(deliveryChannel)) {
             String phone = root.path("officerPhoneNumber").asText("").strip();
-            long contactId = root.path(CONTACT_ID_FIELD).asLong(0);
+            long contactId = fieldOrLegacy(root, CONTACT_ID_FIELD, LEGACY_CONTACT_ID_FIELD).asLong(0);
 
             if (contactId > 0) {
                 // whatsapp_contact_id was provided and valid
