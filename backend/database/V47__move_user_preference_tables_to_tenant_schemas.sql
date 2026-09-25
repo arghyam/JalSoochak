@@ -18,13 +18,17 @@
 --     several rows of one tenant onto one contact, the latest updated_at wins.
 --   * Rows whose tenant is missing, soft-deleted or has no schema are skipped,
 --     and counted in a NOTICE. V48 drops them with the table.
---   * Until V48, a trigger on each common_schema table mirrors every later
---     write into the tenant table, so telemetry pods still running the pre-V47
---     code during the rollout lose nothing. A mirror that fails only logs a
---     WARNING: those pods still read the common_schema row they wrote.
+--   * Until V48, triggers keep both copies in step while telemetry pods of
+--     both versions serve during the rollout. One on each common_schema table
+--     mirrors writes from pre-V47 pods into the tenant table; one on each
+--     tenant table mirrors writes from newer pods back into common_schema,
+--     which pre-V47 pods still read. A mirrored write is not mirrored back
+--     (pg_trigger_depth), and a mirror that fails only logs a WARNING rather
+--     than failing the write it mirrors.
 --
--- The copy and the trigger each apply a row only when it is at least as new
--- as the tenant's, so they and telemetry's own writes can land in any order.
+-- The copy and both mirrors apply a row only when it is at least as new as
+-- the row it replaces, so they and telemetry's own writes can land in any
+-- order.
 --
 -- Runs in one transaction. The SHARE lock on tenant_master_table, taken
 -- first, waits for every createTenant transaction already running the
@@ -32,7 +36,8 @@
 -- provisioning -- and holds new ones off until this commits, so no tenant is
 -- provisioned without the tables. Creating each trigger locks its table
 -- against writes until commit, so every write either commits before the copy
--- reads it or fires the trigger.
+-- reads it or fires the trigger. The tenant-side triggers are created after
+-- the copy, so the copy is not mirrored back.
 --
 -- Deploy tenant-service (this migration) before the telemetry-service that
 -- reads the tenant tables. Every related change is marked
@@ -119,12 +124,16 @@ BEGIN
 
     -- USER-PREFERENCE-TENANT-SCHEMA: per-contact preference tables for new tenant schemas.
     PERFORM common_schema.create_user_preference_tables(schema_name);
+
+    -- Until V48: mirror their writes back to common_schema (Part E).
+    PERFORM common_schema.create_user_preference_common_mirror(schema_name);
 END;
 $func$;
 
 -- ── Part C: Mirror writes still reaching common_schema, until V48 ───────────
 -- TG_ARGV[0] names the table's value column. The tenant is resolved as telemetry resolves it
 -- (tenant_ || lower(trim(state_code))), limited to live tenants like the copy in Part D.
+-- WHEN (pg_trigger_depth() = 0) skips a write that is itself Part E's mirror, so none bounces back.
 CREATE OR REPLACE FUNCTION common_schema.mirror_user_preference_to_tenant()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -167,11 +176,15 @@ $func$;
 
 CREATE TRIGGER trg_user_channel_preference_mirror_to_tenant
     AFTER INSERT OR UPDATE ON common_schema.user_channel_preference
-    FOR EACH ROW EXECUTE FUNCTION common_schema.mirror_user_preference_to_tenant('channel_value');
+    FOR EACH ROW
+    WHEN (pg_trigger_depth() = 0)
+    EXECUTE FUNCTION common_schema.mirror_user_preference_to_tenant('channel_value');
 
 CREATE TRIGGER trg_user_language_preference_mirror_to_tenant
     AFTER INSERT OR UPDATE ON common_schema.user_language_preference
-    FOR EACH ROW EXECUTE FUNCTION common_schema.mirror_user_preference_to_tenant('language_value');
+    FOR EACH ROW
+    WHEN (pg_trigger_depth() = 0)
+    EXECUTE FUNCTION common_schema.mirror_user_preference_to_tenant('language_value');
 
 -- ── Part D: Copy existing rows into their tenant's schema ───────────────────
 DO $$
@@ -224,5 +237,84 @@ BEGIN
 
         RAISE NOTICE 'V47: copied % of % row(s) from common_schema.%, skipped % (tenant missing, soft-deleted or without a schema)',
             copied_rows, total_rows, preference.table_name, total_rows - copied_rows;
+    END LOOP;
+END $$;
+
+-- ── Part E: Mirror writes to the tenant tables back to common_schema, until V48 ─
+-- Pre-V47 telemetry pods still read common_schema during the rollout, so a preference set through a
+-- newer pod reaches them too. The mirror of Part C in reverse: the tenant comes from the table's
+-- schema, and WHEN (pg_trigger_depth() = 0) skips a write that is itself Part C's mirror. V48 drops
+-- these triggers with their function and takes the call out of create_tenant_schema().
+CREATE OR REPLACE FUNCTION common_schema.mirror_user_preference_to_common()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $func$
+DECLARE
+    value_column    CONSTANT TEXT := TG_ARGV[0];
+    owner_tenant_id INTEGER;
+BEGIN
+    SELECT t.id
+    INTO owner_tenant_id
+    FROM common_schema.tenant_master_table t
+    WHERE 'tenant_' || lower(trim(t.state_code)) = TG_TABLE_SCHEMA
+      AND t.deleted_at IS NULL;
+
+    IF owner_tenant_id IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    EXECUTE format(
+        'INSERT INTO common_schema.%1$I AS target (tenant_id, contact_id, %2$I, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (tenant_id, contact_id) DO UPDATE
+             SET %2$I = EXCLUDED.%2$I, updated_at = EXCLUDED.updated_at
+             WHERE target.updated_at <= EXCLUDED.updated_at',
+        TG_TABLE_NAME, value_column)
+    USING owner_tenant_id,
+          NEW.contact_id,
+          to_jsonb(NEW) ->> value_column,
+          NEW.created_at,
+          NEW.updated_at;
+
+    RETURN NULL;
+EXCEPTION WHEN OTHERS THEN
+    -- No contact id here: phone numbers are PII and stay out of WARNING-level logs.
+    RAISE WARNING 'V47: could not mirror a write on %.% back to common_schema: % (SQLSTATE %)',
+        TG_TABLE_SCHEMA, TG_TABLE_NAME, SQLERRM, SQLSTATE;
+    RETURN NULL;
+END;
+$func$;
+
+CREATE OR REPLACE FUNCTION common_schema.create_user_preference_common_mirror(schema_name TEXT)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $func$
+BEGIN
+    EXECUTE format(
+        'CREATE OR REPLACE TRIGGER trg_user_channel_preference_mirror_to_common
+             AFTER INSERT OR UPDATE ON %1$I.user_channel_preference
+             FOR EACH ROW
+             WHEN (pg_trigger_depth() = 0)
+             EXECUTE FUNCTION common_schema.mirror_user_preference_to_common(''channel_value'')',
+        schema_name);
+
+    EXECUTE format(
+        'CREATE OR REPLACE TRIGGER trg_user_language_preference_mirror_to_common
+             AFTER INSERT OR UPDATE ON %1$I.user_language_preference
+             FOR EACH ROW
+             WHEN (pg_trigger_depth() = 0)
+             EXECUTE FUNCTION common_schema.mirror_user_preference_to_common(''language_value'')',
+        schema_name);
+END;
+$func$;
+
+DO $$
+DECLARE
+    tenant_schema TEXT;
+BEGIN
+    FOR tenant_schema IN
+        SELECT nspname FROM pg_namespace WHERE nspname LIKE 'tenant\_%' ESCAPE '\'
+    LOOP
+        PERFORM common_schema.create_user_preference_common_mirror(tenant_schema);
     END LOOP;
 END $$;

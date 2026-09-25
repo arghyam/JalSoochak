@@ -5,9 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import org.flywaydb.core.Flyway;
@@ -30,7 +35,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * <p>Flyway runs the <b>real migrations</b> from {@code classpath:db/migration/} up to V46, the
  * common_schema tables are seeded with rows for live, soft-deleted, unprovisioned and unknown
  * tenants, and V47 runs while another tenant is still being provisioned by the unpatched function.
- * Flyway stops at V47, so the triggers that bridge the rollout until V48 are still there to test.
+ * Flyway stops at V47, so the triggers that bridge the rollout until V48, in both directions, are
+ * still there to test.
  */
 @Testcontainers
 @DisplayName("V47 user preference tables to tenant schemas migration")
@@ -59,7 +65,13 @@ class UserPreferenceTenantSchemaMigrationIntegrationTest {
     private static final int BROKEN_MIRROR_TENANT_ID = 6;
     private static final String BROKEN_MIRROR_TENANT = "tenant_bm";
     /** Provisioned after V47, through the patched function chain. */
+    private static final int NEW_TENANT_ID = 7;
     private static final String NEW_TENANT = "tenant_nw";
+    /** Provisioned after V47, then soft-deleted: writes to its schema have no tenant to mirror back to. */
+    private static final int RETIRED_TENANT_ID = 8;
+    private static final String RETIRED_TENANT = "tenant_rt";
+    private static final List<String> TENANT_SCHEMAS =
+            List.of(LIVE_TENANT, SECOND_TENANT, DELETED_TENANT, IN_FLIGHT_TENANT, NEW_TENANT);
 
     /** The statements telemetry-service ran against common_schema before V47. */
     private static final String PRE_V47_LANGUAGE_UPSERT = """
@@ -75,6 +87,24 @@ class UserPreferenceTenantSchemaMigrationIntegrationTest {
                 (tenant_id, contact_id, channel_value, created_at, updated_at)
             VALUES (?, ?, ?, NOW(), NOW())
             ON CONFLICT (tenant_id, contact_id)
+            DO UPDATE SET channel_value = EXCLUDED.channel_value,
+                          updated_at = NOW()
+            """;
+
+    /** The statements telemetry-service runs against the tenant schema from V47 on. */
+    private static final String POST_V47_LANGUAGE_UPSERT = """
+            INSERT INTO %s.user_language_preference
+                (contact_id, language_value, created_at, updated_at)
+            VALUES (?, ?, NOW(), NOW())
+            ON CONFLICT (contact_id)
+            DO UPDATE SET language_value = EXCLUDED.language_value,
+                          updated_at = NOW()
+            """;
+    private static final String POST_V47_CHANNEL_UPSERT = """
+            INSERT INTO %s.user_channel_preference
+                (contact_id, channel_value, created_at, updated_at)
+            VALUES (?, ?, NOW(), NOW())
+            ON CONFLICT (contact_id)
             DO UPDATE SET channel_value = EXCLUDED.channel_value,
                           updated_at = NOW()
             """;
@@ -129,7 +159,10 @@ class UserPreferenceTenantSchemaMigrationIntegrationTest {
         }
         migration.join();
 
-        jdbcTemplate.execute("SELECT common_schema.create_tenant_schema('" + NEW_TENANT + "')");
+        provisionTenant(NEW_TENANT_ID, NEW_TENANT);
+        provisionTenant(RETIRED_TENANT_ID, RETIRED_TENANT);
+        jdbcTemplate.update("UPDATE common_schema.tenant_master_table SET deleted_at = NOW() WHERE id = ?",
+                RETIRED_TENANT_ID);
     }
 
     private static Flyway flyway(MigrationVersion target) {
@@ -212,6 +245,65 @@ class UserPreferenceTenantSchemaMigrationIntegrationTest {
                 String.class, contactId);
     }
 
+    private static List<String> commonLanguagesOf(int tenantId, String contactId) {
+        return jdbcTemplate.queryForList(
+                "SELECT language_value FROM common_schema.user_language_preference WHERE tenant_id = ? AND contact_id = ?",
+                String.class, tenantId, contactId);
+    }
+
+    private static List<String> commonChannelsOf(int tenantId, String contactId) {
+        return jdbcTemplate.queryForList(
+                "SELECT channel_value FROM common_schema.user_channel_preference WHERE tenant_id = ? AND contact_id = ?",
+                String.class, tenantId, contactId);
+    }
+
+    private static List<String> triggersOn(String schema, String table) {
+        return jdbcTemplate.queryForList("""
+                SELECT tgname FROM pg_trigger
+                WHERE tgrelid = to_regclass(?) AND NOT tgisinternal
+                ORDER BY tgname
+                """, String.class, schema + "." + table);
+    }
+
+    private record TupleCounts(long inserted, long updated) {
+    }
+
+    /**
+     * The rows one statement inserts and updates in each table, the writes of the triggers it fires
+     * included. The statement runs in its own transaction, which is rolled back.
+     */
+    private static Map<String, TupleCounts> tupleCountsOf(List<String> tables, String sql, Object... args)
+            throws SQLException {
+        try (Connection connection = DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+            connection.setAutoCommit(false);
+            try {
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    for (int i = 0; i < args.length; i++) {
+                        statement.setObject(i + 1, args[i]);
+                    }
+                    statement.executeUpdate();
+                }
+                Map<String, TupleCounts> counts = new LinkedHashMap<>();
+                try (PreparedStatement stats = connection.prepareStatement("""
+                        SELECT n_tup_ins, n_tup_upd FROM pg_stat_xact_user_tables
+                        WHERE schemaname || '.' || relname = ?
+                        """)) {
+                    for (String table : tables) {
+                        stats.setString(1, table);
+                        try (ResultSet row = stats.executeQuery()) {
+                            row.next();
+                            counts.put(table, new TupleCounts(row.getLong("n_tup_ins"), row.getLong("n_tup_upd")));
+                        }
+                    }
+                }
+                return counts;
+            } finally {
+                connection.rollback();
+            }
+        }
+    }
+
     private static Integer rowCount(String schema, String table) {
         return jdbcTemplate.queryForObject(
                 String.format("SELECT count(*) FROM %s.%s", schema, table), Integer.class);
@@ -220,7 +312,7 @@ class UserPreferenceTenantSchemaMigrationIntegrationTest {
     @Test
     @DisplayName("Every tenant schema gets both tables, keyed by contact alone, with no tenant_id")
     void createsBothTablesInEveryTenantSchema() {
-        for (String schema : List.of(LIVE_TENANT, SECOND_TENANT, DELETED_TENANT, IN_FLIGHT_TENANT, NEW_TENANT)) {
+        for (String schema : TENANT_SCHEMAS) {
             assertThat(columnsOf(schema, "user_language_preference")).as(schema)
                     .containsExactly("id", "contact_id", "language_value", "created_at", "updated_at");
             assertThat(columnsOf(schema, "user_channel_preference")).as(schema)
@@ -294,10 +386,17 @@ class UserPreferenceTenantSchemaMigrationIntegrationTest {
     @DisplayName("A mirrored write older than the tenant row does not overwrite it")
     void doesNotMirrorAWriteOlderThanTheTenantRow() {
         String contact = "919999900013";
-        jdbcTemplate.update("INSERT INTO " + LIVE_TENANT + ".user_language_preference (contact_id, language_value) VALUES (?, ?)",
-                contact, "Hindi");
+        jdbcTemplate.update(String.format(POST_V47_LANGUAGE_UPSERT, LIVE_TENANT), contact, "Hindi");
 
-        seedLanguage(LIVE_TENANT_ID, contact, "Tamil", "2020-01-01");
+        // An upsert, as the tenant write above was already mirrored back into common_schema.
+        jdbcTemplate.update("""
+                INSERT INTO common_schema.user_language_preference
+                    (tenant_id, contact_id, language_value, created_at, updated_at)
+                VALUES (?, ?, ?, '2020-01-01', '2020-01-01')
+                ON CONFLICT (tenant_id, contact_id)
+                DO UPDATE SET language_value = EXCLUDED.language_value,
+                              updated_at = EXCLUDED.updated_at
+                """, LIVE_TENANT_ID, contact, "Tamil");
 
         assertThat(languagesOf(LIVE_TENANT, contact)).containsExactly("Hindi");
     }
@@ -331,5 +430,112 @@ class UserPreferenceTenantSchemaMigrationIntegrationTest {
         assertThat(postgres.getLogs())
                 .contains("V47: could not mirror a write on common_schema.user_channel_preference for tenant "
                         + BROKEN_MIRROR_TENANT_ID);
+    }
+
+    @Test
+    @DisplayName("Every tenant schema, including one provisioned after V47, mirrors its writes back to common_schema")
+    void createsTheMirrorBackInEveryTenantSchema() {
+        for (String schema : TENANT_SCHEMAS) {
+            assertThat(triggersOn(schema, "user_language_preference")).as(schema)
+                    .containsExactly("trg_user_language_preference_mirror_to_common");
+            assertThat(triggersOn(schema, "user_channel_preference")).as(schema)
+                    .containsExactly("trg_user_channel_preference_mirror_to_common");
+        }
+    }
+
+    @Test
+    @DisplayName("A post-V47 language upsert is mirrored back to common_schema for pre-V47 pods")
+    void mirrorsALanguageWriteFromPostV47CodeBack() {
+        String contact = "919999900021";
+        jdbcTemplate.update(String.format(POST_V47_LANGUAGE_UPSERT, LIVE_TENANT), contact, "Hindi");
+        assertThat(commonLanguagesOf(LIVE_TENANT_ID, contact)).containsExactly("Hindi");
+
+        jdbcTemplate.update(String.format(POST_V47_LANGUAGE_UPSERT, LIVE_TENANT), contact, "Marathi");
+        assertThat(commonLanguagesOf(LIVE_TENANT_ID, contact)).containsExactly("Marathi");
+    }
+
+    @Test
+    @DisplayName("A post-V47 channel upsert is mirrored back to common_schema for pre-V47 pods")
+    void mirrorsAChannelWriteFromPostV47CodeBack() {
+        String contact = "919999900022";
+        jdbcTemplate.update(String.format(POST_V47_CHANNEL_UPSERT, SECOND_TENANT), contact, "BFM");
+        jdbcTemplate.update(String.format(POST_V47_CHANNEL_UPSERT, SECOND_TENANT), contact, "Iot");
+
+        assertThat(commonChannelsOf(SECOND_TENANT_ID, contact)).containsExactly("Iot");
+    }
+
+    @Test
+    @DisplayName("A tenant provisioned after V47 mirrors its writes back as well")
+    void mirrorsBackTheWritesOfATenantProvisionedAfterV47() {
+        String contact = "919999900023";
+        jdbcTemplate.update(String.format(POST_V47_LANGUAGE_UPSERT, NEW_TENANT), contact, "Hindi");
+
+        assertThat(commonLanguagesOf(NEW_TENANT_ID, contact)).containsExactly("Hindi");
+    }
+
+    @Test
+    @DisplayName("A tenant write older than the common_schema row does not overwrite it")
+    void doesNotMirrorBackAWriteOlderThanTheCommonRow() {
+        String contact = "919999900024";
+        seedLanguage(LIVE_TENANT_ID, contact, "Tamil", "2026-06-01");
+
+        jdbcTemplate.update(String.format("""
+                INSERT INTO %s.user_language_preference (contact_id, language_value, created_at, updated_at)
+                VALUES (?, ?, '2020-01-01', '2020-01-01')
+                ON CONFLICT (contact_id)
+                DO UPDATE SET language_value = EXCLUDED.language_value,
+                              updated_at = EXCLUDED.updated_at
+                """, LIVE_TENANT), contact, "Hindi");
+
+        assertThat(commonLanguagesOf(LIVE_TENANT_ID, contact)).containsExactly("Tamil");
+    }
+
+    @Test
+    @DisplayName("A write to the schema of a soft-deleted tenant still succeeds and is not mirrored back")
+    void keepsTenantWritesWithNoLiveTenantToMirrorInto() {
+        String contact = "919999900025";
+        jdbcTemplate.update(String.format(POST_V47_LANGUAGE_UPSERT, RETIRED_TENANT), contact, "Hindi");
+
+        assertThat(languagesOf(RETIRED_TENANT, contact)).containsExactly("Hindi");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM common_schema.user_language_preference WHERE contact_id = ?",
+                Integer.class, contact)).isZero();
+    }
+
+    @Test
+    @DisplayName("A mirrored write is not mirrored back to the table it came from")
+    void doesNotMirrorAMirroredWriteBack() throws SQLException {
+        String tenantTable = LIVE_TENANT + ".user_language_preference";
+        String commonTable = "common_schema.user_language_preference";
+        TupleCounts insertedOnce = new TupleCounts(1, 0);
+
+        // Bounced back, either write would also update the row its own statement inserted.
+        assertThat(tupleCountsOf(List.of(tenantTable, commonTable),
+                String.format(POST_V47_LANGUAGE_UPSERT, LIVE_TENANT), "919999900026", "Hindi"))
+                .containsEntry(tenantTable, insertedOnce)
+                .containsEntry(commonTable, insertedOnce);
+        assertThat(tupleCountsOf(List.of(tenantTable, commonTable),
+                PRE_V47_LANGUAGE_UPSERT, LIVE_TENANT_ID, "919999900027", "Hindi"))
+                .containsEntry(commonTable, insertedOnce)
+                .containsEntry(tenantTable, insertedOnce);
+    }
+
+    @Test
+    @DisplayName("A mirror back that fails logs a warning instead of failing the tenant write")
+    void neverFailsTheTenantWriteItMirrorsBack() {
+        String contact = "919999900028";
+        jdbcTemplate.execute("ALTER TABLE common_schema.user_channel_preference"
+                + " ADD CONSTRAINT reject_test_contact CHECK (contact_id <> '" + contact + "')");
+        try {
+            jdbcTemplate.update(String.format(POST_V47_CHANNEL_UPSERT, SECOND_TENANT), contact, "Iot");
+        } finally {
+            jdbcTemplate.execute("ALTER TABLE common_schema.user_channel_preference DROP CONSTRAINT reject_test_contact");
+        }
+
+        assertThat(channelsOf(SECOND_TENANT, contact)).containsExactly("Iot");
+        assertThat(commonChannelsOf(SECOND_TENANT_ID, contact)).isEmpty();
+        assertThat(postgres.getLogs())
+                .contains("V47: could not mirror a write on " + SECOND_TENANT
+                        + ".user_channel_preference back to common_schema");
     }
 }
