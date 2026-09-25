@@ -52,8 +52,8 @@ class UserLanguagePreferenceRepositoryTest {
         repository = new UserLanguagePreferenceRepository(jdbcTemplate, telemetryTenantRepository);
         lenient().when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(List.of());
-        lenient().when(telemetryTenantRepository.findTenantSchemasWithColumn("user_language_preference", "contact_id"))
-                .thenReturn(List.of("tenant_as", "tenant_mp"));
+        lenient().when(telemetryTenantRepository.findProvisionedTenantSchemas())
+                .thenReturn(List.of(new TelemetryTenantSchema(1, "tenant_as"), new TelemetryTenantSchema(2, "tenant_mp")));
     }
 
     private String capturedQuerySql() {
@@ -124,7 +124,7 @@ class UserLanguagePreferenceRepositoryTest {
     }
 
     @Test
-    void findPreferredTenantIdQueriesEveryTenantSchemaThatHasTheTableInOneStatement() {
+    void findPreferredTenantIdQueriesEveryProvisionedTenantSchemaInOneStatement() {
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(List.of(2));
 
@@ -133,15 +133,15 @@ class UserLanguagePreferenceRepositoryTest {
                 .contains("FROM tenant_as.user_language_preference")
                 .contains("UNION ALL")
                 .contains("FROM tenant_mp.user_language_preference")
-                .contains("ORDER BY preference.updated_at DESC, preference.created_at DESC");
+                .contains("ORDER BY preference.updated_at DESC, preference.created_at DESC")
+                .doesNotContain("tenant_master_table");
         assertThat(capturedQueryArgs())
-                .containsExactly("tenant_as", NORMALISED_CONTACT, "tenant_mp", NORMALISED_CONTACT);
+                .containsExactly(1, NORMALISED_CONTACT, 2, NORMALISED_CONTACT);
     }
 
     @Test
-    void findPreferredTenantIdIsEmptyWithoutQueryingWhenNoSchemaHasTheTable() {
-        when(telemetryTenantRepository.findTenantSchemasWithColumn("user_language_preference", "contact_id"))
-                .thenReturn(List.of());
+    void findPreferredTenantIdIsEmptyWithoutQueryingWhenNoTenantSchemaIsProvisioned() {
+        when(telemetryTenantRepository.findProvisionedTenantSchemas()).thenReturn(List.of());
 
         assertThat(repository.findPreferredTenantIdByContactId(RAW_CONTACT)).isEmpty();
         verify(jdbcTemplate, never()).query(anyString(), any(RowMapper.class), any(Object[].class));
@@ -156,8 +156,8 @@ class UserLanguagePreferenceRepositoryTest {
 
     @Test
     void findPreferredTenantIdRejectsATenantSchemaNameThatIsNotAPlainIdentifier() {
-        when(telemetryTenantRepository.findTenantSchemasWithColumn("user_language_preference", "contact_id"))
-                .thenReturn(List.of("tenant_as", "tenant_Mp"));
+        when(telemetryTenantRepository.findProvisionedTenantSchemas())
+                .thenReturn(List.of(new TelemetryTenantSchema(1, "tenant_as"), new TelemetryTenantSchema(2, "tenant_Mp")));
 
         assertThatThrownBy(() -> repository.findPreferredTenantIdByContactId(RAW_CONTACT))
                 .isInstanceOf(IllegalArgumentException.class)

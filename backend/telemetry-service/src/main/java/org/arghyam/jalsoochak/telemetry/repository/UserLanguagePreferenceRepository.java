@@ -17,8 +17,6 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class UserLanguagePreferenceRepository {
 
-    private static final String TABLE_NAME = "user_language_preference";
-
     private final JdbcTemplate jdbcTemplate;
     private final TelemetryTenantRepository telemetryTenantRepository;
 
@@ -50,41 +48,38 @@ public class UserLanguagePreferenceRepository {
     /**
      * The live tenant whose schema holds the contact's most recently updated language preference,
      * used to pick a tenant first when the same number is registered in several. One query spans
-     * every tenant schema that has the table.
+     * every provisioned tenant schema, each of which has the table from V47 on.
      */
     public Optional<Integer> findPreferredTenantIdByContactId(String contactId) {
         String normalizedContactId = normalizeContactId(contactId);
         if (normalizedContactId == null || normalizedContactId.isEmpty()) {
             return Optional.empty();
         }
-        List<String> schemaNames = telemetryTenantRepository.findTenantSchemasWithColumn(TABLE_NAME, "contact_id");
-        if (schemaNames.isEmpty()) {
+        List<TelemetryTenantSchema> tenantSchemas = telemetryTenantRepository.findProvisionedTenantSchemas();
+        if (tenantSchemas.isEmpty()) {
             return Optional.empty();
         }
 
-        List<String> branches = new ArrayList<>(schemaNames.size());
-        List<Object> args = new ArrayList<>(schemaNames.size() * 2);
-        for (String schemaName : schemaNames) {
-            SchemaNames.validate(schemaName);
+        List<String> branches = new ArrayList<>(tenantSchemas.size());
+        List<Object> args = new ArrayList<>(tenantSchemas.size() * 2);
+        for (TelemetryTenantSchema tenantSchema : tenantSchemas) {
+            SchemaNames.validate(tenantSchema.schemaName());
             branches.add(String.format("""
-                    SELECT CAST(? AS TEXT) AS schema_name, updated_at, created_at
+                    SELECT CAST(? AS INTEGER) AS tenant_id, updated_at, created_at
                     FROM %s.user_language_preference
                     WHERE contact_id = ?
-                    """, schemaName));
-            args.add(schemaName);
+                    """, tenantSchema.schemaName()));
+            args.add(tenantSchema.tenantId());
             args.add(normalizedContactId);
         }
         String sql = String.format("""
-                SELECT t.id
+                SELECT preference.tenant_id
                 FROM (
                 %s) preference
-                JOIN common_schema.tenant_master_table t
-                  ON 'tenant_' || lower(trim(t.state_code)) = preference.schema_name
-                 AND t.deleted_at IS NULL
                 ORDER BY preference.updated_at DESC, preference.created_at DESC
                 LIMIT 1
                 """, String.join("UNION ALL\n", branches));
-        return jdbcTemplate.query(sql, (rs, n) -> rs.getInt("id"), args.toArray())
+        return jdbcTemplate.query(sql, (rs, n) -> rs.getInt("tenant_id"), args.toArray())
                 .stream()
                 .findFirst();
     }

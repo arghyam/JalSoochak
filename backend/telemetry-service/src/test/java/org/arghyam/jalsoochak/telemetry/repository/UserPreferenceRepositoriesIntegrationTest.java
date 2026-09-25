@@ -22,9 +22,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@link UserLanguagePreferenceRepository} against the per-tenant tables V47 creates, on real
  * PostgreSQL.
  *
- * <p>The cross-tenant lookup is one {@code UNION ALL} over every tenant schema, so it is checked here
- * with a schema that predates V47 (which would fail the whole query if it were included) and a
- * soft-deleted tenant whose schema still holds the newest row.
+ * <p>The cross-tenant lookup is one {@code UNION ALL} over every provisioned tenant schema, so it is
+ * checked here with a REGISTERED tenant that has no schema yet (which would fail the whole query if it
+ * were included) and a soft-deleted tenant whose schema still holds the newest row.
  */
 @Testcontainers
 class UserPreferenceRepositoriesIntegrationTest {
@@ -32,7 +32,8 @@ class UserPreferenceRepositoriesIntegrationTest {
     private static final int TENANT_AS = 1;
     private static final int TENANT_MP = 2;
     private static final int DELETED_TENANT = 3;
-    private static final int PRE_V47_TENANT = 4;
+    private static final int REGISTERED_TENANT = 4;
+    private static final int NEW_TENANT = 5;
     private static final List<String> SCHEMAS_WITH_TABLES = List.of("tenant_as", "tenant_mp", "tenant_xx");
 
     private static final String CONTACT = "919999900001";
@@ -66,12 +67,11 @@ class UserPreferenceRepositoriesIntegrationTest {
         jdbcTemplate.update("""
                 INSERT INTO common_schema.tenant_master_table (id, state_code, deleted_at)
                 VALUES (?, 'AS', NULL), (?, ' Mp ', NULL), (?, 'XX', NOW()), (?, 'ZZ', NULL)
-                """, TENANT_AS, TENANT_MP, DELETED_TENANT, PRE_V47_TENANT);
+                """, TENANT_AS, TENANT_MP, DELETED_TENANT, REGISTERED_TENANT);
 
         for (String schemaName : SCHEMAS_WITH_TABLES) {
             createPreferenceTables(schemaName);
         }
-        jdbcTemplate.execute("CREATE SCHEMA tenant_zz");
 
         String key = Base64.getEncoder().encodeToString(new byte[32]);
         TelemetryTenantRepository tenantRepository =
@@ -192,10 +192,10 @@ class UserPreferenceRepositoriesIntegrationTest {
         }
 
         @Test
-        void skipsATenantSchemaThatPredatesTheTable() {
+        void skipsARegisteredTenantWhoseSchemaIsNotProvisionedYet() {
             assertThat(jdbcTemplate.queryForObject(
                     "SELECT count(*) FROM pg_namespace WHERE nspname = 'tenant_zz'", Integer.class))
-                    .isEqualTo(1);
+                    .isZero();
             insertLanguage("tenant_as", "Assamese", OLDER);
 
             assertThat(languageRepository.findPreferredTenantIdByContactId(CONTACT)).contains(TENANT_AS);
@@ -207,6 +207,24 @@ class UserPreferenceRepositoriesIntegrationTest {
             insertLanguage("tenant_xx", "Hindi", NEWEST);
 
             assertThat(languageRepository.findPreferredTenantIdByContactId(CONTACT)).contains(TENANT_AS);
+        }
+
+        @Test
+        void includesATenantSchemaProvisionedSinceThePreviousLookup() {
+            insertLanguage("tenant_as", "Assamese", OLDER);
+            assertThat(languageRepository.findPreferredTenantIdByContactId(CONTACT)).contains(TENANT_AS);
+
+            try {
+                jdbcTemplate.update("INSERT INTO common_schema.tenant_master_table (id, state_code) VALUES (?, 'NN')",
+                        NEW_TENANT);
+                createPreferenceTables("tenant_nn");
+                insertLanguage("tenant_nn", "Hindi", NEWER);
+
+                assertThat(languageRepository.findPreferredTenantIdByContactId(CONTACT)).contains(NEW_TENANT);
+            } finally {
+                jdbcTemplate.execute("DROP SCHEMA IF EXISTS tenant_nn CASCADE");
+                jdbcTemplate.update("DELETE FROM common_schema.tenant_master_table WHERE id = ?", NEW_TENANT);
+            }
         }
 
         @Test
