@@ -255,10 +255,8 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         TenantResponseDTO tenant = requireOnboardedTenant(tenantId);
 
         Set<TenantConfigKeyEnum> effectiveKeys = (keys == null || keys.isEmpty())
-                ? TenantConfigKeyEnum.canonicalValues()
-                : keys.stream()
-                        .map(TenantConfigKeyEnum::canonical)
-                        .collect(Collectors.toCollection(() -> EnumSet.noneOf(TenantConfigKeyEnum.class)));
+                ? EnumSet.allOf(TenantConfigKeyEnum.class)
+                : keys;
 
         Map<TenantConfigKeyEnum, ConfigValueDTO> configMap = new HashMap<>();
 
@@ -269,15 +267,8 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             // ocr_api_key for the pluggable OCR provider, language_N, nudge_message_*, channel_*). Those
             // are not UI config, so they are skipped here. Previously any such row made this endpoint
             // fail with 400 for the whole tenant, even when the caller asked only for UI keys.
-            TenantConfigKeyEnum storedKey = parseUiConfigKey(cfg.getConfigKey());
-            if (storedKey == null) {
-                continue;
-            }
-            TenantConfigKeyEnum key = storedKey.canonical();
-            // A row stored under a legacy alias (kept by V45, or written by an instance still on the old
-            // name) is read as its canonical key, but never over a row stored under the canonical name.
-            boolean shadowed = storedKey.isLegacyAlias() && configMap.containsKey(key);
-            if (!effectiveKeys.contains(key) || shadowed) {
+            TenantConfigKeyEnum key = parseUiConfigKey(cfg.getConfigKey());
+            if (key == null || !effectiveKeys.contains(key)) {
                 continue;
             }
             try {
@@ -321,7 +312,6 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                             .build());
         }
 
-        addLegacyAliases(configMap);
         return TenantConfigResponseDTO.builder()
                 .tenantId(tenantId)
                 .configs(configMap)
@@ -337,14 +327,12 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
         Integer currentUserId = resolveCurrentUserId();
 
-        Map<TenantConfigKeyEnum, JsonNode> configs = toCanonicalKeys(request.getConfigs());
-
-        validateMapLgdLevelCascade(tenantId, tenant.getStateCode(), configs);
-        validateDeptMapLevelCascade(tenantId, tenant.getStateCode(), configs);
+        validateMapLgdLevelCascade(tenantId, tenant.getStateCode(), request.getConfigs());
+        validateDeptMapLevelCascade(tenantId, tenant.getStateCode(), request.getConfigs());
 
         Map<TenantConfigKeyEnum, ConfigValueDTO> results = new HashMap<>();
 
-        for (Map.Entry<TenantConfigKeyEnum, JsonNode> entry : configs.entrySet()) {
+        for (Map.Entry<TenantConfigKeyEnum, JsonNode> entry : request.getConfigs().entrySet()) {
             TenantConfigKeyEnum key = entry.getKey();
             if (key.isManagedValue()) {
                 throw new InvalidConfigKeyException(
@@ -427,7 +415,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 TenantConfigKeyEnum.FIELD_STAFF_ESCALATION_RULES,
                 TenantConfigKeyEnum.DAILY_SITUATION_REPORT_TIME,
                 TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME);
-        boolean hasScheduleKey = configs.keySet().stream()
+        boolean hasScheduleKey = request.getConfigs().keySet().stream()
                 .anyMatch(scheduleKeys::contains);
         if (hasScheduleKey) {
             final int finalTenantId = tenantId;
@@ -447,7 +435,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         eventPublisher.publishEvent(new TenantConfigUpdatedEvent(
                 tenantId,
                 tenant.getStateCode(),
-                configs.keySet().stream()
+                request.getConfigs().keySet().stream()
                         .map(Enum::name)
                         .collect(Collectors.toSet())));
 
@@ -462,7 +450,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             }
         }
 
-        if (configs.containsKey(TenantConfigKeyEnum.WATER_NORM)) {
+        if (request.getConfigs().containsKey(TenantConfigKeyEnum.WATER_NORM)) {
             SimpleConfigValueDTO dto = (SimpleConfigValueDTO) results.get(TenantConfigKeyEnum.WATER_NORM);
             try {
                 int waterNorm = Integer.parseInt(dto.getValue());
@@ -472,7 +460,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                         dto.getValue(), tenantId, tenant.getStateCode());
             }
         }
-        if (configs.containsKey(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD)) {
+        if (request.getConfigs().containsKey(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD)) {
             WaterSupplyThresholdConfigDTO dto = (WaterSupplyThresholdConfigDTO) results
                     .get(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD);
             if (dto == null) {
@@ -500,7 +488,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             }
         }
 
-        if (configs.containsKey(TenantConfigKeyEnum.INCLUDED_WORK_STATUSES)) {
+        if (request.getConfigs().containsKey(TenantConfigKeyEnum.INCLUDED_WORK_STATUSES)) {
             IncludedWorkStatusesConfigDTO dto =
                     (IncludedWorkStatusesConfigDTO) results.get(TenantConfigKeyEnum.INCLUDED_WORK_STATUSES);
             // Enforced validation for JsonNode-bound configs (bean validation does not run on treeToValue).
@@ -509,7 +497,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                     new IncludedWorkStatusesUpdatedEvent(tenantId, tenant.getStateCode(), workStatuses));
         }
 
-        if (configs.containsKey(TenantConfigKeyEnum.REGULARITY_THRESHOLD_PERCENT)) {
+        if (request.getConfigs().containsKey(TenantConfigKeyEnum.REGULARITY_THRESHOLD_PERCENT)) {
             RegularityThresholdConfigDTO dto =
                     (RegularityThresholdConfigDTO) results.get(TenantConfigKeyEnum.REGULARITY_THRESHOLD_PERCENT);
             // Enforced validation for JsonNode-bound configs (bean validation does not run on treeToValue).
@@ -518,41 +506,10 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                     new RegularityThresholdUpdatedEvent(tenantId, tenant.getStateCode(), thresholdPercent));
         }
 
-        addLegacyAliases(results);
         return TenantConfigResponseDTO.builder()
                 .tenantId(tenantId)
                 .configs(results)
                 .build();
-    }
-
-    /**
-     * Rekeys a config request by canonical key, so a value sent under a legacy alias is validated and
-     * stored under the name every reader looks up. Sending both names of one key is ambiguous, and is
-     * rejected.
-     */
-    private static Map<TenantConfigKeyEnum, JsonNode> toCanonicalKeys(Map<TenantConfigKeyEnum, JsonNode> configs) {
-        Map<TenantConfigKeyEnum, JsonNode> canonical = new LinkedHashMap<>();
-        for (Map.Entry<TenantConfigKeyEnum, JsonNode> entry : configs.entrySet()) {
-            TenantConfigKeyEnum key = entry.getKey().canonical();
-            if (canonical.containsKey(key)) {
-                throw new InvalidConfigKeyException(
-                        key + " was sent under more than one name. Send it once, as " + key + ".");
-            }
-            canonical.put(key, entry.getValue());
-        }
-        return canonical;
-    }
-
-    /**
-     * Adds each legacy alias to a config response, with the same value as its canonical key, so that
-     * clients still reading the old name get the value too.
-     */
-    private static void addLegacyAliases(Map<TenantConfigKeyEnum, ConfigValueDTO> configs) {
-        for (TenantConfigKeyEnum key : TenantConfigKeyEnum.values()) {
-            if (key.isLegacyAlias() && configs.containsKey(key.canonical())) {
-                configs.put(key, configs.get(key.canonical()));
-            }
-        }
     }
 
     @Override
@@ -567,8 +524,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         Map<TenantConfigKeyEnum, TenantConfigStatusResponseDTO.ConfigEntry> configs = new LinkedHashMap<>();
         int configuredCount = 0;
 
-        Set<TenantConfigKeyEnum> allKeys = TenantConfigKeyEnum.canonicalValues();
-        for (TenantConfigKeyEnum key : allKeys) {
+        for (TenantConfigKeyEnum key : TenantConfigKeyEnum.values()) {
             boolean configured = configuredKeys.contains(key);
             configs.put(key, TenantConfigStatusResponseDTO.ConfigEntry.builder()
                     .status(configured ? ConfigStatusEnum.CONFIGURED : ConfigStatusEnum.PENDING)
@@ -578,7 +534,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 configuredCount++;
         }
 
-        int total = allKeys.size();
+        int total = TenantConfigKeyEnum.values().length;
         return TenantConfigStatusResponseDTO.builder()
                 .tenantId(tenantId)
                 .summary(TenantConfigStatusResponseDTO.Summary.builder()
@@ -605,14 +561,13 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         List<LanguageConfigDTO> langs = tenantSchemaRepository.getSupportedLanguages(schemaName);
         boolean languagesConfigured = langs != null && !langs.isEmpty();
 
-        // Iterates the aliases too, so a row stored under a legacy alias counts for its canonical key.
         Set<TenantConfigKeyEnum> configured = EnumSet.noneOf(TenantConfigKeyEnum.class);
         for (TenantConfigKeyEnum key : TenantConfigKeyEnum.values()) {
             boolean isConfigured = key.getType() == ConfigType.SPECIALIZED
                     ? languagesConfigured
                     : genericConfiguredKeyNames.contains(key.name());
             if (isConfigured)
-                configured.add(key.canonical());
+                configured.add(key);
         }
         return configured;
     }

@@ -13,8 +13,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -54,13 +54,13 @@ class WhatsAppPreferredLanguageServiceTest {
         }
 
         @Test
-        @DisplayName("returns 1 when config is absent under both key names")
+        @DisplayName("returns 1 when config is absent, without reading any other key")
         void configAbsent() {
             when(tenantConfigRepository.findConfigValue(1, WhatsAppPreferredLanguageService.CONFIG_KEY))
                     .thenReturn(Optional.empty());
-            when(tenantConfigRepository.findConfigValue(1, WhatsAppPreferredLanguageService.LEGACY_CONFIG_KEY))
-                    .thenReturn(Optional.empty());
             assertThat(service.resolvePreferredLanguageId(1)).isEqualTo(1);
+            verify(tenantConfigRepository).findConfigValue(1, WhatsAppPreferredLanguageService.CONFIG_KEY);
+            verifyNoMoreInteractions(tenantConfigRepository);
         }
 
         @Test
@@ -85,32 +85,6 @@ class WhatsAppPreferredLanguageServiceTest {
             when(tenantConfigRepository.findConfigValue(1, WhatsAppPreferredLanguageService.CONFIG_KEY))
                     .thenReturn(Optional.of("{\"foo\":\"bar\"}"));
             assertThat(service.resolvePreferredLanguageId(1)).isEqualTo(1);
-        }
-    }
-
-    @Nested
-    @DisplayName("config key names")
-    class ConfigKeyNames {
-
-        @Test
-        @DisplayName("reads the canonical key, and never the legacy key when the canonical one is set")
-        void canonicalKeyWins() {
-            when(tenantConfigRepository.findConfigValue(1, "WHATSAPP_MESSAGE_TEMPLATES"))
-                    .thenReturn(Optional.of("{\"preferredLanguageId\":3}"));
-
-            assertThat(service.resolvePreferredLanguageId(1)).isEqualTo(3);
-            verify(tenantConfigRepository, never()).findConfigValue(1, "GLIFIC_MESSAGE_TEMPLATES");
-        }
-
-        @Test
-        @DisplayName("falls back to the legacy key when the canonical one is absent")
-        void legacyKeyFallback() {
-            when(tenantConfigRepository.findConfigValue(1, "WHATSAPP_MESSAGE_TEMPLATES"))
-                    .thenReturn(Optional.empty());
-            when(tenantConfigRepository.findConfigValue(1, "GLIFIC_MESSAGE_TEMPLATES"))
-                    .thenReturn(Optional.of("{\"preferredLanguageId\":4}"));
-
-            assertThat(service.resolvePreferredLanguageId(1)).isEqualTo(4);
         }
     }
 

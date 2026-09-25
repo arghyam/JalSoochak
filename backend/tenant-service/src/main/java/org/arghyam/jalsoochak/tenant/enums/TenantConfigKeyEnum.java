@@ -24,18 +24,16 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.stream.Collectors;
 
-import lombok.AccessLevel;
 import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 
 /**
  * Exhaustive list of allowed configuration keys for tenants.
  * Each key declares its storage type and the expected DTO class for that key.
  * Implements ConfigKey sealed interface to restrict config keys to known types.
- * <p>
- * A renamed key keeps its old name as a legacy alias for a while (see {@link #isLegacyAlias()}), so
- * clients still sending the old name keep working while they switch.
  */
 @Getter
+@RequiredArgsConstructor
 public enum TenantConfigKeyEnum implements ConfigKey {
 
     /**
@@ -91,15 +89,6 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * Provides a hierarchical and maintainable structure for all chatbot conversation templates.
      */
     WHATSAPP_MESSAGE_TEMPLATES(ConfigType.GENERIC, WhatsAppMessagesConfigDTO.class, false, false, false),
-
-    /**
-     * Deprecated name of {@link #WHATSAPP_MESSAGE_TEMPLATES}. It is still accepted in requests, but
-     * resolved to the canonical key before anything is read or stored, so this service only ever
-     * writes the canonical name. Responses that carry the canonical key also carry this name, with the same
-     * value.
-     */
-    @Deprecated(forRemoval = true)
-    GLIFIC_MESSAGE_TEMPLATES(WHATSAPP_MESSAGE_TEMPLATES),
 
     /**
      * WhatsApp provider connection settings.
@@ -341,60 +330,6 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * auto-transition to trigger.
      */
     private final boolean mandatory;
-    /**
-     * The key a legacy alias stands in for; null for every canonical key. See {@link #canonical()}.
-     */
-    @Getter(AccessLevel.NONE)
-    private final TenantConfigKeyEnum aliasOf;
-
-    TenantConfigKeyEnum(ConfigType type, Class<? extends ConfigValueDTO> dtoClass, boolean isPublic,
-            boolean managedValue, boolean mandatory) {
-        this(type, dtoClass, isPublic, managedValue, mandatory, null);
-    }
-
-    /**
-     * A legacy alias has the same storage type, DTO and writability as its canonical key. It is never
-     * public or mandatory itself, because the canonical key already answers both.
-     */
-    TenantConfigKeyEnum(TenantConfigKeyEnum canonical) {
-        this(canonical.type, canonical.dtoClass, false, canonical.managedValue, false, canonical);
-    }
-
-    TenantConfigKeyEnum(ConfigType type, Class<? extends ConfigValueDTO> dtoClass, boolean isPublic,
-            boolean managedValue, boolean mandatory, TenantConfigKeyEnum aliasOf) {
-        this.type = type;
-        this.dtoClass = dtoClass;
-        this.isPublic = isPublic;
-        this.managedValue = managedValue;
-        this.mandatory = mandatory;
-        this.aliasOf = aliasOf;
-    }
-
-    /**
-     * True for the old name of a renamed key, which is kept only so that clients still using it keep
-     * working.
-     */
-    public boolean isLegacyAlias() {
-        return aliasOf != null;
-    }
-
-    /**
-     * The key this one is stored and returned under: the key itself, or, for a legacy alias, the key
-     * it stands in for.
-     */
-    public TenantConfigKeyEnum canonical() {
-        return aliasOf == null ? this : aliasOf;
-    }
-
-    /**
-     * Every key except the legacy aliases. Code that lists or counts all keys iterates this instead of
-     * {@link #values()}, so an alias is never reported as a key in its own right.
-     */
-    public static EnumSet<TenantConfigKeyEnum> canonicalValues() {
-        return Arrays.stream(values())
-                .filter(key -> !key.isLegacyAlias())
-                .collect(Collectors.toCollection(() -> EnumSet.noneOf(TenantConfigKeyEnum.class)));
-    }
 
     /**
      * Returns all config keys that are required for the ONBOARDED → CONFIGURED transition.

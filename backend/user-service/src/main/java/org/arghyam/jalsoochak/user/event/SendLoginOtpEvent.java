@@ -55,18 +55,4 @@ public class SendLoginOtpEvent {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty("tenantCode")
     String tenantCode;
-
-    /**
-     * Emits {@link #whatsappContactId} under its legacy name as well, so a consumer that has not
-     * yet been upgraded still reads it.
-     *
-     * @deprecated read {@link #getWhatsappContactId()}; the legacy key is dropped once every
-     *             consumer reads {@code whatsapp_contact_id}.
-     */
-    @Deprecated(forRemoval = true)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonProperty("glific_id")
-    public Long getGlificId() {
-        return whatsappContactId;
-    }
 }
