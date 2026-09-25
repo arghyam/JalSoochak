@@ -17,16 +17,16 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Integration tests for the V47 migration, which leaves no live row under the retired
+ * Integration tests for the V49 migration, which leaves no live row under the retired
  * {@code GLIFIC_MESSAGE_TEMPLATES} tenant config key, against real PostgreSQL via Testcontainers.
  *
- * <p>The SQL under test is the <b>real V47 migration</b>, read from {@code classpath:db/migration/}
+ * <p>The SQL under test is the <b>real V49 migration</b>, read from {@code classpath:db/migration/}
  * (tenant-service's pom copies {@code ../database/V*.sql} there). It runs once, on a table that
  * already holds every kind of row it has to handle. No Spring context is needed, because the
  * migration is the only code under test.
  */
 @Testcontainers
-@DisplayName("V47 legacy message-templates config key retirement migration")
+@DisplayName("V49 legacy message-templates config key retirement migration")
 class LegacyMessageTemplatesKeyRetirementMigrationIntegrationTest {
 
     private static final String LEGACY_KEY = "GLIFIC_MESSAGE_TEMPLATES";
@@ -68,7 +68,7 @@ class LegacyMessageTemplatesKeyRetirementMigrationIntegrationTest {
         insert(TENANT_OTHER_KEY, "WATER_NORM", "{\"value\":\"55\"}", LIVE_UPDATED_AT, null);
 
         String migration = new String(
-                new ClassPathResource("db/migration/V47__retire_legacy_message_templates_config_key.sql")
+                new ClassPathResource("db/migration/V49__retire_legacy_message_templates_config_key.sql")
                         .getInputStream().readAllBytes(), UTF_8);
         jdbcTemplate.execute(migration);
     }

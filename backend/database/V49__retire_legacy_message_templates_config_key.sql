@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: V47 - Retire the GLIFIC_MESSAGE_TEMPLATES tenant config key
+-- Migration: V49 - Retire the GLIFIC_MESSAGE_TEMPLATES tenant config key
 -- ------------------------------------------------------------
 -- tenant-service, telemetry-service and user-service now know the key by its
 -- new name only, so none of them reads a row still stored under the old one.

@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: V48 - Retire the glific_welcome_flow_id tenant config key
+-- Migration: V50 - Retire the glific_welcome_flow_id tenant config key
 -- ------------------------------------------------------------
 -- message-service now reads a tenant's welcome flow id from welcome_flow_id
 -- only. Until now it fell back to glific_welcome_flow_id when the tenant had

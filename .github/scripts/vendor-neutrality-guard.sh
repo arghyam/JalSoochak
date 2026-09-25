@@ -43,8 +43,8 @@ APPLIED_MIGRATIONS=(
 RENAMING_MIGRATIONS=(
   backend/database/V45__copy_message_templates_config_key_to_whatsapp_name.sql
   backend/database/V46__rename_ocr_correlation_id_column.sql
-  backend/database/V47__retire_legacy_message_templates_config_key.sql
-  backend/database/V48__retire_legacy_welcome_flow_id_config_key.sql
+  backend/database/V49__retire_legacy_message_templates_config_key.sql
+  backend/database/V50__retire_legacy_welcome_flow_id_config_key.sql
 )
 
 # Rule HISTORICAL_RECORD — completed plans, code reviews and architecture decision records record

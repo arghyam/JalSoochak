@@ -19,10 +19,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Integration tests for the V48 migration, which retires the {@code glific_welcome_flow_id} tenant
+ * Integration tests for the V50 migration, which retires the {@code glific_welcome_flow_id} tenant
  * config key, against real PostgreSQL via Testcontainers.
  *
- * <p>The SQL under test is the <b>real V48 migration</b>, read from {@code classpath:db/migration/}
+ * <p>The SQL under test is the <b>real V50 migration</b>, read from {@code classpath:db/migration/}
  * (tenant-service's pom copies {@code ../database/V*.sql} there). It runs once, on a table that
  * already holds every kind of row it has to handle. No Spring context is needed, because the
  * migration is the only code under test.
@@ -32,7 +32,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * tenant's welcome flow id is the same before and after the migration.
  */
 @Testcontainers
-@DisplayName("V48 legacy welcome flow id config key retirement migration")
+@DisplayName("V50 legacy welcome flow id config key retirement migration")
 class LegacyWelcomeFlowIdKeyRetirementMigrationIntegrationTest {
 
     private static final String LEGACY_KEY = "glific_welcome_flow_id";
@@ -69,7 +69,7 @@ class LegacyWelcomeFlowIdKeyRetirementMigrationIntegrationTest {
 
     private static JdbcTemplate jdbcTemplate;
 
-    /** Each tenant's welcome flow id as message-service read it before V48, with the fallback. */
+    /** Each tenant's welcome flow id as message-service read it before V50, with the fallback. */
     private static final Map<Integer, Optional<String>> readBefore = new HashMap<>();
 
     @BeforeAll
@@ -95,7 +95,7 @@ class LegacyWelcomeFlowIdKeyRetirementMigrationIntegrationTest {
                 read(tenantId, CANONICAL_KEY).or(() -> read(tenantId, LEGACY_KEY))));
 
         String migration = new String(
-                new ClassPathResource("db/migration/V48__retire_legacy_welcome_flow_id_config_key.sql")
+                new ClassPathResource("db/migration/V50__retire_legacy_welcome_flow_id_config_key.sql")
                         .getInputStream().readAllBytes(), UTF_8);
         jdbcTemplate.execute(migration);
     }
