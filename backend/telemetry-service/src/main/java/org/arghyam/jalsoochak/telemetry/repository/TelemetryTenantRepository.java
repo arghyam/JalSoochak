@@ -2785,9 +2785,7 @@ public class TelemetryTenantRepository {
     }
 
     private void validateSchemaName(String schemaName) {
-        if (schemaName == null || !schemaName.matches("^[a-z_][a-z0-9_]*$")) {
-            throw new IllegalArgumentException("Invalid schema name: " + schemaName);
-        }
+        SchemaNames.validate(schemaName);
     }
 
     public void invalidateMetadataCaches() {
@@ -2825,6 +2823,17 @@ public class TelemetryTenantRepository {
                 """;
         Boolean exists = jdbcTemplate.queryForObject(sql, Boolean.class, schemaName, tableName, columnName);
         return Boolean.TRUE.equals(exists);
+    }
+
+    /**
+     * USER-PREFERENCE-TENANT-SCHEMA: the cached tenant schemas whose {@code tableName} has
+     * {@code columnName}, for queries that span every tenant and would fail as a whole on one
+     * schema without the table.
+     */
+    public List<String> findTenantSchemasWithColumn(String tableName, String columnName) {
+        return getTenantSchemasCached().stream()
+                .filter(schemaName -> columnExists(schemaName, tableName, columnName))
+                .toList();
     }
 
     private List<String> getTenantSchemasCached() {
