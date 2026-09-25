@@ -22,7 +22,6 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryPendingMeterChangeRe
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
-import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationVerdict;
 import org.arghyam.jalsoochak.telemetry.service.location.ReadingSubmission;
@@ -171,7 +170,6 @@ public class MeterReadingConversationService {
     private final TenantConfigRepository tenantConfigRepository;
     private final ConversationTemplateService templatesService;
     private final TelemetryTenantRepository telemetryTenantRepository;
-    private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final ObjectMapper objectMapper;
     private final LocationAffinityService locationAffinityService;
@@ -181,7 +179,6 @@ public class MeterReadingConversationService {
                                            TenantConfigRepository tenantConfigRepository,
                                            ConversationTemplateService templatesService,
                                            TelemetryTenantRepository telemetryTenantRepository,
-                                           UserChannelPreferenceRepository userChannelPreferenceRepository,
                                            TelemetryEventPublisher telemetryEventPublisher,
                                            ObjectMapper objectMapper,
                                            LocationAffinityService locationAffinityService) {
@@ -190,7 +187,6 @@ public class MeterReadingConversationService {
         this.tenantConfigRepository = tenantConfigRepository;
         this.templatesService = templatesService;
         this.telemetryTenantRepository = telemetryTenantRepository;
-        this.userChannelPreferenceRepository = userChannelPreferenceRepository;
         this.telemetryEventPublisher = telemetryEventPublisher;
         this.objectMapper = objectMapper;
         this.locationAffinityService = locationAffinityService;

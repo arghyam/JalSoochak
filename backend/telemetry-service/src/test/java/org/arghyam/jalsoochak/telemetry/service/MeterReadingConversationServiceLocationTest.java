@@ -8,7 +8,6 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
-import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationVerdict;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,8 +67,6 @@ class MeterReadingConversationServiceLocationTest {
     private ConversationTemplateService templatesService;
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
-    @Mock
-    private UserChannelPreferenceRepository userChannelPreferenceRepository;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
