@@ -85,6 +85,6 @@ class ConversationSelectionServiceSelectedChannelTest {
         assertTrue(response.isSuccess());
         assertEquals("Channel selected: Iot", response.getMessage());
         verify(telemetryTenantRepository).updateSchemeChannel("tenant_test", 99L, 2);
-        verify(userChannelPreferenceRepository).upsert(tenantId, contactId, "Iot");
+        verify(userChannelPreferenceRepository).upsert("tenant_test", contactId, "Iot");
     }
 }
