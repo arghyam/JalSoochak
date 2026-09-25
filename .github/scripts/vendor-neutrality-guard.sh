@@ -41,7 +41,7 @@ APPLIED_MIGRATIONS=(
 # Rule RENAMING_MIGRATION — a migration that renames or retires a vendor-named column, index,
 # function body or stored config key has to name what it changes in order to find it.
 RENAMING_MIGRATIONS=(
-  backend/database/V45__rename_whatsapp_message_templates_config_key.sql
+  backend/database/V45__copy_message_templates_config_key_to_whatsapp_name.sql
   backend/database/V46__rename_ocr_correlation_id_column.sql
   backend/database/V47__retire_legacy_message_templates_config_key.sql
   backend/database/V48__retire_legacy_welcome_flow_id_config_key.sql
@@ -88,7 +88,10 @@ FORBIDDEN_MARKER='glif+ic|flow[\s_-]?vision|minio|assam(?!ese)'
 # Tokens removed from a line before the marker is looked for; the rest of the line is still checked.
 # One per line: a Perl regex on the file path, whitespace, then a case-insensitive Perl regex for the
 # token.
-ALLOWED_TOKENS="$(cat <<'RULES'
+#
+# Read with `read` rather than "$(cat <<'RULES' …)": bash 3.2, the default on macOS, mis-parses a
+# here-document inside $(…) and fails on the quote characters in these rules.
+IFS= read -r -d '' ALLOWED_TOKENS <<'RULES' || true
 # Rule URL_OR_HOST — a marker inside a URL or a hostname names a real endpoint
 # (https://api.arghyam.glific.com/api, flowvision-test.s3.ap-south-1.amazonaws.com), not our code.
 .  [a-z][a-z0-9+.-]*://[^\s"'<>()]+
@@ -116,7 +119,6 @@ ALLOWED_TOKENS="$(cat <<'RULES'
 # a test may carry that state's name as data ("tenant_assam", "Assam PHED").
 /src/test/  "[^"\n]*assam[^"\n]*"
 RULES
-)"
 
 # Rule ADAPTER_REFERENCE — a wiring test or a @MockBean has to name the adapter class it wires or
 # silences, and a document may point at the adapter that implements a port. Tests and documents only:

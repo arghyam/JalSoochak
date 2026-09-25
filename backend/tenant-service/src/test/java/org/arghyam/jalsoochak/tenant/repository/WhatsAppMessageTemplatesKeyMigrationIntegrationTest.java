@@ -18,8 +18,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Integration tests for the V45 migration, which renames the {@code GLIFIC_MESSAGE_TEMPLATES} tenant
- * config key to {@code WHATSAPP_MESSAGE_TEMPLATES}, against real PostgreSQL via Testcontainers.
+ * Integration tests for the V45 migration, which copies the {@code GLIFIC_MESSAGE_TEMPLATES} tenant
+ * config key to {@code WHATSAPP_MESSAGE_TEMPLATES}, against real PostgreSQL via Testcontainers. The
+ * legacy row stays, because code that reads only the old name may still be running.
  *
  * <p>The SQL under test is the <b>real V45 migration</b>, read from {@code classpath:db/migration/}
  * (tenant-service's pom copies {@code ../database/V*.sql} there). It runs once, on a table that
@@ -67,7 +68,7 @@ class WhatsAppMessageTemplatesKeyMigrationIntegrationTest {
         insert(TENANT_OTHER_KEY, "WATER_NORM", "{\"value\":\"55\"}", LIVE_UPDATED_AT, null);
 
         String migration = new String(
-                new ClassPathResource("db/migration/V45__rename_whatsapp_message_templates_config_key.sql")
+                new ClassPathResource("db/migration/V45__copy_message_templates_config_key_to_whatsapp_name.sql")
                         .getInputStream().readAllBytes(), UTF_8);
         jdbcTemplate.execute(migration);
     }
@@ -95,15 +96,20 @@ class WhatsAppMessageTemplatesKeyMigrationIntegrationTest {
     }
 
     @Test
-    @DisplayName("A live legacy row becomes exactly one live row under the canonical key")
-    void renamesTheLiveLegacyRow() {
+    @DisplayName("A live legacy row is copied to exactly one live row under the canonical key")
+    void copiesTheLiveLegacyRow() {
         assertThat(liveValues(TENANT_LIVE_AND_DELETED, CANONICAL_KEY)).containsExactly("{\"version\":2}");
-        assertThat(liveValues(TENANT_LIVE_AND_DELETED, LEGACY_KEY)).isEmpty();
     }
 
     @Test
-    @DisplayName("The renamed row keeps its updated_at, because its value has not changed")
-    void keepsUpdatedAtOfTheRenamedRow() {
+    @DisplayName("The live legacy row stays, for code that reads only the old name")
+    void keepsTheLiveLegacyRow() {
+        assertThat(liveValues(TENANT_LIVE_AND_DELETED, LEGACY_KEY)).containsExactly("{\"version\":2}");
+    }
+
+    @Test
+    @DisplayName("The copy keeps the legacy row's updated_at, because its value has not changed")
+    void keepsUpdatedAtOfTheCopiedRow() {
         String updatedAt = jdbcTemplate.queryForObject("""
                 SELECT to_char(updated_at, 'YYYY-MM-DD HH24:MI:SS')
                 FROM common_schema.tenant_config_master_table
@@ -122,7 +128,7 @@ class WhatsAppMessageTemplatesKeyMigrationIntegrationTest {
     }
 
     @Test
-    @DisplayName("A tenant already holding the canonical key keeps it, and its legacy row is not renamed")
+    @DisplayName("A tenant already holding the canonical key keeps it, and its legacy row is not copied over it")
     void keepsAnExistingCanonicalRow() {
         assertThat(liveValues(TENANT_BOTH_NAMES, CANONICAL_KEY)).containsExactly("{\"version\":7}");
         assertThat(liveValues(TENANT_BOTH_NAMES, LEGACY_KEY)).containsExactly("{\"version\":6}");

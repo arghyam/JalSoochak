@@ -11,7 +11,6 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.S3ClientBuilder;
 import software.amazon.awssdk.services.s3.S3Configuration;
 
 import java.net.URI;
@@ -30,37 +29,44 @@ import java.net.URISyntaxException;
 public class StorageConfig {
 
     /**
-     * Path-style access is enabled when {@code storage.endpoint} is set, as most non-AWS
-     * S3-compatible stores require.
+     * Talks to {@code storage.endpoint} with path-style access, which most S3-compatible stores other
+     * than AWS require. The endpoint is required: there is no implicit AWS default, so a deployment
+     * that misses it stops at startup instead of uploading to AWS.
      */
     @Bean
     @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")
     public S3Client s3Client(StorageProperties props) {
+        validateEndpoint(props);
         validateCredentials(props);
-        S3ClientBuilder builder = S3Client.builder()
+        log.info("[Storage] Using endpoint: {} (path-style enabled)", sanitizeEndpoint(props.getEndpoint()));
+        return S3Client.builder()
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create(props.getAccessKey(), props.getSecretKey())))
-                .region(Region.of(props.getRegion()));
-
-        if (hasCustomEndpoint(props)) {
-            log.info("[Storage] Using custom endpoint: {} (path-style enabled)", sanitizeEndpoint(props.getEndpoint()));
-            builder.endpointOverride(URI.create(props.getEndpoint()))
-                    .serviceConfiguration(S3Configuration.builder()
-                            .pathStyleAccessEnabled(true)
-                            .build());
-        }
-        return builder.build();
+                .region(Region.of(props.getRegion()))
+                .endpointOverride(URI.create(props.getEndpoint()))
+                .serviceConfiguration(S3Configuration.builder()
+                        .pathStyleAccessEnabled(true)
+                        .build())
+                .build();
     }
 
     @Bean
     @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")
     public ObjectStorageService objectStorageService(S3Client s3Client, StorageProperties props) {
+        validateBucket(props.getBucket());
         validatePublicBaseUrl(props.getPublicBaseUrl());
         log.info("[Storage] Activating S3-compatible storage [bucket={}, endpoint={}, publicBaseUrl={}]",
                 props.getBucket(),
-                hasCustomEndpoint(props) ? sanitizeEndpoint(props.getEndpoint()) : "AWS default",
+                sanitizeEndpoint(props.getEndpoint()),
                 props.getPublicBaseUrl());
         return new S3CompatibleStorageService(s3Client, props.getPublicBaseUrl());
+    }
+
+    private static void validateEndpoint(StorageProperties props) {
+        if (props.getEndpoint() == null || props.getEndpoint().isBlank()) {
+            throw new IllegalStateException(
+                    "[Storage] storage.endpoint must be provided when storage.enabled=true");
+        }
     }
 
     private static void validateCredentials(StorageProperties props) {
@@ -71,6 +77,13 @@ public class StorageConfig {
         if (props.getSecretKey() == null || props.getSecretKey().isBlank()) {
             throw new IllegalStateException(
                     "[Storage] storage.secret-key must be provided when storage.enabled=true");
+        }
+    }
+
+    private static void validateBucket(String bucket) {
+        if (bucket == null || bucket.isBlank()) {
+            throw new IllegalStateException(
+                    "[Storage] storage.bucket must be provided when storage.enabled=true");
         }
     }
 
@@ -101,10 +114,6 @@ public class StorageConfig {
     private static IllegalStateException invalidPublicBaseUrl() {
         return new IllegalStateException("[Storage] storage.public-base-url must be an absolute http(s) URL "
                 + "with a host and no user-info, query or fragment");
-    }
-
-    private static boolean hasCustomEndpoint(StorageProperties props) {
-        return props.getEndpoint() != null && !props.getEndpoint().isBlank();
     }
 
     private static String sanitizeEndpoint(String endpoint) {

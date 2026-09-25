@@ -28,8 +28,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Pins how object storage is wired: only on an explicit {@code storage.enabled=true}, which the shipped
  * {@code application.yml} sets, and with no no-op fallback, so a disabled store fails whatever needs it
- * at startup instead of letting every upload silently go nowhere. A public base URL the image URLs
- * cannot be built on fails startup too.
+ * at startup instead of letting every upload silently go nowhere. A missing bucket, or a public base URL
+ * the image URLs cannot be built on, fails startup too.
  */
 @DisplayName("StorageConfig")
 class StorageConfigTest {
@@ -39,6 +39,7 @@ class StorageConfigTest {
             "storage.endpoint=http://localhost:9000",
             "storage.access-key=test-access",
             "storage.secret-key=test-secret"};
+    private static final String BUCKET = "storage.bucket=meter-images";
     private static final String PUBLIC_BASE_URL = "storage.public-base-url=https://storage.example.org";
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
@@ -68,9 +69,9 @@ class StorageConfigTest {
     }
 
     @ParameterizedTest(name = "storage.{0} blank")
-    @ValueSource(strings = {"access-key", "secret-key"})
-    @DisplayName("enabled with a blank credential fails startup, naming the property")
-    void blankCredentialFailsStartup(String key) {
+    @ValueSource(strings = {"endpoint", "access-key", "secret-key"})
+    @DisplayName("enabled with a blank endpoint or credential fails startup, naming the property")
+    void blankEndpointOrCredentialFailsStartup(String key) {
         enabled()
                 .withPropertyValues("storage." + key + "=")
                 .run(context -> assertThat(context).hasFailed()
@@ -80,12 +81,28 @@ class StorageConfigTest {
                         .hasMessageContaining("storage." + key));
     }
 
+    @ParameterizedTest(name = "storage.bucket={0}")
+    @NullSource
+    @ValueSource(strings = {"", "   "})
+    @DisplayName("enabled without a bucket fails startup, naming the property")
+    void missingBucketFailsStartup(String bucket) {
+        ApplicationContextRunner withoutBucket = runner.withPropertyValues(ENABLED_WITH_CREDENTIALS)
+                .withPropertyValues(PUBLIC_BASE_URL);
+        (bucket == null ? withoutBucket : withoutBucket.withPropertyValues("storage.bucket=" + bucket))
+                .run(context -> assertThat(context).hasFailed()
+                        .getFailure()
+                        .rootCause()
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("storage.bucket"));
+    }
+
     @ParameterizedTest(name = "storage.public-base-url={0}")
     @NullSource
     @ValueSource(strings = {"", "   "})
     @DisplayName("enabled without a public base URL fails startup, naming the property")
     void missingPublicBaseUrlFailsStartup(String publicBaseUrl) {
-        ApplicationContextRunner withoutBaseUrl = runner.withPropertyValues(ENABLED_WITH_CREDENTIALS);
+        ApplicationContextRunner withoutBaseUrl = runner.withPropertyValues(ENABLED_WITH_CREDENTIALS)
+                .withPropertyValues(BUCKET);
         (publicBaseUrl == null ? withoutBaseUrl
                 : withoutBaseUrl.withPropertyValues("storage.public-base-url=" + publicBaseUrl))
                 .run(context -> assertThat(context).hasFailed()
@@ -156,7 +173,7 @@ class StorageConfigTest {
         runner.run(context -> {
             assertThat(context).hasNotFailed().hasSingleBean(StorageProperties.class);
             StorageProperties props = context.getBean(StorageProperties.class);
-            assertThat(props.getBucket()).isEqualTo("jalsoochak");
+            assertThat(props.getBucket()).as("no default, so an unset bucket fails startup").isNull();
             assertThat(props.getRegion()).isEqualTo("us-east-1");
         });
     }
@@ -178,16 +195,16 @@ class StorageConfigTest {
                 new NoUnboundElementsBindHandler(BindHandler.DEFAULT)).get();
 
         assertThat(props.isEnabled()).isTrue();
-        assertThat(props.getBucket()).isEqualTo("jalsoochak");
+        assertThat(props.getBucket()).as("blank, so an unset bucket fails startup").isEmpty();
         assertThat(props.getRegion()).isEqualTo("us-east-1");
-        assertThat(props.getEndpoint()).isEmpty();
+        assertThat(props.getEndpoint()).as("blank, so an unset endpoint fails startup").isEmpty();
         assertThat(props.getPublicBaseUrl()).as("blank, so an unset base URL fails startup").isEmpty();
         assertThat(props.getAccessKey()).as("blank, so an unset credential fails startup").isEmpty();
         assertThat(props.getSecretKey()).as("blank, so an unset credential fails startup").isEmpty();
     }
 
     private ApplicationContextRunner enabled() {
-        return runner.withPropertyValues(ENABLED_WITH_CREDENTIALS).withPropertyValues(PUBLIC_BASE_URL);
+        return runner.withPropertyValues(ENABLED_WITH_CREDENTIALS).withPropertyValues(BUCKET, PUBLIC_BASE_URL);
     }
 
     private ApplicationContextRunner withEnabled(String enabled) {
