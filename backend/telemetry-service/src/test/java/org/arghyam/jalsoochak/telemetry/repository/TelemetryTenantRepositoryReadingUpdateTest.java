@@ -168,19 +168,19 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
     class UpdateFromIngestion {
 
         @Test
-        void writesPayloadJsonAndFlowVisionIdOnAFullyMigratedSchema() {
+        void writesPayloadJsonAndOcrCorrelationIdOnAFullyMigratedSchema() {
             onColumnExists(true);
 
             repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
-                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "fv-1", "img", "reason", 2L);
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason", 2L);
 
             assertThat(capturedUpdateSql())
                     .contains("payload_json")
-                    .contains("flowvision_correlation_id")
+                    .contains("ocr_correlation_id = COALESCE(?, ocr_correlation_id)")
                     .contains("observation_time");
             assertThat(capturedUpdateArgs()).containsExactly(
                     READING_AT, DAY, new BigDecimal("10"), new BigDecimal("11"),
-                    new BigDecimal("11"), new BigDecimal("10"), "corr-1", "fv-1",
+                    new BigDecimal("11"), new BigDecimal("10"), "corr-1", "ocr-1",
                     "img", "reason", 2L, 5L);
         }
 
@@ -193,7 +193,7 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
 
             assertThat(capturedUpdateSql())
                     .doesNotContain("payload_json")
-                    .doesNotContain("flowvision_correlation_id")
+                    .doesNotContain("_correlation_id = COALESCE")
                     .contains("reading_at");
             assertThat(capturedUpdateArgs()).containsExactly(
                     READING_AT, DAY, new BigDecimal("10"), new BigDecimal("11"),
@@ -201,24 +201,24 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
         }
 
         @Test
-        void writesPayloadJsonOnlyWhenTheFlowVisionColumnIsAbsent() {
+        void writesPayloadJsonOnlyWhenTheOcrCorrelationColumnIsAbsent() {
             onColumnsExisting("payload_json");
 
             repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason", 2L);
 
-            assertThat(capturedUpdateSql()).contains("payload_json").doesNotContain("flowvision_correlation_id");
+            assertThat(capturedUpdateSql()).contains("payload_json").doesNotContain("_correlation_id = COALESCE");
             assertThat(capturedUpdateArgs()).hasSize(11);
         }
 
         @Test
-        void writesTheFlowVisionIdOnlyWhenPayloadJsonIsAbsent() {
-            onColumnsExisting("flowvision_correlation_id");
+        void writesTheOcrCorrelationIdOnlyWhenPayloadJsonIsAbsent() {
+            onColumnsExisting("ocr_correlation_id");
 
             repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
-                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "fv-1", "img", "reason", 2L);
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason", 2L);
 
-            assertThat(capturedUpdateSql()).contains("flowvision_correlation_id").doesNotContain("payload_json");
+            assertThat(capturedUpdateSql()).contains("ocr_correlation_id").doesNotContain("payload_json");
             assertThat(capturedUpdateArgs()).hasSize(10);
         }
 
@@ -247,7 +247,7 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
         }
 
         @Test
-        void nineArgumentOverloadPassesNoFlowVisionId() {
+        void nineArgumentOverloadPassesNoOcrCorrelationId() {
             onColumnExists(true);
 
             repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,

@@ -1,6 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
@@ -39,7 +39,7 @@ class TelemetrySubmissionAuditServiceTest {
     private static final String PHONE = "919999900001";
 
     @Mock
-    private GlificOperatorContextService operatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
 
@@ -175,11 +175,11 @@ class TelemetrySubmissionAuditServiceTest {
     }
 
     @Nested
-    @DisplayName("captureForAssamReading")
-    class CaptureForAssamReading {
+    @DisplayName("captureForCanonicalReading")
+    class CaptureForCanonicalReading {
 
-        private AssamReadingRequest request(String phone, String stateSchemeId, String centreSchemeId) {
-            AssamReadingRequest request = new AssamReadingRequest();
+        private CanonicalReadingRequest request(String phone, String stateSchemeId, String centreSchemeId) {
+            CanonicalReadingRequest request = new CanonicalReadingRequest();
             request.setPhoneNumber(phone);
             request.setStateSchemeId(stateSchemeId);
             request.setCentreSchemeId(centreSchemeId);
@@ -188,7 +188,7 @@ class TelemetrySubmissionAuditServiceTest {
 
         @Test
         void handlesAMissingRequest() {
-            var snapshot = service.captureForAssamReading(null, 3);
+            var snapshot = service.captureForCanonicalReading(null, 3);
 
             assertThat(snapshot.maskedPhone()).isEqualTo("unknown");
             assertThat(snapshot.schemeId()).isNull();
@@ -196,7 +196,7 @@ class TelemetrySubmissionAuditServiceTest {
 
         @Test
         void skipsResolutionForABlankPhoneNumber() {
-            var snapshot = service.captureForAssamReading(request("  ", "S-1", "C-1"), 3);
+            var snapshot = service.captureForCanonicalReading(request("  ", "S-1", "C-1"), 3);
 
             assertThat(snapshot.maskedPhone()).isEqualTo("unknown");
             assertThat(snapshot.schemeId()).isNull();
@@ -209,7 +209,7 @@ class TelemetrySubmissionAuditServiceTest {
                     .thenReturn(Optional.of(70L));
             when(telemetryTenantRepository.isOperatorMappedToScheme(SCHEMA, 11L, 70L)).thenReturn(true);
 
-            assertThat(service.captureForAssamReading(request(PHONE, "S-1", "C-1"), 3).schemeId())
+            assertThat(service.captureForCanonicalReading(request(PHONE, "S-1", "C-1"), 3).schemeId())
                     .isEqualTo(70L);
         }
 
@@ -223,7 +223,7 @@ class TelemetrySubmissionAuditServiceTest {
                     .thenReturn(Optional.of(71L));
             when(telemetryTenantRepository.isOperatorMappedToScheme(SCHEMA, 11L, 71L)).thenReturn(true);
 
-            assertThat(service.captureForAssamReading(request(PHONE, "S-1", "C-1"), 3).schemeId())
+            assertThat(service.captureForCanonicalReading(request(PHONE, "S-1", "C-1"), 3).schemeId())
                     .isEqualTo(71L);
         }
 
@@ -237,7 +237,7 @@ class TelemetrySubmissionAuditServiceTest {
             when(telemetryTenantRepository.isOperatorMappedToScheme(anyString(), anyLong(), anyLong()))
                     .thenReturn(false);
 
-            assertThat(service.captureForAssamReading(request(PHONE, "S-1", "C-1"), 3).schemeId()).isNull();
+            assertThat(service.captureForCanonicalReading(request(PHONE, "S-1", "C-1"), 3).schemeId()).isNull();
         }
 
         @Test
@@ -248,7 +248,7 @@ class TelemetrySubmissionAuditServiceTest {
             when(telemetryTenantRepository.findSchemeIdByCentreSchemeId(anyString(), any()))
                     .thenReturn(Optional.empty());
 
-            assertThat(service.captureForAssamReading(request(PHONE, "S-1", "C-1"), 3).schemeId()).isNull();
+            assertThat(service.captureForCanonicalReading(request(PHONE, "S-1", "C-1"), 3).schemeId()).isNull();
         }
 
         @Test
@@ -256,7 +256,7 @@ class TelemetrySubmissionAuditServiceTest {
             when(operatorContextService.resolveOperatorWithSchema(anyString(), any()))
                     .thenThrow(new IllegalStateException("No operator found"));
 
-            var snapshot = service.captureForAssamReading(request(PHONE, "S-1", "C-1"), 3);
+            var snapshot = service.captureForCanonicalReading(request(PHONE, "S-1", "C-1"), 3);
 
             assertThat(snapshot.schemeId()).isNull();
             assertThat(snapshot.maskedPhone()).isEqualTo("****0001");

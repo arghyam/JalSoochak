@@ -708,8 +708,8 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
         }
 
         @Test
-        void findReadingByCorrelationIdAlsoMatchesFlowVisionIdWhenColumnExists() {
-            onColumnsExisting("flowvision_correlation_id");
+        void findReadingByCorrelationIdAlsoMatchesOcrCorrelationIdWhenColumnExists() {
+            onColumnsExisting("ocr_correlation_id");
             onQuery("flow_reading_table", row("id", 5L, "correlation_id", "corr-1", "created_by", 2L));
 
             Optional<TelemetryReadingRecord> record =
@@ -718,7 +718,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             assertThat(record).isPresent();
             assertThat(record.get().correlationId()).isEqualTo("corr-1");
             assertThat(allQuerySql())
-                    .anySatisfy(sql -> assertThat(sql).contains("flowvision_correlation_id = ?"));
+                    .anySatisfy(sql -> assertThat(sql).contains("ocr_correlation_id = ?"));
         }
 
         @Test
@@ -730,7 +730,18 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
 
             assertThat(allQuerySql())
                     .filteredOn(sql -> sql.contains("SELECT id, correlation_id, created_by"))
-                    .allSatisfy(sql -> assertThat(sql).doesNotContain("flowvision_correlation_id"));
+                    .allSatisfy(sql -> assertThat(sql).doesNotContain(" OR "));
+        }
+
+        @Test
+        void findFlowReadingDetailsByCorrelationIdAlsoMatchesOcrCorrelationIdWhenColumnExists() {
+            onColumnExists(true);
+            onQuery("AS reading_time", row("id", 5L, "correlation_id", "corr-1"));
+
+            repository.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1");
+
+            assertThat(allQuerySql())
+                    .anySatisfy(sql -> assertThat(sql).contains("OR ocr_correlation_id = ?"));
         }
 
         @Test
@@ -742,7 +753,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     "correlation_id", "corr-1",
                     "extracted_reading", new BigDecimal("10.5"),
                     "confirmed_reading", new BigDecimal("11.5"),
-                    "image_url", "https://minio/img.jpg",
+                    "image_url", "https://storage.example.org/img.jpg",
                     "reading_date", LocalDate.of(2026, 3, 1),
                     "reading_time", LocalDateTime.of(2026, 3, 1, 6, 15),
                     "channel", "BFM"));
@@ -757,7 +768,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             assertThat(value.createdBy()).isEqualTo(2L);
             assertThat(value.extractedReading()).isEqualByComparingTo("10.5");
             assertThat(value.confirmedReading()).isEqualByComparingTo("11.5");
-            assertThat(value.imageUrl()).isEqualTo("https://minio/img.jpg");
+            assertThat(value.imageUrl()).isEqualTo("https://storage.example.org/img.jpg");
             assertThat(value.readingDate()).isEqualTo(LocalDate.of(2026, 3, 1));
             assertThat(value.readingAt()).isEqualTo(LocalDateTime.of(2026, 3, 1, 6, 15));
             assertThat(value.channel()).isEqualTo("BFM");

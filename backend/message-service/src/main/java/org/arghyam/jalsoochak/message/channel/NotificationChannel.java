@@ -6,7 +6,7 @@ import org.arghyam.jalsoochak.message.dto.NotificationRequest;
  * Strategy interface for notification delivery channels.
  * <p>
  * Each implementation handles a single delivery mechanism
- * (Webhook, Email via SendGrid, WhatsApp via Gliffic).
+ * (Webhook, Email via SendGrid, WhatsApp).
  */
 public interface NotificationChannel {
 

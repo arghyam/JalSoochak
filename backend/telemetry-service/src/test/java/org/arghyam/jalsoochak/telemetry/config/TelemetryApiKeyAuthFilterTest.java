@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The filter is the single fail-closed gate in front of the server-to-server reading routes.
  * These tests pin the two properties that matter: everything under the protected prefixes needs a
- * key unless it is on the explicit Glific webhook allowlist, and a rejected request never reaches
+ * key unless it is on the explicit chatbot webhook allowlist, and a rejected request never reaches
  * the handler.
  */
 class TelemetryApiKeyAuthFilterTest {
@@ -100,10 +100,10 @@ class TelemetryApiKeyAuthFilterTest {
     }
 
     @Test
-    void glificWebhookRoutesStayUnauthenticated() throws Exception {
+    void webhookRoutesStayUnauthenticated() throws Exception {
         // These are the WhatsApp webhook routes; they are unauthenticated by design today and are
         // tracked as a separate finding. Enforcing a key here would break the live bot.
-        for (String path : new String[]{"/api/v1/telemetry/readings/glific", "/api/v1/telemetry/schemes",
+        for (String path : new String[]{"/api/v1/telemetry/readings/whatsapp", "/api/v1/telemetry/schemes",
                 "/api/v1/telemetry/manual-reading", "/api/v1/telemetry/intro"}) {
             MockFilterChain chain = new MockFilterChain();
             MockHttpServletResponse response = new MockHttpServletResponse();

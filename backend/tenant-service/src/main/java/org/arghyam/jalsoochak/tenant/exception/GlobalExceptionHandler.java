@@ -109,6 +109,17 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
+    /**
+     * MESSAGING-PROVIDER-SECRETS: 503, not 500 — the request is valid and would succeed once
+     * the deployment configures a master key, so this is an unavailable capability rather
+     * than a failure. The message names the missing configuration, never key material.
+     */
+    @ExceptionHandler(SecretStoreUnavailableException.class)
+    public ResponseEntity<ApiErrorResponseDTO> handleSecretStoreUnavailable(SecretStoreUnavailableException ex) {
+        log.warn("Secret store unavailable: {}", ex.getMessage());
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+    }
+
     @ExceptionHandler(ConfigurationException.class)
     public ResponseEntity<ApiErrorResponseDTO> handleConfigurationException(ConfigurationException ex) {
         log.error("Configuration error: {}", ex.getMessage(), ex);
@@ -154,8 +165,40 @@ public class GlobalExceptionHandler {
             log.warn("Invalid format in request body: {}", message);
             return build(HttpStatus.BAD_REQUEST, message);
         }
+        // A settings DTO that rejects its input from a @JsonCreator or a @JsonAnySetter — as the
+        // messaging provider settings do — reaches here wrapped in a JsonMappingException. Its own
+        // message names the offending property or value, which is the whole point of rejecting it;
+        // the generic fallback below would throw that away and leave the caller guessing.
+        String rejection = settingsRejectionMessage(cause);
+        if (rejection != null) {
+            log.warn("Rejected request body: {}", rejection);
+            return build(HttpStatus.BAD_REQUEST, rejection);
+        }
         log.warn("Malformed request body: {}", ex.getMessage());
         return build(HttpStatus.BAD_REQUEST, "Malformed or unreadable request body");
+    }
+
+    /**
+     * Walks the cause chain and returns the message of a settings DTO's own rejection.
+     *
+     * <p>Matches {@link SettingsRejectedException} and not {@link IllegalArgumentException}: any
+     * JDK or third-party {@code IllegalArgumentException} raised while deserializing any body in
+     * this service — a {@code java.time} or {@code URI} coercion, an unrelated DTO's creator —
+     * routinely quotes the input that produced it, and on the messaging endpoints that input sits
+     * next to a credential. Those stay collapsed into the opaque generic message.
+     *
+     * <p>Bounded, because a cause chain can in principle be cyclic.
+     */
+    private static String settingsRejectionMessage(Throwable cause) {
+        Throwable current = cause;
+        for (int depth = 0; current != null && depth < 10; depth++) {
+            if (current instanceof SettingsRejectedException && current.getMessage() != null
+                    && !current.getMessage().isBlank()) {
+                return current.getMessage();
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)

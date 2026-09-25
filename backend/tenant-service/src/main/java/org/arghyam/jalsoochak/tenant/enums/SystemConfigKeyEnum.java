@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.tenant.enums;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.MessagingAllowedHostsConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
@@ -36,7 +37,7 @@ public enum SystemConfigKeyEnum implements ConfigKey {
 
     /**
      * BFM Image Reading Confidence Level Threshold.
-     * Minimum confidence level for AI Reader (FlowVision) meter readings.
+     * Minimum confidence level for AI Reader (OCR) meter readings.
      * Readings below this threshold are marked with low confidence flag.
      * Managed by Super User.
      */
@@ -65,7 +66,21 @@ public enum SystemConfigKeyEnum implements ConfigKey {
      * not set its own value. Published to analytics via REGULARITY_THRESHOLD_UPDATED with tenantId=0.
      * Managed by Super User.
      */
-    REGULARITY_THRESHOLD_PERCENT(RegularityThresholdConfigDTO.class);
+    REGULARITY_THRESHOLD_PERCENT(RegularityThresholdConfigDTO.class),
+
+    /**
+     * Host patterns a tenant's messaging provider settings may point at, per provider —
+     * {@code {"smtp": ["smtp.mp.gov.in", "*.nic.in"]}}.
+     * <p>
+     * A state admin owns their state's SMTP credentials but must not be able to choose an arbitrary
+     * destination for them: without this list, a settings write could make message-service open a
+     * connection to an internal host, or hand the tenant's SMTP password to a server the writer
+     * controls. Onboarding a new relay is therefore a super-user decision, recorded here.
+     * <p>
+     * Unset or empty means no tenant may use SMTP. Checked on write by tenant-service and again by
+     * message-service immediately before it connects.
+     */
+    MESSAGING_PROVIDER_ALLOWED_HOSTS(MessagingAllowedHostsConfigDTO.class);
 
     private final Class<? extends ConfigValueDTO> dtoClass;
 

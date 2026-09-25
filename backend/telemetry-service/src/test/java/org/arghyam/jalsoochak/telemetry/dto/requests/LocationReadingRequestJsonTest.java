@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>It is not, and these tests pin the two reasons why. The coordinates are numeric, so markup
  * cannot bind to them at all; and the contact's WhatsApp profile name is not a bound field, so
- * whatever Glific — or a caller impersonating it — sends under {@code name} is dropped during
+ * whatever the chatbot — or a caller impersonating it — sends under {@code name} is dropped during
  * deserialization rather than carried into the service layer. Re-adding that field would make this
  * suite fail, which is the point: nothing downstream reads it, so binding it only creates a sink.</p>
  */
@@ -57,7 +57,7 @@ class LocationReadingRequestJsonTest {
 
         LocationReadingRequest request = OBJECT_MAPPER.readValue(body, LocationReadingRequest.class);
 
-        // The request is still accepted — Glific keeps sending the key, and rejecting it would
+        // The request is still accepted — the chatbot keeps sending the key, and rejecting it would
         // break live location capture for profile names that are perfectly legitimate.
         assertEquals("919999900001", request.resolveContactId());
         assertEquals(0, new BigDecimal("12.9716").compareTo(request.getLatitude()));

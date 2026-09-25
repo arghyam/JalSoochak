@@ -29,15 +29,16 @@ clamped page rather than `400`.
 
 Set the following environment variables before running the Telemetry services:
 
-- `GLIFIC_API_URL`
-- `GLIFIC_API_KEY`
-- `GLIFIC_NUDGE_TEMPLATE_ID`
-- `GLIFIC_ESCALATION_TEMPLATE_ID`
-- `MINIO_ENDPOINT`
-- `MINIO_ACCESS_KEY`
-- `MINIO_SECRET_KEY`
-- `MINIO_BUCKET`
-- `MINIO_BASE_URL`
+- `WHATSAPP_API_URL`
+- `WHATSAPP_USERNAME`
+- `WHATSAPP_PASSWORD`
+- `WHATSAPP_NUDGE_TEMPLATE_ID`
+- `WHATSAPP_ESCALATION_TEMPLATE_ID`
+- `STORAGE_ENDPOINT`
+- `STORAGE_ACCESS_KEY`
+- `STORAGE_SECRET_KEY`
+- `STORAGE_BUCKET`
+- `STORAGE_PUBLIC_BASE_URL`
 
 ---
 
@@ -172,7 +173,6 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/analytics/water-supply/average-per-region` | Average water supply per region |
 | GET | `/api/v1/analytics/national/dashboard` | National dashboard data |
 | GET | `/api/v1/analytics/scheme-regularity/periodic/national` | National periodic scheme regularity |
-| POST | `/api/v1/analytics/date-dimension/populate` | Populate date dimension table |
 | GET | `/api/v1/analytics/schemes/status-count` | Scheme status counts |
 | GET | `/api/v1/analytics/schemes/dashboard` | Scheme dashboard |
 | GET | `/api/v1/analytics/schemes/region-report` | Scheme region report |
@@ -203,7 +203,6 @@ Set the following environment variables before running the Telemetry services:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/message/notifications` | List notifications |
 | POST | `/api/v1/message/notifications` | Send a notification (specify channel in body) |
 | POST | `/api/v1/message/events` | Dispatch a Kafka event |
 
@@ -256,10 +255,10 @@ The tables below list every endpoint that changed across all services. If your f
 
 ---
 
-### Telemetry service — webhook base URL (affects all 26 Glific webhook endpoints)
+### Telemetry service — webhook base URL (affects all 26 chatbot webhook endpoints)
 
 > ## Telemetry · Webhook (`telemetry-service` · port 8989)
-> These endpoints are called by **Glific** (WhatsApp bot platform), not by the frontend.
+> These endpoints are called by the **WhatsApp chatbot platform**, not by the frontend.
 >
 > **All 26 require the `X-Webhook-Token: <token>` header.** Ingress exposes them publicly, bypassing
 > the API gateway, so this shared secret is the only thing in front of them. Requests without a valid
@@ -285,7 +284,7 @@ recorded when the reading was first submitted.
 
 | Method | Endpoint                                          | Description |
 |--------|---------------------------------------------------|-------------|
-| POST | `/api/v1/telemetry/readings/glific`               | Receive the generic Glific webhook payload for image-based meter readings |
+| POST | `/api/v1/telemetry/readings/whatsapp`             | Receive the chatbot webhook payload for image-based meter readings |
 | POST | `/api/v1/telemetry/intro`                         | Send the flow intro message for a contact |
 | POST | `/api/v1/telemetry/closing`                       | Send the flow closing message for a contact |
 | POST | `/api/v1/telemetry/language/selection`            | Return the language selection prompt/options for a contact |
@@ -309,7 +308,7 @@ recorded when the reading was first submitted.
 | POST | `/api/v1/telemetry/others/submitted`              | Save “other issue” details |
 | POST | `/api/v1/telemetry/take-meter-reading`            | Return the take‑meter‑reading prompt/options |
 | POST | `/api/v1/telemetry/manual-reading`                | Submit a manual meter reading |
-| POST | `/api/v1/telemetry/location`                      | Submit/update location details for a contact |
+| POST | `/api/v1/telemetry/location`                      | Submit/update location details for a contact. Response carries `locationMismatch` — see [location-affinity-check.md](../docs/location-affinity-check.md) |
 | POST | `/api/v1/telemetry/update-previous-reading`       | Update the previous reading for a contact |
 
 ---
@@ -336,6 +335,6 @@ recorded when the reading was first submitted.
 
 | Old | New | Notes |
 |-----|-----|-------|
-| `GET /api/notifications` | `GET /api/v1/message/notifications` | Added `/v1/message/` prefix |
+| `GET /api/notifications` | — | Removed; only ever returned placeholder data |
 | `POST /api/notifications/send` | `POST /api/v1/message/notifications` | Verb `/send` removed; use POST to collection |
 | `POST /api/publish` | `POST /api/v1/message/events` | Renamed to noun; added `/v1/message/` prefix |

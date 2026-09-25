@@ -1,11 +1,11 @@
 package org.arghyam.jalsoochak.telemetry.ingest;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 
 /**
  * Adapter that translates a state IT system's raw reading payload into the platform's canonical
- * reading request ({@link AssamReadingRequest}).
+ * reading request ({@link CanonicalReadingRequest}).
  *
  * <p>Onboarding a state whose IT system emits a different wire format is a matter of adding one
  * implementation of this interface (a Spring bean) declaring its {@link #format()} — the core
@@ -22,12 +22,12 @@ public interface ReadingRequestMapper {
     String format();
 
     /**
-     * Translates a raw request body into the canonical {@link AssamReadingRequest}. Implementations
+     * Translates a raw request body into a {@link CanonicalReadingRequest}. Implementations
      * should not perform bean validation — the controller validates the returned object with the
      * shared constraints so every format is held to the same rules.
      *
      * @param rawBody parsed JSON of the incoming request (never {@code null}; may be a JSON null node)
      * @return the canonical request; never {@code null}
      */
-    AssamReadingRequest map(JsonNode rawBody);
+    CanonicalReadingRequest map(JsonNode rawBody);
 }

@@ -9,8 +9,8 @@ reading "didn't go through", or the daily report shows a gap nobody expected. It
 behaviour as shipped. The design rationale lives in the implementation plan; this is the operational
 half.
 
-**Scope.** `POST /api/v1/telemetry/readings` and `PUT /api/v1/telemetry/readings` only — the Assam
-API endpoints. The Glific/WhatsApp paths are untouched: a rejection inside a live WhatsApp
+**Scope.** `POST /api/v1/telemetry/readings` and `PUT /api/v1/telemetry/readings` only — the State-IT
+ingestion endpoints. The WhatsApp chatbot paths are untouched: a rejection inside a live WhatsApp
 conversation has no correction path, whereas an API caller gets a 400 and can resubmit.
 
 ---

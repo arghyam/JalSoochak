@@ -1,20 +1,24 @@
 package org.arghyam.jalsoochak.message.service;
 
-import org.arghyam.jalsoochak.message.channel.DailyReportSendOutcome;
-import org.arghyam.jalsoochak.message.channel.GlificSendResult;
-import org.arghyam.jalsoochak.message.channel.GlificSendStage;
-import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
-import org.arghyam.jalsoochak.message.channel.SmsSender;
+import org.arghyam.jalsoochak.message.channel.provider.ReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.provider.SmsSender;
+import org.arghyam.jalsoochak.message.channel.provider.TenantChannelProviders;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
+import org.arghyam.jalsoochak.message.config.StorageProperties;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
+import org.arghyam.jalsoochak.message.dto.TenantRef;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
 import org.arghyam.jalsoochak.message.event.InviteEmailEvent;
 import org.arghyam.jalsoochak.message.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.message.event.WhatsAppContactRegisteredEvent;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
+import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -25,6 +29,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import reactor.core.publisher.Mono;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -48,9 +54,9 @@ import java.util.UUID;
  * <ul>
  *   <li>{@code NUDGE} — fetches the localized message from tenant config and
  *       sends it as a WhatsApp HSM to the operator.</li>
- *   <li>{@code ESCALATION} — generates a PDF, uploads it to MinIO, fetches
+ *   <li>{@code ESCALATION} — generates a PDF, uploads it to object storage, fetches
  *       the localized body text, and sends a document HSM to the officer.</li>
- *   <li>{@code STAFF_SYNC_COMPLETED} — onboards pump operators into Glific and
+ *   <li>{@code STAFF_SYNC_COMPLETED} — onboards pump operators into the WhatsApp provider and
  *       publishes {@code WHATSAPP_CONTACT_REGISTERED} events so tenant-service
  *       can persist the contact IDs.</li>
  * </ul>
@@ -66,7 +72,7 @@ public class NotificationEventRouter {
      * Dead-letter topic for {@code SEND_WELCOME_MESSAGE} per-phone failures.
      *
      * <p>Messages are published here when a single phone cannot be processed
-     * (missing {@code whatsapp_connection_id} or a Glific API error) so that
+     * (missing {@code whatsapp_connection_id} or a WhatsApp provider API error) so that
      * already-succeeded phones in the same batch are not re-sent by Kafka retry.
      *
      * <p>This service intentionally does <em>not</em> consume this topic.
@@ -104,19 +110,27 @@ public class NotificationEventRouter {
      */
     private static final String ACCOUNT_EMAIL_DLT_TOPIC = "account-email-dlt";
 
+    /** Event field carrying the WhatsApp contact id on {@code SEND_LOGIN_OTP}. */
+    private static final String CONTACT_ID_FIELD = "whatsapp_contact_id";
+
+    /** Event field carrying the WhatsApp language id on staff-sync and language-update events. */
+    private static final String LANGUAGE_ID_FIELD = "whatsappLanguageId";
+
     private final ObjectMapper objectMapper;
     private final WhatsAppChannel whatsAppChannel;
-    private final GlificWhatsAppService glificWhatsAppService;
-    private final SmsSender smsSender;
+    private final WhatsAppSender whatsAppSender;
+    private final TenantChannelProviders channelProviders;
     private final KafkaProducer kafkaProducer;
     private final EscalationPdfService escalationPdfService;
     private final DailyReportPdfService dailyReportPdfService;
     private final WeeklyReportPdfService weeklyReportPdfService;
-    private final MinioStorageService minioStorageService;
+    private final ObjectStorageService objectStorageService;
+    private final StorageProperties storageProperties;
     private final MessageTemplateService messageTemplateService;
     private final AccountEmailService accountEmailService;
     private final JdbcTemplate jdbcTemplate;
     private final PiiEncryptionService piiEncryptionService;
+    private final TenantRefResolver tenantRefResolver;
 
     @Value("${escalation.report.dir:/tmp/escalation-reports/}")
     private String reportDir;
@@ -126,14 +140,16 @@ public class NotificationEventRouter {
 
     private static final String SCHEMA_PATTERN = "^[a-z0-9_]+$";
 
-    /** The presigned query string on a MinIO URL — stripped before any URL is logged. */
+    /** Any query string on a report URL — stripped before the URL is logged. */
     private static final String URL_QUERY_SUFFIX = "\\?.*$";
+
+    private static final String PDF_CONTENT_TYPE = "application/pdf";
 
     @PostConstruct
     void validateBaseUrl() {
         if (baseUrl.contains("localhost") || baseUrl.contains("127.0.0.1")) {
             log.warn("[Router] app.base-url is set to a local address ('{}')."
-                    + " PDF links embedded in escalation WhatsApp messages will be unreachable by Glific."
+                    + " PDF links embedded in escalation WhatsApp messages will be unreachable by the WhatsApp provider."
                     + " Set the 'app.base-url' property to a publicly reachable URL"
                     + " (e.g., 'APP_BASE_URL=https://<id>.ngrok.io' for demos,"
                     + " or your server's public hostname in production) before sending escalation reports.",
@@ -194,7 +210,7 @@ public class NotificationEventRouter {
         if (storedId > 0) {
             contactId = storedId;
         } else {
-            contactId = glificWhatsAppService.optIn(phone);
+            contactId = whatsAppSender.optIn(phone);
             if (!tenantSchema.isBlank() && userId > 0 && contactId > 0) {
                 kafkaProducer.publishJson(COMMON_TOPIC,
                         WhatsAppContactRegisteredEvent.builder()
@@ -216,15 +232,15 @@ public class NotificationEventRouter {
 
     private void handleStaffSyncCompleted(JsonNode root) {
         JsonNode operatorsNode = root.path("pumpOperators");
-        int glificLanguageId = root.path("glificLanguageId").asInt(0);
+        int whatsappLanguageId = root.path(LANGUAGE_ID_FIELD).asInt(0);
         String tenantSchema = root.path("tenantSchema").asText("");
 
         if (!operatorsNode.isArray() || operatorsNode.isEmpty()) {
             log.warn("[Router/STAFF_SYNC] pumpOperators is empty, skipping");
             return;
         }
-        if (glificLanguageId == 0) {
-            log.warn("[Router/STAFF_SYNC] glificLanguageId missing or zero, skipping");
+        if (whatsappLanguageId == 0) {
+            log.warn("[Router/STAFF_SYNC] whatsappLanguageId missing or zero, skipping");
             return;
         }
 
@@ -238,7 +254,7 @@ public class NotificationEventRouter {
                 continue;
             }
             try {
-                long contactId = whatsAppChannel.onboardOperator(phone, glificLanguageId);
+                long contactId = whatsAppChannel.onboardOperator(phone, whatsappLanguageId);
                 if (!tenantSchema.isBlank() && userId > 0 && contactId > 0) {
                     kafkaProducer.publishJson(COMMON_TOPIC,
                             WhatsAppContactRegisteredEvent.builder()
@@ -265,15 +281,15 @@ public class NotificationEventRouter {
 
     private void handleUpdateUserLanguage(JsonNode root) {
         String tenantCode = root.path("tenantCode").asText("").toLowerCase();
-        int glificLanguageId = root.path("glificLanguageId").asInt(0);
+        int whatsappLanguageId = root.path(LANGUAGE_ID_FIELD).asInt(0);
         JsonNode phonesNode = root.path("pumpOperatorPhones");
 
         if (tenantCode.isBlank() || !tenantCode.matches("[a-z0-9_]+")) {
             log.warn("[Router/UPDATE_LANGUAGE] Invalid or missing tenantCode, skipping");
             return;
         }
-        if (glificLanguageId <= 0) {
-            log.warn("[Router/UPDATE_LANGUAGE] Missing glificLanguageId, skipping");
+        if (whatsappLanguageId <= 0) {
+            log.warn("[Router/UPDATE_LANGUAGE] Missing whatsappLanguageId, skipping");
             return;
         }
         if (!phonesNode.isArray() || phonesNode.isEmpty()) {
@@ -298,7 +314,7 @@ public class NotificationEventRouter {
                     failed++;
                     continue;
                 }
-                glificWhatsAppService.updateContactLanguage(contactId, glificLanguageId);
+                whatsAppSender.updateContactLanguage(contactId, whatsappLanguageId);
                 success++;
             } catch (Exception e) {
                 failed++;
@@ -357,9 +373,9 @@ public class NotificationEventRouter {
                     continue;
                 }
                 if (welcomeFlowId.isBlank()) {
-                    glificWhatsAppService.startWelcomeFlow(info.contactId(), info.name(), stateName);
+                    whatsAppSender.startWelcomeFlow(info.contactId(), info.name(), stateName);
                 } else {
-                    glificWhatsAppService.startWelcomeFlow(info.contactId(), welcomeFlowId, info.name(), stateName);
+                    whatsAppSender.startWelcomeFlow(info.contactId(), welcomeFlowId, info.name(), stateName);
                 }
                 success++;
             } catch (Exception e) {
@@ -410,7 +426,7 @@ public class NotificationEventRouter {
                 Long contactId = info.contactId();
                 String name = info.name();
                 if (contactId == null || contactId <= 0) {
-                    contactId = glificWhatsAppService.optIn(normalized);
+                    contactId = whatsAppSender.optIn(normalized);
                     if (contactId == null || contactId <= 0) {
                         publishWelcomeDlt(tenantSchema, normalized, "optin_failed");
                         failed++;
@@ -418,9 +434,9 @@ public class NotificationEventRouter {
                     }
                 }
                 if (welcomeFlowId.isBlank()) {
-                    glificWhatsAppService.startWelcomeFlow(contactId, name, stateName);
+                    whatsAppSender.startWelcomeFlow(contactId, name, stateName);
                 } else {
-                    glificWhatsAppService.startWelcomeFlow(contactId, welcomeFlowId, name, stateName);
+                    whatsAppSender.startWelcomeFlow(contactId, welcomeFlowId, name, stateName);
                 }
                 success++;
             } catch (Exception e) {
@@ -507,11 +523,19 @@ public class NotificationEventRouter {
                 expiryMinutes = 5;
             }
 
+            TenantRef tenant = resolveTenant(root);
+
+            // PER-TENANT-PROVIDERS: the tenant's own SMSCountry account when it has configured
+            // one, the system default otherwise — including while the flag is off, which is every
+            // send today (O2-9). Resolved per message so a settings change takes effect without a
+            // restart; the lookup is cached, so it costs nothing on the OTP path.
+            SmsSender smsSender = channelProviders.smsFor(tenant);
+
             // Use reactive flow to avoid blocking the Kafka listener thread
             smsSender.sendOtp(phone, otp, expiryMinutes)
                     .doOnNext(sent -> {
                         if (sent) {
-                            log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");
+                            log.info("[Router/SEND_LOGIN_OTP/SMS] {} → SENT", tenant);
                             log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → SENT", phone);
                         } else {
                             // Non-retryable failure (4xx API rejection) — log as warning, do not throw
@@ -533,20 +557,19 @@ public class NotificationEventRouter {
                     .subscribe();
         } else if ("WHATSAPP".equals(deliveryChannel)) {
             String phone = root.path("officerPhoneNumber").asText("").strip();
-            JsonNode glificIdNode = root.path("glific_id");
-            long contactId = glificIdNode.asLong(0);
+            long contactId = root.path(CONTACT_ID_FIELD).asLong(0);
 
             if (contactId > 0) {
-                // glific_id was provided and valid
+                // whatsapp_contact_id was provided and valid
             } else if (!phone.isBlank()) {
-                log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] glific_id not provided, opting in via phone");
-                contactId = glificWhatsAppService.optIn(phone);
+                log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] whatsapp_contact_id not provided, opting in via phone");
+                contactId = whatsAppSender.optIn(phone);
                 if (contactId <= 0) {
                     log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] optIn returned invalid contactId {}, skipping", contactId);
                     return;
                 }
             } else {
-                log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither glific_id nor officerPhoneNumber provided, skipping");
+                log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither whatsapp_contact_id nor officerPhoneNumber provided, skipping");
                 return;
             }
 
@@ -579,18 +602,20 @@ public class NotificationEventRouter {
             publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "missing_invite_link");
             return;
         }
+        TenantRef tenant = tenantRefResolver.resolve(null, event.getTenantCode());
         try {
             if ("STATE_ADMIN".equalsIgnoreCase(event.getRole())
                     && event.getStateName() != null && !event.getStateName().isBlank()) {
                 accountEmailService.sendStateAdminInviteEmail(
-                        event.getTo(), event.getName(), event.getStateName(),
+                        tenant, event.getTo(), event.getName(), event.getStateName(),
                         event.getInviteLink(), event.getExpiryHours());
             } else {
                 accountEmailService.sendInviteEmail(
-                        event.getTo(), event.getName(), event.getRole(),
+                        tenant, event.getTo(), event.getName(), event.getRole(),
                         event.getInviteLink(), event.getExpiryHours());
             }
-            log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={}", event.getRole());
+            log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={} {}",
+                    event.getRole(), tenant);
         } catch (Exception e) {
             log.error("[Router/INVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
             publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "email_delivery_error");
@@ -616,9 +641,12 @@ public class NotificationEventRouter {
             publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "missing_invite_link");
             return;
         }
+        TenantRef tenant = tenantRefResolver.resolve(null, event.getTenantCode());
         try {
-            accountEmailService.sendReinviteEmail(event.getTo(), event.getName(), event.getInviteLink(), event.getExpiryHours());
-            log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={}", event.getRole());
+            accountEmailService.sendReinviteEmail(tenant, event.getTo(), event.getName(),
+                    event.getInviteLink(), event.getExpiryHours());
+            log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={} {}",
+                    event.getRole(), tenant);
         } catch (Exception e) {
             log.error("[Router/REINVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
             publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "email_delivery_error");
@@ -644,13 +672,28 @@ public class NotificationEventRouter {
             publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "missing_reset_link");
             return;
         }
+        TenantRef tenant = tenantRefResolver.resolve(event.getTenantId(), event.getTenantCode());
         try {
-            accountEmailService.sendPasswordResetEmail(event.getTo(), event.getResetLink(), event.getExpiryMinutes());
-            log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched");
+            accountEmailService.sendPasswordResetEmail(tenant, event.getTo(), event.getResetLink(),
+                    event.getExpiryMinutes());
+            log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched {}", tenant);
         } catch (Exception e) {
             log.error("[Router/PASSWORD_RESET_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
             publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "email_delivery_error");
         }
+    }
+
+    /**
+     * Normalises the optional tenant fields on a raw event payload. Both are read strictly —
+     * a JSON null or a value of the wrong type is treated as absent, never as the text
+     * {@code "null"}.
+     */
+    private TenantRef resolveTenant(JsonNode root) {
+        JsonNode idNode = root.path("tenantId");
+        JsonNode codeNode = root.path("tenantCode");
+        return tenantRefResolver.resolve(
+                idNode.isIntegralNumber() ? idNode.asInt() : null,
+                codeNode.isTextual() ? codeNode.asText() : null);
     }
 
     private void publishEmailDlt(String originalEventType, String to, String errorReason) {
@@ -675,7 +718,7 @@ public class NotificationEventRouter {
     }
 
     /**
-     * Looks up the Glific contact ID stored for a given phone number in the tenant's user_table.
+     * Looks up the WhatsApp contact ID stored for a given phone number in the tenant's user_table.
      * tenantSchema is pre-validated to match {@code [a-z0-9_]+} before this call.
      */
     private Long fetchWhatsappConnectionId(String tenantSchema, String phone) {
@@ -692,7 +735,7 @@ public class NotificationEventRouter {
     record UserContactInfo(Long contactId, String name) {}
 
     /**
-     * Looks up both the Glific contact ID and display name for a phone number.
+     * Looks up both the WhatsApp contact ID and display name for a phone number.
      * tenantSchema is pre-validated to match {@code [a-z0-9_]+} before this call.
      */
     private UserContactInfo fetchUserContactInfo(String tenantSchema, String phone) {
@@ -799,11 +842,11 @@ public class NotificationEventRouter {
 
         String filename = escalationPdfService.generate(operators, level, officerName, officerUserType, correlationId);
         java.nio.file.Path localPath = Paths.get(reportDir, filename);
-        String minioUrl;
+        String reportUrl;
         try {
-            minioUrl = minioStorageService.upload(localPath);
+            reportUrl = uploadPdf(localPath, storageProperties.getBucket(), localPath.getFileName().toString());
         } catch (Exception uploadEx) {
-            log.error("[Router/ESCALATION] MinIO upload failed, retaining local PDF for recovery: {} — {}",
+            log.error("[Router/ESCALATION] Storage upload failed, retaining local PDF for recovery: {} — {}",
                     localPath, uploadEx.getMessage());
             throw uploadEx;
         }
@@ -818,7 +861,7 @@ public class NotificationEventRouter {
         if (storedId > 0) {
             contactId = storedId;
         } else {
-            contactId = glificWhatsAppService.optIn(officerPhone);
+            contactId = whatsAppSender.optIn(officerPhone);
             if (!tenantSchema.isBlank() && officerId > 0 && contactId > 0) {
                 kafkaProducer.publishJson(COMMON_TOPIC,
                         WhatsAppContactRegisteredEvent.builder()
@@ -830,11 +873,11 @@ public class NotificationEventRouter {
             }
         }
 
-        boolean sent = whatsAppChannel.sendDocument(contactId, minioUrl);
+        boolean sent = whatsAppChannel.sendDocument(contactId, reportUrl);
         if (!sent) {
             throw new IllegalStateException("[Router/ESCALATION] WhatsApp escalation delivery failed");
         }
-        String loggableUrl = loggableUrl(minioUrl);
+        String loggableUrl = loggableUrl(reportUrl);
         log.info("[Router/ESCALATION] level={} → {} ({})", level, sent ? "SENT" : "FAILED", loggableUrl);
         log.debug("[Router/ESCALATION] officer={} level={} → {} ({})", officerPhone, level,
                 sent ? "SENT" : "FAILED", loggableUrl);
@@ -842,24 +885,25 @@ public class NotificationEventRouter {
 
     /**
      * Handles a {@code DAILY_REPORT_KPIS} event: resolves the officer's contact from the operational
-     * {@code user_table} (analytics never sees PII), renders the report PDF, uploads it to MinIO, and
-     * sends the document HSM via Glific. Mirrors {@link #handleEscalation}.
+     * {@code user_table} (analytics never sees PII), renders the report PDF, uploads it to object
+     * storage, and sends the document HSM through the WhatsApp provider. Mirrors
+     * {@link #handleEscalation}.
      *
      * <p>Every terminal outcome — one per officer — is logged with a {@code result=} tag and a
      * {@code role=} field so daily-report delivery can be counted per role straight from the logs.
-     * {@code result=GENERATED} marks a rendered PDF and {@code result=SENT} a send Glific
+     * {@code result=GENERATED} marks a rendered PDF and {@code result=SENT} a send the provider
      * <em>accepted</em>, so the two are counted separately. Three more tags keep the SENT count honest:
-     * {@code SUPPRESSED} is a dry-run that reached no Glific mutation, {@code FAILED_DELIVERY} a
-     * rejected send, and {@code DELIVERY_UNCONFIRMED} one Glific may have sent but cannot confirm —
+     * {@code SUPPRESSED} is a dry-run that reached no provider mutation, {@code FAILED_DELIVERY} a
+     * rejected send, and {@code DELIVERY_UNCONFIRMED} one the provider may have sent but cannot confirm —
      * the last of which is deliberately <strong>not</strong> retried (see
      * {@link #isAmbiguousDelivery}). None of them means WhatsApp delivered anything; only
-     * {@link GlificDeliveryReconciliationService} can say that.</p>
+     * {@link WhatsAppDeliveryReconciliationService} can say that.</p>
      */
     private void handleDailySituationReport(JsonNode root) throws Exception {
         int tenantId = root.path("tenantId").asInt(0);
         String tenantSchema = root.path("tenantSchema").asText("");
         long officerUserId = root.path("officerUserId").asLong(0);
-        // Canonical role: trimmed once so the SDO gate, the PDF layout and the Glific template are all
+        // Canonical role: trimmed once so the SDO gate, the PDF layout and the WhatsApp template are all
         // chosen from the same token (the latter two trim internally, the gate below did not).
         String officerUserType = root.path("officerUserType").asText("").trim();
         String corr = root.path("correlationId").asText("");
@@ -910,14 +954,14 @@ public class NotificationEventRouter {
                 corr, officerUserId, officerName, officer.contactId() != null);
 
         // Resolved before the report is built. A contact id of 0 while delivery is live means the opt-in
-        // never produced a Glific contact, and nothing downstream can recover from that: sending anyway
+        // never produced a WhatsApp contact, and nothing downstream can recover from that: sending anyway
         // comes back as "Receiver does not exist", and retrying cannot conjure a contact id while it
-        // stalls the whole partition. Doing it here means the dead end costs no PDF render and no MinIO
+        // stalls the whole partition. Doing it here means the dead end costs no PDF render and no storage
         // upload — the previous order paid for both, then deleted the file and gave up.
         long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
-        if (contactId <= 0 && glificWhatsAppService.isDailyReportDeliveryEnabled()) {
+        if (contactId <= 0 && whatsAppSender.isDailyReportDeliveryEnabled()) {
             log.error("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_CONTACT_ID role={} tenant={} officer={}"
-                            + " — Glific opt-in returned no contact id (non-retryable)",
+                            + " — WhatsApp opt-in returned no contact id (non-retryable)",
                     corr, role, tenantId, officerUserId);
             return;
         }
@@ -948,9 +992,9 @@ public class NotificationEventRouter {
         // daily report has its own DAILY_REPORT_DIR, and re-deriving the path sent the upload looking
         // in the wrong directory in any environment that set it.
         String filename = localPath.getFileName().toString();
-        String minioUrl;
+        String reportUrl;
         try {
-            minioUrl = minioStorageService.upload(localPath, ReportFileNaming.DAILY_BUCKET,
+            reportUrl = uploadWaterReport(localPath, ReportFileNaming.DAILY_BUCKET,
                     ReportFileNaming.dailyObjectKey(officerUserType, filename, reportDate));
         } catch (Exception uploadEx) {
             log.error("[Router/DAILY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
@@ -961,14 +1005,14 @@ public class NotificationEventRouter {
         deleteLocalReport(localPath, corr, ReportKind.DAILY.tag());
 
         ReportLogCtx logCtx = new ReportLogCtx(ReportKind.DAILY, corr, role, tenantId, officerUserId);
-        DailyReportSendOutcome outcome =
-                whatsAppChannel.sendDailyReport(contactId, minioUrl, officerUserType, reportDate, officerName);
+        ReportSendOutcome outcome =
+                whatsAppChannel.sendDailyReport(contactId, reportUrl, officerUserType, reportDate, officerName);
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
         if (!outcome.accepted()) {
-            reportFailedDelivery(logCtx, outcome.failure(), reportDate, loggableUrl(minioUrl));
+            reportFailedDelivery(logCtx, outcome.failure(), reportDate, loggableUrl(reportUrl));
             return;
         }
-        logSendResult(logCtx, outcome.result(), contactId, noSupplyRows.size(), tookMs, loggableUrl(minioUrl));
+        logSendResult(logCtx, outcome.result(), contactId, noSupplyRows.size(), tookMs, loggableUrl(reportUrl));
     }
 
     /**
@@ -976,8 +1020,8 @@ public class NotificationEventRouter {
      * layout their role calls for.
      *
      * <p>Mirrors the daily handler's order deliberately: validate, resolve the officer, resolve the
-     * Glific contact id <em>before</em> rendering, then build → upload → send. Resolving the contact
-     * first means a dead end costs no PDF render and no MinIO upload.</p>
+     * WhatsApp contact id <em>before</em> rendering, then build → upload → send. Resolving the contact
+     * first means a dead end costs no PDF render and no storage upload.</p>
      */
     private void handleWeeklySituationReport(JsonNode root) throws Exception {
         int tenantId = root.path("tenantId").asInt(0);
@@ -1018,9 +1062,9 @@ public class NotificationEventRouter {
 
         String officerName = officer.name() != null ? officer.name() : "Officer";
         long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
-        if (contactId <= 0 && glificWhatsAppService.isWeeklyReportDeliveryEnabled()) {
+        if (contactId <= 0 && whatsAppSender.isWeeklyReportDeliveryEnabled()) {
             log.error("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_NO_CONTACT_ID role={} tenant={} officer={}"
-                            + " — Glific opt-in returned no contact id (non-retryable)",
+                            + " — WhatsApp opt-in returned no contact id (non-retryable)",
                     corr, role, tenantId, officerUserId);
             return;
         }
@@ -1057,9 +1101,9 @@ public class NotificationEventRouter {
         // weekly-report.report.dir → daily-report.report.dir → escalation.report.dir, so only the
         // service that wrote the file knows where it landed.
         String filename = localPath.getFileName().toString();
-        String minioUrl;
+        String reportUrl;
         try {
-            minioUrl = minioStorageService.upload(localPath, ReportFileNaming.WEEKLY_BUCKET,
+            reportUrl = uploadWaterReport(localPath, ReportFileNaming.WEEKLY_BUCKET,
                     ReportFileNaming.weeklyObjectKey(officerUserType, filename, weekStart, weekEnd));
         } catch (Exception uploadEx) {
             log.error("[Router/WEEKLY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
@@ -1073,14 +1117,14 @@ public class NotificationEventRouter {
         // land under [Router/WEEKLY_REPORT] alongside this officer's GENERATED line, rather than under
         // the daily prefix the shared helpers are also used by.
         ReportLogCtx logCtx = new ReportLogCtx(ReportKind.WEEKLY, corr, role, tenantId, officerUserId);
-        DailyReportSendOutcome outcome =
-                whatsAppChannel.sendWeeklyReport(contactId, minioUrl, officerUserType, weekStart, officerName);
+        ReportSendOutcome outcome =
+                whatsAppChannel.sendWeeklyReport(contactId, reportUrl, officerUserType, weekStart, officerName);
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
         if (!outcome.accepted()) {
-            reportFailedDelivery(logCtx, outcome.failure(), weekStart, loggableUrl(minioUrl));
+            reportFailedDelivery(logCtx, outcome.failure(), weekStart, loggableUrl(reportUrl));
             return;
         }
-        logSendResult(logCtx, outcome.result(), contactId, noSupplyRows.size(), tookMs, loggableUrl(minioUrl));
+        logSendResult(logCtx, outcome.result(), contactId, noSupplyRows.size(), tookMs, loggableUrl(reportUrl));
     }
 
     /**
@@ -1141,38 +1185,38 @@ public class NotificationEventRouter {
      *
      * <p>Three outcomes, only one of which is retried:</p>
      * <ul>
-     *   <li>{@link #isAmbiguousDelivery} ({@code TIMEOUT}, {@code SEND_NO_MESSAGE_ID}) — Glific may
+     *   <li>{@link #isAmbiguousDelivery} ({@code TIMEOUT}, {@code SEND_NO_MESSAGE_ID}) — the provider may
      *       already hold the message, so re-driving the event would send the officer a second copy of
      *       the same report, which is worse than the missing confirmation it was trying to fix.
      *       Recorded as {@code DELIVERY_UNCONFIRMED} for reconciliation.</li>
-     *   <li>{@link GlificSendStage#CONFIG} — a definite rejection that never reached Glific, and one no
-     *       retry can repair: the template id, contact id or MinIO URL prefix is wrong on our side.
+     *   <li>{@link WhatsAppSendStage#CONFIG} — a definite rejection that never reached the provider, and
+     *       one no retry can repair: the template id, contact id or report URL prefix is wrong on our side.
      *       Retrying only stalls the partition until the configuration changes, so it is terminal.</li>
      *   <li>Everything else ({@code MEDIA_REGISTER}, {@code SEND}) — a definite rejection a retry can
      *       plausibly repair, so it rethrows for the Kafka container's retry policy.</li>
      * </ul>
      */
-    private void reportFailedDelivery(ReportLogCtx ctx, DailyReportSendOutcome.Failure failure,
+    private void reportFailedDelivery(ReportLogCtx ctx, ReportSendOutcome.Failure failure,
                                       LocalDate period, String loggableUrl) {
         String tag = ctx.kind().tag();
-        // stage= and glificErrorKey= are appended *after* officer= on every branch below.
+        // stage= and providerErrorKey= are appended *after* officer= on every branch below.
         if (isAmbiguousDelivery(failure.stage())) {
             log.warn("[Router/{}] corr={} result=DELIVERY_UNCONFIRMED role={} tenant={} officer={}"
-                            + " stage={} glificErrorKey={} {}={} (non-retryable) — Glific may already"
+                            + " stage={} providerErrorKey={} {}={} (non-retryable) — the provider may already"
                             + " have sent this report, so the event is not retried. Settle it against"
-                            + " Glific's own delivery status for this officer; see"
-                            + " GlificDeliveryReconciliationService ({})",
+                            + " the provider's own delivery status for this officer; see"
+                            + " WhatsAppDeliveryReconciliationService ({})",
                     tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
                     failure.stage(), failure.errorKeyForLog(), ctx.kind().periodField(), period, loggableUrl);
             return;
         }
         log.error("[Router/{}] corr={} result=FAILED_DELIVERY role={} tenant={} officer={}"
-                        + " stage={} glificErrorKey={}",
+                        + " stage={} providerErrorKey={}",
                 tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
                 failure.stage(), failure.errorKeyForLog());
-        if (failure.stage() == GlificSendStage.CONFIG) {
+        if (failure.stage() == WhatsAppSendStage.CONFIG) {
             log.error("[Router/{}] corr={} stage=CONFIG {}={} (non-retryable) — the send"
-                            + " never reached Glific because our own template id, contact id or MinIO URL"
+                            + " never reached the provider because our own template id, contact id or report URL"
                             + " prefix is wrong. A retry cannot repair that, so the event is not redriven:"
                             + " fix the configuration, then replay this officer's report ({})",
                     tag, ctx.corr(), ctx.kind().periodField(), period, loggableUrl);
@@ -1184,7 +1228,7 @@ public class NotificationEventRouter {
 
     /**
      * Logs an accepted send — or a suppressed one, which is not the same event and no longer shares a
-     * line with it. A dry-run reached no Glific mutation at all: it has no {@code GLIFIC_ACCEPTED}
+     * line with it. A dry-run reached no provider mutation at all: it has no {@code PROVIDER_ACCEPTED}
      * stage, no message id and nothing for reconciliation to match, so counting it as {@code SENT}
      * reported a muted deployment as a delivering one.
      *
@@ -1192,7 +1236,7 @@ public class NotificationEventRouter {
      * carries the same count as the matching {@code result=GENERATED} line's field of that name, so the
      * two can be lined up per officer.</p>
      */
-    private void logSendResult(ReportLogCtx ctx, GlificSendResult sendResult, long contactId,
+    private void logSendResult(ReportLogCtx ctx, WhatsAppSendResult sendResult, long contactId,
                                int noSupplyRows, long tookMs, String loggableUrl) {
         String tag = ctx.kind().tag();
         if (sendResult.isSuppressed()) {
@@ -1202,12 +1246,12 @@ public class NotificationEventRouter {
                     sendResult.modeForLog(), noSupplyRows, tookMs, loggableUrl);
             return;
         }
-        // result=SENT means Glific ACCEPTED the send — it is not a WhatsApp delivery confirmation.
-        // glificMsgId is what lets the delivery status Gupshup and Meta later report to Glific be
-        // matched back to this officer; see GlificDeliveryReconciliationService. Every new field goes after officer= to preserve
+        // result=SENT means the provider ACCEPTED the send — it is not a WhatsApp delivery confirmation.
+        // providerMsgId is what lets the delivery status Gupshup and Meta later report to the provider be
+        // matched back to this officer; see WhatsAppDeliveryReconciliationService. Every new field goes after officer= to preserve
         // the field adjacency the log-counting recipes rely on.
         log.info("[Router/{}] corr={} result=SENT role={} tenant={} officer={}"
-                        + " stage=GLIFIC_ACCEPTED glificMsgId={} glificContactId={} mode={} templateId={}"
+                        + " stage=PROVIDER_ACCEPTED providerMsgId={} providerContactId={} mode={} templateId={}"
                         + " noSupplyRows={} tookMs={} ({})",
                 tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
                 sendResult.messageIdForLog(), contactId, sendResult.modeForLog(), sendResult.templateIdForLog(),
@@ -1215,17 +1259,38 @@ public class NotificationEventRouter {
     }
 
     /**
-     * Stages after which Glific may already have created and sent the message, so the event must not be
+     * Stages after which the provider may already have created and sent the message, so the event must not be
      * retried: a {@code block()} timeout, and a mutation that returned no errors but no message id
-     * either. Both leave delivery unconfirmed rather than failed, and only Glific can settle which.
+     * either. Both leave delivery unconfirmed rather than failed, and only the provider can settle which.
      */
-    private static boolean isAmbiguousDelivery(GlificSendStage stage) {
-        return stage == GlificSendStage.TIMEOUT || stage == GlificSendStage.SEND_NO_MESSAGE_ID;
+    private static boolean isAmbiguousDelivery(WhatsAppSendStage stage) {
+        return stage == WhatsAppSendStage.TIMEOUT || stage == WhatsAppSendStage.SEND_NO_MESSAGE_ID;
     }
 
-    /** A MinIO URL with any presigned query string stripped, so a signature never reaches a log line. */
+    /** A report URL with any query string stripped, so a signature never reaches a log line. */
     private static String loggableUrl(String url) {
         return url.replaceFirst(URL_QUERY_SUFFIX, "");
+    }
+
+    /**
+     * Uploads a rendered PDF and returns the permanent public URL handed to the WhatsApp provider,
+     * which Meta or the officer's phone fetches without credentials.
+     */
+    private String uploadPdf(java.nio.file.Path localPath, String bucket, String objectKey) throws IOException {
+        try (InputStream content = Files.newInputStream(localPath)) {
+            objectStorageService.upload(bucket, objectKey, content, Files.size(localPath), PDF_CONTENT_TYPE);
+        }
+        return objectStorageService.publicUrl(bucket, objectKey).toString();
+    }
+
+    /**
+     * As {@link #uploadPdf}, into one of the water-report buckets, which is created first when a new
+     * environment does not have it yet. Its anonymous read is still granted out of band.
+     */
+    private String uploadWaterReport(java.nio.file.Path localPath, String bucket, String objectKey)
+            throws IOException {
+        objectStorageService.ensureBucket(bucket);
+        return uploadPdf(localPath, bucket, objectKey);
     }
 
     /**
@@ -1412,9 +1477,9 @@ public class NotificationEventRouter {
     }
 
     /**
-     * Deletes the rendered PDF once it is safely in MinIO. A failure here is logged and swallowed: the
-     * upload already succeeded, so the officer's report is on its way, and the reaper sweeps whatever
-     * is left behind.
+     * Deletes the rendered PDF once it is safely in object storage. A failure here is logged and
+     * swallowed: the upload already succeeded, so the officer's report is on its way, and the reaper
+     * sweeps whatever is left behind.
      */
     private void deleteLocalReport(java.nio.file.Path localPath, String corr, String tag) {
         try {
@@ -1441,14 +1506,14 @@ public class NotificationEventRouter {
     private record OfficerContact(Long contactId, String name, String phone) {}
 
     /**
-     * Returns the officer's stored Glific contact id, or opts them in by phone and publishes a
+     * Returns the officer's stored WhatsApp contact id, or opts them in by phone and publishes a
      * {@code WHATSAPP_CONTACT_REGISTERED} event so tenant-service persists the new contact id.
      */
     private long resolveContactIdOrOptIn(OfficerContact officer, String tenantSchema, long officerUserId) {
         if (officer.contactId() != null && officer.contactId() > 0) {
             return officer.contactId();
         }
-        long contactId = glificWhatsAppService.optIn(officer.phone());
+        long contactId = whatsAppSender.optIn(officer.phone());
         if (contactId > 0) {
             kafkaProducer.publishJson(COMMON_TOPIC,
                     WhatsAppContactRegisteredEvent.builder()
@@ -1462,7 +1527,7 @@ public class NotificationEventRouter {
     }
 
     /**
-     * Resolves an officer's Glific contact id, decrypted display name, and decrypted phone number
+     * Resolves an officer's WhatsApp contact id, decrypted display name, and decrypted phone number
      * from {@code <tenantSchema>.user_table} by user id. {@code tenantSchema} is validated by the
      * caller against {@link #SCHEMA_PATTERN} before interpolation (schema names are SQL identifiers
      * and cannot be bound as {@code ?}); the user id is bound as a parameter.

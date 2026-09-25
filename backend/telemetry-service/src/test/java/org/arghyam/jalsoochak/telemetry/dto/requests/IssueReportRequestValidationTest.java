@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * The 255-character cap on {@code issueReason}, closing the length half of a CWE-20 audit finding.
  *
  * <p>{@code IssueReportRequest} carries only standard constraints, so unlike
- * {@link AssamReadingRequestValidationTest} the default validator factory is enough — no custom
+ * {@link CanonicalReadingRequestValidationTest} the default validator factory is enough — no custom
  * constraint needs constructor wiring here.
  */
 class IssueReportRequestValidationTest {

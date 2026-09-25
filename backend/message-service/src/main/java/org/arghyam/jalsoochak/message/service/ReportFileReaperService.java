@@ -17,9 +17,9 @@ import java.util.stream.Stream;
 /**
  * Periodically reaps stale report PDFs left in the shared report directory.
  *
- * <p>On the happy path a generated report is uploaded to MinIO and its local copy is deleted
+ * <p>On the happy path a generated report is uploaded to object storage and its local copy is deleted
  * immediately (see {@code NotificationEventRouter}). Two paths intentionally or unintentionally
- * leave a file behind: a MinIO-upload failure <em>retains</em> the local PDF on purpose for
+ * leave a file behind: a storage-upload failure <em>retains</em> the local PDF on purpose for
  * recovery, and a crash between generation and deletion leaks one. Across many officers × days ×
  * retries these accumulate and can exhaust disk on the message-service host.</p>
  *

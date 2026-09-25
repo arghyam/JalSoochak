@@ -4,8 +4,8 @@ import java.io.InputStream;
 
 /**
  * Provider-agnostic abstraction over object storage.
- * The default implementation is S3-compatible (works with AWS S3, MinIO,
- * Cloudflare R2, DigitalOcean Spaces, GCS interop mode, and others).
+ * The default implementation works with AWS S3 and any other store that
+ * speaks the S3 API.
  * Additional providers (e.g. Azure Blob) can be added by implementing this
  * interface and activating via the {@code storage.provider} property.
  */

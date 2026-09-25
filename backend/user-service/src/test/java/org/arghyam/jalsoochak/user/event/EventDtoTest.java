@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.user.event;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -26,6 +28,7 @@ class EventDtoTest {
                     .inviteLink("https://example.com/invite?token=abc")
                     .expiryHours(24)
                     .stateName("Madhya Pradesh")
+                    .tenantCode("MP")
                     .build();
 
             assertThat(event.getEventType()).isEqualTo("INVITE_EMAIL");
@@ -35,6 +38,36 @@ class EventDtoTest {
             assertThat(event.getInviteLink()).isEqualTo("https://example.com/invite?token=abc");
             assertThat(event.getExpiryHours()).isEqualTo(24);
             assertThat(event.getStateName()).isEqualTo("Madhya Pradesh");
+            assertThat(event.getTenantCode()).isEqualTo("MP");
+        }
+
+        @Test
+        @DisplayName("tenantCode is null when not set (super-user invite)")
+        void tenantCodeIsNullByDefault() {
+            InviteEmailEvent event = InviteEmailEvent.builder()
+                    .eventType("INVITE_EMAIL")
+                    .to("super@example.com")
+                    .name("Carol")
+                    .role("SUPER_USER")
+                    .inviteLink("https://example.com/invite?token=pqr")
+                    .expiryHours(24)
+                    .build();
+
+            assertThat(event.getTenantCode()).isNull();
+        }
+
+        @Test
+        @DisplayName("tenantCode is omitted from JSON when null")
+        void tenantCodeOmittedFromJsonWhenNull() throws Exception {
+            InviteEmailEvent event = InviteEmailEvent.builder()
+                    .eventType("SEND_INVITE_EMAIL")
+                    .to("super@example.com")
+                    .role("SUPER_USER")
+                    .inviteLink("https://example.com/invite")
+                    .expiryHours(24)
+                    .build();
+
+            assertThat(new ObjectMapper().writeValueAsString(event)).doesNotContain("tenantCode");
         }
 
         @Test
@@ -110,12 +143,45 @@ class EventDtoTest {
                     .to("admin@example.com")
                     .resetLink("https://example.com/reset?token=def")
                     .expiryMinutes(30)
+                    .tenantId(7)
+                    .tenantCode("MP")
                     .build();
 
             assertThat(event.getEventType()).isEqualTo("RESET_PASSWORD_EMAIL");
             assertThat(event.getTo()).isEqualTo("admin@example.com");
             assertThat(event.getResetLink()).isEqualTo("https://example.com/reset?token=def");
             assertThat(event.getExpiryMinutes()).isEqualTo(30);
+            assertThat(event.getTenantId()).isEqualTo(7);
+            assertThat(event.getTenantCode()).isEqualTo("MP");
+        }
+
+        @Test
+        @DisplayName("tenant fields are null when not set (super-user reset)")
+        void tenantFieldsNullByDefault() {
+            ResetPasswordEmailEvent event = ResetPasswordEmailEvent.builder()
+                    .eventType("RESET_PASSWORD_EMAIL")
+                    .to("super@example.com")
+                    .resetLink("https://example.com/reset")
+                    .expiryMinutes(30)
+                    .build();
+
+            assertThat(event.getTenantId()).isNull();
+            assertThat(event.getTenantCode()).isNull();
+        }
+
+        @Test
+        @DisplayName("tenant fields are omitted from JSON when null")
+        void tenantFieldsOmittedFromJsonWhenNull() throws Exception {
+            ResetPasswordEmailEvent event = ResetPasswordEmailEvent.builder()
+                    .eventType("SEND_PASSWORD_RESET_EMAIL")
+                    .to("super@example.com")
+                    .resetLink("https://example.com/reset")
+                    .expiryMinutes(30)
+                    .build();
+
+            assertThat(new ObjectMapper().writeValueAsString(event))
+                    .doesNotContain("tenantId")
+                    .doesNotContain("tenantCode");
         }
 
         @Test
@@ -163,39 +229,94 @@ class EventDtoTest {
     class SendLoginOtpEventTests {
 
         @Test
-        @DisplayName("builder sets all fields correctly including nullable glificId")
+        @DisplayName("builder sets all fields correctly including nullable whatsappContactId")
         void builderSetsAllFields() {
             SendLoginOtpEvent event = SendLoginOtpEvent.builder()
                     .eventType("SEND_LOGIN_OTP")
                     .officerPhoneNumber("919876543210")
-                    .glificId(42L)
+                    .whatsappContactId(42L)
                     .otp("123456")
                     .expiryMinutes(5)
                     .deliveryChannel("WHATSAPP")
+                    .tenantId(3)
+                    .tenantCode("MP")
                     .build();
 
             assertThat(event.getEventType()).isEqualTo("SEND_LOGIN_OTP");
             assertThat(event.getOfficerPhoneNumber()).isEqualTo("919876543210");
-            assertThat(event.getGlificId()).isEqualTo(42L);
+            assertThat(event.getWhatsappContactId()).isEqualTo(42L);
             assertThat(event.getOtp()).isEqualTo("123456");
             assertThat(event.getExpiryMinutes()).isEqualTo(5);
             assertThat(event.getDeliveryChannel()).isEqualTo("WHATSAPP");
+            assertThat(event.getTenantId()).isEqualTo(3);
+            assertThat(event.getTenantCode()).isEqualTo("MP");
         }
 
         @Test
-        @DisplayName("glificId can be null for SMS delivery")
-        void glificIdNullForSms() {
+        @DisplayName("tenant fields are omitted from JSON when null")
+        void tenantFieldsOmittedFromJsonWhenNull() throws Exception {
+            SendLoginOtpEvent event = SendLoginOtpEvent.builder()
+                    .eventType("SEND_LOGIN_OTP")
+                    .officerPhoneNumber("91XXXXXXXXXX")
+                    .otp("123456")
+                    .expiryMinutes(5)
+                    .deliveryChannel("SMS")
+                    .build();
+
+            assertThat(new ObjectMapper().writeValueAsString(event))
+                    .doesNotContain("tenantId")
+                    .doesNotContain("tenantCode");
+        }
+
+        @Test
+        @DisplayName("whatsappContactId can be null for SMS delivery")
+        void whatsappContactIdNullForSms() {
             SendLoginOtpEvent event = SendLoginOtpEvent.builder()
                     .eventType("SEND_LOGIN_OTP")
                     .officerPhoneNumber("919876543210")
-                    .glificId(null)
+                    .whatsappContactId(null)
                     .otp("654321")
                     .expiryMinutes(5)
                     .deliveryChannel("SMS")
                     .build();
 
-            assertThat(event.getGlificId()).isNull();
+            assertThat(event.getWhatsappContactId()).isNull();
             assertThat(event.getDeliveryChannel()).isEqualTo("SMS");
+        }
+
+        @Test
+        @DisplayName("contact id is emitted under whatsapp_contact_id and no other key")
+        void contactIdEmittedUnderOneKey() {
+            SendLoginOtpEvent event = SendLoginOtpEvent.builder()
+                    .eventType("SEND_LOGIN_OTP")
+                    .officerPhoneNumber("91XXXXXXXXXX")
+                    .whatsappContactId(42L)
+                    .otp("123456")
+                    .expiryMinutes(5)
+                    .deliveryChannel("WHATSAPP")
+                    .build();
+
+            JsonNode json = new ObjectMapper().valueToTree(event);
+
+            assertThat(json.path("whatsapp_contact_id").asLong()).isEqualTo(42L);
+            assertThat(json.fieldNames()).toIterable().containsExactlyInAnyOrder(
+                    "eventType", "officerPhoneNumber", "whatsapp_contact_id", "OTP", "expiryMinutes",
+                    "deliveryChannel");
+        }
+
+        @Test
+        @DisplayName("contact id is omitted from JSON when null")
+        void contactIdOmittedFromJsonWhenNull() throws Exception {
+            SendLoginOtpEvent event = SendLoginOtpEvent.builder()
+                    .eventType("SEND_LOGIN_OTP")
+                    .officerPhoneNumber("91XXXXXXXXXX")
+                    .otp("123456")
+                    .expiryMinutes(5)
+                    .deliveryChannel("SMS")
+                    .build();
+
+            assertThat(new ObjectMapper().writeValueAsString(event))
+                    .doesNotContain("whatsapp_contact_id");
         }
 
         @Test
@@ -320,7 +441,7 @@ class EventDtoTest {
                     .tenantCode("MP")
                     .tenantId(1)
                     .triggeredAt("2026-01-01T10:00:00.000Z")
-                    .glificLanguageId("2")
+                    .whatsappLanguageId("2")
                     .pumpOperatorPhones(List.of("919876543210", "919123456789"))
                     .build();
 
@@ -328,7 +449,7 @@ class EventDtoTest {
             assertThat(event.getTenantCode()).isEqualTo("MP");
             assertThat(event.getTenantId()).isEqualTo(1);
             assertThat(event.getTriggeredAt()).isEqualTo("2026-01-01T10:00:00.000Z");
-            assertThat(event.getGlificLanguageId()).isEqualTo("2");
+            assertThat(event.getWhatsappLanguageId()).isEqualTo("2");
             assertThat(event.getPumpOperatorPhones())
                     .containsExactly("919876543210", "919123456789");
         }
@@ -388,6 +509,33 @@ class EventDtoTest {
                     .triggeredAt("2026-01-01T10:00:00.000Z").build();
 
             assertThat(event.toString()).contains("SEND_WELCOME_MESSAGE", "MP");
+        }
+
+        @Test
+        @DisplayName("language id is emitted under whatsappLanguageId and no other key")
+        void languageIdEmittedUnderOneKey() {
+            PumpOperatorMessagingEvent event = PumpOperatorMessagingEvent.builder()
+                    .eventType("UPDATE_USER_LANGUAGE").tenantCode("MP").tenantId(1)
+                    .whatsappLanguageId("2").pumpOperatorPhones(List.of("91XXXXXXXXXX")).build();
+
+            JsonNode json = new ObjectMapper().valueToTree(event);
+
+            assertThat(json.path("whatsappLanguageId").asText()).isEqualTo("2");
+            assertThat(json.fieldNames()).toIterable().containsExactlyInAnyOrder(
+                    "eventType", "tenantCode", "tenantId", "triggeredAt", "whatsappLanguageId",
+                    "pumpOperatorPhones");
+        }
+
+        @Test
+        @DisplayName("language id carries no value when null")
+        void languageIdCarriesNoValueWhenNull() {
+            PumpOperatorMessagingEvent event = PumpOperatorMessagingEvent.builder()
+                    .eventType("SEND_WELCOME_MESSAGE").tenantCode("MP").tenantId(1)
+                    .pumpOperatorPhones(List.of("91XXXXXXXXXX")).build();
+
+            JsonNode json = new ObjectMapper().valueToTree(event);
+
+            assertThat(json.hasNonNull("whatsappLanguageId")).isFalse();
         }
     }
 }

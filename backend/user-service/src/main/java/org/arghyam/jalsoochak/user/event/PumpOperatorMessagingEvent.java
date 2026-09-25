@@ -19,6 +19,6 @@ public class PumpOperatorMessagingEvent {
     private String tenantCode;
     private Integer tenantId;
     private String triggeredAt; // ISO-8601 UTC timestamp, e.g. 2026-03-11T10:00:00.000Z
-    private String glificLanguageId;
+    private String whatsappLanguageId;
     private List<String> pumpOperatorPhones;
 }

@@ -30,16 +30,17 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
     class CreateFlowReading {
 
         @Test
-        void usesPayloadJsonAndFlowVisionColumnsOnFullyMigratedSchema() {
+        void usesPayloadJsonAndOcrCorrelationColumnsOnFullyMigratedSchema() {
             onColumnExists(true);
             onScalar("INSERT INTO", Number.class, 501L);
 
             Long id = repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "fv-1", "img", "reason");
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason");
 
             assertThat(id).isEqualTo(501L);
             String sql = capturedInsertSql();
-            assertThat(sql).contains("payload_json").contains("flowvision_correlation_id");
+            assertThat(sql).contains("payload_json").contains("ocr_correlation_id");
+            assertThat(capturedInsertArgs()).contains("ocr-1");
         }
 
         @Test
@@ -51,12 +52,12 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason");
 
             String sql = capturedInsertSql();
-            assertThat(sql).doesNotContain("payload_json").doesNotContain("flowvision_correlation_id");
+            assertThat(sql).doesNotContain("payload_json").contains("correlation_id, quantity");
             assertThat(sql).contains("reading_at");
         }
 
         @Test
-        void usesPayloadJsonOnlyWhenFlowVisionColumnAbsent() {
+        void usesPayloadJsonOnlyWhenOcrCorrelationColumnAbsent() {
             onColumnsExisting("payload_json", "observation_time");
             onScalar("INSERT INTO", Number.class, 503L);
 
@@ -65,20 +66,20 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
 
             String sql = capturedInsertSql();
             assertThat(sql).contains("payload_json")
-                    .doesNotContain("flowvision_correlation_id")
+                    .contains("correlation_id, quantity")
                     .contains("observation_time");
         }
 
         @Test
-        void usesFlowVisionColumnOnlyWhenPayloadJsonAbsent() {
-            onColumnsExisting("flowvision_correlation_id");
+        void usesOcrCorrelationColumnOnlyWhenPayloadJsonAbsent() {
+            onColumnsExisting("ocr_correlation_id");
             onScalar("INSERT INTO", Number.class, 504L);
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "fv-1", "img", "reason");
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason");
 
             String sql = capturedInsertSql();
-            assertThat(sql).contains("flowvision_correlation_id").doesNotContain("payload_json");
+            assertThat(sql).contains("ocr_correlation_id").doesNotContain("payload_json");
         }
 
         @Test

@@ -29,6 +29,7 @@ public class TelemetryTenantRepository {
     private final JdbcTemplate jdbcTemplate;
     private final PiiEncryptionService piiEncryptionService;
     private static final String SCHEME_SELECTION_CORRELATION_PREFIX = "scheme-selection-";
+    private static final String OCR_CORRELATION_COLUMN = "ocr_correlation_id";
     private static final int OPERATOR_LOOKUP_CACHE_SIZE = 10_000;
     /** Mirrors {@code IngestionSource.NORMAL} — the column default, so it needs no tracking UPDATE. */
     private static final int NORMAL_INGESTION_SOURCE = 0;
@@ -468,6 +469,62 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst().orElse(false);
     }
 
+    /**
+     * LOCATION-AFFINITY: the scheme's recorded position, for comparison against where a reading was
+     * submitted from.
+     *
+     * <p>Deliberately separate from {@link #schemeHasLatitudeAndLongitude}, which answers a
+     * different question for a different caller — {@code ConversationSelectionService} uses that boolean
+     * to decide whether the flow asks for a location at all, and folding the two together would
+     * couple the prompt decision to the distance check.
+     *
+     * <p>Empty means "no row"; a present record may still carry {@code null} halves, which callers
+     * must treat as "no location". A schema predating the coordinate columns degrades to nulls via
+     * {@code resolveSelectColumn} rather than throwing.
+     */
+    public Optional<TelemetryGeoPoint> findSchemeLocation(String schemaName, Long schemeId) {
+        validateSchemaName(schemaName);
+        if (schemeId == null) {
+            return Optional.empty();
+        }
+        return findGeoPoint(schemaName, "scheme_master_table", schemeId);
+    }
+
+    /**
+     * LOCATION-AFFINITY: the position a reading was submitted from, as written by
+     * {@link #updateReadingLocation}.
+     *
+     * <p>Needed because the coordinates and the reading arrive in separate requests on the WhatsApp
+     * path — {@code /location} writes them onto a placeholder row that the later image submission
+     * reuses — so by the time the reading is persisted they are only available from the row.
+     */
+    public Optional<TelemetryGeoPoint> findReadingLocation(String schemaName, Long readingId) {
+        validateSchemaName(schemaName);
+        if (readingId == null) {
+            return Optional.empty();
+        }
+        return findGeoPoint(schemaName, "flow_reading_table", readingId);
+    }
+
+    private Optional<TelemetryGeoPoint> findGeoPoint(String schemaName, String tableName, Long id) {
+        String latColumn = resolveSelectColumn(
+                schemaName, tableName, "latitude", "NULL::double precision AS latitude");
+        String lonColumn = resolveSelectColumn(
+                schemaName, tableName, "longitude", "NULL::double precision AS longitude");
+        String sql = String.format(
+                "SELECT %s, %s FROM %s.%s WHERE id = ? LIMIT 1",
+                latColumn, lonColumn, schemaName, tableName);
+
+        List<TelemetryGeoPoint> rows = jdbcTemplate.query(sql, (rs, n) -> new TelemetryGeoPoint(
+                toDouble(rs.getObject("latitude")),
+                toDouble(rs.getObject("longitude"))), id);
+        return rows.stream().findFirst();
+    }
+
+    private static Double toDouble(Object value) {
+        return value instanceof Number number ? number.doubleValue() : null;
+    }
+
     public boolean isOperatorMappedToScheme(String schemaName, Long operatorId, Long schemeId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -726,7 +783,7 @@ public class TelemetryTenantRepository {
                                                BigDecimal extractedReading,
                                                BigDecimal confirmedReading,
                                                String correlationId,
-                                               String flowVisionCorrelationId,
+                                               String ocrCorrelationId,
                                                String imageUrl,
                                                String meterChangeReason,
                                                int ingestionSource,
@@ -734,7 +791,7 @@ public class TelemetryTenantRepository {
                                                String submittedCentreSchemeId,
                                                String submittedPhoneHash) {
         return persistFlowReadingWithTracking(schemaName, existingReadingId, schemeId, operatorId, readingAt,
-                extractedReading, confirmedReading, correlationId, flowVisionCorrelationId, imageUrl,
+                extractedReading, confirmedReading, correlationId, ocrCorrelationId, imageUrl,
                 meterChangeReason, ingestionSource, submittedStateSchemeId, submittedCentreSchemeId,
                 submittedPhoneHash, null);
     }
@@ -756,7 +813,7 @@ public class TelemetryTenantRepository {
                                                BigDecimal extractedReading,
                                                BigDecimal confirmedReading,
                                                String correlationId,
-                                               String flowVisionCorrelationId,
+                                               String ocrCorrelationId,
                                                String imageUrl,
                                                String meterChangeReason,
                                                int ingestionSource,
@@ -765,7 +822,7 @@ public class TelemetryTenantRepository {
                                                String submittedPhoneHash,
                                                Integer confirmedReadingSource) {
         return persistFlowReadingWithTracking(schemaName, existingReadingId, schemeId, operatorId, readingAt,
-                extractedReading, confirmedReading, correlationId, flowVisionCorrelationId, imageUrl,
+                extractedReading, confirmedReading, correlationId, ocrCorrelationId, imageUrl,
                 meterChangeReason, ingestionSource, submittedStateSchemeId, submittedCentreSchemeId,
                 submittedPhoneHash, confirmedReadingSource, null);
     }
@@ -787,7 +844,7 @@ public class TelemetryTenantRepository {
                                                BigDecimal extractedReading,
                                                BigDecimal confirmedReading,
                                                String correlationId,
-                                               String flowVisionCorrelationId,
+                                               String ocrCorrelationId,
                                                String imageUrl,
                                                String meterChangeReason,
                                                int ingestionSource,
@@ -800,10 +857,10 @@ public class TelemetryTenantRepository {
         if (existingReadingId != null) {
             readingId = existingReadingId;
             updateFlowReadingFromIngestion(schemaName, readingId, readingAt, extractedReading,
-                    confirmedReading, correlationId, flowVisionCorrelationId, imageUrl, meterChangeReason, operatorId);
+                    confirmedReading, correlationId, ocrCorrelationId, imageUrl, meterChangeReason, operatorId);
         } else {
             readingId = createFlowReading(schemaName, schemeId, operatorId, readingAt, extractedReading,
-                    confirmedReading, correlationId, flowVisionCorrelationId, imageUrl, meterChangeReason);
+                    confirmedReading, correlationId, ocrCorrelationId, imageUrl, meterChangeReason);
         }
         // A NORMAL ingestion source carries no submitted-id metadata and matches the column defaults, so
         // the tracking UPDATE is skipped for rows that only need the provenance marker.
@@ -917,15 +974,16 @@ public class TelemetryTenantRepository {
                                   BigDecimal extractedReading,
                                   BigDecimal confirmedReading,
                                   String correlationId,
-                                  String flowVisionCorrelationId,
+                                  String ocrCorrelationId,
                                   String imageUrl,
                                   String meterChangeReason) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
-        boolean hasFlowVisionCorrelationId = columnExists(schemaName, "flow_reading_table", "flowvision_correlation_id");
-        String flowVisionColumn = hasFlowVisionCorrelationId ? ", flowvision_correlation_id" : "";
-        String flowVisionPlaceholder = hasFlowVisionCorrelationId ? ", ?" : "";
+        String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
+        boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
+        String ocrColumn = hasOcrCorrelationId ? ", " + ocrCorrelationColumn : "";
+        String ocrPlaceholder = hasOcrCorrelationId ? ", ?" : "";
         String sql = hasPayloadJson
                 ? String.format("""
                         INSERT INTO %s.flow_reading_table
@@ -933,17 +991,17 @@ public class TelemetryTenantRepository {
                              correlation_id%s, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
                         VALUES (?, ?, ?, ?, ?, jsonb_build_object('confirmed_reading', ?, 'extracted_reading', ?), ?%s, 0, NULL, ?, NULL, ?, ?, NOW(), ?, NOW())
                         RETURNING id
-                        """, schemaName, timeColumn, flowVisionColumn, flowVisionPlaceholder)
+                        """, schemaName, timeColumn, ocrColumn, ocrPlaceholder)
                 : String.format("""
                         INSERT INTO %s.flow_reading_table
                             (scheme_id, %s, reading_date, extracted_reading, confirmed_reading,
                              correlation_id%s, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?%s, 0, NULL, ?, NULL, ?, ?, NOW(), ?, NOW())
                         RETURNING id
-                        """, schemaName, timeColumn, flowVisionColumn, flowVisionPlaceholder);
+                        """, schemaName, timeColumn, ocrColumn, ocrPlaceholder);
 
         Number id;
-        if (hasPayloadJson && hasFlowVisionCorrelationId) {
+        if (hasPayloadJson && hasOcrCorrelationId) {
             id = jdbcTemplate.queryForObject(
                     sql,
                     Number.class,
@@ -955,7 +1013,7 @@ public class TelemetryTenantRepository {
                     confirmedReading,
                     extractedReading,
                     correlationId,
-                    flowVisionCorrelationId,
+                    ocrCorrelationId,
                     meterChangeReason,
                     imageUrl != null ? imageUrl : "",
                     operatorId,
@@ -978,7 +1036,7 @@ public class TelemetryTenantRepository {
                     operatorId,
                     operatorId
             );
-        } else if (hasFlowVisionCorrelationId) {
+        } else if (hasOcrCorrelationId) {
             id = jdbcTemplate.queryForObject(
                     sql,
                     Number.class,
@@ -988,7 +1046,7 @@ public class TelemetryTenantRepository {
                     extractedReading,
                     confirmedReading,
                     correlationId,
-                    flowVisionCorrelationId,
+                    ocrCorrelationId,
                     meterChangeReason,
                     imageUrl != null ? imageUrl : "",
                     operatorId,
@@ -1493,6 +1551,16 @@ public class TelemetryTenantRepository {
     }
 
     /**
+     * The column holding the OCR provider's own correlation id, or {@code null} on a pre-V32 schema that
+     * has none.
+     */
+    private String resolveOcrCorrelationColumn(String schemaName) {
+        return columnExists(schemaName, "flow_reading_table", OCR_CORRELATION_COLUMN)
+                ? OCR_CORRELATION_COLUMN
+                : null;
+    }
+
+    /**
      * SUPPLY-PLAUSIBILITY: sets or clears the quarantine marker on an already-persisted row. A guarded
      * post-write UPDATE in the same style as {@link #applyConfirmedReadingSource}, so pre-V40 tenants
      * are a safe no-op. Clearing (reason {@code 0}) is the release path taken by a correction that
@@ -1738,9 +1806,10 @@ public class TelemetryTenantRepository {
 
     public Optional<TelemetryReadingRecord> findReadingByCorrelationId(String schemaName, String correlationId) {
         validateSchemaName(schemaName);
-        boolean hasFlowVisionCorrelationId = columnExists(schemaName, "flow_reading_table", "flowvision_correlation_id");
-        String predicate = hasFlowVisionCorrelationId
-                ? "(correlation_id = ? OR flowvision_correlation_id = ?)"
+        String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
+        boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
+        String predicate = hasOcrCorrelationId
+                ? "(correlation_id = ? OR " + ocrCorrelationColumn + " = ?)"
                 : "correlation_id = ?";
         String sql = String.format("""
                 SELECT id, correlation_id, created_by
@@ -1750,7 +1819,7 @@ public class TelemetryTenantRepository {
                 ORDER BY id DESC
                 LIMIT 1
                 """, schemaName, predicate);
-        Object[] args = hasFlowVisionCorrelationId
+        Object[] args = hasOcrCorrelationId
                 ? new Object[]{correlationId, correlationId}
                 : new Object[]{correlationId};
         List<TelemetryReadingRecord> rows = jdbcTemplate.query(sql, (rs, n) ->
@@ -1766,9 +1835,10 @@ public class TelemetryTenantRepository {
                                                                                             String correlationId) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
-        boolean hasFlowVisionCorrelationId = columnExists(schemaName, "flow_reading_table", "flowvision_correlation_id");
-        String predicate = hasFlowVisionCorrelationId
-                ? "(correlation_id = ? OR flowvision_correlation_id = ?)"
+        String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
+        boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
+        String predicate = hasOcrCorrelationId
+                ? "(correlation_id = ? OR " + ocrCorrelationColumn + " = ?)"
                 : "correlation_id = ?";
         String sql = String.format("""
                 SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time, %s AS quarantine_reason
@@ -1778,7 +1848,7 @@ public class TelemetryTenantRepository {
                 ORDER BY reading_date DESC, %s DESC NULLS LAST, id DESC
                 LIMIT 1
                 """, timeColumn, quarantineReasonColumn(schemaName), schemaName, predicate, timeColumn);
-        Object[] args = hasFlowVisionCorrelationId
+        Object[] args = hasOcrCorrelationId
                 ? new Object[]{correlationId, correlationId}
                 : new Object[]{correlationId};
         List<TelemetryLatestFlowReadingRecord> rows = jdbcTemplate.query(
@@ -2237,7 +2307,7 @@ public class TelemetryTenantRepository {
     /**
      * Overwrites <em>both</em> extracted_reading and confirmed_reading with the same value. No manual
      * correction may use this: a hand-typed or officer-supplied number is not an extraction, and writing
-     * it into extracted_reading destroys the only record of what FlowVision read off the meter photo and
+     * it into extracted_reading destroys the only record of what OCR read off the meter photo and
      * files the row as a "compliant" (extracted == confirmed) submission on the dashboards. Corrections
      * go through {@link #updateConfirmedReading(String, Long, BigDecimal, Long, Integer)} with a
      * {@code SOURCE_MANUAL} provenance marker. Kept only for a caller that genuinely re-states both.
@@ -2278,7 +2348,7 @@ public class TelemetryTenantRepository {
      * ROLLOVER-RESOLVE: updates confirmed_reading and, when {@code confirmedReadingSource} is non-null,
      * folds {@code confirmed_reading_source = ?} into the <em>same</em> UPDATE — so a manual confirmation
      * is a single round-trip instead of an UPDATE followed by a separate {@link #applyConfirmedReadingSource}
-     * write (this path is on the Glific confirm hot path, hit by ~every reading). A {@code null} source
+     * write (this path is on the chatbot confirm hot path, hit by ~every reading). A {@code null} source
      * leaves the provenance column untouched (callers that do not record provenance), and a non-null source
      * is a safe no-op on pre-migration tenants where the column is absent (guarded by columnExists).
      */
@@ -2384,14 +2454,15 @@ public class TelemetryTenantRepository {
                                                BigDecimal extractedReading,
                                                BigDecimal confirmedReading,
                                                String correlationId,
-                                               String flowVisionCorrelationId,
+                                               String ocrCorrelationId,
                                                String imageUrl,
                                                String meterChangeReason,
                                                Long updatedBy) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
-        boolean hasFlowVisionCorrelationId = columnExists(schemaName, "flow_reading_table", "flowvision_correlation_id");
+        String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
+        boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
         String correlationAssignment = String.format("""
                             correlation_id = CASE
                                 WHEN correlation_id IS NULL
@@ -2401,8 +2472,8 @@ public class TelemetryTenantRepository {
                                 ELSE correlation_id
                             END,
                 """, SCHEME_SELECTION_CORRELATION_PREFIX);
-        String flowVisionAssignment = hasFlowVisionCorrelationId
-                ? "flowvision_correlation_id = COALESCE(?, flowvision_correlation_id),"
+        String ocrAssignment = hasOcrCorrelationId
+                ? String.format("%1$s = COALESCE(?, %1$s),", ocrCorrelationColumn)
                 : "";
         String sql = hasPayloadJson
                 ? String.format("""
@@ -2419,7 +2490,7 @@ public class TelemetryTenantRepository {
                             updated_by = ?,
                             updated_at = NOW()
                         WHERE id = ?
-                        """, schemaName, timeColumn, correlationAssignment, flowVisionAssignment)
+                        """, schemaName, timeColumn, correlationAssignment, ocrAssignment)
                 : String.format("""
                         UPDATE %s.flow_reading_table
                         SET %s = ?,
@@ -2433,8 +2504,8 @@ public class TelemetryTenantRepository {
                             updated_by = ?,
                             updated_at = NOW()
                         WHERE id = ?
-                        """, schemaName, timeColumn, correlationAssignment, flowVisionAssignment);
-        if (hasPayloadJson && hasFlowVisionCorrelationId) {
+                        """, schemaName, timeColumn, correlationAssignment, ocrAssignment);
+        if (hasPayloadJson && hasOcrCorrelationId) {
             jdbcTemplate.update(
                     sql,
                     readingAt,
@@ -2444,7 +2515,7 @@ public class TelemetryTenantRepository {
                     confirmedReading,
                     extractedReading,
                     correlationId,
-                    flowVisionCorrelationId,
+                    ocrCorrelationId,
                     imageUrl != null ? imageUrl : "",
                     meterChangeReason,
                     updatedBy,
@@ -2465,7 +2536,7 @@ public class TelemetryTenantRepository {
                     updatedBy,
                     readingId
             );
-        } else if (hasFlowVisionCorrelationId) {
+        } else if (hasOcrCorrelationId) {
             jdbcTemplate.update(
                     sql,
                     readingAt,
@@ -2473,7 +2544,7 @@ public class TelemetryTenantRepository {
                     extractedReading,
                     confirmedReading,
                     correlationId,
-                    flowVisionCorrelationId,
+                    ocrCorrelationId,
                     imageUrl != null ? imageUrl : "",
                     meterChangeReason,
                     updatedBy,
@@ -2683,9 +2754,7 @@ public class TelemetryTenantRepository {
     }
 
     private void validateSchemaName(String schemaName) {
-        if (schemaName == null || !schemaName.matches("^[a-z_][a-z0-9_]*$")) {
-            throw new IllegalArgumentException("Invalid schema name: " + schemaName);
-        }
+        SchemaNames.validate(schemaName);
     }
 
     public void invalidateMetadataCaches() {
@@ -2723,6 +2792,25 @@ public class TelemetryTenantRepository {
                 """;
         Boolean exists = jdbcTemplate.queryForObject(sql, Boolean.class, schemaName, tableName, columnName);
         return Boolean.TRUE.equals(exists);
+    }
+
+    /**
+     * USER-PREFERENCE-TENANT-SCHEMA: every live tenant whose schema exists, for queries that span
+     * every tenant and would fail as a whole on a missing schema. A REGISTERED tenant has none until
+     * it is onboarded. Read live rather than from the metadata caches, so a tenant provisioned since
+     * their last refresh is included.
+     */
+    public List<TelemetryTenantSchema> findProvisionedTenantSchemas() {
+        String sql = """
+                SELECT t.id, n.nspname
+                FROM common_schema.tenant_master_table t
+                JOIN pg_namespace n
+                  ON n.nspname = 'tenant_' || lower(trim(t.state_code))
+                WHERE t.deleted_at IS NULL
+                ORDER BY n.nspname
+                """;
+        return jdbcTemplate.query(sql,
+                (rs, n) -> new TelemetryTenantSchema(rs.getInt("id"), rs.getString("nspname")));
     }
 
     private List<String> getTenantSchemasCached() {

@@ -6,13 +6,13 @@ import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.MessagingAllowedHostsConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetSystemConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.SystemConfigResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.SystemConfigKeyEnum;
 import org.arghyam.jalsoochak.tenant.event.IncludedWorkStatusesUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.RegularityThresholdUpdatedEvent;
-import org.arghyam.jalsoochak.tenant.exception.InvalidConfigKeyException;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 import org.arghyam.jalsoochak.tenant.exception.ResourceNotFoundException;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
@@ -46,6 +46,23 @@ public class SystemManagementServiceImpl implements SystemManagementService {
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
 
+    /**
+     * Maps a stored {@code config_key} to its {@link SystemConfigKeyEnum}, or {@code null} when the row is
+     * not a UI-managed system config key. Mirrors the tenant-side guard in
+     * {@code TenantManagementServiceImpl#parseUiConfigKey}.
+     */
+    private SystemConfigKeyEnum parseUiConfigKey(String configKey) {
+        if (configKey == null || configKey.isBlank()) {
+            return null;
+        }
+        try {
+            return SystemConfigKeyEnum.valueOf(configKey);
+        } catch (IllegalArgumentException e) {
+            log.debug("Skipping non-UI system config key [key={}]", configKey);
+            return null;
+        }
+    }
+
     @Override
     public SystemConfigResponseDTO getSystemConfigs(Set<SystemConfigKeyEnum> keys) {
         log.info("Fetching system configurations [keys={}]", keys);
@@ -57,14 +74,15 @@ public class SystemManagementServiceImpl implements SystemManagementService {
         Map<SystemConfigKeyEnum, ConfigValueDTO> configMap = new HashMap<>();
 
         for (ConfigDTO cfg : configs) {
+            // The system tenant's rows share tenant_config_master_table with the runtime keys other
+            // services read directly (ocr_*, language_N, nudge_message_*, channel_*), so a key outside
+            // SystemConfigKeyEnum is expected data and is skipped — it must not fail the whole request.
+            SystemConfigKeyEnum key = parseUiConfigKey(cfg.getConfigKey());
+            if (key == null || !effectiveKeys.contains(key)) {
+                continue;
+            }
             try {
-                SystemConfigKeyEnum key = SystemConfigKeyEnum.valueOf(cfg.getConfigKey());
-                if (effectiveKeys.contains(key)) {
-                    configMap.put(key, objectMapper.readValue(cfg.getConfigValue(), key.getDtoClass()));
-                }
-            } catch (IllegalArgumentException e) {
-                log.error("Invalid system config key: {}", cfg.getConfigKey(), e);
-                throw new InvalidConfigKeyException("Invalid system config key: " + cfg.getConfigKey(), e);
+                configMap.put(key, objectMapper.readValue(cfg.getConfigValue(), key.getDtoClass()));
             } catch (JsonProcessingException e) {
                 log.error("Malformed system config value for key [key={}]", cfg.getConfigKey(), e);
                 throw new InvalidConfigValueException("Malformed config value for key: " + cfg.getConfigKey(), e);
@@ -97,6 +115,14 @@ public class SystemManagementServiceImpl implements SystemManagementService {
             if (dto instanceof ChannelListConfigDTO channelDto) {
                 channelDto.setDegraded(null);
                 channelDto.setRemovedChannels(null);
+            }
+
+            if (dto instanceof MessagingAllowedHostsConfigDTO allowedHostsDto) {
+                // Enforced validation for JsonNode-bound configs (bean validation does not run on
+                // treeToValue). Checked before the upsert: a malformed pattern stored here would
+                // throw on every subsequent tenant SMTP settings write, turning one bad super-user
+                // value into a broken endpoint for every state.
+                allowedHostsDto.validatedSmtpHosts();
             }
 
             String serialized;

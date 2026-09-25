@@ -52,13 +52,13 @@ class BfmReadingServiceDeclaredChannelTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private ReadingChannelResolver readingChannelResolver;
 
@@ -70,16 +70,17 @@ class BfmReadingServiceDeclaredChannelTest {
     void setUp() {
         service = new BfmReadingService(
                 repo,
-                flowVisionService,
+                defaultOcrExtractor,
                 telemetryEventPublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
-                glificOperatorContextService,
+                operatorContextService,
                 null,
                 readingChannelResolver,
                 new RolloverResolutionService(true, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
+                null,
                 null,
                 null);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
@@ -128,18 +129,18 @@ class BfmReadingServiceDeclaredChannelTest {
     @Test
     @DisplayName("without a declared channel the operator's stored preference still decides")
     void noDeclaredChannelFallsBackToThePreference() {
-        when(readingChannelResolver.resolve(TENANT_ID, CONTACT)).thenReturn(ReadingChannel.MAN);
+        when(readingChannelResolver.resolve(SCHEMA, CONTACT)).thenReturn(ReadingChannel.MAN);
 
         service.createReading(requestWithChannel(null), SCHEMA, operator, CONTACT, false);
 
-        verify(readingChannelResolver).resolve(TENANT_ID, CONTACT);
+        verify(readingChannelResolver).resolve(SCHEMA, CONTACT);
         verify(repo).updateFlowReadingChannel(SCHEMA, READING_ID, "MAN");
     }
 
     @Test
     @DisplayName("without a declared channel and with no preference on record the reading stays BFM")
     void noDeclaredChannelAndNoPreferenceStaysBfm() {
-        when(readingChannelResolver.resolve(TENANT_ID, CONTACT)).thenReturn(ReadingChannel.BFM);
+        when(readingChannelResolver.resolve(SCHEMA, CONTACT)).thenReturn(ReadingChannel.BFM);
 
         service.createReading(requestWithChannel(null), SCHEMA, operator, CONTACT, false);
 

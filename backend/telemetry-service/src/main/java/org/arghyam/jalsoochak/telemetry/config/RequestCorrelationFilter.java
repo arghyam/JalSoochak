@@ -24,7 +24,7 @@ public class RequestCorrelationFilter extends OncePerRequestFilter {
 
     /**
      * Runs first so every downstream filter — {@link DisallowedHttpMethodFilter},
-     * {@link TelemetryApiKeyAuthFilter} and {@link GlificWebhookAuthFilter} — logs with a request id.
+     * {@link TelemetryApiKeyAuthFilter} and {@link WebhookAuthFilter} — logs with a request id.
      */
     public static final int ORDER = 10;
 

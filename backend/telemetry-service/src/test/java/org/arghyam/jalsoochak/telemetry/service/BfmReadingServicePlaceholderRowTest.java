@@ -6,7 +6,7 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -46,7 +46,7 @@ class BfmReadingServicePlaceholderRowTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
@@ -55,10 +55,10 @@ class BfmReadingServicePlaceholderRowTest {
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
-    private FlowVisionReadingsRetryService flowVisionReadingsRetryService;
+    private OcrReadingsRetryService ocrReadingsRetryService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -97,8 +97,8 @@ class BfmReadingServicePlaceholderRowTest {
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
-        when(flowVisionService.extractReading("http://example.com/img.jpg")).thenReturn(
-                FlowVisionResult.builder()
+        when(defaultOcrExtractor.extractReading("http://example.com/img.jpg", null)).thenReturn(
+                OcrReadingResult.builder()
                         .requestId("request-1")
                         .correlationId("corr-1")
                         .qualityStatus("GOOD")
@@ -116,7 +116,7 @@ class BfmReadingServicePlaceholderRowTest {
                 1L,
                 ReadingTime.today()
         )).thenReturn(Optional.of(99L));
-        when(readingChannelResolver.resolve(1, "919999999999")).thenReturn(ReadingChannel.BFM);
+        when(readingChannelResolver.resolve(schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
@@ -158,8 +158,8 @@ class BfmReadingServicePlaceholderRowTest {
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
-        when(flowVisionReadingsRetryService.extractReading("http://example.com/img.jpg"))
-                .thenThrow(new FlowVisionReadingsUnavailableException("temporarily unavailable", new RuntimeException("timeout")));
+        when(ocrReadingsRetryService.extractReading("http://example.com/img.jpg"))
+                .thenThrow(new OcrReadingsUnavailableException("temporarily unavailable", new RuntimeException("timeout")));
 
         CreateReadingResponse resp = service.createReading(
                 request,
@@ -167,7 +167,7 @@ class BfmReadingServicePlaceholderRowTest {
                 operator,
                 "919999999999",
                 false,
-                FlowVisionRetryMode.RESILIENT
+                OcrRetryMode.RESILIENT
         );
 
         assertNotNull(resp);
@@ -215,7 +215,7 @@ class BfmReadingServicePlaceholderRowTest {
                 0
         );
 
-        when(glificOperatorContextService.resolveOperatorWithSchema("919999999999"))
+        when(operatorContextService.resolveOperatorWithSchema("919999999999"))
                 .thenReturn(new TelemetryOperatorWithSchema(schemaName, operator));
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(schemaName, 1L))
                 .thenReturn(Optional.of(latestReading));

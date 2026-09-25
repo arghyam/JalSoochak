@@ -42,7 +42,7 @@ public class UserEventPublisher {
     public void publishPumpOperatorOnboardedAfterCommit(
             String tenantCode,
             Integer tenantId,
-            String glificLanguageId,
+            String whatsappLanguageId,
             List<String> pumpOperatorPhones
     ) {
         if (pumpOperatorPhones == null || pumpOperatorPhones.isEmpty()) {
@@ -62,7 +62,7 @@ public class UserEventPublisher {
                         .tenantCode(tenantCode)
                         .tenantId(tenantId)
                         .triggeredAt(triggeredAt)
-                        .glificLanguageId(glificLanguageId)
+                        .whatsappLanguageId(whatsappLanguageId)
                         .pumpOperatorPhones(phones)
                         .build();
                 PumpOperatorMessagingEvent welcome = PumpOperatorMessagingEvent.builder()
@@ -70,7 +70,7 @@ public class UserEventPublisher {
                         .tenantCode(tenantCode)
                         .tenantId(tenantId)
                         .triggeredAt(triggeredAt)
-                        .glificLanguageId(glificLanguageId)
+                        .whatsappLanguageId(whatsappLanguageId)
                         .pumpOperatorPhones(phones)
                         .build();
 
@@ -128,7 +128,7 @@ public class UserEventPublisher {
                     .tenantCode(tenantCode)
                     .tenantId(tenantId)
                     .triggeredAt(triggeredAt)
-                    .glificLanguageId(null)
+                    .whatsappLanguageId(null)
                     .pumpOperatorPhones(phones)
                     .build();
 
@@ -162,7 +162,7 @@ public class UserEventPublisher {
                     .tenantCode(tenantCode)
                     .tenantId(tenantId)
                     .triggeredAt(triggeredAt)
-                    .glificLanguageId(null)
+                    .whatsappLanguageId(null)
                     .pumpOperatorPhones(phones)
                     .build();
 

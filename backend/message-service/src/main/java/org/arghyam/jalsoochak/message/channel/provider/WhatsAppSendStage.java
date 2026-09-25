@@ -1,0 +1,48 @@
+package org.arghyam.jalsoochak.message.channel.provider;
+
+/**
+ * Where a WhatsApp send failed, so a {@code result=FAILED_DELIVERY} log line says which half of the
+ * handoff broke instead of collapsing every cause into one token.
+ *
+ * <p>The distinction is operational, not cosmetic. The 20 Aug 2026 incident
+ * ({@code (#131053) Media upload error}) failed at {@link #MEDIA_REGISTER} — Meta could not fetch the
+ * report URL — which is a completely different fix from a template or receiver problem at
+ * {@link #SEND}. Both looked identical in the logs at the time.</p>
+ */
+public enum WhatsAppSendStage {
+
+    /**
+     * {@code createMessageMedia} rejected the PDF. DOCUMENT mode only: the provider validates the media URL
+     * with the BSP before accepting it, so an unreachable or geo-blocked object store surfaces here.
+     */
+    MEDIA_REGISTER,
+
+    /** {@code sendHsmMessage} / {@code createAndSendMessage} rejected the send itself. */
+    SEND,
+
+    /**
+     * The provider accepted the send but returned no {@code message.id}.
+     *
+     * <p>Ambiguous in the same way as {@link #TIMEOUT}, and for a stronger reason: the mutation
+     * returned no errors, so the provider has the message and a retry sends a duplicate. What is lost is
+     * the join key, which means only a reconciliation pass against the provider can say whether it
+     * arrived.</p>
+     */
+    SEND_NO_MESSAGE_ID,
+
+    /**
+     * The provider call's 30 s {@code block()} expired.
+     *
+     * <p>Its own token because it is the one failure a retry makes <em>worse</em>: the provider may already
+     * have created and sent the message, so re-driving the event delivers a duplicate rather than
+     * repairing anything.</p>
+     */
+    TIMEOUT,
+
+    /**
+     * The send never reached the provider because our own configuration or inputs were wrong — a missing
+     * template id, an unresolved contact id, or a report URL that does not sit under the prefix the
+     * approved template froze. Retrying cannot help until configuration changes.
+     */
+    CONFIG
+}

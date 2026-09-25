@@ -19,8 +19,8 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class WelcomeMessageService {
 
-    private final GlificOperatorContextService operatorContextService;
-    private final GlificLocalizationService localizationService;
+    private final OperatorContextService operatorContextService;
+    private final ConversationLocalizationService localizationService;
     private final TenantConfigRepository tenantConfigRepository;
     private static final Pattern NON_ALNUM = Pattern.compile("[^a-z0-9]+");
 

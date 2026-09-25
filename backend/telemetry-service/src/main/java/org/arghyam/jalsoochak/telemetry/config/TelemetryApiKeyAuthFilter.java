@@ -63,14 +63,14 @@ public class TelemetryApiKeyAuthFilter extends OncePerRequestFilter {
     private static final String SCHEMES_PREFIX = TELEMETRY_BASE + "/schemes";
 
     /**
-     * Glific (WhatsApp) webhook routes that fall inside the protected prefixes. They are
+     * Chatbot (WhatsApp) webhook routes that fall inside the protected prefixes. They are
      * unauthenticated at the application layer today — {@code telemetry-service} runs without Spring
      * Security and their only protection is network placement — and that is tracked as its own
      * finding. They are listed explicitly so the exemption is visible in review rather than implied
      * by a missing check.
      */
     private static final Set<String> UNAUTHENTICATED_WEBHOOK_PATHS = Set.of(
-            READINGS_PREFIX + "/glific",
+            READINGS_PREFIX + "/whatsapp",
             SCHEMES_PREFIX
     );
 
@@ -113,7 +113,7 @@ public class TelemetryApiKeyAuthFilter extends OncePerRequestFilter {
     /**
      * Deny by default inside the protected prefixes. {@code /readings} and everything beneath it is
      * server-to-server ingestion; under {@code /schemes} only the sub-paths are (bare
-     * {@code POST /schemes} is a Glific selection webhook).
+     * {@code POST /schemes} is a chatbot selection webhook).
      */
     static boolean requiresApiKey(String path) {
         if (path == null || path.isBlank()) {
@@ -126,6 +126,11 @@ public class TelemetryApiKeyAuthFilter extends OncePerRequestFilter {
             return true;
         }
         return path.startsWith(SCHEMES_PREFIX + "/");
+    }
+
+    /** The exemptions, so a guard test can assert the webhook gate authenticates each one instead. */
+    static Set<String> unauthenticatedWebhookPaths() {
+        return UNAUTHENTICATED_WEBHOOK_PATHS;
     }
 
     /**

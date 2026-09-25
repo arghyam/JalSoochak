@@ -670,6 +670,35 @@ class TenantManagementServiceImplTest {
     class GetTenantConfigsTests {
 
         @Test
+        @DisplayName("Should skip stored config keys that are not UI-managed instead of failing the request")
+        void testGetTenantConfigs_UnknownStoredKeyIsSkipped() {
+            // tenant_config_master_table is shared: alongside the UI-managed TenantConfigKeyEnum keys it
+            // also holds runtime keys other services read (ocr_provider/ocr_url/ocr_api_key, language_N,
+            // nudge_message_*). Those are not UI config and must not make this endpoint 400.
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+            List<ConfigDTO> configsList = Arrays.asList(
+                    ConfigDTO.builder()
+                            .configKey("ocr_url")
+                            .configValue("https://flowvision-assam.example/v1/extract-reading")
+                            .build(),
+                    ConfigDTO.builder()
+                            .configKey(TenantConfigKeyEnum.TENANT_LOGO.name())
+                            .configValue("{\"value\":\"https://brand.com/logo.png\"}")
+                            .build()
+            );
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(tenantId)).thenReturn(configsList);
+
+            TenantConfigResponseDTO result = tenantManagementService.getTenantConfigs(tenantId, null);
+
+            assertNotNull(result);
+            assertTrue(result.getConfigs().containsKey(TenantConfigKeyEnum.TENANT_LOGO));
+            assertEquals(1, result.getConfigs().size());
+        }
+
+        @Test
         @DisplayName("Should retrieve all tenant configurations without key filter")
         void testGetTenantConfigs_AllConfigs() {
             // Arrange
@@ -1120,6 +1149,31 @@ class TenantManagementServiceImplTest {
 
             assertThrows(InvalidConfigKeyException.class,
                     () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            verify(tenantCommonRepository, never()).upsertConfig(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should reject the messaging provider settings keys on the generic config API")
+        void setTenantConfigs_messagingProviderKeys_throwsInvalidConfigKeyException() throws Exception {
+            // MESSAGING-PROVIDER-SETTINGS: these two are the only way an SMTP host reaches the
+            // database, so the generic endpoint must refuse them — writing one here would skip the
+            // allowlist, TLS and address checks entirely.
+            for (TenantConfigKeyEnum key : List.of(
+                    TenantConfigKeyEnum.EMAIL_PROVIDER_SETTINGS,
+                    TenantConfigKeyEnum.SMS_PROVIDER_SETTINGS)) {
+                Integer tenantId = 1;
+                TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+                Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+                configs.put(key, objectMapper.readTree("{\"provider\":\"smtp\"}"));
+                SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+                when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+                when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+                when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+                assertThrows(InvalidConfigKeyException.class,
+                        () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            }
             verify(tenantCommonRepository, never()).upsertConfig(any(), any(), any(), any());
         }
 
@@ -1592,8 +1646,8 @@ class TenantManagementServiceImplTest {
             assertEquals(total - 1, result.getSummary().getPending());
             assertEquals(ConfigStatusEnum.CONFIGURED, result.getConfigs().get(TenantConfigKeyEnum.TENANT_LOGO).getStatus());
             assertTrue(result.getConfigs().get(TenantConfigKeyEnum.TENANT_LOGO).isMandatory());
-            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES).isMandatory(),
-                    "GLIFIC_MESSAGE_TEMPLATES is optional");
+            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES).isMandatory(),
+                    "WHATSAPP_MESSAGE_TEMPLATES is optional");
             assertFalse(result.getConfigs().get(TenantConfigKeyEnum.STATE_IT_SYSTEM_CONNECTION).isMandatory(),
                     "STATE_IT_SYSTEM_CONNECTION is optional");
             assertFalse(result.getConfigs().get(TenantConfigKeyEnum.STATE_DATA_RECONCILIATION_TIME).isMandatory(),

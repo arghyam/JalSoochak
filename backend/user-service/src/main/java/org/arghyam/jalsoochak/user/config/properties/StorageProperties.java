@@ -10,9 +10,8 @@ import org.springframework.validation.annotation.Validated;
  * Configuration properties for object storage.
  * Bound from the {@code storage.*} namespace in application.yml.
  *
- * <p>Setting {@code storage.endpoint} to a non-blank URL activates path-style
- * access and endpoint override, required by MinIO and most S3-compatible
- * providers. Leave it blank to use real AWS S3.
+ * <p>{@code storage.endpoint} is required while storage is enabled, and is
+ * reached with path-style access. There is no implicit AWS default.
  */
 @ConfigurationProperties(prefix = "storage")
 @Data
@@ -25,10 +24,10 @@ public class StorageProperties {
     /** Storage provider key. Currently only {@code s3} is supported. */
     private String provider = "s3";
 
-    /** Custom endpoint URL (MinIO/R2/etc.). Leave blank for real AWS S3. */
+    /** URL of the S3-compatible store. Required while storage is enabled, or startup fails. */
     private String endpoint;
 
-    /** AWS region (or a dummy value like {@code us-east-1} for MinIO). */
+    /** Signing region (a placeholder like {@code us-east-1} for a store that ignores it). */
     @NotBlank
     private String region = "ap-south-1";
 
@@ -53,7 +52,7 @@ public class StorageProperties {
 
     /**
      * Public base URL for presigned GET URLs returned to clients.
-     * Use this when MinIO/S3 is behind a reverse proxy or NAT and the internal
+     * Use this when the store is behind a reverse proxy or NAT and the internal
      * {@code storage.endpoint} differs from the externally reachable address.
      * When set, the scheme+host+port of the SDK-generated URL is replaced with
      * this value before returning it to callers. Leave blank to use the URL

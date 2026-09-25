@@ -42,7 +42,10 @@ CREATE TABLE common_schema.tenant_config_master_table (
     created_by   INTEGER,
     updated_at   TIMESTAMP,
     updated_by   INTEGER,
-    deleted_at   TIMESTAMP
+    deleted_at   TIMESTAMP,
+    -- Present in V1; softDeleteConfig stamps it. The FKs the real table carries are left out
+    -- here, as they are for every other column in this minimal schema.
+    deleted_by   INTEGER
 );
 
 -- Partial unique index required by the upsert ON CONFLICT clause in upsertConfig()

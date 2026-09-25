@@ -9,6 +9,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
@@ -52,7 +53,10 @@ public class KafkaConfig {
 
     // ── Consumer ──────────────────────────────────────────────
 
+    // @Primary so the tenant-event factory below cannot make a ConsumerFactory injection
+    // ambiguous; this one is the service's main consumer.
     @Bean
+    @Primary
     public ConsumerFactory<String, String> consumerFactory() {
         Map<String, Object> props = new HashMap<>();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
@@ -87,6 +91,47 @@ public class KafkaConfig {
         return factory;
     }
 
+    // ── Tenant event consumer (provider cache eviction) ───────
+
+    /**
+     * Consumer factory for {@code tenant-service-topic}, used only by
+     * {@code TenantConfigUpdatedListener}.
+     *
+     * <p>PER-TENANT-PROVIDERS: separate from {@link #consumerFactory()} for one setting —
+     * {@code auto.offset.reset=latest}. That listener joins under a group id generated fresh on
+     * every startup so each replica evicts its own cache (O2-10), and a new group id with
+     * {@code earliest} would replay the topic's whole retention on the first poll to evict caches
+     * that are still empty. The group id itself is set on the listener, not here, because a
+     * {@code @KafkaListener}'s {@code groupId} overrides the factory's.
+     */
+    @Bean
+    public ConsumerFactory<String, String> tenantEventConsumerFactory() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        return new DefaultKafkaConsumerFactory<>(props);
+    }
+
+    /**
+     * Listener container for {@code tenant-service-topic}.
+     *
+     * <p>PER-TENANT-PROVIDERS: deliberately plain — no retry back-off and no dead-letter recoverer,
+     * which is the opposite of {@link #kafkaListenerContainerFactory()}. A cache eviction that
+     * fails costs one stale entry until the TTL expires, so it is not worth a 90-second retry
+     * budget on a shared listener thread, and republishing it to {@code tenant-service-topic.DLT}
+     * would create a topic nothing consumes. The listener catches its own exceptions, so the
+     * container's default error handling is never reached in practice.
+     */
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, String> tenantEventListenerContainerFactory() {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(tenantEventConsumerFactory());
+        return factory;
+    }
+
     /**
      * Wraps the dead-letter recoverer so that a failed DLT publish cannot turn bounded retries into an
      * endless loop.
@@ -103,8 +148,8 @@ public class KafkaConfig {
      * still be replayed from the log if it matters. The payload itself stays at DEBUG and with phone
      * numbers redacted: notification events carry operator and officer mobile numbers, which are PII
      * and must never reach an INFO/WARN/ERROR line. Exception <em>messages</em> are held back for the
-     * same reason — a Glific or JDBC failure routinely echoes the payload it choked on — so ERROR
-     * carries the exception types and DEBUG carries the stack traces.</p>
+     * same reason — a WhatsApp provider or JDBC failure routinely echoes the payload it choked on — so
+     * ERROR carries the exception types and DEBUG carries the stack traces.</p>
      */
     static ConsumerRecordRecoverer neverBlockingRecoverer(ConsumerRecordRecoverer delegate) {
         return (consumerRecord, exception) -> {
@@ -130,7 +175,7 @@ public class KafkaConfig {
      * bare 10-digit mobile and the {@code 91XXXXXXXXXX} E.164 form used throughout these events —
      * keeping the last four digits so two records can still be told apart.
      *
-     * <p>Delegates to {@link PhoneRedactor}, which the Glific delivery-status reader also uses: a
+     * <p>Delegates to {@link PhoneRedactor}, which the WhatsApp delivery-status reader also uses: a
      * Gupshup failure payload carries the recipient's raw number in its {@code destination} field, so
      * the same masking is needed there. Kept as a method here so this class's existing callers and
      * tests are unaffected.</p>
