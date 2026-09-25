@@ -344,6 +344,11 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /**
+     * Inserts through {@link #createFlowReading} on {@code this}, past the proxy, so the transaction its
+     * lock needs has to be opened here.
+     */
+    @org.springframework.transaction.annotation.Transactional
     public String upsertPendingSchemeSelectionRecord(String schemaName,
                                                      Long schemeId,
                                                      Long operatorId,

@@ -175,6 +175,17 @@ class TelemetryTenantRepositoryOcrColumnRenameIntegrationTest {
                 .isEqualByComparingTo(BigDecimal.TEN);
     }
 
+    @Test
+    void upsertPendingSchemeSelectionRecordOpensTheTransactionItsPlaceholderInsertNeeds() {
+        // Inserts through createFlowReading on this, past the proxy, so needs @Transactional itself.
+        String correlationId = repository.upsertPendingSchemeSelectionRecord(SCHEMA, SCHEME, OPERATOR, READING_AT);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM " + SCHEMA + ".flow_reading_table WHERE correlation_id = ?",
+                Integer.class, correlationId))
+                .isEqualTo(1);
+    }
+
     /**
      * Runs {@code call} while another session holds V46's rename uncommitted, and commits the rename
      * once {@code call} is queued behind its lock, so the call's column check and statement straddle the
