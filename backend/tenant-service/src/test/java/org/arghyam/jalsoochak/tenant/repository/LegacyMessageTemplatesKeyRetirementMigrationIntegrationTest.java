@@ -34,11 +34,11 @@ class LegacyMessageTemplatesKeyRetirementMigrationIntegrationTest {
 
     /** A live legacy row only — written by an old instance after V45 — plus a soft-deleted one. */
     private static final int TENANT_ONLY_LEGACY = 101;
-    /** A live row under both names — the legacy one was being ignored. */
+    /** A live row under both names, as V45's copy left them — the legacy one was being ignored. */
     private static final int TENANT_BOTH_NAMES = 102;
     /** Only a soft-deleted legacy row. */
     private static final int TENANT_ONLY_DELETED = 103;
-    /** Only a live canonical row, as V45 left most tenants. */
+    /** Only a live canonical row, as a tenant first configured after V45 has. */
     private static final int TENANT_CANONICAL_ONLY = 104;
     /** No templates at all; an unrelated key only. */
     private static final int TENANT_OTHER_KEY = 105;

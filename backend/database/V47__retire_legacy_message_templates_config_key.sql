@@ -4,18 +4,22 @@
 -- tenant-service, telemetry-service and user-service now know the key by its
 -- new name only, so none of them reads a row still stored under the old one.
 --
--- V45 renamed the live rows it found, but two kinds can still be live under
--- the old name. Each is resolved the way every reader already resolves it, so
--- no tenant's templates change:
+-- V45 copied the live rows it found to the new name and left the old-name
+-- rows live, for the code that still read only the old name. Two kinds of row
+-- can still be live under the old name. Each is resolved the way every reader
+-- already resolves it, so no tenant's templates change:
 --
 --   1. The tenant's only live templates row. An instance still on the old name
 --      wrote it after V45 had run, during that rolling deploy. Readers have
 --      been reading it through the fallback, and without it the tenant would
---      lose its templates, so step 1 renames it, exactly as V45 renamed its
---      rows.
---   2. A row alongside a live row under the new name. Readers have been
---      reading the new-name row and ignoring this one, so step 2 soft-deletes
---      it, leaving no live row under a name nothing reads.
+--      lose its templates, so step 1 renames it.
+--   2. A row alongside a live row under the new name, as V45 left every row it
+--      copied. Readers have been reading the new-name row and ignoring this
+--      one, so step 2 soft-deletes it, leaving no live row under a name
+--      nothing reads.
+--
+-- Code built before V45 reads only the old name, so do not roll back past V45
+-- once this has run.
 --
 -- Step 1 runs first, so step 2 only ever meets the second kind:
 -- uq_tenant_config_key (V15) allows one live row per tenant and key, and
