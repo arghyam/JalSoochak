@@ -133,7 +133,7 @@ class SchemeRegularityRepositoryContinuousWorkStatusToggleIntegrationTest {
         jdbcTemplate.execute("""
                 TRUNCATE TABLE
                     analytics_schema.submission_attempt_table,
-                    analytics_schema.anomaly_table,
+                    analytics_schema.fact_anomaly_table,
                     analytics_schema.fact_meter_reading_table,
                     analytics_schema.dim_user_scheme_mapping_table,
                     analytics_schema.dim_scheme_table,

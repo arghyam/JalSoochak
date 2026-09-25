@@ -82,7 +82,7 @@ reported_events AS (
 
     UNION ALL   -- (B) arrived-but-rejected image submissions
     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
-    FROM analytics_schema.anomaly_table a
+    FROM analytics_schema.fact_anomaly_table a
     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id, params p
     WHERE a.tenant_id = p.tenant_id
       AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
@@ -103,7 +103,7 @@ WHERE COALESCE(rd.reported_days, 0) = ((p.end_date - p.start_date) + 1);
 **Pass criteria:** this equals the `continuousSchemeCount` returned by
 `/api/v1/analytics/continuous-schemes?...&list=false` for the same params.
 
-> **Timezone:** after migration **V41**, `anomaly_table.created_at` is a plain `TIMESTAMP` holding
+> **Timezone:** after migration **V41**, `fact_anomaly_table.created_at` is a plain `TIMESTAMP` holding
 > **UTC** (matching every other table in the repo), so `(created_at + INTERVAL '5:30')::date` gives the
 > IST reporting day **session-independently** — the same result in psql (`Asia/Kolkata`) or the app's
 > JDBC session. (Do *not* use `+5:30` while the column is still `timestamptz`: there it depends on the

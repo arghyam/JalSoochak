@@ -11,7 +11,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.SubmissionRejectedEvent;
 import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
 import org.arghyam.jalsoochak.analytics.entity.Anomaly;
 import org.arghyam.jalsoochak.analytics.entity.DimDate;
-import org.arghyam.jalsoochak.analytics.entity.DimOperatorAttendance;
+import org.arghyam.jalsoochak.analytics.entity.FactOperatorAttendance;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
@@ -19,7 +19,7 @@ import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
 import org.arghyam.jalsoochak.analytics.repository.AnomalyRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimDateRepository;
-import org.arghyam.jalsoochak.analytics.repository.DimOperatorAttendanceRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactOperatorAttendanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
@@ -79,7 +79,7 @@ public class FactServiceImpl implements FactService {
     private final AnomalyRepository anomalyRepository;
     private final DimTenantRepository dimTenantRepository;
     private final DimDateRepository dimDateRepository;
-    private final DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
+    private final FactOperatorAttendanceRepository factOperatorAttendanceRepository;
     // REPORTED-METRIC: persistence for pre-anomaly submission rejects.
     private final SubmissionAttemptRepository submissionAttemptRepository;
     private final WaterQuantityCalculatorRegistry waterQuantityCalculatorRegistry;
@@ -305,7 +305,7 @@ public class FactServiceImpl implements FactService {
         }
 
         Integer dateKey = Integer.parseInt(readingDate.format(DateTimeFormatter.BASIC_ISO_DATE));
-        boolean exists = dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(
+        boolean exists = factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(
                 event.getTenantId(),
                 event.getSchemeId(),
                 event.getUserId(),
@@ -316,7 +316,7 @@ public class FactServiceImpl implements FactService {
         }
 
         LocalDateTime now = LocalDateTime.now();
-        DimOperatorAttendance attendance = DimOperatorAttendance.builder()
+        FactOperatorAttendance attendance = FactOperatorAttendance.builder()
                 .tenantId(event.getTenantId())
                 .schemeId(event.getSchemeId())
                 .userId(event.getUserId())
@@ -325,7 +325,7 @@ public class FactServiceImpl implements FactService {
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
-        dimOperatorAttendanceRepository.save(attendance);
+        factOperatorAttendanceRepository.save(attendance);
     }
 
     private void updateWaterQuantityFromReading(MeterReadingEvent event, LocalDate readingDate, Integer submissionStatus) {
@@ -488,7 +488,7 @@ public class FactServiceImpl implements FactService {
             resolvedAnomalyType = intCodeToVarchar(EscalationType.NO_SUBMISSION.code);
         }
 
-        // One fact_escalation_table row + one anomaly_table row per operator
+        // One fact_escalation_table row + one fact_anomaly_table row per operator
         if (event.getOperators() == null) return;
         for (TenantEscalationEvent.TenantOperatorEscalationDetail op : event.getOperators()) {
             if (op.getCorrelationId() == null || op.getCorrelationId().isBlank()) {
@@ -591,7 +591,7 @@ public class FactServiceImpl implements FactService {
     @Override
     @Transactional
     public void ingestAnomalyRecorded(AnomalyEvent event) {
-        // anomaly_table timestamps are plain TIMESTAMP holding UTC (V41) -> write UTC-naive LocalDateTime.
+        // fact_anomaly_table timestamps are plain TIMESTAMP holding UTC (V41) -> write UTC-naive LocalDateTime.
         LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
         String uuid = event.getUuid();
         if (uuid == null || uuid.isBlank()) {
@@ -610,7 +610,7 @@ public class FactServiceImpl implements FactService {
 
         if (anomalyRepository.existsByUuid(uuid)) {
             anomalyRepository.touchByUuid(uuid, now);
-            log.info("Touched anomaly_table row for duplicate anomaly uuid={}", uuid);
+            log.info("Touched fact_anomaly_table row for duplicate anomaly uuid={}", uuid);
             return;
         }
 
@@ -640,7 +640,7 @@ public class FactServiceImpl implements FactService {
 
         try {
             anomalyRepository.save(anomaly);
-            log.info("Ingested anomaly_table row for scheme={} tenant={} uuid={}",
+            log.info("Ingested fact_anomaly_table row for scheme={} tenant={} uuid={}",
                     event.getSchemeId(), event.getTenantId(), event.getUuid());
         } catch (DataIntegrityViolationException e) {
             anomalyRepository.touchByUuid(uuid, now);

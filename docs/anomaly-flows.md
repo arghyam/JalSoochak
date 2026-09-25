@@ -31,7 +31,7 @@ telemetry-service / tenant-service
           |                             |
           |                     analytics-service
           |                             |
-          +---- operational record      +---- analytics_schema.anomaly_table
+          +---- operational record      +---- analytics_schema.fact_anomaly_table
                                         +---- optional fact_escalation_table row
 ```
 
@@ -263,7 +263,7 @@ Typical event payload fields include:
 
 `analytics-service` consumes `ANOMALY_RECORDED` from `telemetry-service-topic` and writes a row to:
 
-- `analytics_schema.anomaly_table`
+- `analytics_schema.fact_anomaly_table`
 
 This is the analytics-facing anomaly store used by reporting and list APIs.
 
@@ -355,7 +355,7 @@ This means the system is designed to support a full operational lifecycle, even 
 
 ### Analytics tables
 
-- `analytics_schema.anomaly_table`
+- `analytics_schema.fact_anomaly_table`
 - `analytics_schema.fact_escalation_table`
 - `analytics_schema.fact_meter_reading_table`
 - `analytics_schema.fact_water_quantity_table`

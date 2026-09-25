@@ -70,7 +70,7 @@ public class DailyReportKpiDTO {
 
     /**
      * One anomaly type observed on one scheme. {@code type} is the anomaly enum NAME as stored in
-     * {@code anomaly_table.type} (e.g. {@code UNREADABLE_IMAGE}); rows written before analytics
+     * {@code fact_anomaly_table.type} (e.g. {@code UNREADABLE_IMAGE}); rows written before analytics
      * migration V29 may hold the numeric code as a string, and message-service maps either form to a
      * human label.
      */

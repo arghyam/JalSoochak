@@ -16,7 +16,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "anomaly_table", schema = "analytics_schema")
+@Table(name = "fact_anomaly_table", schema = "analytics_schema")
 @Data
 @Builder
 @NoArgsConstructor
