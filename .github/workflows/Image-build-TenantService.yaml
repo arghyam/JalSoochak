@@ -5,10 +5,12 @@ on:
     branches: ["main", "dev"]
     paths:
       - 'backend/tenant-service/**'
+      - 'backend/database/**'
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
       - 'backend/tenant-service/**'
+      - 'backend/database/**'
   workflow_dispatch:
   workflow_call:
 
@@ -72,6 +74,8 @@ jobs:
         run: |
           docker build --build-arg WORK_DIR="backend/tenant-service" -t $ECR_REGISTRY/tenant-service:$IMAGE_TAG -f build/maven/Dockerfile .
           docker push $ECR_REGISTRY/tenant-service:$IMAGE_TAG
+          docker build -t $ECR_REGISTRY/tenant-service-db:$IMAGE_TAG -f backend/database/Dockerfile backend/database
+          docker push $ECR_REGISTRY/tenant-service-db:$IMAGE_TAG
 
       - name: Cache Trivy DB
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
