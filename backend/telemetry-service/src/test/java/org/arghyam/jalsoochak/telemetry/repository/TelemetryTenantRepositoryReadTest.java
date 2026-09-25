@@ -708,8 +708,8 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
         }
 
         @Test
-        void findReadingByCorrelationIdAlsoMatchesFlowVisionIdWhenColumnExists() {
-            onColumnsExisting("flowvision_correlation_id");
+        void findReadingByCorrelationIdAlsoMatchesOcrCorrelationIdWhenColumnExists() {
+            onColumnsExisting("ocr_correlation_id");
             onQuery("flow_reading_table", row("id", 5L, "correlation_id", "corr-1", "created_by", 2L));
 
             Optional<TelemetryReadingRecord> record =
@@ -718,7 +718,17 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             assertThat(record).isPresent();
             assertThat(record.get().correlationId()).isEqualTo("corr-1");
             assertThat(allQuerySql())
-                    .anySatisfy(sql -> assertThat(sql).contains("flowvision_correlation_id = ?"));
+                    .anySatisfy(sql -> assertThat(sql).contains("ocr_correlation_id = ?"));
+        }
+
+        @Test
+        void findReadingByCorrelationIdMatchesThePreV46ColumnUntilItIsRenamed() {
+            onColumnsExisting("flowvision_correlation_id");
+            onQuery("flow_reading_table", row("id", 5L, "correlation_id", "corr-1", "created_by", 2L));
+
+            assertThat(repository.findReadingByCorrelationId(SCHEMA, "corr-1")).isPresent();
+            assertThat(allQuerySql())
+                    .anySatisfy(sql -> assertThat(sql).contains("OR flowvision_correlation_id = ?"));
         }
 
         @Test
@@ -730,7 +740,29 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
 
             assertThat(allQuerySql())
                     .filteredOn(sql -> sql.contains("SELECT id, correlation_id, created_by"))
+                    .allSatisfy(sql -> assertThat(sql).doesNotContain(" OR "));
+        }
+
+        @Test
+        void findFlowReadingDetailsByCorrelationIdPrefersTheOcrCorrelationColumn() {
+            onColumnExists(true);
+            onQuery("AS reading_time", row("id", 5L, "correlation_id", "corr-1"));
+
+            repository.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1");
+
+            assertThat(allQuerySql())
+                    .anySatisfy(sql -> assertThat(sql).contains("OR ocr_correlation_id = ?"))
                     .allSatisfy(sql -> assertThat(sql).doesNotContain("flowvision_correlation_id"));
+        }
+
+        @Test
+        void findFlowReadingDetailsByCorrelationIdMatchesThePreV46ColumnUntilItIsRenamed() {
+            onColumnsExisting("flowvision_correlation_id");
+            onQuery("AS reading_time", row("id", 5L, "correlation_id", "corr-1"));
+
+            assertThat(repository.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1")).isPresent();
+            assertThat(allQuerySql())
+                    .anySatisfy(sql -> assertThat(sql).contains("OR flowvision_correlation_id = ?"));
         }
 
         @Test

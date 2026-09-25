@@ -78,7 +78,7 @@ be looked up by. It therefore needs **one of two identifiers**, and either alone
 
 | Payload                                    | Row corrected                                                         |
 | ------------------------------------------ | --------------------------------------------------------------------- |
-| `correlation_id` (with or without a phone) | the reading with that `correlation_id` or `flowvision_correlation_id` |
+| `correlation_id` (with or without a phone) | the reading with that `correlation_id` or `ocr_correlation_id`        |
 | `phone_number` only                        | the latest reading created by the operator behind that phone          |
 | neither                                    | rejected — `400 Either correlationId or phoneNumber must be provided` |
 

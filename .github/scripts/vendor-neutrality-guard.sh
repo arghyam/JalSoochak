@@ -38,6 +38,12 @@ APPLIED_MIGRATIONS=(
   backend/analytics-service/src/main/resources/db/migration/V48__add_submission_linkage_to_anomaly_and_fact_meter_reading.sql
 )
 
+# Rule RENAMING_MIGRATION — a migration that renames a vendor-named column, index or function body
+# has to name what it renames in order to find it.
+RENAMING_MIGRATIONS=(
+  backend/database/V46__rename_ocr_correlation_id_column.sql
+)
+
 # Rule HISTORICAL_RECORD — completed plans, code reviews and architecture decision records record
 # decisions made under the old names. Rewriting them would change what they record.
 HISTORICAL_RECORDS=(
@@ -97,10 +103,7 @@ IFS= read -r -d '' ALLOWED_TOKENS <<'RULES' || true
 .  glific_welcome_flow_id
 .  \bglific_id\b|\bgetGlificId\b
 .  glificLanguageId
-
-# Rule PENDING_COLUMN_RENAME — flow_reading_table.flowvision_correlation_id and the Java names that
-# mirror it. They are renamed with the column.
-.  flow_?vision(?:_correlation_id|CorrelationId|Id|Columns?|Placeholder|Assignment)
+.  flowvision_correlation_id
 
 # Rule PUBLIC_ERROR_CODE — error codes returned to API callers. Renaming one is a contract change
 # that needs its own transition.
@@ -131,7 +134,7 @@ pathspecs=(.)
 for path in "${ADAPTER_PATHS[@]}" "${HISTORICAL_RECORDS[@]}" "${OPERATIONAL_SCRIPTS[@]}"; do
   pathspecs+=(":(exclude,glob)$path")
 done
-for path in "${APPLIED_MIGRATIONS[@]}" "${DEPLOYMENT_DESCRIPTIONS[@]}" "$GUARD_SELF"; do
+for path in "${APPLIED_MIGRATIONS[@]}" "${RENAMING_MIGRATIONS[@]}" "${DEPLOYMENT_DESCRIPTIONS[@]}" "$GUARD_SELF"; do
   pathspecs+=(":(exclude)$path")
 done
 
