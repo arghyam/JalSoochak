@@ -63,7 +63,7 @@ X-Webhook-Token: <token>
 `WebhookAuthFilter` in telemetry-service compares the SHA-256 of the supplied token against
 `telemetry.webhook.auth.token-hashes` and returns
 `401 {"success":false,"message":"Unauthorized"}` when it does not match. The match is a closed
-allowlist of exactly these 27 routes — *not* a prefix rule on `/api/v1/telemetry/**`, because that
+allowlist of exactly these 26 routes — *not* a prefix rule on `/api/v1/telemetry/**`, because that
 prefix is shared with the `X-Api-Key` ingestion endpoints, which use a different credential.
 
 Set `TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT` to log outcomes without rejecting (the kill switch), or

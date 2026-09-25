@@ -49,8 +49,9 @@ A fail-closed servlet filter, deny-by-default over the server-to-server prefixes
 - **Protected:** `/api/v1/telemetry/readings` and everything below it; every sub-path of
   `/api/v1/telemetry/schemes/`.
 - **Exempt:** an explicit allowlist — `POST /readings/whatsapp` and `POST /schemes` — the two
-  chatbot webhook routes that fall inside those prefixes. They remain unauthenticated (see §4) and are
-  now listed where a reviewer can see them, instead of being exempt by omission.
+  chatbot webhook routes that fall inside those prefixes. They are exempt from the API key only: both
+  are registered webhook routes, authenticated by `WebhookAuthFilter`'s `X-Webhook-Token` check
+  (see §4). They are listed where a reviewer can see them, instead of being exempt by omission.
 
 Consequences worth stating plainly: a new `/readings/**` endpoint is authenticated the moment it is
 mapped, and making one public takes a deliberate edit to a named allowlist. The filter normalises the
@@ -109,11 +110,12 @@ without a Docker daemon — environmental, unrelated.)
 
 ## 4. Not fixed here — still open
 
-- **The chatbot webhook routes are unauthenticated at the application layer**, including
-  `POST /readings/whatsapp` and `POST /manual-reading`, which write readings. Their only protection
-  is network placement. This is a larger change (it needs a webhook authentication scheme and a
-  coordinated bot rollout) and is already recorded in
-  `security-audit-non-dashboard-apis.md` §1.
+- **Chatbot webhook authentication — since closed by a separate change.** The chatbot routes do not
+  use the API key. Every registered webhook route, including `POST /readings/whatsapp` and
+  `POST /manual-reading`, which write readings, is authenticated by `WebhookAuthFilter`: in
+  `ENFORCE` mode (the default) a missing or invalid `X-Webhook-Token` is rejected with 401. `AUDIT`
+  only logs the outcome and `OFF` skips the check, so outside `ENFORCE` these routes fall back to
+  network placement alone.
 - **No rate limiting** on the reading routes. The audit log makes a mass reset detectable; it does
   not make it slower.
 - **`security-audit-api-scope.md` listed both `reset-latest` and `yesterday-final-reading` as
