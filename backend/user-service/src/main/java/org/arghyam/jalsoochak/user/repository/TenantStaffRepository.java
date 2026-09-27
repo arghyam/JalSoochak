@@ -4,6 +4,8 @@ import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.user.dto.response.RoleCountDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeSummaryDTO;
 import org.arghyam.jalsoochak.user.dto.response.TenantStaffResponseDTO;
+import org.arghyam.jalsoochak.user.enums.SchemeOperatingStatus;
+import org.arghyam.jalsoochak.user.enums.SchemeWorkStatus;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.service.PiiEncryptionService;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -40,18 +42,6 @@ public class TenantStaffRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final PiiEncryptionService pii;
-
-    private static final Map<Integer, String> WORK_STATUS_LABELS = Map.of(
-            1, "Ongoing",
-            2, "Completed",
-            3, "Not Started",
-            4, "Handed Over"
-    );
-    private static final Map<Integer, String> OPERATING_STATUS_LABELS = Map.of(
-            1, "Operative",
-            2, "Non-Operative",
-            3, "Partially Operative"
-    );
 
     private RowMapper<TenantStaffResponseDTO> staffRowMapper() {
         return (rs, rowNum) -> TenantStaffResponseDTO.builder()
@@ -122,8 +112,7 @@ public class TenantStaffRepository {
         args.add(offset);
 
         List<TenantStaffResponseDTO> rows = jdbcTemplate.query(sql, staffRowMapper(), args.toArray());
-        attachSchemes(schemaName, rows);
-        return rows;
+        return attachSchemes(schemaName, rows);
     }
 
     public Optional<TenantStaffResponseDTO> findStaffById(String schemaName, Long id) {
@@ -149,8 +138,7 @@ public class TenantStaffRepository {
             if (rs.next()) return Optional.of(staffRowMapper().mapRow(rs, 0));
             return Optional.empty();
         }, id);
-        result.ifPresent(r -> attachSchemes(schemaName, List.of(r)));
-        return result;
+        return result.map(r -> attachSchemes(schemaName, List.of(r)).getFirst());
     }
 
     public long countStaff(String schemaName, List<String> roles, Integer status, String name) {
@@ -252,8 +240,7 @@ public class TenantStaffRepository {
                 """, schemaName, where.sql());
         Long total = jdbcTemplate.queryForObject(countSql, Long.class, where.args().toArray());
 
-        attachSchemes(schemaName, items);
-        return new StaffPage(items, total == null ? 0 : total);
+        return new StaffPage(attachSchemes(schemaName, items), total == null ? 0 : total);
     }
 
     /**
@@ -292,8 +279,7 @@ public class TenantStaffRepository {
                 """, schemaName, where.sql());
 
         List<TenantStaffResponseDTO> rows = jdbcTemplate.query(sql, staffRowMapper(), where.args().toArray());
-        attachSchemes(schemaName, rows);
-        return rows;
+        return attachSchemes(schemaName, rows);
     }
 
     private record SqlAndArgs(String sql, List<Object> args) {}
@@ -370,25 +356,19 @@ public class TenantStaffRepository {
         return TenantUserStatus.fromCode(Integer.parseInt(status.toString()));
     }
 
-    private void attachSchemes(String schemaName, List<TenantStaffResponseDTO> rows) {
+    /**
+     * Returns a copy of {@code rows} with each row's {@code schemes} populated.
+     *
+     * <p>{@link TenantStaffResponseDTO} is an immutable record, so rows are rebuilt rather than
+     * updated. The argument list is never modified — callers must use the returned list, and may
+     * pass an immutable list such as {@link List#of}.
+     */
+    private List<TenantStaffResponseDTO> attachSchemes(String schemaName, List<TenantStaffResponseDTO> rows) {
         if (rows == null || rows.isEmpty()) {
-            return;
+            return rows;
         }
         if (!tableExists(schemaName, "user_scheme_mapping_table")) {
-            for (int i = 0; i < rows.size(); i++) {
-                TenantStaffResponseDTO row = rows.get(i);
-                rows.set(i, TenantStaffResponseDTO.builder()
-                        .id(row.id())
-                        .uuid(row.uuid())
-                        .title(row.title())
-                        .email(row.email())
-                        .phoneNumber(row.phoneNumber())
-                        .status(row.status())
-                        .role(row.role())
-                        .schemes(List.of())
-                        .build());
-            }
-            return;
+            return rows.stream().map(row -> withSchemes(row, List.of())).toList();
         }
 
         List<Long> userIds = rows.stream()
@@ -396,7 +376,7 @@ public class TenantStaffRepository {
                 .filter(Objects::nonNull)
                 .toList();
         if (userIds.isEmpty()) {
-            return;
+            return rows;
         }
 
         Map<Long, List<SchemeSummaryDTO>> byUser = new HashMap<>();
@@ -425,41 +405,30 @@ public class TenantStaffRepository {
                 SchemeSummaryDTO scheme = SchemeSummaryDTO.builder()
                         .schemeId(rs.getLong("scheme_id"))
                         .schemeName(rs.getString("scheme_name"))
-                        .workStatus(workStatusLabel(getNullableInt(rs.getObject("work_status"))))
-                        .operatingStatus(operatingStatusLabel(getNullableInt(rs.getObject("operating_status"))))
+                        .workStatus(SchemeWorkStatus.labelOf(getNullableInt(rs.getObject("work_status"))))
+                        .operatingStatus(SchemeOperatingStatus.labelOf(getNullableInt(rs.getObject("operating_status"))))
                         .build();
                 byUser.computeIfAbsent(userId, k -> new ArrayList<>()).add(scheme);
             }, chunk.toArray());
         }
 
-        for (int i = 0; i < rows.size(); i++) {
-            TenantStaffResponseDTO row = rows.get(i);
-            List<SchemeSummaryDTO> schemes = byUser.getOrDefault(row.id(), List.of());
-            rows.set(i, TenantStaffResponseDTO.builder()
-                    .id(row.id())
-                    .uuid(row.uuid())
-                    .title(row.title())
-                    .email(row.email())
-                    .phoneNumber(row.phoneNumber())
-                    .status(row.status())
-                    .role(row.role())
-                    .schemes(schemes)
-                    .build());
-        }
+        return rows.stream()
+                .map(row -> withSchemes(row, byUser.getOrDefault(row.id(), List.of())))
+                .toList();
     }
 
-    private String workStatusLabel(Integer code) {
-        if (code == null) {
-            return "Unknown";
-        }
-        return WORK_STATUS_LABELS.getOrDefault(code, "Unknown");
-    }
-
-    private String operatingStatusLabel(Integer code) {
-        if (code == null) {
-            return "Unknown";
-        }
-        return OPERATING_STATUS_LABELS.getOrDefault(code, "Unknown");
+    /** Rebuilds an immutable {@link TenantStaffResponseDTO} with a different scheme list. */
+    private TenantStaffResponseDTO withSchemes(TenantStaffResponseDTO row, List<SchemeSummaryDTO> schemes) {
+        return TenantStaffResponseDTO.builder()
+                .id(row.id())
+                .uuid(row.uuid())
+                .title(row.title())
+                .email(row.email())
+                .phoneNumber(row.phoneNumber())
+                .status(row.status())
+                .role(row.role())
+                .schemes(schemes)
+                .build();
     }
 
     private Integer getNullableInt(Object value) {

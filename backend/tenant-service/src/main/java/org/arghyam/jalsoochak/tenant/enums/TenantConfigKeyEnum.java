@@ -3,18 +3,22 @@ package org.arghyam.jalsoochak.tenant.enums;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.DateFormatConfigDTO;
-import org.arghyam.jalsoochak.tenant.dto.internal.GlificMessagesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.EmailProviderConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.WhatsAppMessagesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.MessageBrokerConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.SmsProviderConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.StateITSystemConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TimeSettingsConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.NudgeTimingConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.EscalationRulesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.DailyReportTimingConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.WeeklyReportTimingConfigDTO;
 
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -79,15 +83,15 @@ public enum TenantConfigKeyEnum implements ConfigKey {
     LOCATION_CHECK_REQUIRED(ConfigType.GENERIC, SimpleConfigValueDTO.class, false, false, true),
 
     /**
-     * Glific WhatsApp message templates configuration.
+     * WhatsApp chatbot message templates configuration.
      * Defines all screens, prompts, options, messages, and reasons for the conversation flow.
      * Includes multilingual support (all Indian official languages).
-     * Provides a hierarchical and maintainable structure for all Glific conversation templates.
+     * Provides a hierarchical and maintainable structure for all chatbot conversation templates.
      */
-    GLIFIC_MESSAGE_TEMPLATES(ConfigType.GENERIC, GlificMessagesConfigDTO.class, false, false, false),
+    WHATSAPP_MESSAGE_TEMPLATES(ConfigType.GENERIC, WhatsAppMessagesConfigDTO.class, false, false, false),
 
     /**
-     * Glific Connection Settings.
+     * WhatsApp provider connection settings.
      * Contains API credentials and endpoints for WhatsApp integration.
      */
     MESSAGE_BROKER_CONNECTION_SETTINGS(ConfigType.GENERIC, MessageBrokerConfigDTO.class, false, true, false),
@@ -124,6 +128,32 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * Escalation messages are sent to field staff (Section Officer, District Officer,ExecutiveEngineer, etc.).
      */
     FIELD_STAFF_ESCALATION_RULES(ConfigType.GENERIC, EscalationRulesConfigDTO.class, false, false, true),
+
+    /**
+     * Daily Water Service Situation Report schedule (Section Officers).
+     * The report covers the same day from 00:00 up to this time.
+     * Format: { dailyReport: { schedule: { hour: 16, minute: 0 } } }
+     * Optional: an unset tenant runs on the application default rather than being incomplete.
+     */
+    DAILY_SITUATION_REPORT_TIME(ConfigType.GENERIC, DailyReportTimingConfigDTO.class, false, false, false),
+
+    /**
+     * Weekly Water Service Situation Report schedule and window (Section and Sub-Divisional Officers).
+     * Format: { weeklyReport: { schedule: { dayOfWeek: 1, hour: 9, minute: 0 }, weekStartDay: 1 } }
+     * <p>
+     * {@code schedule} is when the job fires; {@code weekStartDay} is which seven days it reports on.
+     * Both use the cron convention 0–7, where both 0 and 7 are Sunday and 1 is Monday. The report always
+     * covers the last COMPLETE week beginning on {@code weekStartDay}, so 1 gives Monday–Sunday and 4
+     * gives Thursday–Wednesday; it never includes a day that has not finished. The two settings are
+     * independent — the scheduler warns when they differ, since the gap is how stale the data is on
+     * delivery.
+     * <p>
+     * Changing {@code weekStartDay} makes the next window overlap the one already reported, so officers
+     * may receive two reports covering some of the same days. There is no de-duplication.
+     * <p>
+     * Optional: an unset tenant runs on the application default (Monday) rather than being incomplete.
+     */
+    WEEKLY_SITUATION_REPORT_TIME(ConfigType.GENERIC, WeeklyReportTimingConfigDTO.class, false, false, false),
 
     /**
      * Data Consolidation Time.
@@ -253,7 +283,31 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * days (rounded half-up, minimum 1 day). Falls back to the national default, then the analytics env
      * default, when unset. Published to analytics via REGULARITY_THRESHOLD_UPDATED.
      */
-    REGULARITY_THRESHOLD_PERCENT(ConfigType.GENERIC, RegularityThresholdConfigDTO.class, false, false, false);
+    REGULARITY_THRESHOLD_PERCENT(ConfigType.GENERIC, RegularityThresholdConfigDTO.class, false, false, false),
+
+    /**
+     * The email account this tenant's own mail is sent through (SendGrid or SMTP), including the
+     * from address and the account's template ids. Credentials are NOT here — they live encrypted
+     * in {@code common_schema.tenant_provider_secret} and their location is derived by the server.
+     * <p>
+     * {@code managedValue = true}: written only through
+     * {@code PUT /api/v1/tenants/{tenantId}/messaging-providers}, which validates the provider's
+     * required fields and checks an SMTP host against MESSAGING_PROVIDER_ALLOWED_HOSTS. The generic
+     * config API cannot reach it, so a settings value can never skip those checks.
+     * <p>
+     * {@code mandatory = false}: a tenant with no settings uses the system default provider, which
+     * is today's behaviour, so this must not block the ONBOARDED → CONFIGURED transition.
+     */
+    EMAIL_PROVIDER_SETTINGS(ConfigType.GENERIC, EmailProviderConfigDTO.class, false, true, false),
+
+    /**
+     * The SMS account this tenant's own messages are sent through, including the sender id, the DLT
+     * registrations and the OTP text. Credentials are NOT here — see EMAIL_PROVIDER_SETTINGS.
+     * <p>
+     * A WHATSAPP_PROVIDER_SETTINGS key is deliberately absent: every tenant shares one WhatsApp provider
+     * organisation today, so there is nothing per-tenant to store.
+     */
+    SMS_PROVIDER_SETTINGS(ConfigType.GENERIC, SmsProviderConfigDTO.class, false, true, false);
 
     private final ConfigType type;
     private final Class<? extends ConfigValueDTO> dtoClass;

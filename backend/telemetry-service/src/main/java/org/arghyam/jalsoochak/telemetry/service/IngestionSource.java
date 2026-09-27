@@ -23,6 +23,16 @@ public final class IngestionSource {
     /** bit 2 — scheme and operator both exist but the operator is not mapped to the scheme; recorded anyway. */
     public static final int OPERATOR_NOT_MAPPED = 4;
 
+    /**
+     * bit 3 — the submission carried no phone number at all, so the operator was *inferred* from the
+     * scheme (first mapped pump operator, else the sentinel) rather than identified by the submitter.
+     * Always set together with the outcome bit: {@link #UNKNOWN_OPERATOR} when the scheme had no mapped
+     * pump operator, otherwise on its own. Without this bit a phone-less submission credited to a real,
+     * scheme-mapped operator would be indistinguishable from a genuine one, since it trips none of the
+     * other lenient conditions.
+     */
+    public static final int PHONE_ABSENT = 8;
+
     public static boolean has(int source, int bit) {
         return (source & bit) != 0;
     }

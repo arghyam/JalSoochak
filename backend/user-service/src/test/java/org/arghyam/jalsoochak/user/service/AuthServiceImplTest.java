@@ -41,6 +41,7 @@ import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.AccountTemporarilyLockedException;
 import org.arghyam.jalsoochak.user.exceptions.CaptchaVerificationException;
 import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -60,6 +61,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -153,6 +156,11 @@ class AuthServiceImplTest {
 
     private AdminUserRow stateAdminRow() {
         return new AdminUserRow(2L, "kc-sa", "sa@example.com", "91XXXXXXXXXX", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE, 0, null);
+    }
+
+    /** SUPER_USER-equivalent role that lives on a real tenant (tenantId 1), not the system tenant. */
+    private AdminUserRow superStateAdminRow() {
+        return new AdminUserRow(3L, "kc-ssa", "ssa@example.com", "91XXXXXXXXXX", 1, 4, "SUPER_STATE_ADMIN", AdminUserStatus.ACTIVE, 0, null);
     }
 
     private AdminUserRow deactivatedUser() {
@@ -322,6 +330,68 @@ class AuthServiceImplTest {
 
             verify(keycloakClient, never()).obtainToken(anyString(), anyString());
         }
+
+        @ParameterizedTest(name = "STATE_ADMIN blocked for tenant status {0}")
+        @ValueSource(ints = {0, 4, 6}) // INACTIVE, SUSPENDED, ARCHIVED
+        @DisplayName("STATE_ADMIN: should be denied login for INACTIVE, SUSPENDED and ARCHIVED tenants")
+        void login_stateAdmin_blockedTenantStatus_throwsForbidden(int tenantStatus) {
+            when(userCommonRepository.findAdminUserByEmail("sa@example.com")).thenReturn(Optional.of(stateAdminRow()));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(tenantStatus));
+
+            assertThrows(ForbiddenAccessException.class,
+                    () -> authService.login(loginRequest("sa@example.com", "pass")));
+
+            // Credentials must never be exchanged once the tenant gate rejects the login.
+            verify(keycloakClient, never()).obtainToken(anyString(), anyString());
+        }
+
+        @ParameterizedTest(name = "STATE_ADMIN allowed for tenant status {0}")
+        @ValueSource(ints = {1, 2, 3, 5}) // ONBOARDED, CONFIGURED, ACTIVE, DEGRADED
+        @DisplayName("STATE_ADMIN: should still log in for operational tenant statuses")
+        void login_stateAdmin_operationalTenantStatus_succeeds(int tenantStatus) {
+            when(userCommonRepository.findAdminUserByEmail("sa@example.com")).thenReturn(Optional.of(stateAdminRow()));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(tenantStatus));
+            when(keycloakClient.obtainToken("sa@example.com", "pass")).thenReturn(tokenResponse());
+            when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
+
+            AuthResult result = authService.login(loginRequest("sa@example.com", "pass"));
+
+            assertNotNull(result);
+            assertEquals(FAKE_JWT, result.tokenResponse().getAccessToken());
+        }
+
+        @Test
+        @DisplayName("SUPER_USER: home tenant is the system tenant (0), so no tenant status is ever consulted")
+        void login_superUser_systemTenant_skipsTenantStatusLookup() {
+            when(userCommonRepository.findAdminUserByEmail("user@example.com")).thenReturn(Optional.of(superUserRow()));
+            when(keycloakClient.obtainToken("user@example.com", "pass")).thenReturn(tokenResponse());
+
+            AuthResult result = authService.login(loginRequest("user@example.com", "pass"));
+
+            assertNotNull(result);
+            assertEquals("SUPER_USER", result.tokenResponse().getRole());
+            // The bypass is structural: tenantId 0 short-circuits validateTenantStatus, so the
+            // tenant gate is never reached — no status can block a SUPER_USER login.
+            verify(userCommonRepository, never()).findTenantStatusByTenantId(any());
+        }
+
+        @ParameterizedTest(name = "SUPER_STATE_ADMIN allowed for tenant status {0}")
+        @ValueSource(ints = {0, 4, 6}) // INACTIVE, SUSPENDED, ARCHIVED
+        @DisplayName("SUPER_STATE_ADMIN: a SUPER_USER-equivalent role on a real tenant still logs in when the tenant is blocked")
+        void login_superStateAdmin_blockedTenantStatus_succeeds(int tenantStatus) {
+            // tenantId 1 is a real tenant, so validateTenantStatus does reach TenantAccessValidator
+            // and the status below is genuinely evaluated against the role.
+            when(userCommonRepository.findAdminUserByEmail("ssa@example.com")).thenReturn(Optional.of(superStateAdminRow()));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(tenantStatus));
+            when(keycloakClient.obtainToken("ssa@example.com", "pass")).thenReturn(tokenResponse());
+            when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
+
+            AuthResult result = authService.login(loginRequest("ssa@example.com", "pass"));
+
+            assertNotNull(result);
+            assertEquals("SUPER_STATE_ADMIN", result.tokenResponse().getRole());
+            assertEquals(FAKE_JWT, result.tokenResponse().getAccessToken());
+        }
     }
 
     // ── refreshToken ─────────────────────────────────────────────────────────────
@@ -342,6 +412,30 @@ class AuthServiceImplTest {
             assertEquals(FAKE_JWT, result.tokenResponse().getAccessToken());
             assertEquals("refresh-token", result.refreshToken());
             assertEquals(1800, result.refreshExpiresIn());
+        }
+
+        @Test
+        @DisplayName("Should fall back to the Keycloak profile name for a tenant-less admin")
+        void refreshToken_tenantlessAdmin_usesKeycloakName() {
+            when(keycloakClient.refreshToken("valid-refresh")).thenReturn(tokenResponse());
+            when(userCommonRepository.findAdminUserByUuid("kc-uuid")).thenReturn(Optional.of(superUserRow()));
+            when(keycloakAdminHelper.findAdminDisplayName(any(AdminUserRow.class))).thenReturn("Super Admin");
+
+            AuthResult result = authService.refreshToken("valid-refresh");
+
+            assertEquals("Super Admin", result.tokenResponse().getName());
+        }
+
+        @Test
+        @DisplayName("Should leave the name null when the Keycloak profile has none")
+        void refreshToken_tenantlessAdmin_nullNameWhenKeycloakHasNone() {
+            when(keycloakClient.refreshToken("valid-refresh")).thenReturn(tokenResponse());
+            when(userCommonRepository.findAdminUserByUuid("kc-uuid")).thenReturn(Optional.of(superUserRow()));
+            when(keycloakAdminHelper.findAdminDisplayName(any(AdminUserRow.class))).thenReturn(null);
+
+            AuthResult result = authService.refreshToken("valid-refresh");
+
+            assertNull(result.tokenResponse().getName());
         }
 
         @Test
@@ -582,7 +676,35 @@ class AuthServiceImplTest {
 
             verify(userCommonRepository).insertToken(
                     eq("user@example.com"), eq("reset-hash"), eq("RESET"), eq(null), any(), eq(null));
-            verify(userNotificationEventPublisher).publishResetPasswordEmailAfterCommit(any(ResetPasswordEmailEvent.class));
+            ArgumentCaptor<ResetPasswordEmailEvent> captor =
+                    ArgumentCaptor.forClass(ResetPasswordEmailEvent.class);
+            verify(userNotificationEventPublisher).publishResetPasswordEmailAfterCommit(captor.capture());
+            // Super users belong to no tenant (tenantId 0), so the event carries none
+            assertNull(captor.getValue().getTenantId());
+            assertNull(captor.getValue().getTenantCode());
+        }
+
+        @Test
+        @DisplayName("Should carry the tenant id and code when the user belongs to a tenant")
+        void forgotPassword_tenantUser_eventCarriesTenant() {
+            when(userCommonRepository.findAdminUserByEmail("sa@example.com")).thenReturn(Optional.of(stateAdminRow()));
+            when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
+            when(tokenService.generateRawToken()).thenReturn("raw-reset-token");
+            when(tokenService.hash("raw-reset-token")).thenReturn("reset-hash");
+            when(passwordResetProperties.expiryMinutes()).thenReturn(30);
+            when(frontendProperties.baseUrl()).thenReturn("http://localhost:3000");
+            when(frontendProperties.resetPath()).thenReturn("/reset-password");
+
+            ForgotPasswordRequestDTO req = new ForgotPasswordRequestDTO();
+            req.setEmail("sa@example.com");
+
+            authService.forgotPassword(req);
+
+            ArgumentCaptor<ResetPasswordEmailEvent> captor =
+                    ArgumentCaptor.forClass(ResetPasswordEmailEvent.class);
+            verify(userNotificationEventPublisher).publishResetPasswordEmailAfterCommit(captor.capture());
+            assertEquals(1, captor.getValue().getTenantId());
+            assertEquals("MP", captor.getValue().getTenantCode());
         }
     }
 

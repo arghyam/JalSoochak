@@ -10,6 +10,7 @@ import org.apache.hc.core5.util.Timeout;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
@@ -24,13 +25,20 @@ public class RestTemplateConfig {
     private final int readTimeoutMs;
 
     public RestTemplateConfig(
-            @Value("${flowvision.http.connect-timeout-ms:5000}") int connectTimeoutMs,
-            @Value("${flowvision.http.read-timeout-ms:10000}") int readTimeoutMs
+            @Value("${ocr.http.connect-timeout-ms:5000}") int connectTimeoutMs,
+            @Value("${ocr.http.read-timeout-ms:10000}") int readTimeoutMs
     ) {
         this.connectTimeoutMs = connectTimeoutMs;
         this.readTimeoutMs = readTimeoutMs;
     }
 
+    /**
+     * The general-purpose client for the OCR provider, the WhatsApp provider and object storage.
+     * Marked primary because {@link MediaFetchRestTemplateConfig} contributes a second, SSRF-guarded
+     * RestTemplate that only the caller-supplied media fetch should use — every other injection point
+     * keeps getting this one.
+     */
+    @Primary
     @Bean
     public RestTemplate restTemplate() {
         PoolingHttpClientConnectionManager connectionManager = PoolingHttpClientConnectionManagerBuilder.create()

@@ -1,6 +1,10 @@
 package org.arghyam.jalsoochak.analytics.helper;
 
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusDTO;
+import org.arghyam.jalsoochak.analytics.enums.SchemeOperatingStatus;
+import org.arghyam.jalsoochak.analytics.enums.SchemeWorkStatus;
+import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 import java.math.BigDecimal;
@@ -19,7 +23,9 @@ public final class AnalyticsControllerHelper {
 
     public static String buildSchemeRegionReportCsv(SchemeRegularityListResponse response) {
         StringBuilder csvBuilder = new StringBuilder();
-        csvBuilder.append("scheme_id,scheme_name,state_scheme_id,centre_scheme_id,status_code,status,supply_days,average_regularity,submission_days,submission_rate")
+        csvBuilder.append("scheme_id,scheme_name,state_scheme_id,centre_scheme_id,"
+                        + "work_status_code,work_status,operating_status_code,operating_status,"
+                        + "supply_days,average_regularity,submission_days,submission_rate")
                 .append('\n');
         if (response.getSchemes() == null || response.getSchemes().isEmpty()) {
             return csvBuilder.toString();
@@ -29,8 +35,10 @@ public final class AnalyticsControllerHelper {
                     .append(toCsvField(scheme.getSchemeName())).append(',')
                     .append(toCsvField(scheme.getStateSchemeId())).append(',')
                     .append(toCsvField(scheme.getCentreSchemeId())).append(',')
-                    .append(toCsvField(scheme.getStatusCode())).append(',')
-                    .append(toCsvField(scheme.getStatus())).append(',')
+                    .append(toCsvField(statusCode(scheme.getWorkStatus()))).append(',')
+                    .append(toCsvField(statusLabel(scheme.getWorkStatus()))).append(',')
+                    .append(toCsvField(statusCode(scheme.getOperatingStatus()))).append(',')
+                    .append(toCsvField(statusLabel(scheme.getOperatingStatus()))).append(',')
                     .append(toCsvField(scheme.getSupplyDays())).append(',')
                     .append(toCsvField(scheme.getAverageRegularity())).append(',')
                     .append(toCsvField(scheme.getSubmissionDays())).append(',')
@@ -55,68 +63,57 @@ public final class AnalyticsControllerHelper {
     }
 
     public static String buildSchemeDashboardCsvHeader() {
-        return "scheme_id,scheme_name,status_code,status,submission_days,reporting_rate,total_water_supplied_liters,"
+        return "scheme_id,scheme_name,work_status_code,work_status,operating_status_code,operating_status,"
+                + "submission_days,reporting_rate,total_water_supplied_liters,"
                 + "immediate_parent_lgd_id,immediate_parent_lgd_c_name,immediate_parent_lgd_title,immediate_parent_lgd_level,"
                 + "immediate_parent_department_id,immediate_parent_department_c_name,immediate_parent_department_title,immediate_parent_department_level,"
                 + "level_1_lgd_id,level_2_lgd_id,level_3_lgd_id,level_4_lgd_id,level_5_lgd_id,level_6_lgd_id,"
                 + "level_1_dept_id,level_2_dept_id,level_3_dept_id,level_4_dept_id,level_5_dept_id,level_6_dept_id";
     }
 
+    /**
+     * Renders one scheme-dashboard row. Takes the metrics record rather than the 26 positional arguments it
+     * used to, so adding a projected column no longer means widening every call site.
+     */
     public static String buildSchemeDashboardCsvRow(
-            Integer schemeId,
-            String schemeName,
-            Integer statusCode,
-            String status,
-            Integer submissionDays,
-            BigDecimal reportingRate,
-            Long totalWaterSupplied,
-            Integer immediateParentLgdId,
-            String immediateParentLgdCName,
-            String immediateParentLgdTitle,
-            Integer immediateParentLgdLevel,
-            Integer immediateParentDepartmentId,
-            String immediateParentDepartmentCName,
-            String immediateParentDepartmentTitle,
-            Integer immediateParentDepartmentLevel,
-            Integer level1LgdId,
-            Integer level2LgdId,
-            Integer level3LgdId,
-            Integer level4LgdId,
-            Integer level5LgdId,
-            Integer level6LgdId,
-            Integer level1DeptId,
-            Integer level2DeptId,
-            Integer level3DeptId,
-            Integer level4DeptId,
-            Integer level5DeptId,
-            Integer level6DeptId) {
-        return toCsvField(schemeId) + ','
-                + toCsvField(schemeName) + ','
-                + toCsvField(statusCode) + ','
-                + toCsvField(status) + ','
-                + toCsvField(submissionDays) + ','
+            SchemeRegularityRepository.SchemeSubmissionMetrics metric, BigDecimal reportingRate) {
+        return toCsvField(metric.schemeId()) + ','
+                + toCsvField(metric.schemeName()) + ','
+                + toCsvField(metric.workStatus()) + ','
+                + toCsvField(SchemeWorkStatus.labelOf(metric.workStatus())) + ','
+                + toCsvField(metric.operatingStatus()) + ','
+                + toCsvField(SchemeOperatingStatus.labelOf(metric.operatingStatus())) + ','
+                + toCsvField(metric.submissionDays()) + ','
                 + toCsvField(reportingRate) + ','
-                + toCsvField(totalWaterSupplied) + ','
-                + toCsvField(immediateParentLgdId) + ','
-                + toCsvField(immediateParentLgdCName) + ','
-                + toCsvField(immediateParentLgdTitle) + ','
-                + toCsvField(immediateParentLgdLevel) + ','
-                + toCsvField(immediateParentDepartmentId) + ','
-                + toCsvField(immediateParentDepartmentCName) + ','
-                + toCsvField(immediateParentDepartmentTitle) + ','
-                + toCsvField(immediateParentDepartmentLevel) + ','
-                + toCsvField(level1LgdId) + ','
-                + toCsvField(level2LgdId) + ','
-                + toCsvField(level3LgdId) + ','
-                + toCsvField(level4LgdId) + ','
-                + toCsvField(level5LgdId) + ','
-                + toCsvField(level6LgdId) + ','
-                + toCsvField(level1DeptId) + ','
-                + toCsvField(level2DeptId) + ','
-                + toCsvField(level3DeptId) + ','
-                + toCsvField(level4DeptId) + ','
-                + toCsvField(level5DeptId) + ','
-                + toCsvField(level6DeptId);
+                + toCsvField(metric.totalWaterSupplied()) + ','
+                + toCsvField(metric.immediateParentLgdId()) + ','
+                + toCsvField(metric.immediateParentLgdCName()) + ','
+                + toCsvField(metric.immediateParentLgdTitle()) + ','
+                + toCsvField(metric.immediateParentLgdLevel()) + ','
+                + toCsvField(metric.immediateParentDepartmentId()) + ','
+                + toCsvField(metric.immediateParentDepartmentCName()) + ','
+                + toCsvField(metric.immediateParentDepartmentTitle()) + ','
+                + toCsvField(metric.immediateParentDepartmentLevel()) + ','
+                + toCsvField(metric.level1LgdId()) + ','
+                + toCsvField(metric.level2LgdId()) + ','
+                + toCsvField(metric.level3LgdId()) + ','
+                + toCsvField(metric.level4LgdId()) + ','
+                + toCsvField(metric.level5LgdId()) + ','
+                + toCsvField(metric.level6LgdId()) + ','
+                + toCsvField(metric.level1DeptId()) + ','
+                + toCsvField(metric.level2DeptId()) + ','
+                + toCsvField(metric.level3DeptId()) + ','
+                + toCsvField(metric.level4DeptId()) + ','
+                + toCsvField(metric.level5DeptId()) + ','
+                + toCsvField(metric.level6DeptId());
+    }
+
+    private static Integer statusCode(SchemeStatusDTO status) {
+        return status == null ? null : status.getCode();
+    }
+
+    private static String statusLabel(SchemeStatusDTO status) {
+        return status == null ? null : status.getLabel();
     }
 
     public static UUID extractAuthenticatedUserUuid(JwtAuthenticationToken authentication) {

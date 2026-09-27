@@ -438,6 +438,28 @@ public class TenantCommonRepository {
     }
 
     /**
+     * Soft-deletes one configuration row, so the tenant falls back to whatever default the key has.
+     *
+     * <p>Soft rather than hard, matching every other delete in {@code common_schema}: the row stays
+     * as the record of what a tenant was configured with, which is what a later "why did this change"
+     * question is answered from. The partial unique index on {@code (tenant_id, config_key) WHERE
+     * deleted_at IS NULL} is what lets a subsequent upsert insert a fresh row beside it.
+     *
+     * @return the number of rows deleted — 0 when the key was not set
+     */
+    public int softDeleteConfig(Integer tenantId, String keyName, Integer currentUserId) {
+        String sql = """
+                UPDATE common_schema.tenant_config_master_table
+                   SET deleted_at = NOW(),
+                       deleted_by = ?,
+                       updated_at = NOW(),
+                       updated_by = ?
+                 WHERE tenant_id = ? AND config_key = ? AND deleted_at IS NULL
+                """;
+        return jdbcTemplate.update(sql, currentUserId, currentUserId, tenantId, keyName);
+    }
+
+    /**
      * Upserts the API key hash for a tenant.
      * Overwrites any previously stored hash, immediately invalidating the old token.
      */
@@ -476,6 +498,47 @@ public class TenantCommonRepository {
         Integer count = jdbcTemplate.queryForObject(sql, Integer.class,
                 TenantConstants.SYSTEM_TENANT_ID, TenantStatusEnum.REGISTERED.getCode());
         return count != null ? count : 0;
+    }
+
+    /**
+     * Finds the state codes of tenants in {@link TenantStatusEnum#ACTIVE} status, excluding the
+     * system tenant and soft-deleted rows. Used by the Single Tenant Mode startup check, which
+     * must refuse to boot when more than one tenant is ACTIVE.
+     *
+     * <p>Deliberately narrower than {@link #countOnboardedTenants()}: that method counts every
+     * status except {@code REGISTERED}, whereas this one counts only ACTIVE. State codes rather
+     * than a bare count so the startup failure can name the offending tenants.
+     *
+     * @return the ACTIVE tenants' state codes, ordered by state code
+     */
+    public List<String> findActiveTenantStateCodes() {
+        return findTenantStateCodesByStatus(TenantStatusEnum.ACTIVE);
+    }
+
+    /**
+     * Finds the state codes of tenants in {@link TenantStatusEnum#DEGRADED} status, excluding the
+     * system tenant and soft-deleted rows. DEGRADED tenants are fully loginable
+     * ({@code TenantAccessValidator.isAccessibleToStaff} allows ACTIVE and DEGRADED), so the
+     * Single Tenant Mode startup check logs them for visibility even though they do not count
+     * toward the enforced ACTIVE limit.
+     *
+     * @return the DEGRADED tenants' state codes, ordered by state code
+     */
+    public List<String> findDegradedTenantStateCodes() {
+        return findTenantStateCodesByStatus(TenantStatusEnum.DEGRADED);
+    }
+
+    /**
+     * Finds the state codes of non-system, non-deleted tenants in exactly the given status.
+     *
+     * @param status the status to match
+     * @return the matching tenants' state codes, ordered by state code
+     */
+    private List<String> findTenantStateCodesByStatus(TenantStatusEnum status) {
+        String sql = "SELECT state_code FROM common_schema.tenant_master_table "
+                + "WHERE id != ? AND deleted_at IS NULL AND status = ? ORDER BY state_code";
+        return jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString(1),
+                TenantConstants.SYSTEM_TENANT_ID, status.getCode());
     }
 
     /**

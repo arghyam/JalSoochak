@@ -7,8 +7,8 @@ The closed set of supported values is defined by `TelemetryErrorCode`:
 
 | Code | Meaning |
 | --- | --- |
-| `FLOW_VISION_FAILED` | FlowVision OCR processing failed before a result could be returned. |
-| `FLOW_VISION_REJECTED` | FlowVision rejected the image. |
+| `FLOW_VISION_FAILED` | OCR processing failed before a result could be returned. |
+| `FLOW_VISION_REJECTED` | The OCR provider rejected the image. |
 | `UNREADABLE_IMAGE` | OCR completed, but no valid meter reading could be extracted. |
 | `DUPLICATE_IMAGE` | The submitted image was already processed. |
 | `VALIDATION_FAILED` | Request JSON was parsed, but bean validation rejected the payload. |

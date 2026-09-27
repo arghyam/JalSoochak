@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -15,8 +17,13 @@ public class MeterReadingEvent {
     private Integer tenantId;
     private Integer schemeId;
     private Integer userId;
-    private Integer extractedReading;
-    private Integer confirmedReading;
+    /**
+     * The readings exactly as {@code flow_reading_table} holds them — {@code NUMERIC}, decimal digit
+     * included. They used to be rounded to whole cubic metres on the way out, which cost the warehouse
+     * up to 1000 L on every daily volume it derived from them.
+     */
+    private BigDecimal extractedReading;
+    private BigDecimal confirmedReading;
     private Integer confidence;
     private String imageUrl;
     private String readingAt;
@@ -24,4 +31,10 @@ public class MeterReadingEvent {
     private String readingDate;
     private Integer submissionStatus;
     private Integer readingType;
+    /**
+     * ANOMALY-SUBMISSION-LINK: {@code flow_reading_table.correlation_id} of the row this event was
+     * published from, so {@code fact_meter_reading_table} has a counterpart for the anomaly's
+     * {@code submission_correlation_id} to join against. Not unique — see {@code AnomalyEvent}.
+     */
+    private String correlationId;
 }

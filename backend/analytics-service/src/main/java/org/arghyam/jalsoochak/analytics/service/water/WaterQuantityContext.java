@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.analytics.service.water;
 
 import lombok.Builder;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
@@ -12,7 +13,8 @@ import java.time.LocalDate;
  * the same numeric field carries a different quantity per channel:
  * <ul>
  *   <li>{@link org.arghyam.jalsoochak.analytics.enums.ReadingChannel#BFM BFM}: the cumulative
- *       bulk-flow-meter index (litres); the day's quantity is the delta over the previous day.</li>
+ *       bulk-flow-meter index in cubic metres (m&sup3; = KL); the day's quantity is the delta over the
+ *       previous reading, converted to litres by the calculator.</li>
  *   <li>Future channels interpret the value differently (e.g. ELM: energy consumed in kWh;
  *       PDU: pump running duration in minutes) and additionally read per-scheme parameters
  *       (efficiency / head / discharge rate) keyed by {@link #tenantId()} / {@link #schemeId()}.</li>
@@ -20,14 +22,18 @@ import java.time.LocalDate;
  * Because interpretation is delegated to the channel's calculator, a reading is only ever
  * processed by the calculator that understands its units; see
  * {@link WaterQuantityCalculatorRegistry#resolve(Integer)}.
+ *
+ * <p>The readings are {@code BigDecimal} because they are decimal at the source — bulk flow meters
+ * carry a decimal digit — and because a channel whose reading is not a whole count of anything
+ * (ELM's kWh, PDU's pump minutes) cannot be represented otherwise.
  */
 @Builder
 public record WaterQuantityContext(
         Integer tenantId,
         Integer schemeId,
         LocalDate readingDate,
-        Integer currentReading,
-        Integer previousReading,
+        BigDecimal currentReading,
+        BigDecimal previousReading,
         Integer channel
 ) {
 }

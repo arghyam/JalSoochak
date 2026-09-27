@@ -1,9 +1,11 @@
 package org.arghyam.jalsoochak.user.repository;
 
+import org.arghyam.jalsoochak.user.constants.TenantStatusConstants;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserTokenRow;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -170,6 +172,100 @@ class UserCommonRepositoryIntegrationTest {
             } finally {
                 jdbc.update("DELETE FROM common_schema.tenant_master_table WHERE id = ?", 900);
             }
+        }
+    }
+
+    // ── Single Tenant Mode startup check ──────────────────────────────────────
+
+    /**
+     * Backs the Single Tenant Mode startup invariant: user-service must refuse to boot when more
+     * than one tenant is ACTIVE. The fixture seeds exactly one tenant — id 1, MP, status ACTIVE.
+     */
+    @Nested
+    @DisplayName("findActiveTenantStateCodes / findDegradedTenantStateCodes")
+    class SingleTenantModeStatusLookups {
+
+        private static final int FIXTURE_TENANT_ID = 1;
+
+        /** Added tenants use ids from 100 up so they never collide with the fixture row. */
+        private void insertTenant(int id, String stateCode, int status) {
+            jdbc.update(
+                    "INSERT INTO common_schema.tenant_master_table (id, state_code, title, status) "
+                            + "VALUES (?, ?, ?, ?)",
+                    id, stateCode, stateCode + " State", status);
+        }
+
+        @AfterEach
+        void restoreFixtureTenant() {
+            jdbc.update("DELETE FROM common_schema.tenant_master_table WHERE id != ?", FIXTURE_TENANT_ID);
+            jdbc.update("UPDATE common_schema.tenant_master_table "
+                    + "SET status = ?, deleted_at = NULL WHERE id = ?",
+                    TenantStatusConstants.ACTIVE, FIXTURE_TENANT_ID);
+        }
+
+        @Test
+        @DisplayName("returns the single seeded ACTIVE tenant")
+        void findActiveTenantStateCodes_returnsTheSingleActiveTenant() {
+            assertThat(repo.findActiveTenantStateCodes()).containsExactly("MP");
+        }
+
+        @Test
+        @DisplayName("returns every ACTIVE tenant, ordered by state code")
+        void findActiveTenantStateCodes_returnsAllActiveOrdered() {
+            insertTenant(101, "UP", TenantStatusConstants.ACTIVE);
+            insertTenant(102, "RJ", TenantStatusConstants.ACTIVE);
+
+            assertThat(repo.findActiveTenantStateCodes()).containsExactly("MP", "RJ", "UP");
+        }
+
+        @Test
+        @DisplayName("excludes the system tenant (id=0)")
+        void findActiveTenantStateCodes_excludesSystemTenant() {
+            insertTenant(0, "SYS", TenantStatusConstants.ACTIVE);
+
+            assertThat(repo.findActiveTenantStateCodes()).containsExactly("MP");
+        }
+
+        @Test
+        @DisplayName("excludes soft-deleted tenants")
+        void findActiveTenantStateCodes_excludesSoftDeleted() {
+            insertTenant(103, "DL", TenantStatusConstants.ACTIVE);
+            jdbc.update("UPDATE common_schema.tenant_master_table SET deleted_at = NOW() WHERE id = ?", 103);
+
+            assertThat(repo.findActiveTenantStateCodes()).containsExactly("MP");
+        }
+
+        @Test
+        @DisplayName("excludes every status other than ACTIVE, DEGRADED and REGISTERED included")
+        void findActiveTenantStateCodes_excludesNonActiveStatuses() {
+            insertTenant(110, "IN", TenantStatusConstants.INACTIVE);
+            insertTenant(111, "ON", TenantStatusConstants.ONBOARDED);
+            insertTenant(112, "CO", TenantStatusConstants.CONFIGURED);
+            insertTenant(113, "SU", TenantStatusConstants.SUSPENDED);
+            insertTenant(114, "DG", TenantStatusConstants.DEGRADED);
+            insertTenant(115, "AR", TenantStatusConstants.ARCHIVED);
+            insertTenant(116, "RG", TenantStatusConstants.REGISTERED);
+
+            assertThat(repo.findActiveTenantStateCodes()).containsExactly("MP");
+        }
+
+        @Test
+        @DisplayName("findDegradedTenantStateCodes returns only DEGRADED tenants")
+        void findDegradedTenantStateCodes_returnsOnlyDegraded() {
+            insertTenant(120, "D2", TenantStatusConstants.DEGRADED);
+            insertTenant(121, "D1", TenantStatusConstants.DEGRADED);
+            insertTenant(122, "SU", TenantStatusConstants.SUSPENDED);
+
+            assertThat(repo.findDegradedTenantStateCodes()).containsExactly("D1", "D2");
+        }
+
+        @Test
+        @DisplayName("findDegradedTenantStateCodes excludes soft-deleted tenants")
+        void findDegradedTenantStateCodes_excludesSoftDeleted() {
+            insertTenant(123, "DD", TenantStatusConstants.DEGRADED);
+            jdbc.update("UPDATE common_schema.tenant_master_table SET deleted_at = NOW() WHERE id = ?", 123);
+
+            assertThat(repo.findDegradedTenantStateCodes()).isEmpty();
         }
     }
 

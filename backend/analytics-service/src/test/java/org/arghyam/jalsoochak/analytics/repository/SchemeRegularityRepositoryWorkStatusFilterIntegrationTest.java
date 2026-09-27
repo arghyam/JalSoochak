@@ -117,18 +117,44 @@ class SchemeRegularityRepositoryWorkStatusFilterIntegrationTest {
         assertThat(repository.getSchemeCountByUser(1, 11)).isEqualTo(1);
     }
 
+    @Test
+    void schemeCount_byUser_withSupervisor_countsOnlySchemesSharedWithThem() {
+        // Backs the SDO report's per-Section-Officer Total Schemes column: user 11's count must drop
+        // to the schemes they share with the supervising officer, on top of the work-status filter.
+        mapUserScheme("44444444-4444-4444-4444-444444444444", 12, 2);   // supervisor shares only Scheme 2
+        assertThat(repository.getSchemeCountByUser(1, 11, 12L))
+                .as("Scheme 2 is shared but not handed-over, so the work-status filter still excludes it")
+                .isZero();
+
+        mapUserScheme("55555555-5555-5555-5555-555555555555", 12, 1);   // now also shares Scheme 1
+        assertThat(repository.getSchemeCountByUser(1, 11, 12L))
+                .as("Scheme 1 is both shared and handed-over")
+                .isEqualTo(1);
+
+        // A null supervisor leaves the unscoped behaviour untouched.
+        assertThat(repository.getSchemeCountByUser(1, 11, null)).isEqualTo(1);
+    }
+
     // ---- scheme-status count ----
 
     @Test
     void schemeStatusCount_countsOnlyHandedOverScheme() {
-        SchemeRegularityRepository.SchemeStatusCount byLgd = repository.getSchemeStatusCountByLgd(100);
-        // Scheme 1 is active; Scheme 2 (active, ws=1) and Scheme 3 (inactive, ws=NULL) are excluded.
-        assertThat(byLgd.activeSchemeCount()).isEqualTo(1);
-        assertThat(byLgd.inactiveSchemeCount()).isEqualTo(0);
+        // Scheme 2 (ws=1) and Scheme 3 (ws=NULL) are excluded by the work_status filter, so every
+        // bucket of both dimensions describes Scheme 1 alone.
+        SchemeRegularityRepository.SchemeStatusBreakdown byLgd = repository.getSchemeStatusCountByLgd(100);
+        assertThat(byLgd.total()).isEqualTo(1);
+        assertThat(byLgd.workStatusCounts()).containsExactly(codeCount(HANDED_OVER, 1));
+        assertThat(byLgd.operatingStatusCounts()).containsExactly(codeCount(1, 1));
 
-        SchemeRegularityRepository.SchemeStatusCount byDept = repository.getSchemeStatusCountByDepartment(200);
-        assertThat(byDept.activeSchemeCount()).isEqualTo(1);
-        assertThat(byDept.inactiveSchemeCount()).isEqualTo(0);
+        SchemeRegularityRepository.SchemeStatusBreakdown byDept =
+                repository.getSchemeStatusCountByDepartment(200);
+        assertThat(byDept.total()).isEqualTo(1);
+        assertThat(byDept.workStatusCounts()).containsExactly(codeCount(HANDED_OVER, 1));
+        assertThat(byDept.operatingStatusCounts()).containsExactly(codeCount(1, 1));
+    }
+
+    private static SchemeRegularityRepository.SchemeStatusCodeCount codeCount(Integer code, int count) {
+        return new SchemeRegularityRepository.SchemeStatusCodeCount(code, count);
     }
 
     // ---- submission-status summary ----

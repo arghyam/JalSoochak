@@ -11,7 +11,7 @@ graph TD
     SVC --> DB[(PostgreSQL<br/>schema-per-tenant)]
     SVC --> K[Apache Kafka]
     K --> MSG[Message Service]
-    MSG --> GLIFIC[Glific WhatsApp]
+    MSG --> WA[WhatsApp provider]
     SVC --> KC[Keycloak<br/>Identity]
     EXT[State IT Systems] -->|bulk / API sync| SVC
 ```
@@ -55,7 +55,7 @@ Authentication and user lifecycle: email + password and WhatsApp-OTP login, refr
 {% step %}
 ### Telemetry Service
 
-Field-data ingestion. Hosts the **Glific flow webhooks** for the WhatsApp submission journey, calls **FlowVision AI** to extract the meter reading, validates it, and publishes a reading event.
+Field-data ingestion. Hosts the **chatbot flow webhooks** for the WhatsApp submission journey, calls the **OCR provider** to extract the meter reading, validates it, and publishes a reading event.
 {% endstep %}
 
 {% step %}
@@ -73,7 +73,7 @@ Evaluates readings and submissions against anomaly rules (missed submissions, im
 {% step %}
 ### Message Service
 
-Notification delivery across **WhatsApp (Glific), email (SendGrid), and SMS**. Generates escalation **PDF reports**, uploads them to object storage, and sends them as WhatsApp documents. Uses a non-blocking HTTP client for outbound calls.
+Notification delivery across **WhatsApp, email (SendGrid), and SMS**. Generates escalation **PDF reports**, uploads them to object storage, and sends them as WhatsApp documents. Uses a non-blocking HTTP client for outbound calls.
 {% endstep %}
 
 {% step %}
@@ -87,9 +87,9 @@ Consumes events from all services into a dedicated **star-schema data warehouse*
 
 **Field submission via WhatsApp**
 
-1. Operator opens the JalSoochak WhatsApp flow via Glific and submits a meter photo
-2. Glific calls the **telemetry-service flow webhooks** at each step of the conversation
-3. Telemetry calls **FlowVision AI** → extracted reading + confidence score
+1. Operator opens the JalSoochak WhatsApp flow and submits a meter photo
+2. The WhatsApp provider calls the **telemetry-service flow webhooks** at each step of the conversation
+3. Telemetry calls the **OCR provider** → extracted reading + confidence score
 4. The operator confirms (high confidence) or enters the value manually (low confidence)
 5. The reading is validated and persisted; a reading event is published to Kafka
 6. Analytics consumes the event and updates the data warehouse — dashboards reflect it in near-real-time
@@ -125,7 +125,7 @@ graph LR
     KA --> MS[Message Service]
     KA --> AL
     AL --- DW[(Analytics PostgreSQL)]
-    MS --> GL[Glific WhatsApp]
+    MS --> WA[WhatsApp provider]
     MS --> SG[SendGrid Email]
     GW -. JWT .- KC[Keycloak]
 ```

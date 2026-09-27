@@ -6,7 +6,7 @@ import lombok.Data;
 @Data
 public class TriggerWelcomeMessageRequest {
     /**
-     * Glific commonly posts sender phone as "contactId" (e.g. @contact.phone).
+     * The chatbot flow commonly posts sender phone as "contactId" (e.g. @contact.phone).
      * We also accept "phoneNumber" for direct API callers.
      */
     @JsonAlias({"contactId", "phone", "contact"})

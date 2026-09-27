@@ -16,8 +16,13 @@ public sealed interface ConfigValueDTO permits
         TimeSettingsConfigDTO,
         NudgeTimingConfigDTO,
         EscalationRulesConfigDTO,
-        GlificMessagesConfigDTO,
+        DailyReportTimingConfigDTO,
+        WeeklyReportTimingConfigDTO,
+        WhatsAppMessagesConfigDTO,
         WaterSupplyThresholdConfigDTO,
         IncludedWorkStatusesConfigDTO,
-        RegularityThresholdConfigDTO {
+        RegularityThresholdConfigDTO,
+        EmailProviderConfigDTO,
+        SmsProviderConfigDTO,
+        MessagingAllowedHostsConfigDTO {
 }

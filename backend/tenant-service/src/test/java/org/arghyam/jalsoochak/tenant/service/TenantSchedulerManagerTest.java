@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.tenant.service;
 import org.arghyam.jalsoochak.tenant.config.DailyReportScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
+import org.arghyam.jalsoochak.tenant.config.WeeklyReportScheduleConfig;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
@@ -16,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.scheduling.support.CronTrigger;
 
+import java.time.DayOfWeek;
 import java.util.List;
 import java.util.concurrent.ScheduledFuture;
 
@@ -48,6 +50,9 @@ class TenantSchedulerManagerTest {
     @Mock
     private DailySituationReportSchedulerService dailySituationReportSchedulerService;
 
+    @Mock
+    private WeeklySituationReportSchedulerService weeklySituationReportSchedulerService;
+
     @InjectMocks
     private TenantSchedulerManager manager;
 
@@ -65,7 +70,7 @@ class TenantSchedulerManagerTest {
     // ── loadAndScheduleAll ──────────────────────────────────────────────────────
 
     @Test
-    void loadAndScheduleAll_schedulesNudgeEscalationAndDailyReport_forEachActiveTenant() {
+    void loadAndScheduleAll_schedulesAllFourJobs_forEachActiveTenant() {
         TenantResponseDTO t1 = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
         TenantResponseDTO t2 = TenantResponseDTO.builder().id(2).stateCode("UP").status(TenantStatusEnum.ACTIVE.name()).build();
         when(tenantCommonRepository.findAll()).thenReturn(List.of(t1, t2));
@@ -75,8 +80,8 @@ class TenantSchedulerManagerTest {
 
         manager.loadAndScheduleAll();
 
-        // per tenant: nudge + escalation + dailyReport = 3; 2 tenants = 6 schedule calls
-        verify(taskScheduler, times(6)).schedule(any(Runnable.class), any(CronTrigger.class));
+        // per tenant: nudge + escalation + dailyReport + weeklyReport = 4; 2 tenants = 8 schedule calls
+        verify(taskScheduler, times(8)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     @Test
@@ -89,8 +94,8 @@ class TenantSchedulerManagerTest {
 
         manager.loadAndScheduleAll();
 
-        // Only 3 calls for the active tenant (nudge + escalation + dailyReport)
-        verify(taskScheduler, times(3)).schedule(any(Runnable.class), any(CronTrigger.class));
+        // Only 4 calls for the active tenant (nudge + escalation + dailyReport + weeklyReport)
+        verify(taskScheduler, times(4)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     @Test
@@ -103,8 +108,8 @@ class TenantSchedulerManagerTest {
 
         manager.loadAndScheduleAll();
 
-        // Only 3 calls for the active tenant (nudge + escalation + dailyReport); the pre-seeded REGISTERED tenant (no schema) is excluded
-        verify(taskScheduler, times(3)).schedule(any(Runnable.class), any(CronTrigger.class));
+        // Only 4 calls for the active tenant; the pre-seeded REGISTERED tenant (no schema) is excluded
+        verify(taskScheduler, times(4)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     @Test
@@ -117,8 +122,8 @@ class TenantSchedulerManagerTest {
 
         manager.loadAndScheduleAll();
 
-        // Only 3 calls for the active tenant (nudge + escalation + dailyReport); null-status tenant is excluded
-        verify(taskScheduler, times(3)).schedule(any(Runnable.class), any(CronTrigger.class));
+        // Only 4 calls for the active tenant; null-status tenant is excluded
+        verify(taskScheduler, times(4)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     @Test
@@ -131,13 +136,143 @@ class TenantSchedulerManagerTest {
         manager.loadAndScheduleAll();
 
         ArgumentCaptor<CronTrigger> triggerCaptor = ArgumentCaptor.forClass(CronTrigger.class);
-        verify(taskScheduler, times(3)).schedule(any(Runnable.class), triggerCaptor.capture());
+        verify(taskScheduler, times(4)).schedule(any(Runnable.class), triggerCaptor.capture());
 
         List<CronTrigger> triggers = triggerCaptor.getAllValues();
         // nudge cron: 0 30 10 * * ?
         assertThat(triggers.get(0).toString()).contains("0 30 10");
         // escalation cron: 0 15 11 * * ?
         assertThat(triggers.get(1).toString()).contains("0 15 11");
+        // daily-report cron: 0 0 16 * * ?
+        assertThat(triggers.get(2).toString()).contains("0 0 16");
+        // weekly-report cron pins the day-of-week field too: 0 0 9 ? * 1 (Monday 09:00)
+        assertThat(triggers.get(3).toString()).contains("0 0 9 ? * 1");
+    }
+
+    @Test
+    void loadAndScheduleAll_weeklyReportTask_boundToTenantOwnSchema() {
+        TenantResponseDTO t = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(t));
+        stubConfigs(1, 8, 0, 9, 0);
+
+        manager.loadAndScheduleAll();
+
+        ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler, times(4)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
+
+        runnableCaptor.getAllValues().get(3).run(); // weekly-report runnable
+
+        verify(weeklySituationReportSchedulerService)
+                .processWeeklyReportsForTenant("tenant_mp", 1, DayOfWeek.MONDAY);
+        verifyNoInteractions(dailySituationReportSchedulerService);
+    }
+
+    @Test
+    void loadAndScheduleAll_weeklyReportTask_reportsConfiguredWeekStartDay() {
+        TenantResponseDTO t = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(t));
+        stubConfigs(1, 8, 0, 9, 0);
+        // Fires Monday, but reports a Thursday-Wednesday week: the two settings are independent.
+        stubWeeklyConfig(1, 1, 4);
+
+        manager.loadAndScheduleAll();
+
+        ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+        ArgumentCaptor<CronTrigger> triggerCaptor = ArgumentCaptor.forClass(CronTrigger.class);
+        verify(taskScheduler, times(4)).schedule(runnableCaptor.capture(), triggerCaptor.capture());
+
+        runnableCaptor.getAllValues().get(3).run();
+
+        verify(weeklySituationReportSchedulerService)
+                .processWeeklyReportsForTenant("tenant_mp", 1, DayOfWeek.THURSDAY);
+        // The cron still fires on Monday — weekStartDay must not leak into the trigger.
+        assertThat(triggerCaptor.getAllValues().get(3).toString()).contains("0 0 9 ? * 1");
+    }
+
+    @Test
+    void rescheduleForTenant_invalidWeekStartDay_doesNotCancelExistingFutures() {
+        TenantResponseDTO t = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(t));
+        stubConfigs(1, 8, 0, 9, 0);
+        manager.loadAndScheduleAll();
+
+        // 8 is out of the cron 0-7 range. It must be rejected by validation rather than reaching
+        // DayOfWeek.of, which would throw after the old futures had already been cancelled.
+        stubWeeklyConfig(1, 1, 8);
+
+        assertThatThrownBy(() -> manager.rescheduleForTenant(1, "MP"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("weekly-report");
+
+        verify(future, never()).cancel(anyBoolean());
+    }
+
+    @Test
+    void scheduleForTenant_warnsWhenCronDayAndWeekStartDayDiffer() {
+        TenantResponseDTO t = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(t));
+        stubConfigs(1, 8, 0, 9, 0);
+        stubWeeklyConfig(1, 1, 4); // fires Monday, week starts Thursday
+
+        assertThat(captureLogsOf(this::runLoadAndSchedule))
+                .anySatisfy(e -> {
+                    assertThat(e.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+                    assertThat(e.getFormattedMessage())
+                            .contains("MONDAY")
+                            .contains("THURSDAY");
+                });
+    }
+
+    @Test
+    void scheduleForTenant_doesNotWarnWhenCronDayAndWeekStartDayAreBothSunday() {
+        TenantResponseDTO t = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(t));
+        stubConfigs(1, 8, 0, 9, 0);
+        // Cron 0 and weekStartDay 7 are the same day; comparing the raw ints would warn spuriously.
+        stubWeeklyConfig(1, 0, 7);
+
+        assertThat(captureLogsOf(this::runLoadAndSchedule))
+                .noneMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN);
+    }
+
+    private void runLoadAndSchedule() {
+        manager.loadAndScheduleAll();
+    }
+
+    /** Runs {@code action} with a list appender attached to the scheduler's logger. */
+    private List<ch.qos.logback.classic.spi.ILoggingEvent> captureLogsOf(Runnable action) {
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(TenantSchedulerManager.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+        return appender.list;
+    }
+
+    @Test
+    void rescheduleForTenant_invalidWeeklyDayOfWeek_doesNotCancelExistingFutures() {
+        TenantResponseDTO t = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(t));
+        stubConfigs(1, 8, 0, 9, 0);
+        manager.loadAndScheduleAll();
+
+        // 8 is out of the cron 0-7 range. Validation must reject it before anything is cancelled,
+        // so a bad config cannot leave the tenant with no scheduled jobs at all.
+        when(tenantConfigService.getWeeklyReportConfig(1))
+                .thenReturn(WeeklyReportScheduleConfig.builder().dayOfWeek(8).hour(9).minute(0).build());
+
+        assertThatThrownBy(() -> manager.rescheduleForTenant(1, "MP"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("weekly-report");
+
+        verify(future, never()).cancel(anyBoolean());
     }
 
     // ── rescheduleForTenant ─────────────────────────────────────────────────────
@@ -155,10 +290,10 @@ class TenantSchedulerManagerTest {
         stubConfigs(1, 10, 30, 11, 0);
         manager.rescheduleForTenant(1, "MP");
 
-        // Old futures should have been cancelled (3 from initial schedule)
-        verify(future, times(3)).cancel(false);
-        // And 3 new futures scheduled (total 6 schedule calls: 3 initial + 3 new)
-        verify(taskScheduler, times(6)).schedule(any(Runnable.class), any(CronTrigger.class));
+        // Old futures should have been cancelled (4 from initial schedule)
+        verify(future, times(4)).cancel(false);
+        // And 4 new futures scheduled (total 8 schedule calls: 4 initial + 4 new)
+        verify(taskScheduler, times(8)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     @Test
@@ -171,7 +306,7 @@ class TenantSchedulerManagerTest {
         // No cancel calls – no existing futures
         verify(future, never()).cancel(anyBoolean());
         // But 3 new futures should be scheduled
-        verify(taskScheduler, times(3)).schedule(any(Runnable.class), any(CronTrigger.class));
+        verify(taskScheduler, times(4)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     // ── isolation / security tests ───────────────────────────────────────────────
@@ -185,7 +320,7 @@ class TenantSchedulerManagerTest {
         manager.loadAndScheduleAll();
 
         ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
-        verify(taskScheduler, times(3)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
+        verify(taskScheduler, times(4)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
 
         runnableCaptor.getAllValues().get(0).run(); // nudge runnable
 
@@ -202,7 +337,7 @@ class TenantSchedulerManagerTest {
         manager.loadAndScheduleAll();
 
         ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
-        verify(taskScheduler, times(3)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
+        verify(taskScheduler, times(4)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
 
         runnableCaptor.getAllValues().get(1).run(); // escalation runnable
 
@@ -221,11 +356,12 @@ class TenantSchedulerManagerTest {
         manager.loadAndScheduleAll();
 
         ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
-        verify(taskScheduler, times(6)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
+        verify(taskScheduler, times(8)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
 
         List<Runnable> runnables = runnableCaptor.getAllValues();
+        // Four jobs per tenant, scheduled in order, so the second tenant's nudge is index 4.
         runnables.get(0).run(); // nudge for MP
-        runnables.get(3).run(); // nudge for UP
+        runnables.get(4).run(); // nudge for UP
 
         verify(nudgeSchedulerService).processNudgesForTenant("tenant_mp", 1);
         verify(nudgeSchedulerService).processNudgesForTenant("tenant_up", 2);
@@ -301,7 +437,7 @@ class TenantSchedulerManagerTest {
         manager.loadAndScheduleAll();
 
         // good tenant still scheduled (3 jobs)
-        verify(taskScheduler, times(3)).schedule(any(Runnable.class), any(CronTrigger.class));
+        verify(taskScheduler, times(4)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     @Test
@@ -360,6 +496,16 @@ class TenantSchedulerManagerTest {
                         .level2Days(7).level2OfficerType("DISTRICT_OFFICER")
                         .build());
         when(tenantConfigService.getDailyReportConfig(tenantId))
-                .thenReturn(DailyReportScheduleConfig.builder().hour(6).minute(0).build());
+                .thenReturn(DailyReportScheduleConfig.builder().hour(16).minute(0).build());
+        when(tenantConfigService.getWeeklyReportConfig(tenantId))
+                .thenReturn(WeeklyReportScheduleConfig.builder()
+                        .dayOfWeek(1).hour(9).minute(0).weekStartDay(1).build());
+    }
+
+    /** Stubs the weekly config alone, leaving the other three jobs on their defaults. */
+    private void stubWeeklyConfig(int tenantId, int cronDayOfWeek, int weekStartDay) {
+        when(tenantConfigService.getWeeklyReportConfig(tenantId))
+                .thenReturn(WeeklyReportScheduleConfig.builder()
+                        .dayOfWeek(cronDayOfWeek).hour(9).minute(0).weekStartDay(weekStartDay).build());
     }
 }

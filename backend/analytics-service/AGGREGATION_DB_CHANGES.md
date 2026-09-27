@@ -3,14 +3,13 @@
 Schema: `analytics_schema`. All times IST; day = 12am→12am; week = Sunday→Saturday.
 
 > **Naming:** tables follow the house `fact_` / `dim_` + `_table` convention (matching
-> `fact_water_quantity_table`, `dim_scheme_table`, …). **Migration map after the `dev` merge:**
-> V40/V41 earlier fixes, V42 `included_work_statuses`, V43 water-quantity dedup index,
-> **V44 `regularity_threshold_percent`** and **V45 Sunday-week columns** (both merged from `dev`),
-> then the pre-aggregation objects **V46, V47, V48, V49, V50** (contiguous). An interim
-> `fact_region_distribution_table` was designed then dropped (see below) before deployment;
-> its migration was removed and the trailing versions closed up so there is no numbering gap.
-> The water-norm table was moved off its original **V44** to clear a duplicate-V44 collision with
-> `dev`'s `regularity_threshold_percent` migration, landing at **V50**.
+> `fact_water_quantity_table`, `dim_scheme_table`, …). **Migration map after the latest `dev` merge:**
+> V42 `included_work_statuses`, V43 water-quantity dedup index, V44 `regularity_threshold_percent`,
+> and V45–V48 from `dev` (water quantity to BIGINT litres, scheme status code comments, meter
+> reading to NUMERIC, anomaly/submission linkage). This branch's objects follow contiguously:
+> **V49** Sunday-week columns, **V50–V52** the pre-aggregation facts, **V53–V54** the two SCD-2
+> history tables. None of them has been deployed, so they were renumbered past `dev`'s V45–V48
+> rather than colliding with them.
 
 ## The single water figure (important)
 
@@ -44,7 +43,7 @@ national tenant-0 → env default), and tenant screens vs the national dashboard
 use **different chains** (`{{WS}}` vs `{{NWS}}` in the legacy SQL). Pre-aggregated KPIs
 therefore need two things:
 
-1. **Filter history** — `dim_tenant_work_status_filter_table` (V49) is an SCD-2 timeline of
+1. **Filter history** — `dim_tenant_work_status_filter_table` (V53) is an SCD-2 timeline of
    `included_work_statuses` per tier (`tenant_id > 0` = tenant's own filter, `tenant_id = 0`
    = national default). `dim_tenant_table.included_work_statuses` remains the *current*
    convenience copy (the legacy read-time SQL keeps using it); every filter-change event also
@@ -71,22 +70,22 @@ grain with the tenant chain — there is **no** pre-rolled distribution table (s
 
 | # | Object | Migration | Change | Purpose |
 |---|--------|-----------|--------|---------|
-| 1 | `dim_tenant_table.included_work_statuses` | V42 | Altered (+1 col) | Current work-status filter (convenience copy; full history in V49) |
+| 1 | `dim_tenant_table.included_work_statuses` | V42 | Altered (+1 col) | Current work-status filter (convenience copy; full history in V53) |
 | 2 | `dim_tenant_table.regularity_threshold_percent` | V44 *(from dev)* | Altered (+1 col) | Per-tenant regularity threshold %; NULL → 3-tier fallback (tenant → national → env) |
-| 3 | `dim_date_table` | V45 *(from dev)* | Altered (+2 cols) | Sunday-aligned week boundaries |
-| 4 | `fact_scheme_daily_table` | V46 | New table | Base scheme×day pre-aggregation (midnight grain, unfiltered) |
-| 5 | `fact_region_metrics_table` | V47 | New table | Pre-rolled region KPIs per DAY/WEEK/MONTH bucket × filter scope |
-| 6 | `fact_submission_activity_hourly_table` | V48 | New table | Hourly reading-submission activity (state-level fast path) |
-| 7 | `dim_tenant_work_status_filter_table` | V49 | New table | SCD-2 history of the work-status filter per tier (tenant / national) |
-| 8 | `dim_tenant_water_norm_table` | V50 | New table | SCD-2 history of water-norm values used in KPI calcs |
+| 3 | `dim_date_table` | V49 | Altered (+2 cols) | Sunday-aligned week boundaries |
+| 4 | `fact_scheme_daily_table` | V50 | New table | Base scheme×day pre-aggregation (midnight grain, unfiltered) |
+| 5 | `fact_region_metrics_table` | V51 | New table | Pre-rolled region KPIs per DAY/WEEK/MONTH bucket × filter scope |
+| 6 | `fact_submission_activity_hourly_table` | V52 | New table | Hourly reading-submission activity (state-level fast path) |
+| 7 | `dim_tenant_work_status_filter_table` | V53 | New table | SCD-2 history of the work-status filter per tier (tenant / national) |
+| 8 | `dim_tenant_water_norm_table` | V54 | New table | SCD-2 history of water-norm values used in KPI calcs |
 
-> An interim `fact_region_distribution_table` was designed at V48 then dropped before deployment
-> (write-only + non-additive across ranges; distributions are computed on read instead). Its
-> migration was removed and the later versions renumbered down, so there is no version gap.
+> An interim `fact_region_distribution_table` was designed then dropped before deployment
+> (write-only + non-additive across ranges; distributions are computed on read instead). It never
+> had a migration, so there is no version gap.
 
 ---
 
-## 1. `dim_tenant_water_norm_table` (V50) — new
+## 1. `dim_tenant_water_norm_table` (V54) — new
 
 | Column | Type | Constraints | Use / Need |
 |--------|------|-------------|------------|
@@ -107,7 +106,7 @@ grain with the tenant chain — there is **no** pre-rolled distribution table (s
 
 ---
 
-## 2. `dim_date_table` (V45) — altered (new columns only)
+## 2. `dim_date_table` (V49) — altered (new columns only)
 
 | Column | Type | Constraints | Use / Need |
 |--------|------|-------------|------------|
@@ -120,7 +119,7 @@ grain with the tenant chain — there is **no** pre-rolled distribution table (s
 
 ---
 
-## 3. `fact_scheme_daily_table` (V46) — new (base grain: scheme × calendar day)
+## 3. `fact_scheme_daily_table` (V50) — new (base grain: scheme × calendar day)
 
 | Column | Type | Constraints | Use / Need |
 |--------|------|-------------|------------|
@@ -163,7 +162,7 @@ into `water_supplied_liters`), `water_quantity_row_count` (equals `supplied` aft
 
 ---
 
-## 4. `fact_region_metrics_table` (V47) — new (region × period bucket)
+## 4. `fact_region_metrics_table` (V51) — new (region × period bucket)
 
 | Column | Type | Constraints | Use / Need |
 |--------|------|-------------|------------|
@@ -224,7 +223,7 @@ Removed vs the earlier draft: `total_water_submitted_liters` (national now reads
 
 ---
 
-## 5. `fact_region_distribution_table` (V48) — **DROPPED (not created)**
+## 5. `fact_region_distribution_table` — **DROPPED (not created)**
 
 Originally planned as a long-format distribution table (`OUTAGE_REASON` / `NON_SUBMISSION_REASON`
 / `SUBMISSION_STATUS` / `SCHEME_STATUS` counts per region/period). **Removed before deployment**
@@ -232,12 +231,11 @@ because it was write-only — the read path already computes reason/status distr
 from `fact_scheme_daily_table` (`outage_reason_code`, `non_submission_reason_code`,
 `scheme_status_code`, `submitted`) with the tenant filter chain — and its per-bucket
 `COUNT(DISTINCT scheme_id)` is non-additive across arbitrary date ranges, so it could not serve the
-actual range queries anyway. Migration **V48 is intentionally left unused** (version gap, not a
-mistake).
+actual range queries anyway. It never had a migration.
 
 ---
 
-## 6. `fact_submission_activity_hourly_table` (V48) — new (HOUR grain)
+## 6. `fact_submission_activity_hourly_table` (V52) — new (HOUR grain)
 
 | Column | Type | Constraints | Use / Need |
 |--------|------|-------------|------------|
@@ -258,7 +256,7 @@ mistake).
 
 ---
 
-## 7. `dim_tenant_work_status_filter_table` (V49) — new
+## 7. `dim_tenant_work_status_filter_table` (V53) — new
 
 SCD-2 history of the dashboard work-status filter per tier: `tenant_id > 0` = a tenant's own
 filter, `tenant_id = 0` = the national default. Same half-open interval contract as
@@ -288,9 +286,9 @@ creation date, reproducing the legacy retroactive behaviour for backfills).
 `dim_tenant_table` holds the **current** value of each dashboard norm/parameter (the SCD-2 tables
 above keep the history). Two columns were added for the KPI work; the water-norm values
 (`required_lpcd` V22, `over/under_supply_range_percentage` V30, `person_count_per_household`) predate
-this branch and are snapshotted into `dim_tenant_water_norm_table` (V50).
+this branch and are snapshotted into `dim_tenant_water_norm_table` (V54).
 
 | Column | Type | Migration | Use / Need |
 |--------|------|-----------|------------|
-| `included_work_statuses` | INT[] | V42 | Current work-status filter set; nightly aggregation resolves the point-in-time value from `dim_tenant_work_status_filter_table` (V49) instead, but legacy read-time SQL still uses this copy |
+| `included_work_statuses` | INT[] | V42 | Current work-status filter set; nightly aggregation resolves the point-in-time value from `dim_tenant_work_status_filter_table` (V53) instead, but legacy read-time SQL still uses this copy |
 | `regularity_threshold_percent` | NUMERIC(5,2) | V44 *(from dev)* | % of days a scheme must supply to be "regular". **Deliberately no DEFAULT** — NULL means "not configured" and drives the three-tier fallback (own tenant → national tenant-0 → env default) in `RegularityThresholdFilter` |

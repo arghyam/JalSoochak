@@ -41,6 +41,8 @@ public class AnomalyIngestService {
                 .reason(event.getReason())
                 .status(event.getStatus())
                 .correlationId(event.getCorrelationId())
+                // ANOMALY-SUBMISSION-LINK: carried through verbatim; never derived.
+                .submissionCorrelationId(event.getSubmissionCorrelationId())
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

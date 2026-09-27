@@ -13,7 +13,7 @@ A pluggable per-channel architecture was just landed for BFM (`ReadingChannel` e
 ### Locked decisions
 
 1. **Pump params sourced in analytics, on demand.** Analytics reads `efficiency / head / discharge_rate` directly from `tenant_<state>.pumps_scheme_mapping_table`. **The Kafka `MeterReadingEvent` and all of telemetry stay unchanged** → BFM path is identical. All new logic is localized in analytics-service (the designated pluggable point).
-2. **Channel resolution unchanged.** Keep resolving channel from `common_schema.user_channel_preference` (default BFM). No change to `ReadingChannelResolver` or `scheme_master_table.channel`.
+2. **Channel resolution unchanged.** Keep resolving channel from the contact's `user_channel_preference` row in the tenant schema (default BFM; moved there from `common_schema` in V47). No change to `ReadingChannelResolver` or `scheme_master_table.channel`.
 3. Per-channel **submission endpoints** are handled in the Glific flow (out of scope here — noted below).
 
 ## Ground truth (verified)

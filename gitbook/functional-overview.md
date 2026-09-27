@@ -8,13 +8,13 @@
 {% step %}
 ### Field Operations
 
-Manages schemes, pumps, operators, and daily meter readings. Operators submit a flow-meter photo over WhatsApp; **FlowVision AI** extracts the reading and the operator confirms or corrects it. Readings are validated (monotonic, outlier, daily-duplicate checks) before being persisted, and scheme performance metrics (compliance, LPCD, last-reading date) are derived from them.
+Manages schemes, pumps, operators, and daily meter readings. Operators submit a flow-meter photo over WhatsApp; an **AI OCR provider** extracts the reading and the operator confirms or corrects it. Readings are validated (monotonic, outlier, daily-duplicate checks) before being persisted, and scheme performance metrics (compliance, LPCD, last-reading date) are derived from them.
 {% endstep %}
 
 {% step %}
 ### Messaging & Nudge Orchestration
 
-State-configured messaging integrated with **Glific**. Daily schedulers identify operators who missed a reading and dispatch **nudge** reminders; persistent non-submission triggers **escalation** notifications (with a PDF report) to the responsible officers. Message text is resolved per operator language, with a fallback chain.
+State-configured messaging over **WhatsApp**. Daily schedulers identify operators who missed a reading and dispatch **nudge** reminders; persistent non-submission triggers **escalation** notifications (with a PDF report) to the responsible officers. Message text is resolved per operator language, with a fallback chain.
 {% endstep %}
 
 {% step %}

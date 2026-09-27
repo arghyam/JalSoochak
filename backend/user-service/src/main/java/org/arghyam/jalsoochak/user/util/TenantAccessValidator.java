@@ -20,9 +20,9 @@ import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
  *   <li>ONBOARDED (1): Only System Users (SUPER_USER, STATE_ADMIN) can access</li>
  *   <li>CONFIGURED (2): Only System Users (SUPER_USER, STATE_ADMIN) can access</li>
  *   <li>ACTIVE (3): All users can access (System Users, Staff)</li>
- *   <li>INACTIVE (0): Only System Users can access; data retained for compliance</li>
+ *   <li>INACTIVE (0): Only SUPER_USER can access; STATE_ADMIN blocked; data retained for compliance</li>
  *   <li>DEGRADED (5): All users can access (with known issues)</li>
- *   <li>SUSPENDED (4): Only System Users can access; access blocked for business users</li>
+ *   <li>SUSPENDED (4): Only SUPER_USER can access; STATE_ADMIN and business users blocked</li>
  *   <li>ARCHIVED (6): Only SUPER_USER can access; data in long-term storage</li>
  * </ul>
  */
@@ -51,8 +51,21 @@ public class TenantAccessValidator {
     }
 
     /**
+     * Checks whether a tenant status denies access to a plain STATE_ADMIN.
+     * A tenant in one of these statuses is no longer operational, so only SUPER_USER-equivalent
+     * roles may reach it.
+     *
+     * @param tenantStatus The tenant status code
+     * @return true if a plain STATE_ADMIN must be denied access to this tenant
+     */
+    private static boolean isBlockedForStateAdmin(int tenantStatus) {
+        return tenantStatus == INACTIVE || tenantStatus == SUSPENDED || tenantStatus == ARCHIVED;
+    }
+
+    /**
      * Validates if a system user (SUPER_USER or STATE_ADMIN) can access a tenant.
-     * System users can access all statuses except ARCHIVED, which is restricted to SUPER_USER.
+     * SUPER_USER-equivalent roles can access every known status; STATE_ADMIN is denied
+     * INACTIVE, SUSPENDED and ARCHIVED.
      *
      * @param tenantStatus The tenant status code
      * @param role         The caller's access role
@@ -62,8 +75,13 @@ public class TenantAccessValidator {
         if (role == null || (!role.isSuperUserEquivalent() && !role.isStateAdminEquivalent())) {
             throw new ForbiddenAccessException("Access denied: invalid user role.");
         }
-        if (tenantStatus == ARCHIVED && role == TenantAccessRole.STATE_ADMIN) {
-            throw new ForbiddenAccessException("Tenant is archived and no longer accessible.");
+        if (role == TenantAccessRole.STATE_ADMIN) {
+            switch (tenantStatus) {
+                case INACTIVE -> throw new ForbiddenAccessException("Tenant access has been deactivated.");
+                case SUSPENDED -> throw new ForbiddenAccessException("Tenant has been suspended.");
+                case ARCHIVED -> throw new ForbiddenAccessException("Tenant is archived and no longer accessible.");
+                default -> { /* allowed, subject to the known-status check below */ }
+            }
         }
         if (!isKnownTenantStatus(tenantStatus)) {
             throw new ForbiddenAccessException("Tenant is not accessible.");
@@ -98,8 +116,8 @@ public class TenantAccessValidator {
      *
      * <p>SUPER_USER / STATE_ADMIN:
      * <ul>
-     *   <li>Can access: ONBOARDED, CONFIGURED, ACTIVE, INACTIVE, DEGRADED, SUSPENDED</li>
-     *   <li>SUPER_USER only: ARCHIVED</li>
+     *   <li>Can access: ONBOARDED, CONFIGURED, ACTIVE, DEGRADED</li>
+     *   <li>SUPER_USER only: INACTIVE, SUSPENDED, ARCHIVED</li>
      * </ul>
      *
      * <p>STAFF:
@@ -145,13 +163,13 @@ public class TenantAccessValidator {
             return false;
         }
 
-        // ARCHIVED is only accessible to SUPER_USER-equivalent roles
-        if (tenantStatus == ARCHIVED) {
+        // INACTIVE, SUSPENDED and ARCHIVED are only accessible to SUPER_USER-equivalent roles
+        if (isBlockedForStateAdmin(tenantStatus)) {
             return role.isSuperUserEquivalent();
         }
-        
+
         // All other valid statuses are accessible to SUPER_USER and STATE_ADMIN
-        return tenantStatus == INACTIVE || tenantStatus == ONBOARDED || tenantStatus == CONFIGURED
-                || tenantStatus == ACTIVE || tenantStatus == SUSPENDED || tenantStatus == DEGRADED;
+        return tenantStatus == ONBOARDED || tenantStatus == CONFIGURED
+                || tenantStatus == ACTIVE || tenantStatus == DEGRADED;
     }
 }

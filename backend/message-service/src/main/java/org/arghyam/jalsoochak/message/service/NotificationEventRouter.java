@@ -1,16 +1,24 @@
 package org.arghyam.jalsoochak.message.service;
 
-import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
-import org.arghyam.jalsoochak.message.channel.SmsCountryService;
+import org.arghyam.jalsoochak.message.channel.provider.ReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.provider.SmsSender;
+import org.arghyam.jalsoochak.message.channel.provider.TenantChannelProviders;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
+import org.arghyam.jalsoochak.message.config.StorageProperties;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
-import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
-import org.arghyam.jalsoochak.message.dto.DailyReportSectionOfficerRow;
+import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
+import org.arghyam.jalsoochak.message.dto.TenantRef;
+import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
+import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
 import org.arghyam.jalsoochak.message.event.InviteEmailEvent;
 import org.arghyam.jalsoochak.message.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.message.event.WhatsAppContactRegisteredEvent;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
+import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -21,6 +29,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import reactor.core.publisher.Mono;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -44,9 +54,9 @@ import java.util.UUID;
  * <ul>
  *   <li>{@code NUDGE} — fetches the localized message from tenant config and
  *       sends it as a WhatsApp HSM to the operator.</li>
- *   <li>{@code ESCALATION} — generates a PDF, uploads it to MinIO, fetches
+ *   <li>{@code ESCALATION} — generates a PDF, uploads it to object storage, fetches
  *       the localized body text, and sends a document HSM to the officer.</li>
- *   <li>{@code STAFF_SYNC_COMPLETED} — onboards pump operators into Glific and
+ *   <li>{@code STAFF_SYNC_COMPLETED} — onboards pump operators into the WhatsApp provider and
  *       publishes {@code WHATSAPP_CONTACT_REGISTERED} events so tenant-service
  *       can persist the contact IDs.</li>
  * </ul>
@@ -62,7 +72,7 @@ public class NotificationEventRouter {
      * Dead-letter topic for {@code SEND_WELCOME_MESSAGE} per-phone failures.
      *
      * <p>Messages are published here when a single phone cannot be processed
-     * (missing {@code whatsapp_connection_id} or a Glific API error) so that
+     * (missing {@code whatsapp_connection_id} or a WhatsApp provider API error) so that
      * already-succeeded phones in the same batch are not re-sent by Kafka retry.
      *
      * <p>This service intentionally does <em>not</em> consume this topic.
@@ -100,18 +110,27 @@ public class NotificationEventRouter {
      */
     private static final String ACCOUNT_EMAIL_DLT_TOPIC = "account-email-dlt";
 
+    /** Event field carrying the WhatsApp contact id on {@code SEND_LOGIN_OTP}. */
+    private static final String CONTACT_ID_FIELD = "whatsapp_contact_id";
+
+    /** Event field carrying the WhatsApp language id on staff-sync and language-update events. */
+    private static final String LANGUAGE_ID_FIELD = "whatsappLanguageId";
+
     private final ObjectMapper objectMapper;
     private final WhatsAppChannel whatsAppChannel;
-    private final GlificWhatsAppService glificWhatsAppService;
-    private final SmsCountryService smsCountryService;
+    private final WhatsAppSender whatsAppSender;
+    private final TenantChannelProviders channelProviders;
     private final KafkaProducer kafkaProducer;
     private final EscalationPdfService escalationPdfService;
     private final DailyReportPdfService dailyReportPdfService;
-    private final MinioStorageService minioStorageService;
+    private final WeeklyReportPdfService weeklyReportPdfService;
+    private final ObjectStorageService objectStorageService;
+    private final StorageProperties storageProperties;
     private final MessageTemplateService messageTemplateService;
     private final AccountEmailService accountEmailService;
     private final JdbcTemplate jdbcTemplate;
     private final PiiEncryptionService piiEncryptionService;
+    private final TenantRefResolver tenantRefResolver;
 
     @Value("${escalation.report.dir:/tmp/escalation-reports/}")
     private String reportDir;
@@ -119,21 +138,18 @@ public class NotificationEventRouter {
     @Value("${app.base-url:http://localhost:8085}")
     private String baseUrl;
 
-    /**
-     * Gates delivery of the SUB_DIVISIONAL_OFFICER daily report. Defaults to {@code true} now that the
-     * SDO layout exists (the SO report plus a per-Section-Officer Summary breakdown table). Retained as
-     * an operational kill-switch — set to {@code false} to suppress SDO reports without a redeploy.
-     */
-    @Value("${app.daily-report.sdo-enabled:true}")
-    private boolean dailyReportSdoEnabled;
-
     private static final String SCHEMA_PATTERN = "^[a-z0-9_]+$";
+
+    /** Any query string on a report URL — stripped before the URL is logged. */
+    private static final String URL_QUERY_SUFFIX = "\\?.*$";
+
+    private static final String PDF_CONTENT_TYPE = "application/pdf";
 
     @PostConstruct
     void validateBaseUrl() {
         if (baseUrl.contains("localhost") || baseUrl.contains("127.0.0.1")) {
             log.warn("[Router] app.base-url is set to a local address ('{}')."
-                    + " PDF links embedded in escalation WhatsApp messages will be unreachable by Glific."
+                    + " PDF links embedded in escalation WhatsApp messages will be unreachable by the WhatsApp provider."
                     + " Set the 'app.base-url' property to a publicly reachable URL"
                     + " (e.g., 'APP_BASE_URL=https://<id>.ngrok.io' for demos,"
                     + " or your server's public hostname in production) before sending escalation reports.",
@@ -158,6 +174,7 @@ public class NotificationEventRouter {
                 case "NUDGE" -> handleNudge(root);
                 case "ESCALATION" -> handleEscalation(root);
                 case "DAILY_REPORT_KPIS" -> handleDailySituationReport(root);
+            case "WEEKLY_REPORT_KPIS" -> handleWeeklySituationReport(root);
                 case "STAFF_SYNC_COMPLETED" -> handleStaffSyncCompleted(root);
                 case "UPDATE_USER_LANGUAGE" -> handleUpdateUserLanguage(root);
                 case "SEND_WELCOME_MESSAGE" -> handleSendWelcomeMessage(root);
@@ -193,7 +210,7 @@ public class NotificationEventRouter {
         if (storedId > 0) {
             contactId = storedId;
         } else {
-            contactId = glificWhatsAppService.optIn(phone);
+            contactId = whatsAppSender.optIn(phone);
             if (!tenantSchema.isBlank() && userId > 0 && contactId > 0) {
                 kafkaProducer.publishJson(COMMON_TOPIC,
                         WhatsAppContactRegisteredEvent.builder()
@@ -215,15 +232,15 @@ public class NotificationEventRouter {
 
     private void handleStaffSyncCompleted(JsonNode root) {
         JsonNode operatorsNode = root.path("pumpOperators");
-        int glificLanguageId = root.path("glificLanguageId").asInt(0);
+        int whatsappLanguageId = root.path(LANGUAGE_ID_FIELD).asInt(0);
         String tenantSchema = root.path("tenantSchema").asText("");
 
         if (!operatorsNode.isArray() || operatorsNode.isEmpty()) {
             log.warn("[Router/STAFF_SYNC] pumpOperators is empty, skipping");
             return;
         }
-        if (glificLanguageId == 0) {
-            log.warn("[Router/STAFF_SYNC] glificLanguageId missing or zero, skipping");
+        if (whatsappLanguageId == 0) {
+            log.warn("[Router/STAFF_SYNC] whatsappLanguageId missing or zero, skipping");
             return;
         }
 
@@ -237,7 +254,7 @@ public class NotificationEventRouter {
                 continue;
             }
             try {
-                long contactId = whatsAppChannel.onboardOperator(phone, glificLanguageId);
+                long contactId = whatsAppChannel.onboardOperator(phone, whatsappLanguageId);
                 if (!tenantSchema.isBlank() && userId > 0 && contactId > 0) {
                     kafkaProducer.publishJson(COMMON_TOPIC,
                             WhatsAppContactRegisteredEvent.builder()
@@ -264,15 +281,15 @@ public class NotificationEventRouter {
 
     private void handleUpdateUserLanguage(JsonNode root) {
         String tenantCode = root.path("tenantCode").asText("").toLowerCase();
-        int glificLanguageId = root.path("glificLanguageId").asInt(0);
+        int whatsappLanguageId = root.path(LANGUAGE_ID_FIELD).asInt(0);
         JsonNode phonesNode = root.path("pumpOperatorPhones");
 
         if (tenantCode.isBlank() || !tenantCode.matches("[a-z0-9_]+")) {
             log.warn("[Router/UPDATE_LANGUAGE] Invalid or missing tenantCode, skipping");
             return;
         }
-        if (glificLanguageId <= 0) {
-            log.warn("[Router/UPDATE_LANGUAGE] Missing glificLanguageId, skipping");
+        if (whatsappLanguageId <= 0) {
+            log.warn("[Router/UPDATE_LANGUAGE] Missing whatsappLanguageId, skipping");
             return;
         }
         if (!phonesNode.isArray() || phonesNode.isEmpty()) {
@@ -297,7 +314,7 @@ public class NotificationEventRouter {
                     failed++;
                     continue;
                 }
-                glificWhatsAppService.updateContactLanguage(contactId, glificLanguageId);
+                whatsAppSender.updateContactLanguage(contactId, whatsappLanguageId);
                 success++;
             } catch (Exception e) {
                 failed++;
@@ -356,9 +373,9 @@ public class NotificationEventRouter {
                     continue;
                 }
                 if (welcomeFlowId.isBlank()) {
-                    glificWhatsAppService.startWelcomeFlow(info.contactId(), info.name(), stateName);
+                    whatsAppSender.startWelcomeFlow(info.contactId(), info.name(), stateName);
                 } else {
-                    glificWhatsAppService.startWelcomeFlow(info.contactId(), welcomeFlowId, info.name(), stateName);
+                    whatsAppSender.startWelcomeFlow(info.contactId(), welcomeFlowId, info.name(), stateName);
                 }
                 success++;
             } catch (Exception e) {
@@ -409,7 +426,7 @@ public class NotificationEventRouter {
                 Long contactId = info.contactId();
                 String name = info.name();
                 if (contactId == null || contactId <= 0) {
-                    contactId = glificWhatsAppService.optIn(normalized);
+                    contactId = whatsAppSender.optIn(normalized);
                     if (contactId == null || contactId <= 0) {
                         publishWelcomeDlt(tenantSchema, normalized, "optin_failed");
                         failed++;
@@ -417,9 +434,9 @@ public class NotificationEventRouter {
                     }
                 }
                 if (welcomeFlowId.isBlank()) {
-                    glificWhatsAppService.startWelcomeFlow(contactId, name, stateName);
+                    whatsAppSender.startWelcomeFlow(contactId, name, stateName);
                 } else {
-                    glificWhatsAppService.startWelcomeFlow(contactId, welcomeFlowId, name, stateName);
+                    whatsAppSender.startWelcomeFlow(contactId, welcomeFlowId, name, stateName);
                 }
                 success++;
             } catch (Exception e) {
@@ -506,11 +523,19 @@ public class NotificationEventRouter {
                 expiryMinutes = 5;
             }
 
+            TenantRef tenant = resolveTenant(root);
+
+            // PER-TENANT-PROVIDERS: the tenant's own SMSCountry account when it has configured
+            // one, the system default otherwise — including while the flag is off, which is every
+            // send today (O2-9). Resolved per message so a settings change takes effect without a
+            // restart; the lookup is cached, so it costs nothing on the OTP path.
+            SmsSender smsSender = channelProviders.smsFor(tenant);
+
             // Use reactive flow to avoid blocking the Kafka listener thread
-            smsCountryService.sendOtpReactive(phone, otp, expiryMinutes)
+            smsSender.sendOtp(phone, otp, expiryMinutes)
                     .doOnNext(sent -> {
                         if (sent) {
-                            log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");
+                            log.info("[Router/SEND_LOGIN_OTP/SMS] {} → SENT", tenant);
                             log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → SENT", phone);
                         } else {
                             // Non-retryable failure (4xx API rejection) — log as warning, do not throw
@@ -532,20 +557,19 @@ public class NotificationEventRouter {
                     .subscribe();
         } else if ("WHATSAPP".equals(deliveryChannel)) {
             String phone = root.path("officerPhoneNumber").asText("").strip();
-            JsonNode glificIdNode = root.path("glific_id");
-            long contactId = glificIdNode.asLong(0);
+            long contactId = root.path(CONTACT_ID_FIELD).asLong(0);
 
             if (contactId > 0) {
-                // glific_id was provided and valid
+                // whatsapp_contact_id was provided and valid
             } else if (!phone.isBlank()) {
-                log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] glific_id not provided, opting in via phone");
-                contactId = glificWhatsAppService.optIn(phone);
+                log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] whatsapp_contact_id not provided, opting in via phone");
+                contactId = whatsAppSender.optIn(phone);
                 if (contactId <= 0) {
                     log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] optIn returned invalid contactId {}, skipping", contactId);
                     return;
                 }
             } else {
-                log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither glific_id nor officerPhoneNumber provided, skipping");
+                log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither whatsapp_contact_id nor officerPhoneNumber provided, skipping");
                 return;
             }
 
@@ -578,18 +602,20 @@ public class NotificationEventRouter {
             publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "missing_invite_link");
             return;
         }
+        TenantRef tenant = tenantRefResolver.resolve(null, event.getTenantCode());
         try {
             if ("STATE_ADMIN".equalsIgnoreCase(event.getRole())
                     && event.getStateName() != null && !event.getStateName().isBlank()) {
                 accountEmailService.sendStateAdminInviteEmail(
-                        event.getTo(), event.getName(), event.getStateName(),
+                        tenant, event.getTo(), event.getName(), event.getStateName(),
                         event.getInviteLink(), event.getExpiryHours());
             } else {
                 accountEmailService.sendInviteEmail(
-                        event.getTo(), event.getName(), event.getRole(),
+                        tenant, event.getTo(), event.getName(), event.getRole(),
                         event.getInviteLink(), event.getExpiryHours());
             }
-            log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={}", event.getRole());
+            log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={} {}",
+                    event.getRole(), tenant);
         } catch (Exception e) {
             log.error("[Router/INVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
             publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "email_delivery_error");
@@ -615,9 +641,12 @@ public class NotificationEventRouter {
             publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "missing_invite_link");
             return;
         }
+        TenantRef tenant = tenantRefResolver.resolve(null, event.getTenantCode());
         try {
-            accountEmailService.sendReinviteEmail(event.getTo(), event.getName(), event.getInviteLink(), event.getExpiryHours());
-            log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={}", event.getRole());
+            accountEmailService.sendReinviteEmail(tenant, event.getTo(), event.getName(),
+                    event.getInviteLink(), event.getExpiryHours());
+            log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={} {}",
+                    event.getRole(), tenant);
         } catch (Exception e) {
             log.error("[Router/REINVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
             publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "email_delivery_error");
@@ -643,13 +672,28 @@ public class NotificationEventRouter {
             publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "missing_reset_link");
             return;
         }
+        TenantRef tenant = tenantRefResolver.resolve(event.getTenantId(), event.getTenantCode());
         try {
-            accountEmailService.sendPasswordResetEmail(event.getTo(), event.getResetLink(), event.getExpiryMinutes());
-            log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched");
+            accountEmailService.sendPasswordResetEmail(tenant, event.getTo(), event.getResetLink(),
+                    event.getExpiryMinutes());
+            log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched {}", tenant);
         } catch (Exception e) {
             log.error("[Router/PASSWORD_RESET_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
             publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "email_delivery_error");
         }
+    }
+
+    /**
+     * Normalises the optional tenant fields on a raw event payload. Both are read strictly —
+     * a JSON null or a value of the wrong type is treated as absent, never as the text
+     * {@code "null"}.
+     */
+    private TenantRef resolveTenant(JsonNode root) {
+        JsonNode idNode = root.path("tenantId");
+        JsonNode codeNode = root.path("tenantCode");
+        return tenantRefResolver.resolve(
+                idNode.isIntegralNumber() ? idNode.asInt() : null,
+                codeNode.isTextual() ? codeNode.asText() : null);
     }
 
     private void publishEmailDlt(String originalEventType, String to, String errorReason) {
@@ -674,7 +718,7 @@ public class NotificationEventRouter {
     }
 
     /**
-     * Looks up the Glific contact ID stored for a given phone number in the tenant's user_table.
+     * Looks up the WhatsApp contact ID stored for a given phone number in the tenant's user_table.
      * tenantSchema is pre-validated to match {@code [a-z0-9_]+} before this call.
      */
     private Long fetchWhatsappConnectionId(String tenantSchema, String phone) {
@@ -691,7 +735,7 @@ public class NotificationEventRouter {
     record UserContactInfo(Long contactId, String name) {}
 
     /**
-     * Looks up both the Glific contact ID and display name for a phone number.
+     * Looks up both the WhatsApp contact ID and display name for a phone number.
      * tenantSchema is pre-validated to match {@code [a-z0-9_]+} before this call.
      */
     private UserContactInfo fetchUserContactInfo(String tenantSchema, String phone) {
@@ -798,11 +842,11 @@ public class NotificationEventRouter {
 
         String filename = escalationPdfService.generate(operators, level, officerName, officerUserType, correlationId);
         java.nio.file.Path localPath = Paths.get(reportDir, filename);
-        String minioUrl;
+        String reportUrl;
         try {
-            minioUrl = minioStorageService.upload(localPath);
+            reportUrl = uploadPdf(localPath, storageProperties.getBucket(), localPath.getFileName().toString());
         } catch (Exception uploadEx) {
-            log.error("[Router/ESCALATION] MinIO upload failed, retaining local PDF for recovery: {} — {}",
+            log.error("[Router/ESCALATION] Storage upload failed, retaining local PDF for recovery: {} — {}",
                     localPath, uploadEx.getMessage());
             throw uploadEx;
         }
@@ -817,7 +861,7 @@ public class NotificationEventRouter {
         if (storedId > 0) {
             contactId = storedId;
         } else {
-            contactId = glificWhatsAppService.optIn(officerPhone);
+            contactId = whatsAppSender.optIn(officerPhone);
             if (!tenantSchema.isBlank() && officerId > 0 && contactId > 0) {
                 kafkaProducer.publishJson(COMMON_TOPIC,
                         WhatsAppContactRegisteredEvent.builder()
@@ -829,11 +873,11 @@ public class NotificationEventRouter {
             }
         }
 
-        boolean sent = whatsAppChannel.sendDocument(contactId, minioUrl);
+        boolean sent = whatsAppChannel.sendDocument(contactId, reportUrl);
         if (!sent) {
             throw new IllegalStateException("[Router/ESCALATION] WhatsApp escalation delivery failed");
         }
-        String loggableUrl = minioUrl.replaceFirst("\\?.*$", "");
+        String loggableUrl = loggableUrl(reportUrl);
         log.info("[Router/ESCALATION] level={} → {} ({})", level, sent ? "SENT" : "FAILED", loggableUrl);
         log.debug("[Router/ESCALATION] officer={} level={} → {} ({})", officerPhone, level,
                 sent ? "SENT" : "FAILED", loggableUrl);
@@ -841,48 +885,67 @@ public class NotificationEventRouter {
 
     /**
      * Handles a {@code DAILY_REPORT_KPIS} event: resolves the officer's contact from the operational
-     * {@code user_table} (analytics never sees PII), renders the report PDF, uploads it to MinIO, and
-     * sends the document HSM via Glific. Mirrors {@link #handleEscalation}.
+     * {@code user_table} (analytics never sees PII), renders the report PDF, uploads it to object
+     * storage, and sends the document HSM through the WhatsApp provider. Mirrors
+     * {@link #handleEscalation}.
+     *
+     * <p>Every terminal outcome — one per officer — is logged with a {@code result=} tag and a
+     * {@code role=} field so daily-report delivery can be counted per role straight from the logs.
+     * {@code result=GENERATED} marks a rendered PDF and {@code result=SENT} a send the provider
+     * <em>accepted</em>, so the two are counted separately. Three more tags keep the SENT count honest:
+     * {@code SUPPRESSED} is a dry-run that reached no provider mutation, {@code FAILED_DELIVERY} a
+     * rejected send, and {@code DELIVERY_UNCONFIRMED} one the provider may have sent but cannot confirm —
+     * the last of which is deliberately <strong>not</strong> retried (see
+     * {@link #isAmbiguousDelivery}). None of them means WhatsApp delivered anything; only
+     * {@link WhatsAppDeliveryReconciliationService} can say that.</p>
      */
     private void handleDailySituationReport(JsonNode root) throws Exception {
         int tenantId = root.path("tenantId").asInt(0);
         String tenantSchema = root.path("tenantSchema").asText("");
         long officerUserId = root.path("officerUserId").asLong(0);
-        String officerUserType = root.path("officerUserType").asText("");
+        // Canonical role: trimmed once so the SDO gate, the PDF layout and the WhatsApp template are all
+        // chosen from the same token (the latter two trim internally, the gate below did not).
+        String officerUserType = root.path("officerUserType").asText("").trim();
         String corr = root.path("correlationId").asText("");
+        String role = officerUserType.isEmpty() ? "UNKNOWN" : officerUserType;
         long startNanos = System.nanoTime();
 
         if (tenantSchema.isBlank() || !tenantSchema.matches(SCHEMA_PATTERN) || officerUserId <= 0) {
-            log.warn("[Router/DAILY_REPORT] corr={} invalid tenantSchema/officerUserId, skipping", corr);
+            log.warn("[Router/DAILY_REPORT] corr={} result=SKIPPED_INVALID_EVENT role={} tenant={}",
+                    corr, role, tenantId);
             return;
         }
         if (!root.hasNonNull("kpis")) {
-            log.warn("[Router/DAILY_REPORT] corr={} missing kpis payload for officer={}, skipping", corr, officerUserId);
+            log.warn("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_KPIS role={} tenant={} officer={}",
+                    corr, role, tenantId, officerUserId);
             return;
         }
 
         log.info("[Router/DAILY_REPORT] corr={} received: tenant={} officer={} role={}",
-                corr, tenantId, officerUserId, officerUserType);
+                corr, tenantId, officerUserId, role);
 
-        // SDO delivery is enabled by default now that the SDO layout exists; the dailyReportSdoEnabled
-        // flag remains an operational kill-switch to suppress SDO reports without a redeploy.
-        if ("SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType) && !dailyReportSdoEnabled) {
-            log.info("[Router/DAILY_REPORT] corr={} SDO delivery disabled via flag; skipping officer={}",
-                    corr, officerUserId);
+        // The daily report is a Section Officer product now; SDOs are served by the weekly one. This
+        // still has to be checked rather than assumed: events published before the upgrade can be
+        // sitting in the topic, and an SDO's queued daily report must be dropped, not rendered into a
+        // layout that no longer describes their command.
+        if ("SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType)) {
+            log.info("[Router/DAILY_REPORT] corr={} result=SKIPPED_SDO_DAILY_RETIRED role={} tenant={} officer={}"
+                            + " — SDOs receive the weekly report instead",
+                    corr, role, tenantId, officerUserId);
             return;
         }
 
         DailyReportKpis kpis = objectMapper.treeToValue(root.path("kpis"), DailyReportKpis.class);
         if (!isRenderableKpis(kpis)) {
-            log.warn("[Router/DAILY_REPORT] corr={} incomplete/malformed kpis for officer={}, skipping (non-retryable)",
-                    corr, officerUserId);
+            log.warn("[Router/DAILY_REPORT] corr={} result=SKIPPED_MALFORMED_KPIS role={} tenant={} officer={}"
+                    + " (non-retryable)", corr, role, tenantId, officerUserId);
             return;
         }
 
         OfficerContact officer = resolveOfficerContactById(tenantSchema, officerUserId);
         if (officer.contactId() == null && (officer.phone() == null || officer.phone().isBlank())) {
-            log.warn("[Router/DAILY_REPORT] corr={} no phone or whatsapp_connection_id for officer={} in schema={}, skipping",
-                    corr, officerUserId, tenantSchema);
+            log.warn("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_CONTACT role={} tenant={} officer={} schema={}",
+                    corr, role, tenantId, officerUserId, tenantSchema);
             return;
         }
 
@@ -890,37 +953,344 @@ public class NotificationEventRouter {
         log.debug("[Router/DAILY_REPORT] corr={} resolved officer={} name='{}' hasContactId={}",
                 corr, officerUserId, officerName, officer.contactId() != null);
 
-        List<DailyReportPriorityRow> priorityRows = buildPriorityRows(tenantSchema, kpis, corr);
-        List<DailyReportSectionOfficerRow> sectionOfficerRows =
-                buildSectionOfficerRows(tenantSchema, kpis, corr);
+        // Resolved before the report is built. A contact id of 0 while delivery is live means the opt-in
+        // never produced a WhatsApp contact, and nothing downstream can recover from that: sending anyway
+        // comes back as "Receiver does not exist", and retrying cannot conjure a contact id while it
+        // stalls the whole partition. Doing it here means the dead end costs no PDF render and no storage
+        // upload — the previous order paid for both, then deleted the file and gave up.
+        long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
+        if (contactId <= 0 && whatsAppSender.isDailyReportDeliveryEnabled()) {
+            log.error("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_CONTACT_ID role={} tenant={} officer={}"
+                            + " — WhatsApp opt-in returned no contact id (non-retryable)",
+                    corr, role, tenantId, officerUserId);
+            return;
+        }
 
-        String filename = dailyReportPdfService.generate(
-                kpis, officerUserId, officerName, officerUserType, priorityRows, sectionOfficerRows);
-        java.nio.file.Path localPath = Paths.get(reportDir, filename);
-        String minioUrl;
+        List<ReportSchemeRow> noSupplyRows;
+        List<ReportSchemeRow> anomalyRows;
+        java.nio.file.Path localPath;
         try {
-            minioUrl = minioStorageService.upload(localPath);
+            noSupplyRows = buildSchemeRows(tenantSchema, kpis.getNoSupplySchemeIds(), false);
+            anomalyRows = buildAnomalyRows(tenantSchema, kpis);
+            localPath = dailyReportPdfService.generate(
+                    kpis, officerUserId, officerName, officerUserType, noSupplyRows, anomalyRows);
+        } catch (Exception generateEx) {
+            // Row lookup or PDF rendering failed: tag the outcome so it is counted like every other
+            // terminal state, then rethrow so the event is still retried.
+            log.error("[Router/DAILY_REPORT] corr={} result=FAILED_GENERATION role={} tenant={} officer={} — {}",
+                    corr, role, tenantId, officerUserId, generateEx.getMessage(), generateEx);
+            throw generateEx;
+        }
+        // The PDF now exists on disk. Logged before upload/delivery so a report that is built but never
+        // delivered is still counted as generated — that gap is the signal worth spotting.
+        log.info("[Router/DAILY_REPORT] corr={} result=GENERATED role={} tenant={} officer={}"
+                        + " noSupplyRows={} anomalyRows={}",
+                corr, role, tenantId, officerUserId, noSupplyRows.size(), anomalyRows.size());
+
+        LocalDate reportDate = LocalDate.parse(kpis.getReportDate());
+        // The path the PDF service actually wrote to, not one rebuilt from escalation.report.dir: the
+        // daily report has its own DAILY_REPORT_DIR, and re-deriving the path sent the upload looking
+        // in the wrong directory in any environment that set it.
+        String filename = localPath.getFileName().toString();
+        String reportUrl;
+        try {
+            reportUrl = uploadWaterReport(localPath, ReportFileNaming.DAILY_BUCKET,
+                    ReportFileNaming.dailyObjectKey(officerUserType, filename, reportDate));
         } catch (Exception uploadEx) {
-            log.error("[Router/DAILY_REPORT] corr={} MinIO upload failed, retaining local PDF for recovery: {} — {}",
-                    corr, localPath, uploadEx.getMessage());
+            log.error("[Router/DAILY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
+                            + " retaining local PDF for recovery: {} — {}",
+                    corr, role, tenantId, officerUserId, localPath, uploadEx.getMessage());
             throw uploadEx;
         }
-        try {
-            Files.deleteIfExists(localPath);
-        } catch (Exception cleanupEx) {
-            log.warn("[Router/DAILY_REPORT] corr={} could not delete local PDF {}: {}", corr, localPath, cleanupEx.getMessage());
-        }
+        deleteLocalReport(localPath, corr, ReportKind.DAILY.tag());
 
-        long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
-
-        boolean sent = whatsAppChannel.sendDailyReport(contactId, minioUrl, officerUserType);
-        if (!sent) {
-            throw new IllegalStateException("[Router/DAILY_REPORT] corr=" + corr + " WhatsApp daily report delivery failed");
-        }
-        String loggableUrl = minioUrl.replaceFirst("\\?.*$", "");
+        ReportLogCtx logCtx = new ReportLogCtx(ReportKind.DAILY, corr, role, tenantId, officerUserId);
+        ReportSendOutcome outcome =
+                whatsAppChannel.sendDailyReport(contactId, reportUrl, officerUserType, reportDate, officerName);
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
-        log.info("[Router/DAILY_REPORT] corr={} SENT: tenant={} officer={} role={} priorityRows={} tookMs={} ({})",
-                corr, tenantId, officerUserId, officerUserType, priorityRows.size(), tookMs, loggableUrl);
+        if (!outcome.accepted()) {
+            reportFailedDelivery(logCtx, outcome.failure(), reportDate, loggableUrl(reportUrl));
+            return;
+        }
+        logSendResult(logCtx, outcome.result(), contactId, noSupplyRows.size(), tookMs, loggableUrl(reportUrl));
+    }
+
+    /**
+     * Renders and delivers the Weekly Water Service Situation Report for one officer, in whichever
+     * layout their role calls for.
+     *
+     * <p>Mirrors the daily handler's order deliberately: validate, resolve the officer, resolve the
+     * WhatsApp contact id <em>before</em> rendering, then build → upload → send. Resolving the contact
+     * first means a dead end costs no PDF render and no storage upload.</p>
+     */
+    private void handleWeeklySituationReport(JsonNode root) throws Exception {
+        int tenantId = root.path("tenantId").asInt(0);
+        String tenantSchema = root.path("tenantSchema").asText("");
+        long officerUserId = root.path("officerUserId").asLong(0);
+        String officerUserType = root.path("officerUserType").asText("").trim();
+        String corr = root.path("correlationId").asText("");
+        String role = officerUserType.isEmpty() ? "UNKNOWN" : officerUserType;
+        long startNanos = System.nanoTime();
+
+        if (tenantSchema.isBlank() || !tenantSchema.matches(SCHEMA_PATTERN) || officerUserId <= 0) {
+            log.warn("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_INVALID_EVENT role={} tenant={}",
+                    corr, role, tenantId);
+            return;
+        }
+        if (!root.hasNonNull("kpis")) {
+            log.warn("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_NO_KPIS role={} tenant={} officer={}",
+                    corr, role, tenantId, officerUserId);
+            return;
+        }
+
+        log.info("[Router/WEEKLY_REPORT] corr={} received: tenant={} officer={} role={}",
+                corr, tenantId, officerUserId, role);
+
+        WeeklyReportKpis kpis = objectMapper.treeToValue(root.path("kpis"), WeeklyReportKpis.class);
+        if (!isRenderableWeeklyKpis(kpis)) {
+            log.warn("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_MALFORMED_KPIS role={} tenant={} officer={}"
+                    + " (non-retryable)", corr, role, tenantId, officerUserId);
+            return;
+        }
+
+        OfficerContact officer = resolveOfficerContactById(tenantSchema, officerUserId);
+        if (officer.contactId() == null && (officer.phone() == null || officer.phone().isBlank())) {
+            log.warn("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_NO_CONTACT role={} tenant={} officer={} schema={}",
+                    corr, role, tenantId, officerUserId, tenantSchema);
+            return;
+        }
+
+        String officerName = officer.name() != null ? officer.name() : "Officer";
+        long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
+        if (contactId <= 0 && whatsAppSender.isWeeklyReportDeliveryEnabled()) {
+            log.error("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_NO_CONTACT_ID role={} tenant={} officer={}"
+                            + " — WhatsApp opt-in returned no contact id (non-retryable)",
+                    corr, role, tenantId, officerUserId);
+            return;
+        }
+
+        boolean sdo = "SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType);
+        List<ReportSchemeRow> noSupplyRows;
+        List<ReportSchemeRow> lowSupplyDaysRows;
+        List<ReportSchemeRow> lowLpcdRows;
+        List<WeeklyReportOfficerRow> officerRows;
+        java.nio.file.Path localPath;
+        try {
+            noSupplyRows = buildSchemeRows(tenantSchema, kpis.getNoSupplySchemeIds(), sdo);
+            // The 1-3 day band is a Section Officer section only; resolving it for an SDO would be
+            // several queries for rows nobody draws.
+            lowSupplyDaysRows = sdo ? List.of()
+                    : buildSchemeRows(tenantSchema, kpis.getLowSupplyDaysSchemeIds(), false);
+            lowLpcdRows = buildSchemeRows(tenantSchema, kpis.getLowLpcdSchemeIds(), sdo);
+            officerRows = sdo ? buildWeeklyOfficerRows(tenantSchema, kpis) : List.of();
+            localPath = weeklyReportPdfService.generate(kpis, officerUserId, officerName, officerUserType,
+                    noSupplyRows, lowSupplyDaysRows, lowLpcdRows, officerRows);
+        } catch (Exception generateEx) {
+            log.error("[Router/WEEKLY_REPORT] corr={} result=FAILED_GENERATION role={} tenant={} officer={} — {}",
+                    corr, role, tenantId, officerUserId, generateEx.getMessage(), generateEx);
+            throw generateEx;
+        }
+        log.info("[Router/WEEKLY_REPORT] corr={} result=GENERATED role={} tenant={} officer={}"
+                        + " noSupplyRows={} lowDaysRows={} lowLpcdRows={} officerRows={}",
+                corr, role, tenantId, officerUserId,
+                noSupplyRows.size(), lowSupplyDaysRows.size(), lowLpcdRows.size(), officerRows.size());
+
+        LocalDate weekStart = LocalDate.parse(kpis.getWeekStart());
+        LocalDate weekEnd = LocalDate.parse(kpis.getWeekEnd());
+        // As for the daily report: the weekly PDF's directory resolves through
+        // weekly-report.report.dir → daily-report.report.dir → escalation.report.dir, so only the
+        // service that wrote the file knows where it landed.
+        String filename = localPath.getFileName().toString();
+        String reportUrl;
+        try {
+            reportUrl = uploadWaterReport(localPath, ReportFileNaming.WEEKLY_BUCKET,
+                    ReportFileNaming.weeklyObjectKey(officerUserType, filename, weekStart, weekEnd));
+        } catch (Exception uploadEx) {
+            log.error("[Router/WEEKLY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
+                            + " retaining local PDF for recovery: {} — {}",
+                    corr, role, tenantId, officerUserId, localPath, uploadEx.getMessage());
+            throw uploadEx;
+        }
+        deleteLocalReport(localPath, corr, ReportKind.WEEKLY.tag());
+
+        // Tagged WEEKLY so the terminal SENT / SUPPRESSED / FAILED_DELIVERY / DELIVERY_UNCONFIRMED lines
+        // land under [Router/WEEKLY_REPORT] alongside this officer's GENERATED line, rather than under
+        // the daily prefix the shared helpers are also used by.
+        ReportLogCtx logCtx = new ReportLogCtx(ReportKind.WEEKLY, corr, role, tenantId, officerUserId);
+        ReportSendOutcome outcome =
+                whatsAppChannel.sendWeeklyReport(contactId, reportUrl, officerUserType, weekStart, officerName);
+        long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
+        if (!outcome.accepted()) {
+            reportFailedDelivery(logCtx, outcome.failure(), weekStart, loggableUrl(reportUrl));
+            return;
+        }
+        logSendResult(logCtx, outcome.result(), contactId, noSupplyRows.size(), tookMs, loggableUrl(reportUrl));
+    }
+
+    /**
+     * Which situation report a router line is about.
+     *
+     * <p>Selects the {@code [Router/…]} prefix and the name of the date field on the terminal lines, so
+     * a weekly outcome is counted as a weekly one. The send-logging helpers below are shared by both
+     * reports and used to hard-code the daily prefix, which folded every weekly {@code SENT} into the
+     * daily total and left every weekly {@code GENERATED} with no {@code SENT} to reconcile against. A
+     * Section Officer now receives both reports, so the prefix is the only thing that can tell their
+     * lines apart.</p>
+     */
+    private enum ReportKind {
+        DAILY("reportDate"),
+        WEEKLY("weekStart");
+
+        private final String periodField;
+
+        ReportKind(String periodField) {
+            this.periodField = periodField;
+        }
+
+        /** The {@code [Router/<tag>]} prefix, and the tag {@link #deleteLocalReport} logs under. */
+        String tag() {
+            return name() + "_REPORT";
+        }
+
+        /** "daily" / "weekly", for prose inside an exception message. */
+        String label() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+
+        /**
+         * Names the date the terminal lines carry: the day a daily report covers, the first day a weekly
+         * one opens on. Two different facts, so they do not share a field name.
+         */
+        String periodField() {
+            return periodField;
+        }
+    }
+
+    /**
+     * The fields every {@code [Router/…_REPORT]} line opens with, kept together so the
+     * {@code result= role= tenant= officer=} adjacency the log-counting recipes grep for cannot drift
+     * apart between the handler and the lines it delegates.
+     */
+    private record ReportLogCtx(ReportKind kind, String corr, String role, int tenantId, long officerUserId) {}
+
+    /**
+     * Logs a rejected send and decides whether the event may be retried. Shared by both reports; the
+     * {@link ReportKind} on the context picks the {@code [Router/…]} prefix and the date field name, so
+     * a weekly failure is never counted as a daily one.
+     *
+     * <p>Emits <strong>exactly one</strong> terminal {@code result=} line per failed send, because the
+     * log-counting recipes add those tokens up: an ambiguous send that logged both
+     * {@code FAILED_DELIVERY} and {@code DELIVERY_UNCONFIRMED} was counted twice, and inflated the
+     * definite-failure total with sends that may well have arrived.</p>
+     *
+     * <p>Three outcomes, only one of which is retried:</p>
+     * <ul>
+     *   <li>{@link #isAmbiguousDelivery} ({@code TIMEOUT}, {@code SEND_NO_MESSAGE_ID}) — the provider may
+     *       already hold the message, so re-driving the event would send the officer a second copy of
+     *       the same report, which is worse than the missing confirmation it was trying to fix.
+     *       Recorded as {@code DELIVERY_UNCONFIRMED} for reconciliation.</li>
+     *   <li>{@link WhatsAppSendStage#CONFIG} — a definite rejection that never reached the provider, and
+     *       one no retry can repair: the template id, contact id or report URL prefix is wrong on our side.
+     *       Retrying only stalls the partition until the configuration changes, so it is terminal.</li>
+     *   <li>Everything else ({@code MEDIA_REGISTER}, {@code SEND}) — a definite rejection a retry can
+     *       plausibly repair, so it rethrows for the Kafka container's retry policy.</li>
+     * </ul>
+     */
+    private void reportFailedDelivery(ReportLogCtx ctx, ReportSendOutcome.Failure failure,
+                                      LocalDate period, String loggableUrl) {
+        String tag = ctx.kind().tag();
+        // stage= and providerErrorKey= are appended *after* officer= on every branch below.
+        if (isAmbiguousDelivery(failure.stage())) {
+            log.warn("[Router/{}] corr={} result=DELIVERY_UNCONFIRMED role={} tenant={} officer={}"
+                            + " stage={} providerErrorKey={} {}={} (non-retryable) — the provider may already"
+                            + " have sent this report, so the event is not retried. Settle it against"
+                            + " the provider's own delivery status for this officer; see"
+                            + " WhatsAppDeliveryReconciliationService ({})",
+                    tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
+                    failure.stage(), failure.errorKeyForLog(), ctx.kind().periodField(), period, loggableUrl);
+            return;
+        }
+        log.error("[Router/{}] corr={} result=FAILED_DELIVERY role={} tenant={} officer={}"
+                        + " stage={} providerErrorKey={}",
+                tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
+                failure.stage(), failure.errorKeyForLog());
+        if (failure.stage() == WhatsAppSendStage.CONFIG) {
+            log.error("[Router/{}] corr={} stage=CONFIG {}={} (non-retryable) — the send"
+                            + " never reached the provider because our own template id, contact id or report URL"
+                            + " prefix is wrong. A retry cannot repair that, so the event is not redriven:"
+                            + " fix the configuration, then replay this officer's report ({})",
+                    tag, ctx.corr(), ctx.kind().periodField(), period, loggableUrl);
+            return;
+        }
+        throw new IllegalStateException("[Router/" + tag + "] corr=" + ctx.corr()
+                + " WhatsApp " + ctx.kind().label() + " report delivery failed at stage=" + failure.stage());
+    }
+
+    /**
+     * Logs an accepted send — or a suppressed one, which is not the same event and no longer shares a
+     * line with it. A dry-run reached no provider mutation at all: it has no {@code PROVIDER_ACCEPTED}
+     * stage, no message id and nothing for reconciliation to match, so counting it as {@code SENT}
+     * reported a muted deployment as a delivering one.
+     *
+     * <p>Shared by both reports, prefixed by the context's {@link ReportKind}. {@code noSupplyRows=}
+     * carries the same count as the matching {@code result=GENERATED} line's field of that name, so the
+     * two can be lined up per officer.</p>
+     */
+    private void logSendResult(ReportLogCtx ctx, WhatsAppSendResult sendResult, long contactId,
+                               int noSupplyRows, long tookMs, String loggableUrl) {
+        String tag = ctx.kind().tag();
+        if (sendResult.isSuppressed()) {
+            log.info("[Router/{}] corr={} result=SUPPRESSED role={} tenant={} officer={}"
+                            + " mode={} noSupplyRows={} tookMs={} ({})",
+                    tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
+                    sendResult.modeForLog(), noSupplyRows, tookMs, loggableUrl);
+            return;
+        }
+        // result=SENT means the provider ACCEPTED the send — it is not a WhatsApp delivery confirmation.
+        // providerMsgId is what lets the delivery status Gupshup and Meta later report to the provider be
+        // matched back to this officer; see WhatsAppDeliveryReconciliationService. Every new field goes after officer= to preserve
+        // the field adjacency the log-counting recipes rely on.
+        log.info("[Router/{}] corr={} result=SENT role={} tenant={} officer={}"
+                        + " stage=PROVIDER_ACCEPTED providerMsgId={} providerContactId={} mode={} templateId={}"
+                        + " noSupplyRows={} tookMs={} ({})",
+                tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
+                sendResult.messageIdForLog(), contactId, sendResult.modeForLog(), sendResult.templateIdForLog(),
+                noSupplyRows, tookMs, loggableUrl);
+    }
+
+    /**
+     * Stages after which the provider may already have created and sent the message, so the event must not be
+     * retried: a {@code block()} timeout, and a mutation that returned no errors but no message id
+     * either. Both leave delivery unconfirmed rather than failed, and only the provider can settle which.
+     */
+    private static boolean isAmbiguousDelivery(WhatsAppSendStage stage) {
+        return stage == WhatsAppSendStage.TIMEOUT || stage == WhatsAppSendStage.SEND_NO_MESSAGE_ID;
+    }
+
+    /** A report URL with any query string stripped, so a signature never reaches a log line. */
+    private static String loggableUrl(String url) {
+        return url.replaceFirst(URL_QUERY_SUFFIX, "");
+    }
+
+    /**
+     * Uploads a rendered PDF and returns the permanent public URL handed to the WhatsApp provider,
+     * which Meta or the officer's phone fetches without credentials.
+     */
+    private String uploadPdf(java.nio.file.Path localPath, String bucket, String objectKey) throws IOException {
+        try (InputStream content = Files.newInputStream(localPath)) {
+            objectStorageService.upload(bucket, objectKey, content, Files.size(localPath), PDF_CONTENT_TYPE);
+        }
+        return objectStorageService.publicUrl(bucket, objectKey).toString();
+    }
+
+    /**
+     * As {@link #uploadPdf}, into one of the water-report buckets, which is created first when a new
+     * environment does not have it yet. Its anonymous read is still granted out of band.
+     */
+    private String uploadWaterReport(java.nio.file.Path localPath, String bucket, String objectKey)
+            throws IOException {
+        objectStorageService.ensureBucket(bucket);
+        return uploadPdf(localPath, bucket, objectKey);
     }
 
     /**
@@ -928,74 +1298,130 @@ public class NotificationEventRouter {
      * by looking up the scheme's name + IMIS id and its pump operators (Jal Mitras) from the
      * operational schema. Schemes that can't be resolved are still shown with the ids we have.
      */
-    private List<DailyReportPriorityRow> buildPriorityRows(String tenantSchema, DailyReportKpis kpis, String corr) {
-        List<DailyReportPriorityRow> rows = new ArrayList<>();
-        if (kpis.getPriorityActions() == null || kpis.getPriorityActions().isEmpty()) {
-            return rows;
+    /**
+     * Resolves analytics scheme ids into printable rows: scheme name, IMIS id, Jal Mitra contacts,
+     * and — for the SDO report — the owning Section Officer and the villages the scheme serves.
+     *
+     * <p>Every lookup is batched over the whole id set (three or five queries for the section, not
+     * per row): a Section Officer with two hundred schemes with no supply by 16:00 is an ordinary
+     * afternoon, and a per-row lookup would turn that into six hundred round trips.</p>
+     *
+     * <p>A scheme whose name cannot be resolved still produces a row, labelled with its id. Dropping
+     * it would silently shorten a list whose whole purpose is to be acted on.</p>
+     */
+    private List<ReportSchemeRow> buildSchemeRows(String tenantSchema, List<Integer> schemeIds, boolean withSdoDetail) {
+        if (schemeIds == null || schemeIds.isEmpty()) {
+            return List.of();
         }
-        // Batch-fetch scheme labels and pump operators for all referenced schemes up front
-        // (two queries total) rather than two per priority action, then enrich from memory.
-        Set<Integer> schemeIds = new LinkedHashSet<>();
-        for (DailyReportKpis.PriorityAction pa : kpis.getPriorityActions()) {
-            schemeIds.add(pa.getSchemeId());
-        }
-        Map<Integer, SchemeLabel> schemeLabels = resolveSchemeLabels(tenantSchema, schemeIds);
-        Map<Integer, List<OperatorContact>> operatorsByScheme = resolvePumpOperators(tenantSchema, schemeIds);
-        for (DailyReportKpis.PriorityAction pa : kpis.getPriorityActions()) {
-            SchemeLabel scheme = schemeLabels.getOrDefault(pa.getSchemeId(), new SchemeLabel(null, null));
-            List<OperatorContact> operators = operatorsByScheme.getOrDefault(pa.getSchemeId(), List.of());
-            String names = operators.stream().map(OperatorContact::name)
-                    .filter(n -> n != null && !n.isBlank()).collect(java.util.stream.Collectors.joining(", "));
-            String mobiles = operators.stream().map(OperatorContact::phone)
-                    .filter(p -> p != null && !p.isBlank()).collect(java.util.stream.Collectors.joining(", "));
-            rows.add(DailyReportPriorityRow.builder()
-                    .scheme(scheme.schemeName() != null ? scheme.schemeName() : ("#" + pa.getSchemeId()))
-                    .imisId(scheme.centreSchemeId() != null ? scheme.centreSchemeId() : "")
-                    .jalMitraNames(names)
-                    .jalMitraMobiles(mobiles)
-                    .issue(pa.getIssue() != null ? pa.getIssue() : "")
-                    .remarks(formatNoSupplyRemark(pa.getDaysNoSupply()))
+        Set<Integer> ids = new LinkedHashSet<>(schemeIds);
+        Map<Integer, SchemeLabel> labels = resolveSchemeLabels(tenantSchema, ids);
+        Map<Integer, List<OperatorContact>> operators = resolvePumpOperators(tenantSchema, ids);
+        Map<Integer, List<OperatorContact>> sectionOfficers =
+                withSdoDetail ? resolveSectionOfficers(tenantSchema, ids) : Map.of();
+        Map<Integer, List<String>> villages =
+                withSdoDetail ? resolveVillages(tenantSchema, ids) : Map.of();
+
+        List<ReportSchemeRow> rows = new ArrayList<>();
+        for (Integer schemeId : ids) {
+            SchemeLabel label = labels.getOrDefault(schemeId, new SchemeLabel(null, null));
+            rows.add(ReportSchemeRow.builder()
+                    .schemeId(schemeId)
+                    .schemeName(label.schemeName() != null ? label.schemeName() : ("#" + schemeId))
+                    .imisId(label.centreSchemeId() != null ? label.centreSchemeId() : "")
+                    .jalMitraNames(joinNames(operators.get(schemeId)))
+                    .jalMitraMobiles(joinPhones(operators.get(schemeId)))
+                    .sectionOfficerNames(joinNames(sectionOfficers.get(schemeId)))
+                    .sectionOfficerMobiles(joinPhones(sectionOfficers.get(schemeId)))
+                    .villageNames(villages.containsKey(schemeId) ? String.join(", ", villages.get(schemeId)) : "")
                     .build());
         }
-        log.debug("[Router/DAILY_REPORT] corr={} built {} priority row(s)", corr, rows.size());
         return rows;
     }
 
     /**
-     * Resolves each analytics {@code SectionOfficerSummary} (KPIs keyed by officer user id) into a
-     * printable SDO-breakdown row by looking up the Section Officer's decrypted name + mobile from the
-     * operational {@code user_table}. Returns an empty list for a non-SDO report (no summaries present).
-     * Officer order from analytics is preserved.
+     * The daily report's anomalous-submissions rows: one per (scheme, anomaly type), so a scheme with
+     * three different problems is three lines. The scheme lookups are batched once across the whole
+     * section even though a scheme may appear on several rows.
      */
-    private List<DailyReportSectionOfficerRow> buildSectionOfficerRows(String tenantSchema, DailyReportKpis kpis, String corr) {
-        List<DailyReportSectionOfficerRow> rows = new ArrayList<>();
-        if (kpis.getSectionOfficerSummaries() == null || kpis.getSectionOfficerSummaries().isEmpty()) {
-            return rows;
+    private List<ReportSchemeRow> buildAnomalyRows(String tenantSchema, DailyReportKpis kpis) {
+        List<DailyReportKpis.SchemeAnomaly> anomalies = kpis.getSchemeAnomalies();
+        if (anomalies == null || anomalies.isEmpty()) {
+            return List.of();
         }
-        Set<Long> officerIds = new LinkedHashSet<>();
-        for (DailyReportKpis.SectionOfficerSummary s : kpis.getSectionOfficerSummaries()) {
-            officerIds.add(s.getOfficerUserId());
+        List<Integer> distinctIds = anomalies.stream().map(DailyReportKpis.SchemeAnomaly::getSchemeId)
+                .distinct().toList();
+        Map<Integer, ReportSchemeRow> byScheme = new LinkedHashMap<>();
+        for (ReportSchemeRow row : buildSchemeRows(tenantSchema, distinctIds, false)) {
+            byScheme.put(row.getSchemeId(), row);
         }
-        Map<Long, OfficerContact> contacts = resolveOfficerContactsByIds(tenantSchema, officerIds);
-        for (DailyReportKpis.SectionOfficerSummary s : kpis.getSectionOfficerSummaries()) {
-            OfficerContact c = contacts.get(s.getOfficerUserId());
-            String name = (c != null && c.name() != null) ? c.name() : ("#" + s.getOfficerUserId());
-            String mobile = (c != null && c.phone() != null) ? c.phone() : "";
-            rows.add(DailyReportSectionOfficerRow.builder()
-                    .officerName(name)
-                    .officerMobile(mobile)
-                    .totalSchemes(s.getTotalSchemes())
-                    .schemesSupplying(s.getSchemesSupplying())
-                    .schemesNotSupplying(s.getSchemesNotSupplying())
-                    .avgLpcd(s.getAvgLpcd())
-                    .avgMld(s.getAvgMld())
-                    .regularSupplyPctWeek(s.getRegularSupplyPctWeek())
-                    .readingSubmissionPct(s.getReadingSubmissionPct())
-                    .anomalousCount(s.getAnomalousCount())
+
+        List<ReportSchemeRow> rows = new ArrayList<>();
+        for (DailyReportKpis.SchemeAnomaly anomaly : anomalies) {
+            ReportSchemeRow base = byScheme.get(anomaly.getSchemeId());
+            if (base == null) {
+                continue;
+            }
+            rows.add(ReportSchemeRow.builder()
+                    .schemeId(base.getSchemeId())
+                    .schemeName(base.getSchemeName())
+                    .imisId(base.getImisId())
+                    .jalMitraNames(base.getJalMitraNames())
+                    .jalMitraMobiles(base.getJalMitraMobiles())
+                    .anomalyType(AnomalyLabels.label(anomaly.getType()))
                     .build());
         }
-        log.debug("[Router/DAILY_REPORT] corr={} built {} section-officer row(s)", corr, rows.size());
         return rows;
+    }
+
+    /**
+     * Resolves each weekly {@code SectionOfficerWeekSummary} into a printable performance row by
+     * looking up the officer's decrypted name and mobile. Officer order from analytics is preserved.
+     */
+    private List<WeeklyReportOfficerRow> buildWeeklyOfficerRows(String tenantSchema, WeeklyReportKpis kpis) {
+        List<WeeklyReportKpis.SectionOfficerWeekSummary> summaries = kpis.getSectionOfficerSummaries();
+        if (summaries == null || summaries.isEmpty()) {
+            return List.of();
+        }
+        Set<Long> officerIds = new LinkedHashSet<>();
+        for (WeeklyReportKpis.SectionOfficerWeekSummary summary : summaries) {
+            officerIds.add(summary.getOfficerUserId());
+        }
+        Map<Long, OfficerContact> contacts = resolveOfficerContactsByIds(tenantSchema, officerIds);
+
+        List<WeeklyReportOfficerRow> rows = new ArrayList<>();
+        for (WeeklyReportKpis.SectionOfficerWeekSummary summary : summaries) {
+            OfficerContact contact = contacts.get(summary.getOfficerUserId());
+            rows.add(WeeklyReportOfficerRow.builder()
+                    .officerUserId(summary.getOfficerUserId())
+                    .name(contact != null && contact.name() != null
+                            ? contact.name() : ("#" + summary.getOfficerUserId()))
+                    .mobile(contact != null && contact.phone() != null ? contact.phone() : "")
+                    .totalSchemes(summary.getTotalSchemes())
+                    .schemesSupplying(summary.getSchemesSupplying())
+                    .schemesNotSupplying(summary.getSchemesNotSupplying())
+                    .schemesLowLpcd(summary.getSchemesLowLpcd())
+                    .avgLpcd(summary.getAvgLpcd())
+                    .build());
+        }
+        return rows;
+    }
+
+    private static String joinNames(List<OperatorContact> contacts) {
+        if (contacts == null) {
+            return "";
+        }
+        return contacts.stream().map(OperatorContact::name)
+                .filter(n -> n != null && !n.isBlank())
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    private static String joinPhones(List<OperatorContact> contacts) {
+        if (contacts == null) {
+            return "";
+        }
+        return contacts.stream().map(OperatorContact::phone)
+                .filter(phone -> phone != null && !phone.isBlank())
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 
     /**
@@ -1027,16 +1453,6 @@ public class NotificationEventRouter {
     /** Intermediate row carrying the officer user id alongside its resolved contact, for batch grouping. */
     private record OfficerContactRow(long userId, OfficerContact contact) {}
 
-    private String formatNoSupplyRemark(Integer daysNoSupply) {
-        if (daysNoSupply == null) {
-            return "No recorded water supply";
-        }
-        if (daysNoSupply <= 0) {
-            return "No water supply today";
-        }
-        return "No water supply for past " + daysNoSupply + (daysNoSupply == 1 ? " day" : " days");
-    }
-
     /**
      * A KPI payload is renderable only when both dates are present and ISO-parseable and both
      * day-KPI blocks exist. Guarding here keeps a malformed/incomplete payload from surfacing as a
@@ -1044,10 +1460,34 @@ public class NotificationEventRouter {
      * instead it is treated as a permanent, non-retryable skip like the other checks above.
      */
     private boolean isRenderableKpis(DailyReportKpis kpis) {
-        if (kpis == null || kpis.getYesterday() == null || kpis.getPreviousDay() == null) {
-            return false;
+        // The report date is the one field with no safe default: it names the filename, the object key
+        // and the WhatsApp message. Everything else can legitimately be zero.
+        return kpis != null && isIsoDate(kpis.getReportDate());
+    }
+
+    /**
+     * A weekly payload is renderable only with all four week bounds present and ISO-parseable. The
+     * comparison week's bounds count too: the PDF's summary table parses them for its column header, so
+     * a malformed one throws {@link DateTimeParseException} mid-render just as the current week's would.
+     */
+    private boolean isRenderableWeeklyKpis(WeeklyReportKpis kpis) {
+        return kpis != null
+                && isIsoDate(kpis.getWeekStart()) && isIsoDate(kpis.getWeekEnd())
+                && isIsoDate(kpis.getPreviousWeekStart()) && isIsoDate(kpis.getPreviousWeekEnd());
+    }
+
+    /**
+     * Deletes the rendered PDF once it is safely in object storage. A failure here is logged and
+     * swallowed: the upload already succeeded, so the officer's report is on its way, and the reaper
+     * sweeps whatever is left behind.
+     */
+    private void deleteLocalReport(java.nio.file.Path localPath, String corr, String tag) {
+        try {
+            Files.deleteIfExists(localPath);
+        } catch (Exception cleanupEx) {
+            log.warn("[Router/{}] corr={} could not delete local PDF {}: {}",
+                    tag, corr, localPath, cleanupEx.getMessage());
         }
-        return isIsoDate(kpis.getReportDate()) && isIsoDate(kpis.getPreviousDate());
     }
 
     private boolean isIsoDate(String value) {
@@ -1066,14 +1506,14 @@ public class NotificationEventRouter {
     private record OfficerContact(Long contactId, String name, String phone) {}
 
     /**
-     * Returns the officer's stored Glific contact id, or opts them in by phone and publishes a
+     * Returns the officer's stored WhatsApp contact id, or opts them in by phone and publishes a
      * {@code WHATSAPP_CONTACT_REGISTERED} event so tenant-service persists the new contact id.
      */
     private long resolveContactIdOrOptIn(OfficerContact officer, String tenantSchema, long officerUserId) {
         if (officer.contactId() != null && officer.contactId() > 0) {
             return officer.contactId();
         }
-        long contactId = glificWhatsAppService.optIn(officer.phone());
+        long contactId = whatsAppSender.optIn(officer.phone());
         if (contactId > 0) {
             kafkaProducer.publishJson(COMMON_TOPIC,
                     WhatsAppContactRegisteredEvent.builder()
@@ -1087,7 +1527,7 @@ public class NotificationEventRouter {
     }
 
     /**
-     * Resolves an officer's Glific contact id, decrypted display name, and decrypted phone number
+     * Resolves an officer's WhatsApp contact id, decrypted display name, and decrypted phone number
      * from {@code <tenantSchema>.user_table} by user id. {@code tenantSchema} is validated by the
      * caller against {@link #SCHEMA_PATTERN} before interpolation (schema names are SQL identifiers
      * and cannot be bound as {@code ?}); the user id is bound as a parameter.
@@ -1171,6 +1611,73 @@ public class NotificationEventRouter {
 
     /** Intermediate row carrying the scheme id alongside its resolved label, for batch grouping. */
     private record SchemeRow(int schemeId, SchemeLabel label) {}
+
+    /**
+     * Batch-resolves the active Section Officers mapped to each scheme, with decrypted name + phone.
+     *
+     * <p>Used only by the SDO weekly report, where a scheme row has to say <em>whose</em> scheme it is
+     * — an SDO acts through their officers rather than directly on a scheme. A scheme mapped to two
+     * Section Officers lists both; that is a data-quality condition in the mapping table, and hiding
+     * one of them would misattribute the scheme.</p>
+     */
+    @SuppressWarnings("java:S2077")
+    private Map<Integer, List<OperatorContact>> resolveSectionOfficers(String tenantSchema, Set<Integer> schemeIds) {
+        if (schemeIds.isEmpty()) {
+            return Map.of();
+        }
+        String sql = "SELECT usm.scheme_id, u.title, u.phone_number FROM " + tenantSchema + ".user_scheme_mapping_table usm "
+                + "JOIN " + tenantSchema + ".user_table u ON u.id = usm.user_id "
+                + "JOIN common_schema.user_type_master_table ut ON ut.id = u.user_type "
+                + "WHERE usm.scheme_id IN (" + placeholders(schemeIds.size()) + ") AND UPPER(ut.c_name) = 'SECTION_OFFICER' "
+                + "AND usm.status = 1 AND u.status = 1 AND usm.deleted_at IS NULL AND u.deleted_at IS NULL "
+                + "ORDER BY usm.scheme_id, u.id";
+        List<OperatorRow> rows = jdbcTemplate.query(sql,
+                (rs, n) -> new OperatorRow(rs.getInt("scheme_id"),
+                        new OperatorContact(
+                                piiEncryptionService.safeDecrypt(rs.getString("title")),
+                                piiEncryptionService.safeDecrypt(rs.getString("phone_number")))),
+                schemeIds.toArray());
+        Map<Integer, List<OperatorContact>> byScheme = new LinkedHashMap<>();
+        for (OperatorRow row : rows) {
+            byScheme.computeIfAbsent(row.schemeId(), k -> new ArrayList<>()).add(row.contact());
+        }
+        return byScheme;
+    }
+
+    /**
+     * Batch-resolves the village names each scheme serves.
+     *
+     * <p>There is no village table: villages are rows of {@code lgd_location_master_table} at the
+     * deepest level of the per-tenant LGD tree, reached through {@code scheme_lgd_mapping_table}. A
+     * scheme can serve several — which is exactly why the analytics scheme dimension fans out — and
+     * all of them are returned, because an officer sent to a scheme needs to know every village it
+     * covers.</p>
+     */
+    @SuppressWarnings("java:S2077")
+    private Map<Integer, List<String>> resolveVillages(String tenantSchema, Set<Integer> schemeIds) {
+        if (schemeIds.isEmpty()) {
+            return Map.of();
+        }
+        String sql = "SELECT slm.scheme_id, lgd.title FROM " + tenantSchema + ".scheme_lgd_mapping_table slm "
+                + "JOIN " + tenantSchema + ".lgd_location_master_table lgd ON lgd.id = slm.parent_lgd_id "
+                + "WHERE slm.scheme_id IN (" + placeholders(schemeIds.size()) + ") "
+                + "AND slm.deleted_at IS NULL AND lgd.deleted_at IS NULL AND lgd.status = 1 "
+                + "ORDER BY slm.scheme_id, lgd.title";
+        List<VillageRow> rows = jdbcTemplate.query(sql,
+                (rs, n) -> new VillageRow(rs.getInt("scheme_id"), rs.getString("title")),
+                schemeIds.toArray());
+        Map<Integer, List<String>> byScheme = new LinkedHashMap<>();
+        for (VillageRow row : rows) {
+            if (row.title() == null || row.title().isBlank()) {
+                continue;
+            }
+            byScheme.computeIfAbsent(row.schemeId(), k -> new ArrayList<>()).add(row.title());
+        }
+        return byScheme;
+    }
+
+    /** Intermediate row carrying the scheme id alongside one village name, for batch grouping. */
+    private record VillageRow(int schemeId, String title) {}
 
     /** Intermediate row carrying the scheme id alongside one resolved operator, for batch grouping. */
     private record OperatorRow(int schemeId, OperatorContact contact) {}

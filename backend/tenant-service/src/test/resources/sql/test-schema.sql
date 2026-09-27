@@ -50,7 +50,9 @@ CREATE TABLE tenant_test.user_table (
     whatsapp_connection_id  BIGINT  NULL,
     email        VARCHAR(255) NOT NULL DEFAULT 'noop@test.com',
     tenant_id    INTEGER NOT NULL DEFAULT 1,
-    status       INTEGER NOT NULL DEFAULT 1
+    status       INTEGER NOT NULL DEFAULT 1,
+    deleted_at   TIMESTAMP,
+    deleted_by   INTEGER
 );
 
 CREATE TABLE tenant_test.scheme_master_table (
@@ -63,10 +65,12 @@ CREATE TABLE tenant_test.scheme_master_table (
 );
 
 CREATE TABLE tenant_test.user_scheme_mapping_table (
-    id        SERIAL PRIMARY KEY,
-    user_id   INTEGER NOT NULL,
-    scheme_id INTEGER NOT NULL,
-    status    INTEGER NOT NULL
+    id         SERIAL PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    scheme_id  INTEGER NOT NULL,
+    status     INTEGER NOT NULL,
+    deleted_at TIMESTAMP,
+    deleted_by INTEGER
 );
 
 CREATE TABLE tenant_test.flow_reading_table (

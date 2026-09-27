@@ -6,10 +6,12 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,7 +44,7 @@ class BfmReadingServiceMeterReplacedTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
@@ -51,16 +53,24 @@ class BfmReadingServiceMeterReplacedTest {
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
-    private FlowVisionReadingsRetryService flowVisionReadingsRetryService;
+    private OcrReadingsRetryService ocrReadingsRetryService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
     @Mock
     private ReadingChannelResolver readingChannelResolver;
+
+    @Mock
+    private RolloverResolutionService rolloverResolutionService;
+
+    // SUPPLY-PLAUSIBILITY: declared so @InjectMocks supplies it rather than leaving it null. These
+    // tests never set CreateReadingRequest.supplyPlausibilityChecked, so the guard is never consulted.
+    @Mock
+    private SupplyPlausibilityGuard supplyPlausibilityGuard;
 
     @InjectMocks
     private BfmReadingService service;
@@ -86,8 +96,8 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
-        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
+        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.createFlowReading(
                 anyString(),
@@ -123,11 +133,8 @@ class BfmReadingServiceMeterReplacedTest {
         );
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 anyString(),
-                anyLong(),
-                anyLong(),
-                org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
-                anyString(),
-                org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
+                org.mockito.ArgumentMatchers.argThat(anomaly -> anomaly != null
+                        && anomaly.type() == AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS)
         );
         verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                 org.mockito.ArgumentMatchers.eq(1),
@@ -144,7 +151,7 @@ class BfmReadingServiceMeterReplacedTest {
                 anyString(),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
                 anyString()
-        );
+        , any());
     }
 
     @Test
@@ -163,7 +170,7 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("800"), LocalDateTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("800"), ReadingTime.now().minusDays(1))));
 
         when(tenantConfigRepository.findConfigValue(1, "TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD"))
                 .thenReturn(Optional.empty());
@@ -171,7 +178,7 @@ class BfmReadingServiceMeterReplacedTest {
                 .thenReturn(Optional.of("{\"undersupplyThresholdPercent\":10,\"oversupplyThresholdPercent\":20}"));
         when(tenantConfigRepository.findConfigValue(1, "WATER_NORM"))
                 .thenReturn(Optional.of("{\"value\":\"1000\"}"));
-        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.now()))
+        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.createFlowReading(
                 anyString(),
@@ -212,7 +219,7 @@ class BfmReadingServiceMeterReplacedTest {
         String schemaName = "tenant_test";
         TelemetryOperator operator = new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null);
 
-        LocalDateTime readingAt = LocalDateTime.now();
+        LocalDateTime readingAt = ReadingTime.now();
         CreateReadingRequest request = CreateReadingRequest.builder()
                 .schemeId(10L)
                 .operatorId(1L)
@@ -226,7 +233,7 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
 
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.from(readingAt)))
                 .thenReturn(Optional.empty());

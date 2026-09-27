@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.tenant.enums;
 
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.MessagingAllowedHostsConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 import org.junit.jupiter.api.DisplayName;
@@ -56,8 +57,15 @@ class SystemConfigKeyEnumTest {
     }
 
     @Test
-    @DisplayName("enum has exactly 6 values")
-    void enumHasSixValues() {
-        assertThat(SystemConfigKeyEnum.values()).hasSize(6);
+    @DisplayName("MESSAGING_PROVIDER_ALLOWED_HOSTS has MessagingAllowedHostsConfigDTO class")
+    void messagingProviderAllowedHosts_hasDtoClass() {
+        assertThat(SystemConfigKeyEnum.MESSAGING_PROVIDER_ALLOWED_HOSTS.getDtoClass())
+                .isEqualTo(MessagingAllowedHostsConfigDTO.class);
+    }
+
+    @Test
+    @DisplayName("enum has exactly 7 values")
+    void enumHasSevenValues() {
+        assertThat(SystemConfigKeyEnum.values()).hasSize(7);
     }
 }

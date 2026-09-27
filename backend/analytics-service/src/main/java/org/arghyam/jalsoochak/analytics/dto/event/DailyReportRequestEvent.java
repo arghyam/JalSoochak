@@ -6,8 +6,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.List;
-
 /**
  * Inbound request (produced by tenant-service, consumed by analytics-service on
  * {@code common-topic}) asking analytics to compute the Daily Water Service Situation
@@ -25,11 +23,14 @@ public class DailyReportRequestEvent {
     private Integer tenantId;
     private String tenantSchema;       // tenant_<state> — passed through for message-service PII lookup
     private Long officerUserId;
-    private String officerUserType;    // SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
-    private String reportDate;         // ISO-8601 date the report covers (D-1)
-    private String correlationId;      // ties one report run's logs across tenant/analytics/message
+    private String officerUserType;    // SECTION_OFFICER
+    private String reportDate;         // ISO-8601 date the report covers (today, IST)
 
-    /** SDO reports only: Section Officer user ids under this SDO (share ≥1 scheme with it). Drives the
-     *  per-officer Summary breakdown table; null/empty for a SECTION_OFFICER request. */
-    private List<Long> subordinateOfficerUserIds;
+    /**
+     * ISO-8601 local date-time (IST) the data window closes at — the instant the job ran. Anomaly
+     * queries bound by it so a replay reproduces the delivered numbers. Null falls back to the end of
+     * the report day.
+     */
+    private String cutoffIst;
+    private String correlationId;      // ties one report run's logs across tenant/analytics/message
 }

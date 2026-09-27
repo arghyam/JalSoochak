@@ -49,7 +49,7 @@ public class TelemetryEventPublisher {
                 .tenantId(tenantId)
                 .schemeId(toInt(schemeId))
                 .userId(toInt(userId))
-                .waterQuantity(toInt(waterQuantity))
+                .waterQuantity(waterQuantity)
                 .submissionStatus(submissionStatus)
                 .outageReason(null)
                 .nonSubmissionReason(null)
@@ -80,7 +80,7 @@ public class TelemetryEventPublisher {
                 .tenantId(tenantId)
                 .schemeId(toInt(schemeId))
                 .userId(toInt(userId))
-                .waterQuantity(0)
+                .waterQuantity(BigDecimal.ZERO)
                 .submissionStatus(NOT_SUBMITTED_STATUS)
                 .outageReason(payload.outageReason)
                 .nonSubmissionReason(payload.nonSubmissionReason)
@@ -109,7 +109,7 @@ public class TelemetryEventPublisher {
                 .tenantId(tenantId)
                 .schemeId(toInt(schemeId))
                 .userId(toInt(userId))
-                .waterQuantity(0)
+                .waterQuantity(BigDecimal.ZERO)
                 .submissionStatus(NOT_SUBMITTED_STATUS)
                 .outageReason(null)
                 .nonSubmissionReason(meterChangeReason)
@@ -137,7 +137,8 @@ public class TelemetryEventPublisher {
                                        Integer consecutiveDaysMissed,
                                        String reason,
                                        Integer status,
-                                       String correlationId) {
+                                       String correlationId,
+                                       String submissionCorrelationId) {
         String eventUuid = resolveAnomalyEventUuid(correlationId, userId);
         AnomalyEvent event = AnomalyEvent.builder()
                 .eventType(EVENT_ANOMALY_RECORDED)
@@ -156,6 +157,9 @@ public class TelemetryEventPublisher {
                 .reason(reason)
                 .status(status)
                 .correlationId(correlationId)
+                // ANOMALY-SUBMISSION-LINK: carried separately from correlationId, which is the dedup
+                // key the event uuid above is derived from and must keep its meaning.
+                .submissionCorrelationId(submissionCorrelationId)
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);
@@ -205,15 +209,16 @@ public class TelemetryEventPublisher {
                                             Integer channel,
                                             LocalDate readingDate,
                                             Integer submissionStatus,
-                                            Integer readingType) {
+                                            Integer readingType,
+                                            String correlationId) {
         LocalDate effectiveDate = readingDate != null ? readingDate : (readingAt != null ? readingAt.toLocalDate() : null);
         MeterReadingEvent event = MeterReadingEvent.builder()
                 .eventType(EVENT_METER_READING_RECORDED)
                 .tenantId(tenantId)
                 .schemeId(toInt(schemeId))
                 .userId(toInt(userId))
-                .extractedReading(toInt(extractedReading))
-                .confirmedReading(toInt(confirmedReading))
+                .extractedReading(extractedReading)
+                .confirmedReading(confirmedReading)
                 .confidence(toConfidenceInt(confidence))
                 .imageUrl(imageUrl)
                 .readingAt(readingAt != null ? readingAt.toString() : null)
@@ -221,6 +226,9 @@ public class TelemetryEventPublisher {
                 .readingDate(effectiveDate != null ? effectiveDate.toString() : null)
                 .submissionStatus(submissionStatus)
                 .readingType(readingType)
+                // ANOMALY-SUBMISSION-LINK: the warehouse counterpart an anomaly's
+                // submission_correlation_id joins against.
+                .correlationId(correlationId)
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);
@@ -274,13 +282,6 @@ public class TelemetryEventPublisher {
 
     private static Integer toInt(Long value) {
         return value == null ? null : value.intValue();
-    }
-
-    private static Integer toInt(BigDecimal value) {
-        if (value == null) {
-            return null;
-        }
-        return value.setScale(0, RoundingMode.HALF_UP).intValue();
     }
 
     private static Integer toConfidenceInt(BigDecimal value) {

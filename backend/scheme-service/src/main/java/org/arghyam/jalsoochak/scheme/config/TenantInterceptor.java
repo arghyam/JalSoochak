@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 public class TenantInterceptor implements HandlerInterceptor {
@@ -24,7 +25,9 @@ public class TenantInterceptor implements HandlerInterceptor {
                 return false;
             }
             if (!normalized.isEmpty()) {
-                TenantContext.setSchema("tenant_" + normalized.toLowerCase());
+                // Locale.ROOT keeps this schema name identical to the one the security evaluator
+                // derives from the caller's own tenant claim, whatever the JVM default locale is.
+                TenantContext.setSchema("tenant_" + normalized.toLowerCase(Locale.ROOT));
             }
         }
         return true;

@@ -18,6 +18,9 @@ Thumbs.db
 logs/
 backend/logger/logs/
 
+#local reference docs
+mydocs/
+
 # Environment files
 .env
 *.env

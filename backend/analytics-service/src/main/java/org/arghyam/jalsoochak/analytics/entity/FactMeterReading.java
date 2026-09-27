@@ -11,6 +11,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -35,16 +36,32 @@ public class FactMeterReading {
     @Column(name = "user_id", nullable = false)
     private Integer userId;
 
+    /**
+     * Readings are {@code BigDecimal} over a bare {@code NUMERIC} column, mirroring
+     * {@code flow_reading_table} — the meters have a decimal digit and the warehouse keeps it.
+     *
+     * <p>No precision or scale is declared: the column is unconstrained, as at the source, and this
+     * entity must not impose one it does not have.
+     */
     @Column(name = "extracted_reading", nullable = false)
-    private Integer extractedReading;
+    private BigDecimal extractedReading;
 
     @Column(name = "confirmed_reading", nullable = false)
-    private Integer confirmedReading;
+    private BigDecimal confirmedReading;
 
     private Integer confidence;
 
     @Column(name = "image_url")
     private String imageUrl;
+
+    /**
+     * ANOMALY-SUBMISSION-LINK (V48): the source row's {@code flow_reading_table.correlation_id}, so
+     * an anomaly can be resolved to the fact row it was raised over. Not unique — the tenant column
+     * has no unique constraint and the chatbot flows share one value across rows — so this is a
+     * drill-down key, never a counting key.
+     */
+    @Column(name = "correlation_id")
+    private String correlationId;
 
     @Column(name = "reading_at", nullable = false)
     private LocalDateTime readingAt;

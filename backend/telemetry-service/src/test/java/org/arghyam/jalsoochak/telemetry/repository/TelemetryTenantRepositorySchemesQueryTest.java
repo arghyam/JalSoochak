@@ -16,6 +16,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -80,11 +81,65 @@ class TelemetryTenantRepositorySchemesQueryTest {
         assertTrue(sql.contains("AND u.deleted_at IS NULL"));
     }
 
-    // LENIENT-INGEST: placeholder schemes must be created inactive so they never inflate active-scheme
-    // dashboards, and flagged is_auto_provisioned so they stay discoverable for reconciliation.
+    // PHONE-OPTIONAL: a submission without a phone is credited to the scheme's pump operator, so the
+    // lookup must filter on that role, ignore soft-deleted/inactive rows, and be deterministic (oldest
+    // mapping first) so repeated submissions for a scheme always land on the same user.
     @SuppressWarnings("unchecked")
     @Test
-    void getOrCreatePlaceholderSchemeInsertsInactiveAutoProvisionedScheme() {
+    void findFirstPumpOperatorForSchemeSelectsOldestActivePumpOperatorMapping() {
+        TelemetryTenantRepository repository = new TelemetryTenantRepository(jdbcTemplate, piiEncryptionService);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Boolean.class), any(), any(), any())).thenReturn(Boolean.TRUE);
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(), any())).thenReturn(List.of());
+
+        repository.findFirstPumpOperatorForScheme("tenant_as", 33L);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sqlCaptor.capture(), any(RowMapper.class), eq(33L), eq("PUMP_OPERATOR"));
+        String sql = sqlCaptor.getValue();
+
+        assertTrue(sql.contains("WHERE usm.scheme_id = ?"));
+        assertTrue(sql.contains("AND usm.status = 1"));
+        assertTrue(sql.contains("AND usm.deleted_at IS NULL"));
+        assertTrue(sql.contains("AND u.status = 1"));
+        assertTrue(sql.contains("AND u.deleted_at IS NULL"));
+        assertTrue(sql.contains("UPPER(COALESCE(ut.c_name, '')) = ?"));
+        assertTrue(sql.contains("ORDER BY usm.id"));
+        assertTrue(sql.contains("LIMIT 1"));
+        assertTrue(sql.contains("u.language_id AS language_id"),
+                "the language column must stay table-qualified so the join does not make it ambiguous");
+    }
+
+    // The language_id column is absent on pre-migration tenant schemas; the lookup must degrade to NULL
+    // rather than failing, exactly as findOperatorById does.
+    @SuppressWarnings("unchecked")
+    @Test
+    void findFirstPumpOperatorForSchemeFallsBackWhenLanguageColumnMissing() {
+        TelemetryTenantRepository repository = new TelemetryTenantRepository(jdbcTemplate, piiEncryptionService);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Boolean.class), any(), any(), any())).thenReturn(Boolean.FALSE);
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(), any())).thenReturn(List.of());
+
+        repository.findFirstPumpOperatorForScheme("tenant_as", 33L);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sqlCaptor.capture(), any(RowMapper.class), eq(33L), eq("PUMP_OPERATOR"));
+        assertTrue(sqlCaptor.getValue().contains("NULL::integer AS language_id"));
+    }
+
+    @Test
+    void findFirstPumpOperatorForSchemeSkipsQueryWhenSchemeIdMissing() {
+        TelemetryTenantRepository repository = new TelemetryTenantRepository(jdbcTemplate, piiEncryptionService);
+
+        assertTrue(repository.findFirstPumpOperatorForScheme("tenant_as", null).isEmpty());
+
+        verifyNoInteractions(jdbcTemplate);
+    }
+
+    // LENIENT-INGEST: placeholder schemes must be created Non-Operative so they never inflate
+    // operative-scheme dashboards, and flagged is_auto_provisioned so they stay discoverable for
+    // reconciliation. The retired is_active column is deliberately absent from the insert.
+    @SuppressWarnings("unchecked")
+    @Test
+    void getOrCreatePlaceholderSchemeInsertsNonOperativeAutoProvisionedScheme() {
         TelemetryTenantRepository repository = new TelemetryTenantRepository(jdbcTemplate, piiEncryptionService);
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(), any())).thenReturn(List.of());
         when(jdbcTemplate.queryForObject(anyString(), eq(Number.class), any(), any(), any())).thenReturn(55555L);
@@ -96,9 +151,10 @@ class TelemetryTenantRepositorySchemesQueryTest {
         verify(jdbcTemplate).queryForObject(sqlCaptor.capture(), eq(Number.class), any(), any(), any());
         String insertSql = sqlCaptor.getValue();
         assertTrue(insertSql.contains("is_auto_provisioned"), "placeholder must be flagged is_auto_provisioned");
-        assertTrue(insertSql.contains("is_active"), "placeholder insert must set is_active explicitly");
-        assertTrue(insertSql.contains("TRUE, FALSE"),
-                "placeholder must be is_auto_provisioned=TRUE and is_active=FALSE");
+        assertFalse(insertSql.contains("is_active"),
+                "placeholder insert must not reference the retired is_active column");
+        assertTrue(insertSql.contains("0, 0, TRUE"),
+                "placeholder must be work_status=0, operating_status=0 and is_auto_provisioned=TRUE");
     }
 
     // LENIENT-INGEST: when two concurrent unknown-scheme submissions race, the unique index (V31) makes
@@ -128,7 +184,7 @@ class TelemetryTenantRepositorySchemesQueryTest {
                 eq("tenant_as"),
                 eq("flow_reading_table"),
                 anyString()
-        )).thenAnswer(invocation -> "flowvision_correlation_id".equals(invocation.getArgument(4)));
+        )).thenAnswer(invocation -> "ocr_correlation_id".equals(invocation.getArgument(4)));
 
         repository.updateFlowReadingFromIngestion(
                 "tenant_as",
@@ -161,7 +217,7 @@ class TelemetryTenantRepositorySchemesQueryTest {
         assertTrue(sql.contains("correlation_id = CASE"));
         assertTrue(sql.contains("correlation_id LIKE 'scheme-selection-%'"));
         assertTrue(sql.contains("THEN COALESCE(?, correlation_id)"));
-        assertTrue(sql.contains("flowvision_correlation_id = COALESCE(?, flowvision_correlation_id)"));
+        assertTrue(sql.contains("ocr_correlation_id = COALESCE(?, ocr_correlation_id)"));
     }
 
     // SCHEME-ID-MISMATCH: after a reading resolves on one id, the other submitted id is cross-checked

@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Immutable input to the {@link org.arghyam.jalsoochak.message.channel.EmailSender} port.
+ * Immutable input to the {@link org.arghyam.jalsoochak.message.channel.provider.EmailSender} port.
  *
  * <p>{@code templateVariables} uses snake_case keys as the canonical naming convention:
  * <ul>

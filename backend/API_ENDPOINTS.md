@@ -5,19 +5,40 @@ When accessed through the API gateway, prefix each path with the service slug (e
 
 ---
 
+## Pagination
+
+Paginated endpoints take `page` (zero-indexed, default `0`) and `size` (default `20`; named `limit`
+on `/api/v1/tenant/user/staff`).
+
+On the **user-service** endpoints — `/api/v1/pumpoperator/...` and `/api/v1/tenant/user/staff` —
+both are validated at the controller: `page` must be `>= 0` and `size` must be between `1` and
+`100`. Out-of-range values are rejected with `400 Bad Request` and a `fieldErrors` entry naming the
+offending parameter — they are never silently clamped.
+
+Exception: `/api/v1/pumpoperator/pump-operators/by-scheme` only paginates when `page` or `size` is
+supplied. When either is, the same bounds apply.
+
+Endpoints on the other services do not share this contract. Scheme-service's `/api/v1/scheme/schemes`
+family, for one, takes `page`/`limit` unvalidated at the controller and clamps them in the service
+layer (`page` to `>= 0`, `limit` to `1..100`), so an out-of-range value there returns `200` with the
+clamped page rather than `400`.
+
+---
+
 ## Required Environment Variables
 
 Set the following environment variables before running the Telemetry services:
 
-- `GLIFIC_API_URL`
-- `GLIFIC_API_KEY`
-- `GLIFIC_NUDGE_TEMPLATE_ID`
-- `GLIFIC_ESCALATION_TEMPLATE_ID`
-- `MINIO_ENDPOINT`
-- `MINIO_ACCESS_KEY`
-- `MINIO_SECRET_KEY`
-- `MINIO_BUCKET`
-- `MINIO_BASE_URL`
+- `WHATSAPP_API_URL`
+- `WHATSAPP_USERNAME`
+- `WHATSAPP_PASSWORD`
+- `WHATSAPP_NUDGE_TEMPLATE_ID`
+- `WHATSAPP_ESCALATION_TEMPLATE_ID`
+- `STORAGE_ENDPOINT`
+- `STORAGE_ACCESS_KEY`
+- `STORAGE_SECRET_KEY`
+- `STORAGE_BUCKET`
+- `STORAGE_PUBLIC_BASE_URL`
 
 ---
 
@@ -113,11 +134,10 @@ Set the following environment variables before running the Telemetry services:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/public/schemes/{schemeId}` | Get scheme by ID (public) |
-| GET | `/api/v1/scheme/schemes` | List all schemes |
-| GET | `/api/v1/scheme/schemes/mappings` | List scheme mappings |
-| GET | `/api/v1/scheme/schemes/counts` | Scheme counts |
-| GET | `/api/v1/scheme/schemes/counts/by-status` | Scheme counts by status |
+| GET | `/api/v1/public/schemes/{schemeId}?tenantCode={tenantCode}` | Get scheme by ID. Authenticated despite the `public` path — `tenantCode` must match the caller's own tenant. No other query parameters are read |
+| GET | `/api/v1/scheme/schemes` | List all schemes; `workStatus` / `operatingStatus` accept repeated or comma-separated values |
+| GET | `/api/v1/scheme/schemes/mappings` | List scheme mappings; same multi-valued status filters |
+| GET | `/api/v1/scheme/schemes/counts/by-status` | Total schemes plus the work-status and operating-status breakdowns |
 | PATCH | `/api/v1/scheme/schemes/{schemeId}/status?tenantCode={tenantCode}` | Update scheme work/operating status (one or both) |
 | POST | `/api/v1/scheme/schemes/upload` | Bulk upload schemes (CSV) |
 | POST | `/api/v1/scheme/schemes/mappings/upload` | Bulk upload scheme mappings (CSV) |
@@ -131,9 +151,9 @@ Set the following environment variables before running the Telemetry services:
 - `4` = `Handed Over`
 
 `operating_status`
+- `0` = `Non-Operative`
 - `1` = `Operative`
-- `2` = `Non-Operative`
-- `3` = `Partially Operative`
+- `2` = `Partially Operative`
 
 ---
 
@@ -153,7 +173,6 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/analytics/water-supply/average-per-region` | Average water supply per region |
 | GET | `/api/v1/analytics/national/dashboard` | National dashboard data |
 | GET | `/api/v1/analytics/scheme-regularity/periodic/national` | National periodic scheme regularity |
-| POST | `/api/v1/analytics/date-dimension/populate` | Populate date dimension table |
 | GET | `/api/v1/analytics/schemes/status-count` | Scheme status counts |
 | GET | `/api/v1/analytics/schemes/dashboard` | Scheme dashboard |
 | GET | `/api/v1/analytics/schemes/region-report` | Scheme region report |
@@ -184,7 +203,6 @@ Set the following environment variables before running the Telemetry services:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/message/notifications` | List notifications |
 | POST | `/api/v1/message/notifications` | Send a notification (specify channel in body) |
 | POST | `/api/v1/message/events` | Dispatch a Kafka event |
 
@@ -237,35 +255,60 @@ The tables below list every endpoint that changed across all services. If your f
 
 ---
 
-### Telemetry service — webhook base URL (affects all 23 Glific webhook endpoints)
+### Telemetry service — webhook base URL (affects all 26 chatbot webhook endpoints)
 
-> ## Telemetry · Webhook (`telemetry-service` · port 8084)
-> These endpoints are called by **Glific** (WhatsApp bot platform), not by the frontend.
+> ## Telemetry · Webhook (`telemetry-service` · port 8989)
+> These endpoints are called by the **WhatsApp chatbot platform**, not by the frontend.
+>
+> **All 26 require the `X-Webhook-Token: <token>` header.** Ingress exposes them publicly, bypassing
+> the API gateway, so this shared secret is the only thing in front of them. Requests without a valid
+> token get `401 {"success":false,"message":"Unauthorized"}`. Configure via
+> `TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES` (comma-separated SHA-256 hex of the accepted tokens);
+> `TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT` is the kill switch, `OFF` is for local development.
+>
+> Note this is a **different credential** from the `X-Api-Key` used by the partner ingestion
+> endpoints (`/readings`, `/readings/formats/{format}`, `/schemes/{id}/yesterday-final-reading`),
+> which share the same `/api/v1/telemetry` prefix.
+
+### Partner ingestion — the optional `channel` parameter
+
+`POST /api/v1/telemetry/readings` and `POST /api/v1/telemetry/readings/formats/{format}` accept an
+optional `channel` on the request body: `BFM`, `ELM`, `PDU`, `IOT` or `MAN`, case-insensitive, blank
+treated as absent. It names the equipment the reading came from and overrides the submitting
+operator's stored channel preference; omitted, the preference decides and falls back to `BFM`, which
+is what every caller did before the field existed.
+
+An unsupported value returns `400` with `errorCode: CHANNEL_NOT_SUPPORTED`. `PUT /readings` and
+`PATCH /schemes/{id}/yesterday-final-reading` do not take it — a correction keeps the channel
+recorded when the reading was first submitted.
 
 | Method | Endpoint                                          | Description |
 |--------|---------------------------------------------------|-------------|
-| POST | `/api/v1/telemetry/readings/glific`               | Receive the generic Glific webhook payload for image-based meter readings |
+| POST | `/api/v1/telemetry/readings/whatsapp`             | Receive the chatbot webhook payload for image-based meter readings |
 | POST | `/api/v1/telemetry/intro`                         | Send the flow intro message for a contact |
 | POST | `/api/v1/telemetry/closing`                       | Send the flow closing message for a contact |
 | POST | `/api/v1/telemetry/language/selection`            | Return the language selection prompt/options for a contact |
 | POST | `/api/v1/telemetry/selected/language`             | Persist the selected language for a contact |
 | POST | `/api/v1/telemetry/channel/selection`             | Return the channel selection prompt/options for a contact |
 | POST | `/api/v1/telemetry/selected/channel`              | Persist the selected channel for a contact |
+| POST | `/api/v1/telemetry/schemes`                       | Return the schemes the contact's operator is mapped to |
+| POST | `/api/v1/telemetry/scheme/selected`               | Persist the selected scheme for a contact |
 | POST | `/api/v1/telemetry/item/selection`                | Return the item selection prompt/options for a contact |
 | POST | `/api/v1/telemetry/selected/item`                 | Persist the selected item for a contact |
+| POST | `/api/v1/telemetry/trigger-welcome-message`       | Build the onboarding message for a newly registered operator |
 | POST | `/api/v1/telemetry/meter-change`                  | Return meter-change reason prompts/options |
 | POST | `/api/v1/telemetry/issue-report`                  | Return issue-report prompt/options |
 | POST | `/api/v1/telemetry/issue-report/submit`           | Save the issue report details provided by the contact |
 | POST | `/api/v1/telemetry/issue-report/telemetry`        | Return telemetry-specific issue-report prompt/options |
 | POST | `/api/v1/telemetry/issue-report/telemetry/submit` | Save telemetry issue report details |
 | POST | `/api/v1/telemetry/meter/issue-report`            | Return telemetry issue-report reasons (JSON list) |
-| POST | `/api/v1/telemetry/meter/change`                  | Return meter-change reasons (JSON list) |
-| POST | `/api/v1/telemetry/meter/change/submit`           | Save the selected meter-change reason |
+| POST | `/api/v1/telemetry/meter/meter-change`            | Return meter-change reasons (JSON list) |
+| POST | `/api/v1/telemetry/meter/meter-change/submit`     | Save the selected meter-change reason |
 | POST | `/api/v1/telemetry/others`                        | Return the “other issue” prompt/options |
 | POST | `/api/v1/telemetry/others/submitted`              | Save “other issue” details |
 | POST | `/api/v1/telemetry/take-meter-reading`            | Return the take‑meter‑reading prompt/options |
 | POST | `/api/v1/telemetry/manual-reading`                | Submit a manual meter reading |
-| POST | `/api/v1/telemetry/location`                      | Submit/update location details for a contact |
+| POST | `/api/v1/telemetry/location`                      | Submit/update location details for a contact. Response carries `locationMismatch` — see [location-affinity-check.md](../docs/location-affinity-check.md) |
 | POST | `/api/v1/telemetry/update-previous-reading`       | Update the previous reading for a contact |
 
 ---
@@ -292,6 +335,6 @@ The tables below list every endpoint that changed across all services. If your f
 
 | Old | New | Notes |
 |-----|-----|-------|
-| `GET /api/notifications` | `GET /api/v1/message/notifications` | Added `/v1/message/` prefix |
+| `GET /api/notifications` | — | Removed; only ever returned placeholder data |
 | `POST /api/notifications/send` | `POST /api/v1/message/notifications` | Verb `/send` removed; use POST to collection |
 | `POST /api/publish` | `POST /api/v1/message/events` | Renamed to noun; added `/v1/message/` prefix |

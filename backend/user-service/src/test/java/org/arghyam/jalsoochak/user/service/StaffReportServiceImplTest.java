@@ -155,7 +155,7 @@ class StaffReportServiceImplTest {
                 .thenReturn(List.of(TenantStaffResponseDTO.builder()
                         .id(1L).uuid("u1").title("Alice")
                         .email("a@x").phoneNumber("9").status(TenantUserStatus.ACTIVE)
-                        .role("DISTRICT_OFFICER").schemes(List.of()).build()));
+                        .role("SUB_DIVISIONAL_OFFICER").schemes(List.of()).build()));
         when(reportsRepository.insertIfAbsent(eq(SCHEMA), any(), anyString())).thenReturn(true);
         when(objectStorageService.presignedGetUrl(eq("staff-reports"), anyString(), any(Duration.class), anyString()))
                 .thenReturn(URI.create("https://example/staff.csv?sig=y"));
@@ -234,10 +234,10 @@ class StaffReportServiceImplTest {
                 .thenReturn(URI.create("https://x"));
 
         service.generate(TENANT_CODE, ReportFormat.CSV,
-                new StaffReportRequestDTO(List.of("DISTRICT_OFFICER", "SECTION_OFFICER"), "ACTIVE", null),
+                new StaffReportRequestDTO(List.of("SUB_DIVISIONAL_OFFICER", "SECTION_OFFICER"), "ACTIVE", null),
                 authentication());
         service.generate(TENANT_CODE, ReportFormat.CSV,
-                new StaffReportRequestDTO(List.of("section_officer", "district_officer"), " active ", null),
+                new StaffReportRequestDTO(List.of("section_officer", "sub_divisional_officer"), " active ", null),
                 authentication());
 
         List<String> hashes = hashCap.getAllValues();

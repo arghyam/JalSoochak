@@ -19,8 +19,7 @@ import java.time.Duration;
 
 /**
  * S3-compatible implementation of {@link ObjectStorageService}.
- * Works with any provider exposing the AWS S3 API (AWS S3, MinIO,
- * Cloudflare R2, DigitalOcean Spaces, Wasabi, …).
+ * Works with AWS S3 and any other store that speaks the S3 API.
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -29,10 +28,10 @@ public class S3CompatibleStorageService implements ObjectStorageService {
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
     /**
-     * Optional public-facing base URL (e.g. {@code https://jalsoochak.in/minio}) used to
+     * Optional public-facing base URL (e.g. {@code https://jalsoochak.in/storage}) used to
      * rewrite the SDK-generated presigned URL after signing. The signature itself is computed
      * against the internal endpoint so the reverse proxy can validate it correctly by forwarding
-     * {@code Host: <internal-host>} to MinIO. Only the origin and path prefix are swapped;
+     * {@code Host: <internal-host>} to the store. Only the origin and path prefix are swapped;
      * the query string (including X-Amz-Signature and X-Amz-Expires) is preserved verbatim.
      */
     private final String presignedBaseUrl;
@@ -113,7 +112,7 @@ public class S3CompatibleStorageService implements ObjectStorageService {
      * signature and TTL remain valid.
      *
      * <p>Requires the reverse proxy to forward {@code Host: <internal-host>} to
-     * MinIO (e.g. nginx {@code proxy_set_header Host $proxy_host;}) so that MinIO
+     * the store (e.g. nginx {@code proxy_set_header Host $proxy_host;}) so that it
      * reconstructs the canonical request with the same host that was signed.
      */
     URI rewritePublicUrl(URI sdkUri) {

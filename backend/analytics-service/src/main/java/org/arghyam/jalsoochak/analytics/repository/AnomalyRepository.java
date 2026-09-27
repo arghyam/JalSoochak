@@ -38,7 +38,7 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
                     SELECT new org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto(
                         a.id, a.uuid, a.type, a.userId, a.schemeId, a.tenantId, a.aiReading, a.aiConfidencePercentage,
                         a.overriddenReading, a.retries, a.previousReading, a.previousReadingDate, a.consecutiveDaysMissed,
-                        a.reason, a.status, a.remarks, a.correlationId, a.resolvedBy, a.resolvedAt, a.deletedAt, a.deletedBy,
+                        a.reason, a.status, a.remarks, a.correlationId, a.submissionCorrelationId, a.resolvedBy, a.resolvedAt, a.deletedAt, a.deletedBy,
                         a.createdAt, a.updatedAt, s.schemeName)
                     FROM Anomaly a, DimUserSchemeMapping m, DimScheme s
                     WHERE a.tenantId = :tenantId

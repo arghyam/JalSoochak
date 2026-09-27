@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.RequiredArgsConstructor;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class TelemetrySubmissionAuditService {
 
-    private final GlificOperatorContextService operatorContextService;
+    private final OperatorContextService operatorContextService;
     private final TelemetryTenantRepository telemetryTenantRepository;
 
     private final Map<LocalDate, Set<String>> dailyUniqueSubmitters = new ConcurrentHashMap<>();
@@ -48,7 +48,7 @@ public class TelemetrySubmissionAuditService {
         return snapshot(maskPhone(phoneNumber), schemeId, normalizePhone(phoneNumber));
     }
 
-    public SubmissionAuditSnapshot captureForAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
+    public SubmissionAuditSnapshot captureForCanonicalReading(CanonicalReadingRequest request, Integer preferredTenantId) {
         cleanupOldDates();
 
         String phoneNumber = request != null ? request.getPhoneNumber() : null;
@@ -62,7 +62,7 @@ public class TelemetrySubmissionAuditService {
                         operatorContextService.resolveOperatorWithSchema(phoneNumber, preferredTenantId);
                 maskedPhone = maskPhone(operatorWithSchema.operator().phoneNumber());
                 uniqueKey = normalizePhone(operatorWithSchema.operator().phoneNumber());
-                schemeId = resolveAssamSchemeId(
+                schemeId = resolveCanonicalSchemeId(
                         operatorWithSchema,
                         request.getStateSchemeId(),
                         request.getCentreSchemeId()
@@ -101,7 +101,7 @@ public class TelemetrySubmissionAuditService {
                 ));
     }
 
-    private Optional<Long> resolveAssamSchemeId(TelemetryOperatorWithSchema operatorWithSchema,
+    private Optional<Long> resolveCanonicalSchemeId(TelemetryOperatorWithSchema operatorWithSchema,
                                                 String stateSchemeId,
                                                 String centreSchemeId) {
         Optional<Long> stateResolvedSchemeId = telemetryTenantRepository.findSchemeIdByStateSchemeId(

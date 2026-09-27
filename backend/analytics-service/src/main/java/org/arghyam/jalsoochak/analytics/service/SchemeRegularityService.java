@@ -16,6 +16,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.RegionWiseWaterQuantityResp
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusBreakdownResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserNonSubmissionReasonSchemeCountResponse;
@@ -30,7 +31,6 @@ import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 public interface SchemeRegularityService {
 
@@ -178,9 +178,9 @@ public interface SchemeRegularityService {
     SubmissionStatusSummaryResponse getSubmissionStatusSummaryByDepartment(
             Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate);
 
-    Map<String, Integer> getSchemeStatusCountByLgd(Integer tenantId, Integer lgdId);
+    SchemeStatusBreakdownResponse getSchemeStatusCountByLgd(Integer tenantId, Integer lgdId);
 
-    Map<String, Integer> getSchemeStatusCountByDepartment(Integer tenantId, Integer departmentId);
+    SchemeStatusBreakdownResponse getSchemeStatusCountByDepartment(Integer tenantId, Integer departmentId);
 
     SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByLgd(
             Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate,

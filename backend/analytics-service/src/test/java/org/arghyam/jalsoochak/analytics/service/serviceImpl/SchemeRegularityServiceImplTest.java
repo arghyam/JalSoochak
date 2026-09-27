@@ -15,6 +15,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.PeriodicWaterQuantityRespon
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.RegionWiseWaterQuantityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusBreakdownResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusCountDTO;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserNonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserOutageReasonSchemeCountResponse;
@@ -30,6 +32,7 @@ import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -40,6 +43,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -47,6 +51,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -83,7 +88,6 @@ class SchemeRegularityServiceImplTest {
     @BeforeEach
     void initCacheTtl() {
         // @Value isn't applied under @InjectMocks; set the cache TTL the prod default uses.
-        ReflectionTestUtils.setField(service, "cacheTtlHours", 1L);
     }
 
     @Test
@@ -140,7 +144,67 @@ class SchemeRegularityServiceImplTest {
         // 90% of a 3-day window rounds (half-up) to 3 days required.
         assertThat(response.getThresholdPercent()).isEqualByComparingTo("90");
         assertThat(response.getThresholdDays()).isEqualTo(3);
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+    }
+
+    @Test
+    void writeToCache_currentDayWindow_usesShortTtl() throws Exception {
+        // A window ending today is still accumulating (facts stream in via Kafka), so it must not be
+        // frozen for a full day — it gets the short current-day TTL instead.
+        ReflectionTestUtils.setField(service, "currentDayCacheTtlSeconds", 300L);
+        mockRedisValueOps();
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        LocalDate start = today.minusDays(2);
+        String key = ":scheme_regularity:tenant:1:lgd:101:start:" + start + ":end:" + today + ":v2";
+        when(valueOperations.get(key)).thenReturn(null);
+        when(schemeRegularityRepository.getSchemeRegularityMetrics(1, 101, start, today))
+                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 3, 1));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        service.getAverageSchemeRegularity(1, 101, start, today);
+
+        ArgumentCaptor<Duration> ttl = ArgumentCaptor.forClass(Duration.class);
+        verify(valueOperations).set(eq(key), eq("{json}"), ttl.capture());
+        assertThat(ttl.getValue()).isEqualTo(Duration.ofSeconds(300));
+    }
+
+    @Test
+    void writeToCache_currentDayWindowWithNonPositiveTtl_skipsCacheWrite() throws Exception {
+        // TTL <= 0 disables caching for today's window entirely: serve fully live, like continuous-schemes.
+        ReflectionTestUtils.setField(service, "currentDayCacheTtlSeconds", 0L);
+        mockRedisValueOps();
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        LocalDate start = today.minusDays(2);
+        String key = ":scheme_regularity:tenant:1:lgd:101:start:" + start + ":end:" + today + ":v2";
+        when(valueOperations.get(key)).thenReturn(null);
+        when(schemeRegularityRepository.getSchemeRegularityMetrics(1, 101, start, today))
+                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 3, 1));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+
+        service.getAverageSchemeRegularity(1, 101, start, today);
+
+        verify(valueOperations, never()).set(any(), any(), any(Duration.class));
+    }
+
+    @Test
+    void writeToCache_historicalWindow_keepsFullDayTtlEvenWithShortCurrentDayTtl() throws Exception {
+        // An immutable window ending before today keeps the 24h TTL regardless of the current-day setting.
+        ReflectionTestUtils.setField(service, "currentDayCacheTtlSeconds", 300L);
+        mockRedisValueOps();
+        String key = ":scheme_regularity:tenant:1:lgd:101:start:2026-01-01:end:2026-01-03:v2";
+        when(valueOperations.get(key)).thenReturn(null);
+        when(schemeRegularityRepository.getSchemeRegularityMetrics(1, 101, START, END))
+                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 3, 1));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        service.getAverageSchemeRegularity(1, 101, START, END);
+
+        verify(valueOperations).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -354,7 +418,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getThresholdDays()).isEqualTo(27);
         // The repository is queried over the widened window, never the single requested day.
         verify(schemeRegularityRepository).getSchemeRegularityMetrics(1, 101, expandedStart, singleDay);
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -389,7 +453,7 @@ class SchemeRegularityServiceImplTest {
         var response = service.getChildAveragePerformanceScoreByDepartment(201, START, END);
 
         assertThat(response).isEqualTo(repoRows);
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -427,7 +491,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.8889");
         assertThat(response.getChildRegionCount()).isEqualTo(2);
         assertThat(response.getChildRegions()).hasSize(2);
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -528,7 +592,7 @@ class SchemeRegularityServiceImplTest {
         verify(schemeRegularityRepository, times(1))
                 .getPeriodicSchemeRegularityForNation(START, requestedEnd, PeriodScale.WEEK);
 
-        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -560,7 +624,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getSchemeCount()).isEqualTo(2);
         assertThat(response.getTotalAchievedFhtcCount()).isEqualTo(123L);
         assertThat(response.getMetrics().getFirst().getTotalWaterQuantity()).isEqualTo(115L);
-        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -614,7 +678,7 @@ class SchemeRegularityServiceImplTest {
 
         assertThat(response.getScale()).isEqualTo("week");
         assertThat(response.getDepartmentId()).isEqualTo(201);
-        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -683,27 +747,39 @@ class SchemeRegularityServiceImplTest {
     }
 
     @Test
-    void getSchemeStatusCountByLgd_handlesNullCountsAsZero() {
+    void getSchemeStatusCountByLgd_labelsEveryBucketFromTheStatusEnums() {
         when(schemeRegularityRepository.getSchemeStatusCountByLgd(1, 101))
-                .thenReturn(new SchemeRegularityRepository.SchemeStatusCount(null, 7));
+                .thenReturn(new SchemeRegularityRepository.SchemeStatusBreakdown(
+                        7,
+                        List.of(codeCount(1, 4), codeCount(null, 3)),
+                        List.of(codeCount(0, 2), codeCount(2, 5))));
 
-        Map<String, Integer> result = service.getSchemeStatusCountByLgd(1, 101);
+        SchemeStatusBreakdownResponse result = service.getSchemeStatusCountByLgd(1, 101);
 
-        assertThat(result)
-                .containsEntry("active_schemes_count", 0)
-                .containsEntry("inactive_schemes_count", 7);
+        assertThat(result.getTotal()).isEqualTo(7);
+        assertThat(result.getWorkStatusCounts())
+                .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getLabel, SchemeStatusCountDTO::getCount)
+                .containsExactly(tuple(1, "Ongoing", 4), tuple(null, "Unknown", 3));
+        assertThat(result.getOperatingStatusCounts())
+                .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getLabel, SchemeStatusCountDTO::getCount)
+                .containsExactly(tuple(0, "Non-Operative", 2), tuple(2, "Partially Operative", 5));
+    }
+
+    private static SchemeRegularityRepository.SchemeStatusCodeCount codeCount(Integer code, int count) {
+        return new SchemeRegularityRepository.SchemeStatusCodeCount(code, count);
     }
 
     @Test
     void getSchemeStatusAndTopReportingByLgd_mapsParentLevelImmediateParentLevelAndLadders() throws Exception {
         mockRedisValueOps();
-        String key = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v4";
+        String key = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v5";
         when(valueOperations.get(key)).thenReturn(null);
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
         when(schemeRegularityRepository.getLgdLevelForTenant(12, 101)).thenReturn(2);
         when(schemeRegularityRepository.getSchemeStatusCountByLgd(12, 101))
-                .thenReturn(new SchemeRegularityRepository.SchemeStatusCount(1, 1));
+                .thenReturn(new SchemeRegularityRepository.SchemeStatusBreakdown(
+                        2, List.of(codeCount(1, 2)), List.of(codeCount(0, 1), codeCount(1, 1))));
         when(schemeRegularityRepository.getSchemeCountByLgdInScope(12, 101)).thenReturn(2L);
         when(schemeRegularityRepository.getParentLgdCNameByLgd(12, 101)).thenReturn("Parent");
         when(schemeRegularityRepository.getParentLgdTitleByLgd(12, 101)).thenReturn("District");
@@ -712,6 +788,7 @@ class SchemeRegularityServiceImplTest {
                         1,
                         "Scheme A",
                         1,
+                        3,
                         2,
                         150L,
                         100,
@@ -751,11 +828,43 @@ class SchemeRegularityServiceImplTest {
                 .containsEntry("level_6", null);
     }
 
+    /**
+     * The v4 payload shape carried activeSchemeCount/inactiveSchemeCount and a per-scheme
+     * statusCode/status pair, all of which this release replaced. Jackson would deserialize such a
+     * payload into the new DTO with every status field left null, so the key had to move to v5:
+     * anything still sitting at the v4 key must never be read again.
+     */
+    @Test
+    void getSchemeStatusAndTopReportingByLgd_ignoresPayloadLeftAtTheRetiredV4Key() {
+        mockRedisValueOps();
+        String retiredKey = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v4";
+        String currentKey = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v5";
+        when(valueOperations.get(currentKey)).thenReturn(null);
+
+        when(schemeRegularityRepository.getSchemeStatusCountByLgd(12, 101))
+                .thenReturn(new SchemeRegularityRepository.SchemeStatusBreakdown(
+                        2, List.of(codeCount(1, 2)), List.of(codeCount(2, 2))));
+        when(schemeRegularityRepository.getTopSchemeSubmissionMetricsByLgd(12, 101, START, END, 5, 0, "reportingRate", "desc"))
+                .thenReturn(List.of());
+
+        SchemeStatusAndTopReportingResponse response =
+                service.getSchemeStatusAndTopReportingByLgd(12, 101, START, END, 1, 5, "reportingRate", "desc");
+
+        verify(valueOperations, never()).get(retiredKey);
+        assertThat(response.getWorkStatusCounts())
+                .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getLabel, SchemeStatusCountDTO::getCount)
+                .containsExactly(tuple(1, "Ongoing", 2));
+        assertThat(response.getOperatingStatusCounts())
+                .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getLabel, SchemeStatusCountDTO::getCount)
+                .containsExactly(tuple(2, "Partially Operative", 2));
+    }
+
     @Test
     void getSchemeStatusAndTopReportingByDepartment_mapsParentLevelImmediateParentLevelAndLadders() throws Exception {
         when(schemeRegularityRepository.getDepartmentLevelForTenant(12, 201)).thenReturn(4);
         when(schemeRegularityRepository.getSchemeStatusCountByDepartment(12, 201))
-                .thenReturn(new SchemeRegularityRepository.SchemeStatusCount(2, 0));
+                .thenReturn(new SchemeRegularityRepository.SchemeStatusBreakdown(
+                        2, List.of(codeCount(2, 2)), List.of(codeCount(1, 2))));
         when(schemeRegularityRepository.getSchemeCountByDepartmentInScope(12, 201)).thenReturn(5L);
         when(schemeRegularityRepository.getParentDepartmentCNameByDepartment(12, 201)).thenReturn("Dept");
         when(schemeRegularityRepository.getParentDepartmentTitleByDepartment(12, 201)).thenReturn("Division");
@@ -764,6 +873,7 @@ class SchemeRegularityServiceImplTest {
                         2,
                         "Scheme B",
                         1,
+                        4,
                         3,
                         80L,
                         null,
@@ -845,7 +955,7 @@ class SchemeRegularityServiceImplTest {
         RegionWiseWaterQuantityResponse response = service.getRegionWiseWaterQuantityByLgd(1, 101, START, END);
 
         assertThat(response.getParentLgdId()).isEqualTo(101);
-        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -864,7 +974,7 @@ class SchemeRegularityServiceImplTest {
         RegionWiseWaterQuantityResponse response = service.getRegionWiseWaterQuantityByDepartment(1, 201, START, END);
 
         assertThat(response.getParentDepartmentId()).isEqualTo(201);
-        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -939,7 +1049,7 @@ class SchemeRegularityServiceImplTest {
 
         assertThat(response.getParentLgdLevel()).isEqualTo(2);
         assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.5000");
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -1389,7 +1499,7 @@ class SchemeRegularityServiceImplTest {
         SubmissionStatusSummaryResponse response = service.getSubmissionStatusSummaryByLgd(1, 100, START, END);
 
         assertThat(response.getSchemeCount()).isEqualTo(2);
-        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -1423,23 +1533,30 @@ class SchemeRegularityServiceImplTest {
     }
 
     @Test
-    void getSchemeStatusCountByDepartment_handlesNullCountsAsZero() {
+    void getSchemeStatusCountByDepartment_labelsEveryBucketFromTheStatusEnums() {
         when(schemeRegularityRepository.getSchemeStatusCountByDepartment(1, 201))
-                .thenReturn(new SchemeRegularityRepository.SchemeStatusCount(4, null));
+                .thenReturn(new SchemeRegularityRepository.SchemeStatusBreakdown(
+                        4,
+                        List.of(codeCount(4, 4)),
+                        List.of(codeCount(1, 4))));
 
-        Map<String, Integer> result = service.getSchemeStatusCountByDepartment(1, 201);
+        SchemeStatusBreakdownResponse result = service.getSchemeStatusCountByDepartment(1, 201);
 
-        assertThat(result)
-                .containsEntry("active_schemes_count", 4)
-                .containsEntry("inactive_schemes_count", 0);
+        assertThat(result.getTotal()).isEqualTo(4);
+        assertThat(result.getWorkStatusCounts())
+                .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getLabel)
+                .containsExactly(tuple(4, "Handed Over"));
+        assertThat(result.getOperatingStatusCounts())
+                .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getLabel)
+                .containsExactly(tuple(1, "Operative"));
     }
 
     @Test
     void getSchemeRegionReportByLgd_buildsSchemeMetricsAndCounts() {
         when(schemeRegularityRepository.getSchemeRegionReportByLgd(1, 101, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", 10001, 20001, 1, 2, 3, false),
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", 10002, 20002, 0, 0, 1, false)
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", 10001, 20001, 1, 1, 2, 3, false),
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", 10002, 20002, 0, 1, 0, 1, false)
                 ));
         when(schemeRegularityRepository.getParentLgdCNameByLgd(1, 101)).thenReturn("Parent");
         when(schemeRegularityRepository.getParentLgdTitleByLgd(1, 101)).thenReturn("District");
@@ -1449,21 +1566,27 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getParentLgdId()).isEqualTo(101);
         assertThat(response.getDaysInRange()).isEqualTo(3);
         assertThat(response.getTotalSchemeCount()).isEqualTo(2);
-        assertThat(response.getActiveSchemeCount()).isEqualTo(1);
-        assertThat(response.getInactiveSchemeCount()).isEqualTo(1);
+        assertThat(response.getWorkStatusCounts())
+                .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getLabel, SchemeStatusCountDTO::getCount)
+                .containsExactly(tuple(1, "Ongoing", 2));
+        assertThat(response.getOperatingStatusCounts())
+                .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getLabel, SchemeStatusCountDTO::getCount)
+                .containsExactly(tuple(0, "Non-Operative", 1), tuple(1, "Operative", 1));
         assertThat(response.getSchemes()).hasSize(2);
         // Per-scheme reporting rate stays supplyDays/daysInRange (unchanged); isRegular is additive.
         assertThat(response.getSchemes().get(0).getAverageRegularity()).isEqualByComparingTo("0.6667");
         assertThat(response.getSchemes().get(0).getIsRegular()).isFalse();
         assertThat(response.getSchemes().get(0).getSubmissionRate()).isEqualByComparingTo("1.0000");
-        assertThat(response.getSchemes().get(1).getStatus()).isEqualTo("inactive");
+        assertThat(response.getSchemes().get(1).getOperatingStatus().getCode()).isZero();
+        assertThat(response.getSchemes().get(1).getOperatingStatus().getLabel()).isEqualTo("Non-Operative");
+        assertThat(response.getSchemes().get(1).getWorkStatus().getLabel()).isEqualTo("Ongoing");
     }
 
     @Test
     void getSchemeRegionReportByDepartment_buildsSchemeMetricsAndCounts() {
         when(schemeRegularityRepository.getSchemeRegionReportByDepartment(1, 201, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(4, "Scheme D", 10004, 20004, 1, 1, 2, false)
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(4, "Scheme D", 10004, 20004, 1, 1, 1, 2, false)
                 ));
         when(schemeRegularityRepository.getParentDepartmentCNameByDepartment(1, 201)).thenReturn("Dept");
         when(schemeRegularityRepository.getParentDepartmentTitleByDepartment(1, 201)).thenReturn("Division");
@@ -1473,8 +1596,12 @@ class SchemeRegularityServiceImplTest {
 
         assertThat(response.getParentDepartmentId()).isEqualTo(201);
         assertThat(response.getTotalSchemeCount()).isEqualTo(1);
-        assertThat(response.getActiveSchemeCount()).isEqualTo(1);
-        assertThat(response.getInactiveSchemeCount()).isEqualTo(0);
+        assertThat(response.getWorkStatusCounts())
+                .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getCount)
+                .containsExactly(tuple(1, 1));
+        assertThat(response.getOperatingStatusCounts())
+                .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getCount)
+                .containsExactly(tuple(1, 1));
         assertThat(response.getSchemes().getFirst().getAverageRegularity()).isEqualByComparingTo("0.3333");
         assertThat(response.getSchemes().getFirst().getSubmissionRate()).isEqualByComparingTo("0.6667");
     }
@@ -1483,9 +1610,9 @@ class SchemeRegularityServiceImplTest {
     void getSchemeRegionReportByLgd_withPagination_returnsPagedSchemes() {
         when(schemeRegularityRepository.getSchemeRegionReportByLgd(1, 101, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", 10001, 20001, 1, 2, 3, false),
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", 10002, 20002, 0, 0, 1, false),
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(3, "Scheme C", 10003, 20003, 1, 3, 3, true)
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", 10001, 20001, 1, 1, 2, 3, false),
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", 10002, 20002, 0, 1, 0, 1, false),
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(3, "Scheme C", 10003, 20003, 1, 1, 3, 3, true)
                 ));
         when(schemeRegularityRepository.getParentLgdCNameByLgd(1, 101)).thenReturn("Parent");
         when(schemeRegularityRepository.getParentLgdTitleByLgd(1, 101)).thenReturn("District");
@@ -1549,7 +1676,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getStateWiseRegularity().getFirst().getRegularSchemeCount()).isEqualTo(4);
         assertThat(response.getStateWiseRegularity().getFirst().getAverageRegularity()).isEqualByComparingTo("0.8000");
         assertThat(response.getStateWiseReadingSubmissionRate().getFirst().getTenantStatus()).isEqualTo(1);
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -1713,7 +1840,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(district.getTotalSupplyDays()).isEqualTo(12);
         // KPI = regularSchemeCount / schemeCount = 4 / 5 = 0.8000.
         assertThat(district.getAverageRegularity()).isEqualByComparingTo("0.8000");
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -1786,7 +1913,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getStateWiseBoundaries()).hasSize(1);
         assertThat(response.getStateWiseBoundaries().getFirst().getBoundary().get("type").asText()).isEqualTo("Polygon");
         verify(valueOperations, times(1)).set(
-                eq(":national:dashboard:boundaries:v1"), eq("{boundary-json}"), eq(Duration.ofHours(1)));
+                eq(":national:dashboard:boundaries:v1"), eq("{boundary-json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -1810,7 +1937,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getLgdLevel2Boundaries()).hasSize(1);
         assertThat(response.getLgdLevel2Boundaries().getFirst().getBoundary().get("type").asText()).isEqualTo("Polygon");
         verify(valueOperations, times(1)).set(
-                eq(":national:dashboard:boundaries:level2:v1"), eq("{boundary-json}"), eq(Duration.ofHours(1)));
+                eq(":national:dashboard:boundaries:level2:v1"), eq("{boundary-json}"), eq(Duration.ofHours(24)));
     }
 
     @Test

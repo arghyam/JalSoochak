@@ -72,17 +72,21 @@ public class UploadAuthService {
     }
 
     private int requireUserId(String schemaName, Jwt jwt) {
-        String email = jwt.getClaimAsString("email");
-        String username = jwt.getClaimAsString("preferred_username");
-        if ((email == null || email.isBlank()) && (username == null || username.isBlank())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token missing user identity (email)");
+        // The subject is the only identity claim guaranteed to survive: user_table.uuid is
+        // overwritten with the Keycloak UUID at provisioning, so any bearer of a token matches on it.
+        Integer userId = userUploadRepository.findUserIdByUuid(schemaName, jwt.getSubject());
+
+        if (userId == null) {
+            // Rows whose uuid predates Keycloak provisioning still match on the legacy email/phone identity.
+            String email = jwt.getClaimAsString("email");
+            String username = jwt.getClaimAsString("preferred_username");
+            userId = userUploadRepository.findUserIdByEmailOrPhone(
+                    schemaName,
+                    email != null ? email.trim() : null,
+                    username != null ? username.trim() : null
+            );
         }
 
-        Integer userId = userUploadRepository.findUserIdByEmailOrPhone(
-                schemaName,
-                email != null ? email.trim() : null,
-                username != null ? username.trim() : null
-        );
         if (userId == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found for token");
         }

@@ -24,10 +24,35 @@ public class TelemetrySchemeReadingService {
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final TelemetryEventPublisher telemetryEventPublisher;
 
+    /**
+     * Falls back to the schema in {@link TenantContext}, i.e. the unauthenticated
+     * {@code X-Tenant-Code} header.
+     *
+     * <p>Production callers must use
+     * {@link #updateYesterdayFinalReadingBySchemeId(Long, String, BigDecimal, LocalDate, Integer)}
+     * and pass the id of the tenant behind an authenticated {@code X-Api-Key}. This overload exists
+     * for tests that set {@code TenantContext} directly.
+     */
     public UpdateYesterdayFinalReadingBySchemeResponse updateYesterdayFinalReadingBySchemeId(Long schemeId,
                                                                                             String phoneNumber,
                                                                                             BigDecimal finalReading,
                                                                                             LocalDate date) {
+        return updateYesterdayFinalReadingBySchemeId(schemeId, phoneNumber, finalReading, date, null);
+    }
+
+    /**
+     * {@code authenticatedTenantId} is the tenant the caller proved with its API key, and it decides
+     * which schema the correction is applied to. The {@code X-Tenant-Code} header behind
+     * {@link TenantContext} remains the fallback for in-process callers with no authenticated tenant,
+     * but it must never win over the key: it is unauthenticated, so letting it decide would let a
+     * caller holding one tenant's key — or none at all — correct another tenant's readings. Same
+     * precedence as {@code BfmReadingService.resolveSchemaForCorrelationUpdate}.
+     */
+    public UpdateYesterdayFinalReadingBySchemeResponse updateYesterdayFinalReadingBySchemeId(Long schemeId,
+                                                                                            String phoneNumber,
+                                                                                            BigDecimal finalReading,
+                                                                                            LocalDate date,
+                                                                                            Integer authenticatedTenantId) {
         String maskedPhone = maskPhone(phoneNumber);
         try {
             if (schemeId == null || schemeId < 1) {
@@ -40,7 +65,7 @@ public class TelemetrySchemeReadingService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "reading must be greater than zero");
             }
 
-            String schemaName = requireTenantSchema();
+            String schemaName = requireTenantSchema(authenticatedTenantId);
             log.info("[update-yesterday-final-reading] start schemeId={} tenantSchema={} phone={}", schemeId, schemaName, maskedPhone);
 
             Long updaterUserId = telemetryTenantRepository.findUserIdByPhone(schemaName, phoneNumber)
@@ -105,7 +130,12 @@ public class TelemetrySchemeReadingService {
             }
 
             // Always treat this as a "confirmed correction": keep extracted_reading untouched (or 0 for created rows).
-            telemetryTenantRepository.updateConfirmedReading(schemaName, targetDayRecord.id(), finalReading, updaterUserId);
+            // The officer's number is a manual override, so the row must also stop claiming its
+            // confirmed_reading is what the AI extracted (confirmed_reading_source DEFAULT 0 =
+            // AS_EXTRACTED). Retag only when the value actually moves, so a correction that restates the
+            // stored number preserves an existing ROLLOVER_RESOLVED or EXTERNALLY_ASSERTED marker.
+            telemetryTenantRepository.updateConfirmedReading(schemaName, targetDayRecord.id(), finalReading, updaterUserId,
+                    RolloverResolutionService.manualConfirmSource(finalReading, targetDayRecord.confirmedReading()));
             log.info("[update-yesterday-final-reading] updated readingId={} newFinalReading={}",
                     targetDayRecord.id(), finalReading);
 
@@ -155,7 +185,18 @@ public class TelemetrySchemeReadingService {
         }
     }
 
-    private String requireTenantSchema() {
+    /**
+     * The schema behind an authenticated API key wins over {@link TenantContext}. That context is
+     * populated from {@code X-Tenant-Code}, which carries no credential — letting it take precedence
+     * would let a caller holding one tenant's key write into another tenant's schema.
+     */
+    private String requireTenantSchema(Integer authenticatedTenantId) {
+        if (authenticatedTenantId != null) {
+            return telemetryTenantRepository.findSchemaNameByTenantId(authenticatedTenantId)
+                    .filter(schema -> !schema.isBlank())
+                    .orElseThrow(() -> new ResponseStatusException(
+                            HttpStatus.NOT_FOUND, "Tenant not found for API key"));
+        }
         String schemaName = TenantContext.getSchema();
         if (schemaName == null || schemaName.isBlank()) {
             throw new ResponseStatusException(
@@ -177,5 +218,8 @@ public class TelemetrySchemeReadingService {
         return "****" + digits.substring(digits.length() - 4);
     }
 
-    // No JWT authentication for this endpoint. We resolve the user by phone number and then enforce scheme mapping.
+    // No JWT here: the caller is authenticated by the per-tenant X-Api-Key at the controller, which
+    // also fixes the tenant schema. The phone lookup and scheme-mapping check below then constrain
+    // the write within that tenant — they are authorization, not authentication, and were never
+    // sufficient on their own.
 }
