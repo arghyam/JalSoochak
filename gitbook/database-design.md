@@ -38,8 +38,6 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 
 **`tenant_<state>.user_token_table`** — hashed invite and password-reset tokens (`token_type` INVITE / RESET) for tenant users.
 
-* **`user_channel_preference` / `user_language_preference`** — per-contact reading channel and language chosen in the WhatsApp conversation
-
 ### 10.2 Location & Hierarchies
 
 * **`lgd_location_master_table`** — LGD nodes: State → District → Block → Panchayat → Village

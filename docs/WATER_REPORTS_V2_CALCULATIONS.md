@@ -209,7 +209,7 @@ This is the most common source of off-by-one-day bugs in this codebase.
 | `fact_water_quantity_table.date`                    | **IST calendar day**              |
 | `fact_meter_reading_table.reading_date`             | **IST calendar day**              |
 | `fact_meter_reading_table.reading_at`               | **IST wall-clock**                |
-| `anomaly_table.created_at`                          | **UTC, naive** (no offset stored) |
+| `fact_anomaly_table.created_at`                     | **UTC, naive** (no offset stored) |
 | `created_at` / `updated_at` audit columns generally | UTC                               |
 
 So an IST calendar day `D` maps to the half-open UTC interval
@@ -240,7 +240,7 @@ and queries bound by it **wherever a timestamp column exists**:
 
 | Source                      | Bounded by                                                               |
 | --------------------------- | ------------------------------------------------------------------------ |
-| `anomaly_table`             | `created_at ∈ [istDayStartUtc(today), istToUtc(cutoffIst))`              |
+| `fact_anomaly_table`        | `created_at ∈ [istDayStartUtc(today), istToUtc(cutoffIst))`              |
 | `fact_meter_reading_table`  | `reading_at < cutoffIst`                                                 |
 | `fact_water_quantity_table` | **cannot be bounded** — the table has only `date`, no intraday timestamp |
 
@@ -270,7 +270,7 @@ supplying schemes.
 | Number of HHs with water supply TODAY — `nn (m%)`    | `dim_scheme_table.fhtc_count`                        | `nn` = `Σ fhtc_count` (§2.3) of the **S** supplying schemes; `m` = `round1(100 × nn / NN)`                                                                  |
 | Number of HHs yet to get water supply — `qq (r%)`    | _derived_                                            | `qq = NN − nn`; `r = round1(100 × qq / NN)` — computed from `qq` directly, **not** as `100 − m`, so the two percentages never sum to 100.1 through rounding |
 | Average LPCD _(of schemes that have supplied water)_ | `{{LWQ}}` + `dim_scheme_table` + `dim_tenant_table`  | `round1(litres / popSupplying)`                                                                                                                             |
-| Number of Anomalous Submissions                      | `analytics_schema.anomaly_table`                     | `COUNT(DISTINCT a.id)` in the window                                                                                                                        |
+| Number of Anomalous Submissions                      | `analytics_schema.fact_anomaly_table`                | `COUNT(DISTINCT a.id)` in the window                                                                                                                        |
 
 **NN** = `Σ fhtc_count` (§2.3) over all **T** handed-over schemes mapped to the officer.
 
@@ -319,10 +319,10 @@ One row per **(scheme, anomaly type)** raised in the window.
 | Column                        | Source                                                           |
 | ----------------------------- | ---------------------------------------------------------------- |
 | Scheme_imis_id / Scheme Name  | `scheme_master_table.centre_scheme_id` / `scheme_name`           |
-| Type of Anomaly in Submission | `analytics_schema.anomaly_table.type`, mapped to a display label |
+| Type of Anomaly in Submission | `analytics_schema.fact_anomaly_table.type`, mapped to a display label |
 | Jal Mitra Name / Mobile No.   | as §3.4                                                          |
 
-`anomaly_table.type` is `VARCHAR(128)` holding the enum **name**; rows written before analytics
+`fact_anomaly_table.type` is `VARCHAR(128)` holding the enum **name**; rows written before analytics
 migration V29 hold the numeric **code** as a string. The label mapping handles both
 (`ANOMALY_LABELS` keyed by name, `CODE_TO_NAME` for the legacy form).
 
@@ -764,7 +764,7 @@ FROM litres, pop;
 ```sql
 WITH user_schemes AS ( /* as §9.2 */ )
 SELECT COUNT(DISTINCT a.id)::int AS anomalous_count
-FROM analytics_schema.anomaly_table a
+FROM analytics_schema.fact_anomaly_table a
 JOIN user_schemes us ON us.scheme_id = a.scheme_id
 WHERE a.tenant_id = :tenant_id
   AND a.deleted_at IS NULL
@@ -776,7 +776,7 @@ Per-scheme list for §3.5 — replace the SELECT with:
 
 ```sql
 SELECT DISTINCT a.scheme_id, a.type
-FROM analytics_schema.anomaly_table a
+FROM analytics_schema.fact_anomaly_table a
 JOIN user_schemes us ON us.scheme_id = a.scheme_id
 WHERE a.tenant_id = :tenant_id
   AND a.deleted_at IS NULL
