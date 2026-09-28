@@ -29,8 +29,6 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 * `phone_number (bytea, AES-256 encrypted)`, `phone_number_hash (varchar, HMAC lookup)`
 * `language_id (int)`, `status (int)`, `whatsapp_connection_id (bigint, WhatsApp provider contact id)`
 
-**`tenant_<state>.user_token_table`** — DB-backed refresh tokens and OTPs (hashed) for revocation.
-
 ### 10.2 Location & Hierarchies
 
 * **`lgd_location_master_table`** — LGD nodes: State → District → Block → Panchayat → Village
