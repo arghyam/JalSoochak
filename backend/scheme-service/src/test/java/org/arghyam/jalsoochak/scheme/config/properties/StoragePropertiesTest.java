@@ -12,7 +12,7 @@ class StoragePropertiesTest {
     private static StorageProperties populated() {
         StorageProperties p = new StorageProperties();
         p.setEnabled(true);
-        p.setEndpoint("http://minio:9000");
+        p.setEndpoint("http://object-store:9000");
         p.setRegion("ap-south-1");
         p.setAccessKey("access");
         p.setSecretKey("secret");
@@ -37,11 +37,12 @@ class StoragePropertiesTest {
     void equalsAndHashCode_matchForSameValues() {
         StorageProperties a = populated();
         StorageProperties b = populated();
-        assertThat(a).isEqualTo(a).isEqualTo(b).hasSameHashCodeAs(b);
+        assertThat(a).isEqualTo(a).isEqualTo(b);
+        assertThat(a.hashCode()).isEqualTo(b.hashCode());
         assertThat(a).isNotEqualTo(null).isNotEqualTo("other");
-        assertThat(new StorageProperties()).isEqualTo(new StorageProperties())
-                .hasSameHashCodeAs(new StorageProperties());
-        assertThat(a.toString()).contains("minio", "bucket");
+        assertThat(new StorageProperties()).isEqualTo(new StorageProperties());
+        assertThat(new StorageProperties().hashCode()).isEqualTo(new StorageProperties().hashCode());
+        assertThat(a.toString()).contains("object-store", "bucket");
     }
 
     @Test
