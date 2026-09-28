@@ -24,5 +24,6 @@ It is a **multi-tenant** platform for state-level water-supply monitoring, featu
 * **Database Design** — multi-tenant schema and analytics warehouse
 * **Non-functional Requirements** — security, scalability, performance, observability
 * **Future Work** — roadmap and known gaps
+* **Guides** — installation and onboarding a new tenant (State/UT)
 
 For implementation details, build instructions, and source code, see the main project repository.
