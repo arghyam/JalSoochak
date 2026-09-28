@@ -594,7 +594,7 @@ public class BfmReadingService {
         // SUPPLY-PLAUSIBILITY: the row is stored and marked, but it is not a reading. The channel
         // still belongs on it, and the anomaly is still published — "nothing reaches analytics" was
         // never literal. What is withheld is publishMeterReadingRecorded, the single event that
-        // writes fact_meter_reading, dim_operator_attendance and fact_water_quantity. Withholding it
+        // writes fact_meter_reading, fact_operator_attendance and fact_water_quantity. Withholding it
         // marks the operator absent and the scheme non-reporting for the day: intended, and called
         // out in the ops runbook so the daily-report gap is not chased as a pipeline fault.
         if (quarantined) {
@@ -1324,7 +1324,7 @@ public class BfmReadingService {
     /**
      * SUPPLY-PLAUSIBILITY: one anomaly per operator, per scheme, per day.
      *
-     * <p>Analytics derives {@code anomaly_table.uuid} deterministically from the correlationId, and
+     * <p>Analytics derives {@code fact_anomaly_table.uuid} deterministically from the correlationId, and
      * dedups on it — a repeat is touched, not inserted. The date is in the key because the keys
      * analytics builds for itself carry none: without it every type-10 anomaly for an operator and
      * scheme would collapse into a single row forever, and the second day's rejection would be
