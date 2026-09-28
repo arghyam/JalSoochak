@@ -50,6 +50,8 @@ Enter admin details (First name, Last name, Phone, Email) to invite admin.
 
 System shows success message after tenant creation.
 
+Behind the scenes, the State/UT is saved with status Onboarded, its `tenant_<state_code>` schema is provisioned, and default configuration (location hierarchies, meter-change and supply-outage reasons) is seeded. In Single Tenant Mode, only one State/UT can be created.
+
 ![][image8]
 
 After creating a tenant, you have two options:
