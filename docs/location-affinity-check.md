@@ -68,7 +68,7 @@ recomputable from the reading's and the scheme's stored coordinates, and it is i
 
 ---
 
-## 4. Glific flow changes
+## 4. Whatsapp flow changes
 
 ### What the backend now returns
 
@@ -120,11 +120,11 @@ existing "Location saved successfully" message:
 
 Four things about this shape are deliberate:
 
-- **The warning is a separate message from the buttons.** A Glific interactive template carries
+- **The warning is a separate message from the buttons.** A Whatsapp interactive template carries
   static text, so it cannot render the backend's per-tenant, per-language wording. Sending the
   localized text first and then reusing the existing generic **"Are you sure?"** template (id
   `37140`, already shared by the language-confirmation steps) keeps both the localization and the
-  tappable buttons, and adds no new Glific object.
+  tappable buttons, and adds no new Whatsapp object.
 - **Yes skips the "Location saved" message** and goes straight to the `/intro` webhook. Routing it
   through the normal path would show `locationresponse.message` again — which on a mismatch is the
   warning, so the operator would read it twice.
