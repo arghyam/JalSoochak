@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: V49 - External (state) LGD location identifier on
+-- Migration: V51 - External (state) LGD location identifier on
 --                  lgd_location_master_table
 -- ------------------------------------------------------------
 -- The state JJM master data carries a public identifier per LGD node
@@ -77,11 +77,11 @@ BEGIN
         SELECT 1
         FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-        WHERE p.proname = 'create_tenant_schema_v49_base'
+        WHERE p.proname = 'create_tenant_schema_v51_base'
           AND n.nspname = 'common_schema'
           AND pg_get_function_identity_arguments(p.oid) = 'schema_name text'
     ) THEN
-        ALTER FUNCTION common_schema.create_tenant_schema(text) RENAME TO create_tenant_schema_v49_base;
+        ALTER FUNCTION common_schema.create_tenant_schema(text) RENAME TO create_tenant_schema_v51_base;
     END IF;
 END $$;
 
@@ -91,7 +91,7 @@ LANGUAGE plpgsql
 AS $func$
 BEGIN
     -- Execute the existing provisioning logic first.
-    PERFORM common_schema.create_tenant_schema_v49_base(schema_name);
+    PERFORM common_schema.create_tenant_schema_v51_base(schema_name);
 
     -- External (state) LGD location identifier for new tenant schemas.
     -- Guard with to_regclass so a partially-provisioned schema is skipped instead of aborting.

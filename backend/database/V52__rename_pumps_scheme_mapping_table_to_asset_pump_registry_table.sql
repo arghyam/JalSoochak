@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: V50 - Rename pumps_scheme_mapping_table to
+-- Migration: V52 - Rename pumps_scheme_mapping_table to
 --                  asset_pump_registry_table
 -- ------------------------------------------------------------
 -- The table is a registry of the pump assets installed on a scheme, not
@@ -56,7 +56,7 @@ BEGIN
           AND pg_get_function_identity_arguments(p.oid) = 'schema_name text';
 
         IF NOT FOUND THEN
-            RAISE EXCEPTION 'V50: common_schema.%(text) is called by the create_tenant_schema() chain but does not exist',
+            RAISE EXCEPTION 'V52: common_schema.%(text) is called by the create_tenant_schema() chain but does not exist',
                 fn_name;
         END IF;
 
@@ -67,7 +67,7 @@ BEGIN
                 '_psm_scheme', '_asset_pump_scheme');
 
             IF strpos(patched_def, 'pumps_scheme_mapping') > 0 OR strpos(patched_def, '_psm_') > 0 THEN
-                RAISE EXCEPTION 'V50 patch failed: common_schema.%() names the pump table in a form this migration does not rewrite',
+                RAISE EXCEPTION 'V52 patch failed: common_schema.%() names the pump table in a form this migration does not rewrite',
                     fn_name;
             END IF;
 
@@ -81,10 +81,10 @@ BEGIN
     END LOOP;
 
     IF patched = 0 THEN
-        RAISE EXCEPTION 'V50: no function in the create_tenant_schema() chain creates pumps_scheme_mapping_table';
+        RAISE EXCEPTION 'V52: no function in the create_tenant_schema() chain creates pumps_scheme_mapping_table';
     END IF;
 
-    RAISE NOTICE 'V50: renamed the pump table in % tenant provisioning function(s)', patched;
+    RAISE NOTICE 'V52: renamed the pump table in % tenant provisioning function(s)', patched;
 END $$;
 
 -- ── Part B: Rename in existing tenant schemas ───────────────────────────────
@@ -147,5 +147,5 @@ BEGIN
         renamed := renamed + 1;
     END LOOP;
 
-    RAISE NOTICE 'V50: renamed the pump table in % tenant schema(s)', renamed;
+    RAISE NOTICE 'V52: renamed the pump table in % tenant schema(s)', renamed;
 END $$;
