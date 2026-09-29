@@ -1352,7 +1352,6 @@ public class TelemetryTenantRepository {
         String sql = String.format("""
                 UPDATE %s.flow_reading_table
                 SET deleted_at = NOW(),
-                    deleted_by = ?,
                     updated_by = ?,
                     updated_at = NOW()
                 WHERE scheme_id = ?
@@ -1363,7 +1362,9 @@ public class TelemetryTenantRepository {
                   AND deleted_at IS NULL
                   AND id <> ?
                 """, schemaName);
-        jdbcTemplate.update(sql, updatedBy, updatedBy, schemeId, operatorId, keepId);
+        // deleted_by is left NULL: it references tenant_admin_user_master_table, and this cleanup is
+        // done on behalf of a pump operator (a user_table id), who is recorded in updated_by instead.
+        jdbcTemplate.update(sql, updatedBy, schemeId, operatorId, keepId);
     }
 
     /** Writes both reading columns — see the warning on {@link #updateReadingValues}. Currently unused. */

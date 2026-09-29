@@ -5,7 +5,9 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryFlowReadingDetails;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService;
@@ -246,5 +248,43 @@ class MeterReadingConversationServiceLocationTest {
         order.verify(telemetryTenantRepository)
                 .updateReadingLocation(SCHEMA, READING, LAT, LNG, OPERATOR);
         order.verify(locationAffinityService).assess(anyString(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("checks the scheme the operator selected today, not their first mapped scheme")
+    void usesTheSelectedScheme() {
+        long selectedScheme = 9L;
+        long pendingRow = 5151L;
+        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(eq(SCHEMA), eq(OPERATOR), any()))
+                .thenReturn(Optional.of(new TelemetrySchemeSelectionRecord(pendingRow, selectedScheme, "scheme-selection-x")));
+        TelemetryFlowReadingDetails pending = new TelemetryFlowReadingDetails(
+                pendingRow, "scheme-selection-x", OPERATOR, BigDecimal.ZERO, BigDecimal.ZERO);
+        when(telemetryTenantRepository.findLatestFlowReadingForDate(eq(SCHEMA), eq(selectedScheme), eq(OPERATOR), any()))
+                .thenReturn(Optional.of(pending));
+        verdict(new LocationVerdict.Within(10.0d, 500.0d));
+
+        post();
+
+        // The coordinates land on the selection row the image will later update, and the boundary
+        // is measured against that scheme. Checking the first mapped scheme instead told an operator
+        // standing at their selected scheme that they were outside its boundary.
+        verify(telemetryTenantRepository).updateReadingLocation(SCHEMA, pendingRow, LAT, LNG, OPERATOR);
+        verify(locationAffinityService).assess(eq(SCHEMA), eq(TENANT), eq(selectedScheme), eq(LAT), eq(LNG),
+                eq(LocationAffinityService.Path.LOCATION_WEBHOOK));
+        verify(telemetryTenantRepository, never()).createFlowReading(
+                anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("falls back to the first mapped scheme when nothing was selected today")
+    void fallsBackToTheFirstScheme() {
+        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(eq(SCHEMA), eq(OPERATOR), any()))
+                .thenReturn(Optional.empty());
+        verdict(new LocationVerdict.Within(10.0d, 500.0d));
+
+        post();
+
+        verify(locationAffinityService).assess(eq(SCHEMA), eq(TENANT), eq(SCHEME), eq(LAT), eq(LNG),
+                eq(LocationAffinityService.Path.LOCATION_WEBHOOK));
     }
 }

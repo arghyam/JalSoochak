@@ -233,6 +233,15 @@ public class ConversationLocalizationService {
         }
 
         String normalized = message.trim().toLowerCase(Locale.ROOT);
+        if (normalized.contains("please enter the correct meter reading")) {
+            return "कृपया सही मीटर रीडिंग दर्ज करें।";
+        }
+        if (normalized.contains("no reading from today was found to correct")) {
+            return "आज की कोई रीडिंग सुधारने के लिए नहीं मिली। कृपया मीटर की नई इमेज भेजें।";
+        }
+        if (normalized.contains("the reading could not be corrected")) {
+            return "रीडिंग सुधारी नहीं जा सकी। कृपया फिर से प्रयास करें।";
+        }
         if (normalized.contains("duplicate image submission detected")) {
             return "डुप्लिकेट इमेज मिली है। कृपया नई इमेज सबमिट करें।";
         }

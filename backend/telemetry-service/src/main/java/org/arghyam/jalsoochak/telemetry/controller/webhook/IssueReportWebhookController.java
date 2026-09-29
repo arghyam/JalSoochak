@@ -112,7 +112,9 @@ public class IssueReportWebhookController {
         } catch (Exception e) {
             log.error("Error fetching telemetry issue report reasons: {}", e.getMessage(), e);
             log.debug("Error fetching telemetry issue report reasons for contactId {}: {}", request.getContactId(), e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            // 200, not 500: the chatbot routes a non-2xx to its "server is down" branch, which is
+            // the wrong thing to tell an operator whose tenant simply has no reasons configured.
+            return ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_JSON)
                     .body("{\"success\":false,\"message\":\"Supply outage reasons could not be fetched.\"}");
         }

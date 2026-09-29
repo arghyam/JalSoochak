@@ -148,4 +148,84 @@ class ReadingsAsyncServiceTest {
 
         verify(conversationResumeGateway).resumeReadingsFlow(eq(CONTACT), eq(JOB_ID), any());
     }
+
+    /**
+     * The flow sends "We have received your image" and only then parks in its wait-for-result node.
+     * Glific accepts a resume that arrives before that — and reports success — but the flow never sees
+     * it and waits out its full timeout. A floor on the time between accepting the image and resuming
+     * keeps a fast result from overtaking the flow.
+     */
+    @Test
+    void holdsAFastResultUntilTheMinimumDelayHasPassed() {
+        long[] now = {1_000_000_000L};
+        java.util.List<Long> sleptMs = new java.util.ArrayList<>();
+        ReadingsAsyncService service = service();
+        service.configureResumeTiming(4_000L, () -> now[0], ms -> {
+            sleptMs.add(ms);
+            now[0] += ms * 1_000_000L;
+        });
+        org.mockito.Mockito.when(imageWorkflowService.processImage(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    now[0] += 1_000L * 1_000_000L; // processing took 1 s
+                    return org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse.builder()
+                            .success(true).message("ok").build();
+                });
+
+        service.enqueueProcessAndResume(request(), JOB_ID);
+
+        org.assertj.core.api.Assertions.assertThat(sleptMs).containsExactly(3_000L);
+        org.mockito.Mockito.verify(conversationResumeGateway)
+                .resumeReadingsFlow(org.mockito.ArgumentMatchers.eq(CONTACT), org.mockito.ArgumentMatchers.eq(JOB_ID),
+                        org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void doesNotWaitWhenProcessingAlreadyTookLongerThanTheMinimum() {
+        long[] now = {0L};
+        java.util.List<Long> sleptMs = new java.util.ArrayList<>();
+        ReadingsAsyncService service = service();
+        service.configureResumeTiming(4_000L, () -> now[0], sleptMs::add);
+        org.mockito.Mockito.when(imageWorkflowService.processImage(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    now[0] += 9_000L * 1_000_000L;
+                    return org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse.builder()
+                            .success(true).message("ok").build();
+                });
+
+        service.enqueueProcessAndResume(request(), JOB_ID);
+
+        org.assertj.core.api.Assertions.assertThat(sleptMs).isEmpty();
+    }
+
+    @Test
+    void attachesTheClosingLineToASuccessfulResult() {
+        ConversationMessageService messageService = org.mockito.Mockito.mock(ConversationMessageService.class);
+        when(messageService.closingMessage(any())).thenReturn(
+                org.arghyam.jalsoochak.telemetry.dto.response.ClosingResponse.builder()
+                        .success(true).message("Thank you.").build());
+        when(imageWorkflowService.processImage(any()))
+                .thenReturn(CreateReadingResponse.builder().success(true).message("ok").build());
+
+        new ReadingsAsyncService(imageWorkflowService, conversationResumeGateway, inlineExecutor, messageService)
+                .enqueueProcessAndResume(request(), JOB_ID);
+
+        ArgumentCaptor<CreateReadingResponse> sent = ArgumentCaptor.forClass(CreateReadingResponse.class);
+        verify(conversationResumeGateway).resumeReadingsFlow(eq(CONTACT), eq(JOB_ID), sent.capture());
+        assertThat(sent.getValue().getClosingMessage()).isEqualTo("Thank you.");
+    }
+
+    @Test
+    void leavesAFailedResultWithoutAClosingLine() {
+        ConversationMessageService messageService = org.mockito.Mockito.mock(ConversationMessageService.class);
+        when(imageWorkflowService.processImage(any()))
+                .thenReturn(CreateReadingResponse.builder().success(false).message("unreadable").build());
+
+        new ReadingsAsyncService(imageWorkflowService, conversationResumeGateway, inlineExecutor, messageService)
+                .enqueueProcessAndResume(request(), JOB_ID);
+
+        ArgumentCaptor<CreateReadingResponse> sent = ArgumentCaptor.forClass(CreateReadingResponse.class);
+        verify(conversationResumeGateway).resumeReadingsFlow(eq(CONTACT), eq(JOB_ID), sent.capture());
+        assertThat(sent.getValue().getClosingMessage()).isNull();
+        org.mockito.Mockito.verifyNoInteractions(messageService);
+    }
 }

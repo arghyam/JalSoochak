@@ -144,4 +144,66 @@ class SelectionWebhookControllerTest {
         assertThat(controller.selectedItem(request).getStatusCode())
                 .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
     }
+
+    private static SelectedItemRequest itemRequest(String choice) {
+        SelectedItemRequest request = new SelectedItemRequest();
+        request.setContactId(CONTACT);
+        request.setChannel(choice);
+        return request;
+    }
+
+    private static SelectionResponse selected(String code) {
+        return SelectionResponse.builder().success(true).selected(code).message(code + " selected").build();
+    }
+
+    /**
+     * "Submit reading" used to cost the flow a second webhook just to fetch the scheme list; each
+     * Glific webhook step adds 1–2 s the operator waits through. The list now rides on this answer.
+     */
+    @Test
+    void readingSubmissionCarriesTheSchemeList() {
+        when(selectionService.selectedItemMessage(any())).thenReturn(selected("readingSubmission"));
+        when(selectionService.schemeSelectionMessage(any())).thenReturn(IntroResponse.builder()
+                .success(true).message("Please select a scheme:\n1. A\n2. B").isSchemeGreaterThanOne(true).build());
+
+        SelectionResponse body = controller.selectedItem(itemRequest("1")).getBody();
+
+        assertThat(body.getSelected()).isEqualTo("readingSubmission");
+        assertThat(body.getSchemesMessage()).isEqualTo("Please select a scheme:\n1. A\n2. B");
+        assertThat(body.getIsSchemeGreaterThanOne()).isTrue();
+    }
+
+    @Test
+    void readingSubmissionWithoutLocationAlsoCarriesTheSchemeList() {
+        when(selectionService.selectedItemMessage(any())).thenReturn(selected("readingSubmissionLocationNotSelected"));
+        when(selectionService.schemeSelectionMessage(any())).thenReturn(IntroResponse.builder()
+                .success(true).message("one scheme").isSchemeGreaterThanOne(false).build());
+
+        SelectionResponse body = controller.selectedItem(itemRequest("1")).getBody();
+
+        assertThat(body.getIsSchemeGreaterThanOne()).isFalse();
+    }
+
+    @Test
+    void otherItemsDoNotLookUpSchemes() {
+        when(selectionService.selectedItemMessage(any())).thenReturn(selected("reportIssue"));
+
+        SelectionResponse body = controller.selectedItem(itemRequest("2")).getBody();
+
+        assertThat(body.getSchemesMessage()).isNull();
+        org.mockito.Mockito.verify(selectionService, org.mockito.Mockito.never()).schemeSelectionMessage(any());
+    }
+
+    @Test
+    void aFailedSchemeLookupLeavesTheSelectionIntact() {
+        when(selectionService.selectedItemMessage(any())).thenReturn(selected("readingSubmission"));
+        when(selectionService.schemeSelectionMessage(any())).thenThrow(BOOM);
+
+        var response = controller.selectedItem(itemRequest("1"));
+
+        // The flow falls back to calling /schemes itself when the list is absent.
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().getSelected()).isEqualTo("readingSubmission");
+        assertThat(response.getBody().getIsSchemeGreaterThanOne()).isNull();
+    }
 }

@@ -1,6 +1,9 @@
 package org.arghyam.jalsoochak.telemetry.controller.webhook;
 
 import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
+import org.arghyam.jalsoochak.telemetry.dto.requests.ClosingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
+import org.arghyam.jalsoochak.telemetry.dto.response.ClosingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingWebhookAckResponse;
@@ -9,6 +12,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.ManualReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
+import org.arghyam.jalsoochak.telemetry.service.ConversationMessageService;
 import org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.MeterReadingConversationService;
 import org.arghyam.jalsoochak.telemetry.service.ReadingsAsyncService;
@@ -43,6 +47,7 @@ public class ReadingWebhookController {
     private final MeterReadingConversationService meterWorkflowService;
     private final ReadingsAsyncService readingsAsyncService;
     private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
+    private final ConversationMessageService conversationMessageService;
 
     public ReadingWebhookController(MeterImageWorkflowService imageWorkflowService,
                                     MeterReadingConversationService meterWorkflowService) {
@@ -55,15 +60,24 @@ public class ReadingWebhookController {
         this(imageWorkflowService, meterWorkflowService, readingsAsyncService, null);
     }
 
-    @Autowired
     public ReadingWebhookController(MeterImageWorkflowService imageWorkflowService,
                                     MeterReadingConversationService meterWorkflowService,
                                     ReadingsAsyncService readingsAsyncService,
                                     TelemetrySubmissionAuditService telemetrySubmissionAuditService) {
+        this(imageWorkflowService, meterWorkflowService, readingsAsyncService, telemetrySubmissionAuditService, null);
+    }
+
+    @Autowired
+    public ReadingWebhookController(MeterImageWorkflowService imageWorkflowService,
+                                    MeterReadingConversationService meterWorkflowService,
+                                    ReadingsAsyncService readingsAsyncService,
+                                    TelemetrySubmissionAuditService telemetrySubmissionAuditService,
+                                    ConversationMessageService conversationMessageService) {
         this.imageWorkflowService = imageWorkflowService;
         this.meterWorkflowService = meterWorkflowService;
         this.readingsAsyncService = readingsAsyncService;
         this.telemetrySubmissionAuditService = telemetrySubmissionAuditService;
+        this.conversationMessageService = conversationMessageService;
     }
 
     @PostMapping(
@@ -153,6 +167,7 @@ public class ReadingWebhookController {
     public ResponseEntity<CreateReadingResponse> manualReading(@RequestBody @Valid ManualReadingRequest request) {
         try {
             CreateReadingResponse response = meterWorkflowService.manualReadingMessage(request);
+            attachClosingMessage(request != null ? request.getContactId() : null, response);
             logReadingSubmission(
                     "/api/v1/telemetry/manual-reading",
                     request != null ? request.getContactId() : null,
@@ -184,6 +199,7 @@ public class ReadingWebhookController {
     public ResponseEntity<CreateReadingResponse> location(@RequestBody @Valid LocationReadingRequest request) {
         try {
             CreateReadingResponse response = meterWorkflowService.locationReadingMessage(request);
+            attachIntroMessage(request != null ? request.resolveContactId() : null, response);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             String safeContactId = request != null ? request.resolveContactId() : null;
@@ -204,6 +220,7 @@ public class ReadingWebhookController {
     public ResponseEntity<CreateReadingResponse> updatedPreviousReading(@RequestBody @Valid UpdatedPreviousReadingRequest request) {
         try {
             CreateReadingResponse response = meterWorkflowService.updatePreviousReadingMessage(request);
+            attachClosingMessage(request != null ? request.getContactId() : null, response);
             logReadingSubmission(
                     "/api/v1/telemetry/update-previous-reading",
                     request != null ? request.getContactId() : null,
@@ -341,5 +358,40 @@ public class ReadingWebhookController {
             return "n/a";
         }
         return message.replace('\n', ' ').replace('\r', ' ').trim();
+    }
+
+    /**
+     * The image prompt that follows a saved location. Best effort: without it the flow calls
+     * {@code /intro} itself, so a lookup failure must not turn a saved location into an error.
+     */
+    private void attachIntroMessage(String contactId, CreateReadingResponse response) {
+        if (conversationMessageService == null || response == null || !response.isSuccess()) {
+            return;
+        }
+        try {
+            IntroResponse intro = conversationMessageService.introMessage(
+                    IntroRequest.builder().contactId(contactId).build());
+            if (intro != null && intro.isSuccess()) {
+                response.setIntroMessage(intro.getMessage());
+            }
+        } catch (Exception e) {
+            log.warn("Could not attach the intro message to the location answer: {}", e.getMessage());
+        }
+    }
+
+    /** The closing line that follows a recorded reading; best effort, as above. */
+    private void attachClosingMessage(String contactId, CreateReadingResponse response) {
+        if (conversationMessageService == null || response == null || !response.isSuccess()) {
+            return;
+        }
+        try {
+            ClosingResponse closing = conversationMessageService.closingMessage(
+                    ClosingRequest.builder().contactId(contactId).build());
+            if (closing != null && closing.isSuccess()) {
+                response.setClosingMessage(closing.getMessage());
+            }
+        } catch (Exception e) {
+            log.warn("Could not attach the closing message to the reading answer: {}", e.getMessage());
+        }
     }
 }

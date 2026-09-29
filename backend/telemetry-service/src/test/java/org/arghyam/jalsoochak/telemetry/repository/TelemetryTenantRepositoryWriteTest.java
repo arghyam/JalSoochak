@@ -550,6 +550,23 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
         }
 
         @Test
+        void supersededMeterChangeRowsAreSoftDeletedWithoutAnAdminDeleter() {
+            // flow_reading_table.deleted_by references tenant_admin_user_master_table, but the chatbot
+            // acts as a pump operator (a user_table id). Writing the operator's id there failed the
+            // foreign key, so every second no-reading report of the day was answered "could not be
+            // saved". The operator is still recorded, in updated_by.
+            onQuery("meter_change_reason IS NOT NULL", row(
+                    "id", 5L, "correlation_id", "meter-change-1",
+                    "created_by", 2L, "extracted_reading", BigDecimal.ZERO));
+
+            repository.upsertPendingMeterChangeRecord(SCHEMA, 7L, 2L, READING_AT, "Meter replaced");
+
+            String cleanup = allUpdateSql().get(1);
+            assertThat(cleanup).contains("deleted_at = NOW()").contains("updated_by = ?");
+            assertThat(cleanup).doesNotContain("deleted_by");
+        }
+
+        @Test
         void upsertPendingMeterChangeRecordCreatesNewRecordWithGeneratedCorrelationId() {
             onScalar("INSERT INTO", Number.class, 610L);
 

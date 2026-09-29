@@ -10,7 +10,9 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.ClosingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
+import org.arghyam.jalsoochak.telemetry.service.ConversationMessageService;
 import org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService;
 import org.arghyam.jalsoochak.telemetry.service.MeterReadingConversationService;
 import org.arghyam.jalsoochak.telemetry.service.ReadingsAsyncService;
@@ -287,5 +289,89 @@ class ReadingWebhookControllerTest {
             logger.setLevel(originalLevel);
         }
         return appender.list;
+    }
+
+    /**
+     * Each Glific webhook step costs the operator 1–2 s, so a successful answer carries the text of
+     * the screen that follows it: the image prompt after a location, the closing line after a
+     * reading. The flow then sends one message instead of calling /intro or /closing.
+     */
+    @Nested
+    @DisplayName("next-screen text on successful answers")
+    class NextScreenText {
+
+        @Mock
+        private ConversationMessageService messageService;
+
+        private ReadingWebhookController withMessages() {
+            return new ReadingWebhookController(
+                    imageWorkflowService, meterWorkflowService, readingsAsyncService, auditService, messageService);
+        }
+
+        @BeforeEach
+        void stubTexts() {
+            when(messageService.introMessage(any()))
+                    .thenReturn(IntroResponse.builder().success(true).message("Hello, send a meter image.").build());
+            when(messageService.closingMessage(any()))
+                    .thenReturn(ClosingResponse.builder().success(true).message("Thank you.").build());
+        }
+
+        private LocationReadingRequest location() {
+            return LocationReadingRequest.builder()
+                    .contact(LocationReadingRequest.Contact.builder().phone(CONTACT).build())
+                    .build();
+        }
+
+        private ManualReadingRequest manual() {
+            ManualReadingRequest request = new ManualReadingRequest();
+            request.setContactId(CONTACT);
+            return request;
+        }
+
+        @Test
+        void locationCarriesTheImagePrompt() {
+            when(meterWorkflowService.locationReadingMessage(any())).thenReturn(okReading);
+
+            assertThat(withMessages().location(location()).getBody().getIntroMessage())
+                    .isEqualTo("Hello, send a meter image.");
+        }
+
+        @Test
+        void aFailedLocationCarriesNoPrompt() {
+            when(meterWorkflowService.locationReadingMessage(any()))
+                    .thenReturn(CreateReadingResponse.builder().success(false).message("bad").build());
+
+            assertThat(withMessages().location(location()).getBody().getIntroMessage()).isNull();
+            verify(messageService, never()).introMessage(any());
+        }
+
+        @Test
+        void manualReadingCarriesTheClosingLine() {
+            when(meterWorkflowService.manualReadingMessage(any())).thenReturn(okReading);
+
+            assertThat(withMessages().manualReading(manual()).getBody().getClosingMessage()).isEqualTo("Thank you.");
+        }
+
+        @Test
+        void updatedPreviousReadingCarriesTheClosingLine() {
+            UpdatedPreviousReadingRequest request = new UpdatedPreviousReadingRequest();
+            request.setContactId(CONTACT);
+            when(meterWorkflowService.updatePreviousReadingMessage(any())).thenReturn(okReading);
+
+            assertThat(withMessages().updatedPreviousReading(request).getBody().getClosingMessage())
+                    .isEqualTo("Thank you.");
+        }
+
+        @Test
+        void aTextLookupFailureDoesNotSpoilTheAnswer() {
+            when(meterWorkflowService.manualReadingMessage(any())).thenReturn(okReading);
+            when(messageService.closingMessage(any())).thenThrow(new IllegalStateException("no config"));
+
+            var response = withMessages().manualReading(manual());
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(response.getBody().isSuccess()).isTrue();
+            assertThat(response.getBody().getClosingMessage()).isNull();
+        }
     }
 }

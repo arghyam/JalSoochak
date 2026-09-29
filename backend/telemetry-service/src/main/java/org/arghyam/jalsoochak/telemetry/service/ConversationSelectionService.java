@@ -422,7 +422,6 @@ public class ConversationSelectionService {
 
             TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(request.getContactId());
             Integer tenantId = operatorWithSchema.operator().tenantId();
-            System.out.println("tenant id " + tenantId);
             if (tenantId == null) {
                 throw new IllegalStateException("Operator tenant could not be resolved");
             }

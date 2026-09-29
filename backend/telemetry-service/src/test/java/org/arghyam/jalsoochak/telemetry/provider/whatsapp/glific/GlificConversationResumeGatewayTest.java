@@ -17,6 +17,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
@@ -30,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -388,6 +390,20 @@ class GlificConversationResumeGatewayTest {
         }
 
         @Test
+        void carriesTheClosingLineSoTheFlowNeedNotCallClosing() throws JsonProcessingException {
+            stubResumeMutation(Map.of("data", Map.of("resumeContactFlow", Map.of("success", true))));
+            CreateReadingResponse withClosing = result();
+            withClosing.setClosingMessage("Thank you. Your reading has been recorded.");
+
+            service.resumeReadingsFlow(CONTACT, JOB_ID, withClosing);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> payload = new ObjectMapper().readValue(String.valueOf(
+                    variablesOf(capturedGraphQlRequest("resumeContactFlow")).get("result")), Map.class);
+            assertThat(payload).containsEntry("closing_message", "Thank you. Your reading has been recorded.");
+        }
+
+        @Test
         void sendsANullBearingPayloadWhenThereIsNoResult() throws JsonProcessingException {
             stubResumeMutation(Map.of("data", Map.of("resumeContactFlow", Map.of("success", true))));
 
@@ -489,6 +505,74 @@ class GlificConversationResumeGatewayTest {
             assertThatCode(() -> service.resumeReadingsFlow(CONTACT, JOB_ID, result()))
                     .doesNotThrowAnyException();
             verify(restTemplate, never()).postForEntity(eq(GRAPHQL_URL), any(), eq(Map.class));
+        }
+    }
+
+    /**
+     * A resume used to log in and look the contact up on every image. The login alone measured 2.1 s
+     * on dev, which the operator spends watching "Please wait a moment" — so both are now reused.
+     */
+    @Nested
+    @DisplayName("session and contact reuse")
+    class SessionReuse {
+
+        @BeforeEach
+        void stubHappyPath() {
+            stubLogin("token-1");
+            stubContactLookup("6067530");
+            stubResumeMutation(Map.of("data", Map.of("resumeContactFlow", Map.of("success", true))));
+        }
+
+        @Test
+        @DisplayName("logs in once for consecutive resumes")
+        void reusesTheSessionToken() {
+            service.resumeReadingsFlow(CONTACT, JOB_ID, result());
+            service.resumeReadingsFlow(CONTACT, "job-2", result());
+
+            verify(restTemplate, times(1)).postForEntity(eq(SESSION_URL), any(), eq(Map.class));
+        }
+
+        @Test
+        @DisplayName("looks a contact up once and reuses its Glific id")
+        void reusesTheContactId() {
+            service.resumeReadingsFlow(CONTACT, JOB_ID, result());
+            service.resumeReadingsFlow(CONTACT, "job-2", result());
+
+            verify(restTemplate, times(1))
+                    .postForEntity(eq(GRAPHQL_URL), argThatIsQuery("contactByPhone"), eq(Map.class));
+            verify(restTemplate, times(2))
+                    .postForEntity(eq(GRAPHQL_URL), argThatIsQuery("resumeContactFlow"), eq(Map.class));
+        }
+
+        @Test
+        @DisplayName("logs in again and retries once when the cached token is refused")
+        @SuppressWarnings("unchecked")
+        void refreshesAnExpiredToken() {
+            service.resumeReadingsFlow(CONTACT, JOB_ID, result());
+            when(restTemplate.postForEntity(eq(GRAPHQL_URL), argThatIsQuery("resumeContactFlow"), eq(Map.class)))
+                    .thenThrow(new HttpClientErrorException(HttpStatus.UNAUTHORIZED))
+                    .thenReturn((ResponseEntity<Map>) (ResponseEntity<?>) ResponseEntity.ok(
+                            Map.of("data", Map.of("resumeContactFlow", Map.of("success", true)))));
+
+            service.resumeReadingsFlow(CONTACT, "job-2", result());
+
+            verify(restTemplate, times(2)).postForEntity(eq(SESSION_URL), any(), eq(Map.class));
+            verify(restTemplate, times(3))
+                    .postForEntity(eq(GRAPHQL_URL), argThatIsQuery("resumeContactFlow"), eq(Map.class));
+        }
+
+        @Test
+        @DisplayName("honours the expiry Glific returns with the token")
+        void expiresTheTokenWithGlific() {
+            when(restTemplate.postForEntity(eq(SESSION_URL), any(), eq(Map.class)))
+                    .thenReturn(ResponseEntity.ok(Map.of("data", Map.of(
+                            "access_token", "short-lived",
+                            "token_expiry_time", "2000-01-01T00:00:00Z"))));
+
+            service.resumeReadingsFlow(CONTACT, JOB_ID, result());
+            service.resumeReadingsFlow(CONTACT, "job-2", result());
+
+            verify(restTemplate, times(2)).postForEntity(eq(SESSION_URL), any(), eq(Map.class));
         }
     }
 }
