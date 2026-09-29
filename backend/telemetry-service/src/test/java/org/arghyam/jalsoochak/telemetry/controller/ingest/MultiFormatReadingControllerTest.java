@@ -184,6 +184,28 @@ class MultiFormatReadingControllerTest {
     }
 
     @Test
+    void photoForAChannelThatCannotReadOneReachesTheWireAs400WithItsCode() throws Exception {
+        when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(22));
+        when(imageWorkflowService.processCanonicalReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+                .success(false)
+                .qualityStatus("REJECTED")
+                .errorCode(TelemetryErrorCode.IMAGE_NOT_SUPPORTED_FOR_CHANNEL)
+                .message("Meter photos are not supported for your reading channel.")
+                .build());
+        String body = CANONICAL_BODY.replace("\"confirmed_reading\": 123.4,",
+                "\"channel\": \"PDU\",");
+
+        mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
+                        .header("X-Api-Key", "valid")
+                        .contentType("application/json")
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data.errorCode").value("IMAGE_NOT_SUPPORTED_FOR_CHANNEL"))
+                .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"));
+    }
+
+    @Test
     void unknownFormatForAuthenticatedRequestReturns400() throws Exception {
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(1));
 

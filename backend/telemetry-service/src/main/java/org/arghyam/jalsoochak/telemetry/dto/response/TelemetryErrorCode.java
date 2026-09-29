@@ -56,6 +56,13 @@ public enum TelemetryErrorCode {
      */
     READING_UNIT_NOT_SUPPORTED("READING_UNIT_NOT_SUPPORTED"),
 
+    /**
+     * The submission sent only a meter photo, and its reading channel can't read one: PDU readings are
+     * always typed in, and ELM photos wait for an ELM OCR model. A photo sent with a
+     * {@code confirmed_reading} is accepted on every channel; the photo is kept and not read.
+     */
+    IMAGE_NOT_SUPPORTED_FOR_CHANNEL("IMAGE_NOT_SUPPORTED_FOR_CHANNEL"),
+
     /** Unclassified server-side failure while processing the reading. */
     PROCESSING_FAILED("PROCESSING_FAILED"),
 

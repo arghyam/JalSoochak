@@ -24,9 +24,6 @@ public class OcrReadingsRetryService {
     /** Per-provider resilience instances are named "ocrReadings-<providerId>" for isolation + metrics. */
     static final String PROVIDER_INSTANCE_PREFIX = INSTANCE_NAME + "-";
 
-    /** The primary {@link MeterReadingExtractor}, serving tenants that set no {@code ocr_*} override. */
-    private final MeterReadingExtractor defaultOcrExtractor;
-    private final OcrProviderRegistry ocrProviderRegistry;
     private final RetryRegistry retryRegistry;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
     /** Shared across all providers: a global cap on concurrent OCR calls protecting the ingestion threads. */
@@ -40,13 +37,9 @@ public class OcrReadingsRetryService {
      */
     private final Map<String, ResilienceBundle> providerBundles = new ConcurrentHashMap<>();
 
-    public OcrReadingsRetryService(MeterReadingExtractor defaultOcrExtractor,
-                                   OcrProviderRegistry ocrProviderRegistry,
-                                   RetryRegistry retryRegistry,
+    public OcrReadingsRetryService(RetryRegistry retryRegistry,
                                    CircuitBreakerRegistry circuitBreakerRegistry,
                                    BulkheadRegistry bulkheadRegistry) {
-        this.defaultOcrExtractor = defaultOcrExtractor;
-        this.ocrProviderRegistry = ocrProviderRegistry;
         this.retryRegistry = retryRegistry;
         this.circuitBreakerRegistry = circuitBreakerRegistry;
         this.bulkhead = bulkheadRegistry.bulkhead(INSTANCE_NAME);
@@ -55,24 +48,21 @@ public class OcrReadingsRetryService {
                 circuitBreakerRegistry.circuitBreaker(INSTANCE_NAME));
     }
 
-    /** Resilient extraction against the global-default OCR endpoint. */
-    public OcrReadingResult extractReading(String readingUrl) {
-        return extractReading(readingUrl, null);
-    }
-
     /**
-     * Resilient extraction against the tenant-resolved provider. {@code null} settings use the built-in
-     * default provider. Retry and circuit breaker are isolated per provider so a failing backend trips
-     * only its own breaker; the bulkhead (concurrency cap) is shared across providers.
+     * Resilient extraction through {@code extractor}, which the caller picked through
+     * {@link OcrProviderRegistry}. {@code null} settings mean the extractor's own global defaults. Retry and
+     * circuit breaker are isolated per provider so a failing backend trips only its own breaker; the
+     * bulkhead (concurrency cap) is shared across providers.
+     *
+     * <p>The resilience instance follows the extractor that actually serves the call, not the id a tenant
+     * configured: an unknown/mis-typed id has already degraded to the default provider in the registry,
+     * and must then use the default breaker rather than spawn a phantom instance named after a provider
+     * that never runs.
      */
-    public OcrReadingResult extractReading(String readingUrl, OcrProviderSettings settings) {
-        // Resolve the extractor once so the resilience instance follows the provider that actually serves
-        // the call: an unknown/mis-typed id degrades to the built-in provider in the registry, and must
-        // then use the default breaker rather than spawning a phantom instance named after a provider that
-        // never runs.
-        MeterReadingExtractor extractor = resolveExtractor(settings);
+    public OcrReadingResult extractReading(MeterReadingExtractor extractor, String readingUrl,
+                                           OcrProviderSettings settings) {
         ResilienceBundle bundle = bundleFor(extractor);
-        Supplier<OcrReadingResult> supplier = () -> invokeExtractor(extractor, readingUrl, settings);
+        Supplier<OcrReadingResult> supplier = () -> extractor.extractReadingOrThrow(readingUrl, settings);
         Supplier<OcrReadingResult> resilientSupplier = Retry.decorateSupplier(
                 bundle.retry(),
                 CircuitBreaker.decorateSupplier(bundle.circuitBreaker(), Bulkhead.decorateSupplier(bulkhead, supplier))
@@ -90,18 +80,6 @@ public class OcrReadingsRetryService {
             }
             throw ex;
         }
-    }
-
-    /**
-     * The provider that will actually serve the call: {@code null} settings (or a null registry, as in
-     * some unit tests) use the built-in OCR provider; otherwise the registry resolves the configured
-     * id, degrading to the default provider for an unknown id.
-     */
-    private MeterReadingExtractor resolveExtractor(OcrProviderSettings settings) {
-        if (settings == null || ocrProviderRegistry == null) {
-            return defaultOcrExtractor;
-        }
-        return ocrProviderRegistry.get(settings.providerId());
     }
 
     /**
@@ -137,13 +115,6 @@ public class OcrReadingsRetryService {
             return null;
         }
         return normalized;
-    }
-
-    private OcrReadingResult invokeExtractor(MeterReadingExtractor extractor, String readingUrl, OcrProviderSettings settings) {
-        if (settings == null || ocrProviderRegistry == null) {
-            return defaultOcrExtractor.extractReadingOrThrow(readingUrl, null);
-        }
-        return extractor.extractReadingOrThrow(readingUrl, settings);
     }
 
     private String providerLabel(MeterReadingExtractor extractor) {

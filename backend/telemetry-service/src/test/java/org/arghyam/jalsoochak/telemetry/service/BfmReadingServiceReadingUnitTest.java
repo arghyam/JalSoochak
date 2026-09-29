@@ -95,10 +95,9 @@ class BfmReadingServiceReadingUnitTest {
                 new ImageReadingCapture(
                         repo,
                         telemetryEventPublisher,
-                        defaultOcrExtractor,
                         null,
                         ocrProviderResolver,
-                        null),
+                        OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
                 null);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
@@ -182,7 +181,8 @@ class BfmReadingServiceReadingUnitTest {
         CreateReadingResponse response = service.createReading(photo("L"), SCHEMA, operator, CONTACT, false);
 
         assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED);
-        verifyNoInteractions(defaultOcrExtractor, ocrProviderResolver);
+        verify(defaultOcrExtractor, never()).extractReading(anyString(), any());
+        verifyNoInteractions(ocrProviderResolver);
         verifyNothingStoredOrPublished();
     }
 

@@ -122,10 +122,9 @@ class BfmReadingServiceImplausibleSupplyTest {
                 new ImageReadingCapture(
                         repo,
                         telemetryEventPublisher,
-                        defaultOcrExtractor,
                         null,
                         ocrProviderResolver,
-                        null),
+                        OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
                 null);
     }

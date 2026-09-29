@@ -19,10 +19,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -43,15 +46,20 @@ class ImageReadingCaptureTest {
     private static final long OPERATOR_ID = 11L;
     private static final long SCHEME_ID = 100L;
     private static final String IMAGE_URL = "https://img.example.com/meter.jpg";
+    private static final CaptureOutcome IMAGE_NOT_SUPPORTED = new CaptureOutcome.Rejected(
+            TelemetryErrorCode.IMAGE_NOT_SUPPORTED_FOR_CHANNEL,
+            "Meter photos are not supported for your reading channel.");
 
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
-    private MeterReadingExtractor defaultOcrExtractor;
+    private MeterReadingExtractor bfmOcrExtractor;
     @Mock
     private MeterReadingExtractor tenantOcrExtractor;
+    @Mock
+    private MeterReadingExtractor elmOcrExtractor;
     @Mock
     private OcrReadingsRetryService ocrReadingsRetryService;
     @Mock
@@ -66,17 +74,22 @@ class ImageReadingCaptureTest {
         capture = new ImageReadingCapture(
                 telemetryTenantRepository,
                 telemetryEventPublisher,
-                defaultOcrExtractor,
                 ocrReadingsRetryService,
                 ocrProviderResolver,
                 ocrProviderRegistry);
+    }
+
+    /** A tenant with no BFM override: the registry hands BFM photos to BFM's default provider. */
+    private void bfmPhotosGoToTheDefaultProvider() {
+        when(ocrProviderRegistry.get(ReadingChannel.BFM, null)).thenReturn(Optional.of(bfmOcrExtractor));
     }
 
     @Test
     @DisplayName("a readable photo is captured in the channel's standard unit with its OCR details")
     void readablePhotoIsCaptured() {
         OcrReadingResult ocr = readable("123.45", "0.95");
-        when(defaultOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(ocr);
+        bfmPhotosGoToTheDefaultProvider();
+        when(bfmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(ocr);
 
         CaptureOutcome outcome = capture.capture(input(ReadingChannel.BFM, null, OcrRetryMode.NONE));
 
@@ -88,13 +101,15 @@ class ImageReadingCaptureTest {
         assertThat(reading.confidence()).isEqualByComparingTo("0.95");
         assertThat(reading.source()).isEqualTo(RolloverResolutionService.SOURCE_AS_EXTRACTED);
         assertThat(reading.ocrResult()).isSameAs(ocr);
+        verify(ocrProviderResolver).resolve(TENANT_ID, ReadingChannel.BFM);
         verifyNoInteractions(telemetryEventPublisher);
     }
 
     @Test
     @DisplayName("naming the channel's standard unit with a photo changes nothing")
     void standardUnitWithAPhotoIsAccepted() {
-        when(defaultOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(readable("123", "0.95"));
+        bfmPhotosGoToTheDefaultProvider();
+        when(bfmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(readable("123", "0.95"));
 
         CaptureOutcome outcome = capture.capture(input(ReadingChannel.BFM, " M3 ", OcrRetryMode.NONE));
 
@@ -109,7 +124,7 @@ class ImageReadingCaptureTest {
         assertThat(outcome).isEqualTo(new CaptureOutcome.Rejected(
                 TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED,
                 "reading_unit applies only to confirmed_reading. A meter photo for channel BFM is read in m3."));
-        verifyNoInteractions(ocrProviderResolver, defaultOcrExtractor, ocrReadingsRetryService,
+        verifyNoInteractions(ocrProviderResolver, ocrProviderRegistry, ocrReadingsRetryService,
                 telemetryTenantRepository, telemetryEventPublisher);
     }
 
@@ -121,24 +136,74 @@ class ImageReadingCaptureTest {
         assertThat(outcome).isEqualTo(new CaptureOutcome.Rejected(
                 TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED,
                 ReadingUnit.unsupportedMessage(ReadingChannel.BFM)));
-        verifyNoInteractions(ocrProviderResolver, defaultOcrExtractor);
+        verifyNoInteractions(ocrProviderResolver, ocrProviderRegistry);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ReadingChannel.class, names = {"PDU", "IOT", "MAN"})
+    @DisplayName("a photo for a channel that doesn't read photos is rejected before any OCR setting is read")
+    void photoForAChannelThatDoesNotReadPhotosIsRejected(ReadingChannel channel) {
+        CaptureOutcome outcome = capture.capture(input(channel, null, OcrRetryMode.RESILIENT));
+
+        assertThat(outcome).isEqualTo(IMAGE_NOT_SUPPORTED);
+        verifyNoInteractions(ocrProviderResolver, ocrProviderRegistry, ocrReadingsRetryService,
+                telemetryTenantRepository, telemetryEventPublisher);
     }
 
     @Test
-    @DisplayName("a channel with no units rejects any declared unit")
-    void channelWithNoUnitsRejectsAnyUnit() {
-        CaptureOutcome outcome = capture.capture(input(ReadingChannel.IOT, "m3", OcrRetryMode.NONE));
+    @DisplayName("a PDU photo is refused as a photo, whatever unit came with it")
+    void pduPhotoWithAUnitIsRefusedAsAPhoto() {
+        CaptureOutcome outcome = capture.capture(input(ReadingChannel.PDU, "min", OcrRetryMode.NONE));
 
-        assertThat(outcome).isEqualTo(new CaptureOutcome.Rejected(
-                TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED,
-                ReadingUnit.unsupportedMessage(ReadingChannel.IOT)));
-        verifyNoInteractions(ocrProviderResolver);
+        assertThat(outcome).isEqualTo(IMAGE_NOT_SUPPORTED);
+    }
+
+    @Test
+    @DisplayName("an ELM photo is rejected when ELM has no OCR provider, and never reaches the BFM provider")
+    void elmPhotoWithNoElmProviderIsRejected() {
+        when(ocrProviderRegistry.get(ReadingChannel.ELM, null)).thenReturn(Optional.empty());
+
+        CaptureOutcome outcome = capture.capture(input(ReadingChannel.ELM, null, OcrRetryMode.RESILIENT));
+
+        assertThat(outcome).isEqualTo(IMAGE_NOT_SUPPORTED);
+        verify(ocrProviderResolver).resolve(TENANT_ID, ReadingChannel.ELM);
+        verifyNoInteractions(bfmOcrExtractor, ocrReadingsRetryService, telemetryTenantRepository,
+                telemetryEventPublisher);
+    }
+
+    @Test
+    @DisplayName("an ELM photo is rejected when the tenant's ELM provider isn't registered")
+    void elmPhotoWithAnUnregisteredTenantProviderIsRejected() {
+        OcrProviderSettings settings = new OcrProviderSettings("elm-x", "https://elm.example.com", null, null);
+        when(ocrProviderResolver.resolve(TENANT_ID, ReadingChannel.ELM)).thenReturn(settings);
+        when(ocrProviderRegistry.get(ReadingChannel.ELM, "elm-x")).thenReturn(Optional.empty());
+
+        CaptureOutcome outcome = capture.capture(input(ReadingChannel.ELM, null, OcrRetryMode.NONE));
+
+        assertThat(outcome).isEqualTo(IMAGE_NOT_SUPPORTED);
+        verifyNoInteractions(bfmOcrExtractor, tenantOcrExtractor, ocrReadingsRetryService);
+    }
+
+    @Test
+    @DisplayName("an ELM photo is read by the ELM provider once one exists, in kW.h")
+    void elmPhotoIsReadByTheElmProvider() {
+        when(ocrProviderRegistry.get(ReadingChannel.ELM, null)).thenReturn(Optional.of(elmOcrExtractor));
+        when(elmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(readable("812.4", "0.9"));
+
+        CaptureOutcome outcome = capture.capture(input(ReadingChannel.ELM, null, OcrRetryMode.NONE));
+
+        assertThat(outcome).isInstanceOf(CaptureOutcome.Captured.class);
+        CapturedReading reading = ((CaptureOutcome.Captured) outcome).reading();
+        assertThat(reading.value()).isEqualByComparingTo("812.4");
+        assertThat(reading.submittedUnit()).isEqualTo(ReadingUnit.KILOWATT_HOUR);
+        verifyNoInteractions(bfmOcrExtractor);
     }
 
     @Test
     @DisplayName("no reading from OCR is rejected as unreadable and recorded as an anomaly")
     void noReadingIsUnreadable() {
-        when(defaultOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(null);
+        bfmPhotosGoToTheDefaultProvider();
+        when(bfmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(null);
 
         CaptureOutcome outcome = capture.capture(input(ReadingChannel.BFM, null, OcrRetryMode.NONE));
 
@@ -151,7 +216,8 @@ class ImageReadingCaptureTest {
     @Test
     @DisplayName("an unreadable photo's message carries the provider's rejection reason")
     void unreadableMessageCarriesTheRejectionReason() {
-        when(defaultOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(
+        bfmPhotosGoToTheDefaultProvider();
+        when(bfmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(
                 OcrReadingResult.builder().rejectionReason("Meter face is blurred.").build());
 
         CaptureOutcome outcome = capture.capture(input(ReadingChannel.BFM, null, OcrRetryMode.NONE));
@@ -164,7 +230,8 @@ class ImageReadingCaptureTest {
     @Test
     @DisplayName("an OCR failure is rejected and recorded as an unreadable-image anomaly")
     void ocrFailureIsRejected() {
-        when(defaultOcrExtractor.extractReading(IMAGE_URL, null)).thenThrow(new IllegalStateException("boom"));
+        bfmPhotosGoToTheDefaultProvider();
+        when(bfmOcrExtractor.extractReading(IMAGE_URL, null)).thenThrow(new IllegalStateException("boom"));
 
         CaptureOutcome outcome = capture.capture(input(ReadingChannel.BFM, null, OcrRetryMode.NONE));
 
@@ -177,7 +244,8 @@ class ImageReadingCaptureTest {
     @Test
     @DisplayName("a temporary OCR outage asks for a retry and records no anomaly")
     void ocrOutageAsksForARetry() {
-        when(ocrReadingsRetryService.extractReading(IMAGE_URL))
+        bfmPhotosGoToTheDefaultProvider();
+        when(ocrReadingsRetryService.extractReading(bfmOcrExtractor, IMAGE_URL, null))
                 .thenThrow(new OcrReadingsUnavailableException("circuit open", new RuntimeException("timeout")));
 
         CaptureOutcome outcome = capture.capture(input(ReadingChannel.BFM, null, OcrRetryMode.RESILIENT));
@@ -188,30 +256,32 @@ class ImageReadingCaptureTest {
     }
 
     @Test
-    @DisplayName("the resilient mode reads through the retry layer, with the tenant's settings when it has them")
+    @DisplayName("the resilient mode reads through the retry layer, with the provider and settings of the tenant")
     void resilientModeGoesThroughTheRetryLayer() {
         OcrProviderSettings settings = new OcrProviderSettings("custom", "https://ocr.example.com", "key", "X-Key");
-        when(ocrProviderResolver.resolve(TENANT_ID)).thenReturn(settings);
-        when(ocrReadingsRetryService.extractReading(IMAGE_URL, settings)).thenReturn(readable("50", "0.9"));
+        when(ocrProviderResolver.resolve(TENANT_ID, ReadingChannel.BFM)).thenReturn(settings);
+        when(ocrProviderRegistry.get(ReadingChannel.BFM, "custom")).thenReturn(Optional.of(tenantOcrExtractor));
+        when(ocrReadingsRetryService.extractReading(tenantOcrExtractor, IMAGE_URL, settings))
+                .thenReturn(readable("50", "0.9"));
 
         CaptureOutcome outcome = capture.capture(input(ReadingChannel.BFM, null, OcrRetryMode.RESILIENT));
 
         assertThat(outcome).isInstanceOf(CaptureOutcome.Captured.class);
-        verifyNoInteractions(defaultOcrExtractor, ocrProviderRegistry);
+        verifyNoInteractions(bfmOcrExtractor, tenantOcrExtractor);
     }
 
     @Test
     @DisplayName("a tenant's own OCR provider is dispatched through the registry")
     void tenantProviderIsDispatchedThroughTheRegistry() {
         OcrProviderSettings settings = new OcrProviderSettings("custom", "https://ocr.example.com", "key", "X-Key");
-        when(ocrProviderResolver.resolve(TENANT_ID)).thenReturn(settings);
-        when(ocrProviderRegistry.get("custom")).thenReturn(tenantOcrExtractor);
+        when(ocrProviderResolver.resolve(TENANT_ID, ReadingChannel.BFM)).thenReturn(settings);
+        when(ocrProviderRegistry.get(ReadingChannel.BFM, "custom")).thenReturn(Optional.of(tenantOcrExtractor));
         when(tenantOcrExtractor.extractReading(IMAGE_URL, settings)).thenReturn(readable("50", "0.9"));
 
         CaptureOutcome outcome = capture.capture(input(ReadingChannel.BFM, null, OcrRetryMode.NONE));
 
         assertThat(outcome).isInstanceOf(CaptureOutcome.Captured.class);
-        verify(defaultOcrExtractor, never()).extractReading(anyString(), any());
+        verify(bfmOcrExtractor, never()).extractReading(anyString(), any());
     }
 
     private void verifyUnreadableImageAnomaly(String reason) {

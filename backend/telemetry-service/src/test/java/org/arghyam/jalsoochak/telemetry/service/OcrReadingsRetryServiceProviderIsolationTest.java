@@ -7,6 +7,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryConfig;
 import io.github.resilience4j.retry.RetryRegistry;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.ResourceAccessException;
@@ -42,6 +43,7 @@ class OcrReadingsRetryServiceProviderIsolationTest {
                 .qualityStatus("GOOD")
                 .build();
         MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
+        when(defaultOcrExtractor.providerId()).thenReturn("flowvision");
         when(defaultOcrExtractor.extractReadingOrThrow(anyString(), isNull())).thenReturn(ok);
 
         // Provider "vision-x" always fails with a transient (recorded) error.
@@ -49,8 +51,6 @@ class OcrReadingsRetryServiceProviderIsolationTest {
         when(visionX.providerId()).thenReturn("vision-x");
         when(visionX.extractReadingOrThrow(anyString(), any(OcrProviderSettings.class)))
                 .thenThrow(new ResourceAccessException("Read timed out"));
-        OcrProviderRegistry providerRegistry =
-                new OcrProviderRegistry(List.of(visionX), "flowvision");
 
         // Breaker opens after 2 failing calls; no retries so each extractReading == one breaker call.
         CircuitBreakerConfig cbConfig = CircuitBreakerConfig.custom()
@@ -68,8 +68,6 @@ class OcrReadingsRetryServiceProviderIsolationTest {
                 .build();
 
         OcrReadingsRetryService service = new OcrReadingsRetryService(
-                defaultOcrExtractor,
-                providerRegistry,
                 RetryRegistry.of(retryConfig),
                 CircuitBreakerRegistry.of(cbConfig),
                 BulkheadRegistry.of(BulkheadConfig.custom().maxConcurrentCalls(10).maxWaitDuration(Duration.ZERO).build()));
@@ -78,34 +76,33 @@ class OcrReadingsRetryServiceProviderIsolationTest {
                 new OcrProviderSettings("vision-x", "https://vision-x/extract", "k", "Authorization");
 
         // Two real failures open vision-x's breaker.
-        assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(URL, visionXSettings));
-        assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(URL, visionXSettings));
+        assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(visionX, URL, visionXSettings));
+        assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(visionX, URL, visionXSettings));
         verify(visionX, times(2)).extractReadingOrThrow(anyString(), any(OcrProviderSettings.class));
 
         // Breaker now OPEN: the next call short-circuits without invoking the extractor.
-        assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(URL, visionXSettings));
+        assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(visionX, URL, visionXSettings));
         verify(visionX, times(2)).extractReadingOrThrow(anyString(), any(OcrProviderSettings.class));
 
         // The default provider's breaker is unaffected — it still succeeds.
-        assertEquals(ok, service.extractReading(URL));
+        assertEquals(ok, service.extractReading(defaultOcrExtractor, URL, null));
     }
 
     @Test
     void defaultProviderUsesTheSharedTunedInstance() {
         // Sanity: null settings resolve the shared "ocrReadings" breaker, not a per-provider one.
         MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
+        when(defaultOcrExtractor.providerId()).thenReturn("flowvision");
         OcrReadingResult ok = OcrReadingResult.builder().adjustedReading(new BigDecimal("1")).build();
         when(defaultOcrExtractor.extractReadingOrThrow(anyString(), isNull())).thenReturn(ok);
 
         CircuitBreakerRegistry cbRegistry = CircuitBreakerRegistry.ofDefaults();
         OcrReadingsRetryService service = new OcrReadingsRetryService(
-                defaultOcrExtractor,
-                new OcrProviderRegistry(List.of(), "flowvision"),
                 RetryRegistry.ofDefaults(),
                 cbRegistry,
                 BulkheadRegistry.ofDefaults());
 
-        service.extractReading(URL);
+        service.extractReading(defaultOcrExtractor, URL, null);
 
         CircuitBreaker defaultBreaker = cbRegistry.circuitBreaker(OcrReadingsRetryService.INSTANCE_NAME);
         assertEquals(1, defaultBreaker.getMetrics().getNumberOfSuccessfulCalls());
@@ -116,14 +113,13 @@ class OcrReadingsRetryServiceProviderIsolationTest {
         // Registry knows only the built-in provider (which fails transiently here).
         MeterReadingExtractor builtIn = mock(MeterReadingExtractor.class);
         when(builtIn.providerId()).thenReturn("flowvision");
+        when(builtIn.channel()).thenReturn(ReadingChannel.BFM);
         when(builtIn.extractReadingOrThrow(anyString(), any(OcrProviderSettings.class)))
                 .thenThrow(new ResourceAccessException("Read timed out"));
         OcrProviderRegistry registry = new OcrProviderRegistry(List.of(builtIn), "flowvision");
 
         CircuitBreakerRegistry cbRegistry = CircuitBreakerRegistry.ofDefaults();
         OcrReadingsRetryService service = new OcrReadingsRetryService(
-                mock(MeterReadingExtractor.class),
-                registry,
                 RetryRegistry.of(RetryConfig.custom()
                         .maxAttempts(1)
                         .retryExceptions(OcrTransientFailures.retriableExceptions())
@@ -134,7 +130,8 @@ class OcrReadingsRetryServiceProviderIsolationTest {
         // A mis-typed provider id degrades to the built-in provider in the registry.
         OcrProviderSettings unknown =
                 new OcrProviderSettings("typo-provider", "https://custom/extract", "k", "Authorization");
-        assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(URL, unknown));
+        MeterReadingExtractor served = registry.get(ReadingChannel.BFM, unknown.providerId()).orElseThrow();
+        assertThrows(OcrReadingsUnavailableException.class, () -> service.extractReading(served, URL, unknown));
 
         // Failure is recorded on the shared default breaker; no phantom per-provider instance is created.
         assertEquals(1, cbRegistry.circuitBreaker(OcrReadingsRetryService.INSTANCE_NAME)

@@ -407,6 +407,8 @@ class ConversationLocalizationServiceTest {
                     Arguments.of("Invalid reading value", "रीडिंग मान्य नहीं है।"),
                     Arguments.of("Could not read meter value from image",
                             "इमेज से मीटर रीडिंग नहीं पढ़ी जा सकी। कृपया स्पष्ट फोटो भेजें।"),
+                    Arguments.of("Meter photos are not supported for your reading channel.",
+                            "आपके रीडिंग चैनल के लिए मीटर की फ़ोटो समर्थित नहीं है।"),
                     Arguments.of("OCR failed", "मीटर रीडिंग पढ़ने में त्रुटि हुई। कृपया स्पष्ट फोटो भेजें।"),
                     Arguments.of("Location saved successfully", "लोकेशन सफलतापूर्वक सेव हो गई।"),
                     Arguments.of("Reading updated successfully", "रीडिंग सफलतापूर्वक अपडेट हुई।")

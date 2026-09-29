@@ -82,10 +82,9 @@ class BfmReadingServiceAnomalyDedupTest {
                 new ImageReadingCapture(
                         telemetryTenantRepository,
                         telemetryEventPublisher,
-                        defaultOcrExtractor,
                         null,
                         ocrProviderResolver,
-                        null),
+                        OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
                 null);
         // The channel is resolved before the photo is read, so every submission here needs it.

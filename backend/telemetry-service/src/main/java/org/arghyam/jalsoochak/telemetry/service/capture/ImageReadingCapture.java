@@ -27,6 +27,11 @@ import java.util.UUID;
 /**
  * Captures a reading from a meter photo through OCR.
  *
+ * <p>The OCR provider is chosen by channel through {@link OcrProviderRegistry}, so a photo is only ever
+ * read by a model for its kind of meter. A channel that doesn't read photos, or has no provider yet, is
+ * rejected with {@code IMAGE_NOT_SUPPORTED_FOR_CHANNEL}; for a channel that doesn't read photos this
+ * happens before any OCR setting is read.
+ *
  * <p>A photo that can't be read is rejected and recorded as an unreadable-image anomaly, once per
  * attempt; a temporary OCR outage asks the submitter to retry. OCR reads the meter in the channel's
  * standard unit, so a {@code reading_unit} other than that one is rejected before any OCR setting is
@@ -39,24 +44,35 @@ public class ImageReadingCapture implements ReadingCapture {
 
     private static final String UNREADABLE_IMAGE_MESSAGE =
             "Could not read meter value from image. Please retry with a clearer photo.";
+    /** Also sent to WhatsApp operators; {@code ConversationLocalizationService} translates it. */
+    private static final String IMAGE_NOT_SUPPORTED_MESSAGE =
+            "Meter photos are not supported for your reading channel.";
 
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final TelemetryEventPublisher telemetryEventPublisher;
-    private final MeterReadingExtractor defaultOcrExtractor;
     private final OcrReadingsRetryService ocrReadingsRetryService;
     private final OcrProviderResolver ocrProviderResolver;
     private final OcrProviderRegistry ocrProviderRegistry;
 
     @Override
     public CaptureOutcome capture(CaptureInput input) {
+        if (!input.channel().supportsImageReading()) {
+            return imageNotSupported(input);
+        }
         Optional<CaptureOutcome> unitRejection = rejectUnitOtherThanStandard(input);
         if (unitRejection.isPresent()) {
             return unitRejection.get();
         }
 
         try {
-            OcrProviderSettings ocrSettings = ocrProviderResolver.resolve(input.tenantId());
-            OcrReadingResult ocrResult = extractReading(input.readingUrl(), ocrSettings, input.ocrRetryMode());
+            OcrProviderSettings ocrSettings = ocrProviderResolver.resolve(input.tenantId(), input.channel());
+            Optional<MeterReadingExtractor> extractor = ocrProviderRegistry.get(
+                    input.channel(), ocrSettings == null ? null : ocrSettings.providerId());
+            if (extractor.isEmpty()) {
+                return imageNotSupported(input);
+            }
+            OcrReadingResult ocrResult =
+                    extractReading(extractor.get(), input.readingUrl(), ocrSettings, input.ocrRetryMode());
             log.info("readings_ocr ocr_result operatorId={} schemeId={} imageUrlHash={} result={}",
                     input.operatorId(),
                     input.schemeId(),
@@ -121,20 +137,26 @@ public class ImageReadingCapture implements ReadingCapture {
     }
 
     /**
-     * Runs OCR for {@code readingUrl}. When {@code settings} is {@code null} the tenant has no per-tenant
-     * OCR override and the built-in provider path is used unchanged; otherwise the resolved provider is
-     * dispatched via {@link OcrProviderRegistry}. Honours the resilient (retry/circuit-breaker) path.
+     * The channel has no way to read a photo: it doesn't read photos at all, or no provider exists for it
+     * yet. Not an unreadable image, so no anomaly is recorded.
      */
-    private OcrReadingResult extractReading(String readingUrl, OcrProviderSettings settings, OcrRetryMode ocrRetryMode) {
+    private static CaptureOutcome imageNotSupported(CaptureInput input) {
+        log.info("readings_ocr image_not_supported operatorId={} schemeId={} channel={}",
+                input.operatorId(), input.schemeId(), input.channel());
+        return new CaptureOutcome.Rejected(TelemetryErrorCode.IMAGE_NOT_SUPPORTED_FOR_CHANNEL, IMAGE_NOT_SUPPORTED_MESSAGE);
+    }
+
+    /**
+     * Runs OCR for {@code readingUrl} through {@code extractor}. {@code null} settings mean the tenant has
+     * no override, so the extractor uses its own configuration. Honours the resilient
+     * (retry/circuit-breaker) path.
+     */
+    private OcrReadingResult extractReading(MeterReadingExtractor extractor, String readingUrl,
+                                            OcrProviderSettings settings, OcrRetryMode ocrRetryMode) {
         if (ocrRetryMode == OcrRetryMode.RESILIENT) {
-            return settings == null
-                    ? ocrReadingsRetryService.extractReading(readingUrl)
-                    : ocrReadingsRetryService.extractReading(readingUrl, settings);
+            return ocrReadingsRetryService.extractReading(extractor, readingUrl, settings);
         }
-        if (settings == null) {
-            return defaultOcrExtractor.extractReading(readingUrl, null);
-        }
-        return ocrProviderRegistry.get(settings.providerId()).extractReading(readingUrl, settings);
+        return extractor.extractReading(readingUrl, settings);
     }
 
     private void recordUnreadableImage(CaptureInput input, String reason) {

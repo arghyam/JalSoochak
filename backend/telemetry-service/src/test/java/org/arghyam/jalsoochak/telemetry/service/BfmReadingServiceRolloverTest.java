@@ -97,10 +97,9 @@ class BfmReadingServiceRolloverTest {
                 new ImageReadingCapture(
                         repo,
                         telemetryEventPublisher,
-                        defaultOcrExtractor,
                         null,
                         ocrProviderResolver,
-                        null),
+                        OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
                 null);
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);

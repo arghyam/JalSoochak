@@ -374,6 +374,9 @@ public class ConversationLocalizationService {
         if (normalized.contains("could not read meter value from image")) {
             return "इमेज से मीटर रीडिंग नहीं पढ़ी जा सकी। कृपया स्पष्ट फोटो भेजें।";
         }
+        if (normalized.contains("meter photos are not supported for your reading channel")) {
+            return "आपके रीडिंग चैनल के लिए मीटर की फ़ोटो समर्थित नहीं है।";
+        }
         if (normalized.contains("ocr failed")) {
             return "मीटर रीडिंग पढ़ने में त्रुटि हुई। कृपया स्पष्ट फोटो भेजें।";
         }
