@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ManualReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
@@ -7,12 +9,15 @@ import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryFlowReadingDetails;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryPendingMeterChangeRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentMatchers;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -32,6 +37,8 @@ import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.argThat;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -69,8 +76,19 @@ class MeterReadingConversationServiceManualReadingTest {
     @Spy
     private com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
+    @Mock
+    private ReadingChannelResolver readingChannelResolver;
+
+    @Mock
+    private ReadingRepublisher readingRepublisher;
+
     @InjectMocks
     private MeterReadingConversationService service;
+
+    @BeforeEach
+    void defaultChannel() {
+        lenient().when(readingChannelResolver.resolve(anyString(), anyString())).thenReturn(ReadingChannel.BFM);
+    }
 
     @Test
     void manualReadingUpdatesTodaysReadingByUpdatingConfirmedOnly() {
@@ -392,6 +410,8 @@ class MeterReadingConversationServiceManualReadingTest {
 
         verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+        verify(telemetryTenantRepository, never()).updateFlowReadingChannel(anyString(), anyLong(), anyString());
+        verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
 
     @Test
@@ -487,6 +507,9 @@ class MeterReadingConversationServiceManualReadingTest {
         // No anomaly, no escalation, no confirmation template lookup once the reading did not land.
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(anyString(), any());
         verify(telemetryTenantRepository, never()).applyConfirmedReadingSource(anyString(), anyLong(), anyInt(), any());
+        // Nor an event: there is no stored reading to publish.
+        verify(telemetryTenantRepository, never()).updateFlowReadingChannel(anyString(), anyLong(), anyString());
+        verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
 
     @Test
@@ -747,5 +770,102 @@ class MeterReadingConversationServiceManualReadingTest {
 
         assertEquals(99L, submission.getValue().readingId());
         assertEquals(ReadingTime.today(), submission.getValue().readingDate());
+    }
+
+    /**
+     * The three branches below each end with a stored reading, and analytics must receive every one
+     * of them: before, the manual path never published, so the day had no fact row and no water
+     * quantity. Each publishes the row it wrote, once, after the value and the channel are stored.
+     */
+    @Test
+    void manualReadingOnAPendingMeterChangeRowPublishesThatRow() {
+        stubAcceptedManualReading();
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.of(new TelemetryPendingMeterChangeRecord(
+                        88L, "mc-1", 1L, new BigDecimal("140"))));
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("150")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
+        order.verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 88L, new BigDecimal("150"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL);
+        order.verify(telemetryTenantRepository).updateFlowReadingChannel("tenant_test", 88L, ReadingChannel.BFM.name());
+        order.verify(readingRepublisher).republish("tenant_test", 1, 88L);
+        verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());
+    }
+
+    @Test
+    void manualReadingOnTodaysRowPublishesThatRowOnTheOperatorsChannel() {
+        stubAcceptedManualReading();
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L, "bfm-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO)));
+        // The channel is the operator's stored preference, as on the photo path.
+        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.ELM);
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("123")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
+        order.verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("123"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL);
+        order.verify(telemetryTenantRepository).updateFlowReadingChannel("tenant_test", 99L, ReadingChannel.ELM.name());
+        order.verify(readingRepublisher).republish("tenant_test", 1, 99L);
+        verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());
+    }
+
+    @Test
+    void manualReadingThatOpensTheRowPublishesTheNewRow() {
+        stubAcceptedManualReading();
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
+                any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any()))
+                .thenReturn(4242L);
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("123")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
+        order.verify(telemetryTenantRepository).persistFlowReadingWithTracking(anyString(), any(), anyLong(),
+                anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(),
+                any(), any());
+        order.verify(telemetryTenantRepository).updateFlowReadingChannel("tenant_test", 4242L, ReadingChannel.BFM.name());
+        order.verify(readingRepublisher).republish("tenant_test", 1, 4242L);
+        verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());
+    }
+
+    /** Everything an accepted manual reading needs apart from the row it lands on. */
+    private void stubAcceptedManualReading() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt()))
+                .thenReturn(0);
+        when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt()))
+                .thenReturn(List.of());
+        when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString()))
+                .thenReturn(Optional.empty());
     }
 }

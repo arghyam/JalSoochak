@@ -87,6 +87,8 @@ class BfmReadingServiceCorrectionOutcomeTest {
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
+    private ReadingRepublisher readingRepublisher;
+    @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
     private OperatorContextService operatorContextService;
@@ -105,7 +107,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
     private BfmReadingService service(SupplyPlausibilityProperties.Mode mode) {
         return new BfmReadingService(
-                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
+                repo, defaultOcrExtractor, telemetryEventPublisher, readingRepublisher, tenantConfigRepository,
                 new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
@@ -144,8 +146,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
         verify(repo, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
         verify(repo, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any());
         verify(repo, never()).applyQuarantineReason(anyString(), anyLong(), anyInt());
-        verify(telemetryEventPublisher, never()).publishMeterReadingRecorded(
-                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
 
     private TenantAnomalyRecord capturedAnomaly() {
@@ -179,9 +180,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
             verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(PLAUSIBLE), eq(OPERATOR_ID), any());
             verify(repo).applyQuarantineReason(SCHEMA, READING_ID, QuarantineReason.NONE);
-            verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                    eq(TENANT_ID), eq(SCHEME_ID), eq(OPERATOR_ID), any(), eq(PLAUSIBLE), isNull(),
-                    any(), any(), any(), eq(READING_DATE), eq(1), eq(0), any());
+            verify(readingRepublisher).republish(SCHEMA, TENANT_ID, READING_ID);
             assertThat(response.isSuccess()).isTrue();
             assertThat(response.getQualityStatus()).isEqualTo("CONFIRMED");
         }
@@ -196,9 +195,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
             verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(PLAUSIBLE), eq(OPERATOR_ID), any());
             verify(repo).applyQuarantineReason(SCHEMA, READING_ID, QuarantineReason.NONE);
-            verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                    eq(TENANT_ID), eq(SCHEME_ID), eq(OPERATOR_ID), any(), eq(PLAUSIBLE), isNull(),
-                    any(), any(), any(), eq(READING_DATE), eq(1), eq(0), any());
+            verify(readingRepublisher).republish(SCHEMA, TENANT_ID, READING_ID);
             assertThat(response.isSuccess()).isTrue();
         }
 

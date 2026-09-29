@@ -78,6 +78,7 @@ class BfmReadingServiceAssertedReadingTest {
                 repo,
                 defaultOcrExtractor,
                 telemetryEventPublisher,
+                null,
                 tenantConfigRepository,
                 new ObjectMapper(),
                 operatorContextService,

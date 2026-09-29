@@ -104,7 +104,7 @@ class BfmReadingServiceImplausibleSupplyTest {
 
     private BfmReadingService service(SupplyPlausibilityProperties.Mode mode) {
         return new BfmReadingService(
-                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
+                repo, defaultOcrExtractor, telemetryEventPublisher, null, tenantConfigRepository,
                 new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),

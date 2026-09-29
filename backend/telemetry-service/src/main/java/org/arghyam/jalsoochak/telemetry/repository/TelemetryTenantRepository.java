@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -1852,22 +1853,26 @@ public class TelemetryTenantRepository {
                 ? new Object[]{correlationId, correlationId}
                 : new Object[]{correlationId};
         List<TelemetryLatestFlowReadingRecord> rows = jdbcTemplate.query(
-                sql,
-                (rs, n) -> new TelemetryLatestFlowReadingRecord(
-                        toLong(rs.getObject("id")),
-                        toLong(rs.getObject("scheme_id")),
-                        toLong(rs.getObject("created_by")),
-                        rs.getString("correlation_id"),
-                        rs.getBigDecimal("extracted_reading"),
-                        rs.getBigDecimal("confirmed_reading"),
-                        rs.getString("image_url"),
-                        rs.getObject("reading_date", LocalDate.class),
-                        rs.getObject("reading_time", LocalDateTime.class),
-                        rs.getString("channel"),
-                        toInteger(rs.getObject("quarantine_reason"))
-                ),
-                args
-        );
+                sql, (rs, n) -> mapLatestFlowReadingRecord(rs), args);
+        return rows.stream().findFirst();
+    }
+
+    /**
+     * The row a caller has just written, read back by its primary key. Used to republish a stored
+     * reading, where {@code correlation_id} will not do: it is not unique (the WhatsApp flows reuse
+     * it across rows, V48).
+     */
+    public Optional<TelemetryLatestFlowReadingRecord> findFlowReadingById(String schemaName, Long readingId) {
+        validateSchemaName(schemaName);
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time, %s AS quarantine_reason
+                FROM %s.flow_reading_table
+                WHERE id = ?
+                  AND deleted_at IS NULL
+                """, timeColumn, quarantineReasonColumn(schemaName), schemaName);
+        List<TelemetryLatestFlowReadingRecord> rows = jdbcTemplate.query(
+                sql, (rs, n) -> mapLatestFlowReadingRecord(rs), readingId);
         return rows.stream().findFirst();
     }
 
@@ -1969,23 +1974,25 @@ public class TelemetryTenantRepository {
                 LIMIT 1
                 """, timeColumn, quarantineReasonColumn(schemaName), schemaName, timeColumn);
         List<TelemetryLatestFlowReadingRecord> rows = jdbcTemplate.query(
-                sql,
-                (rs, n) -> new TelemetryLatestFlowReadingRecord(
-                        toLong(rs.getObject("id")),
-                        toLong(rs.getObject("scheme_id")),
-                        toLong(rs.getObject("created_by")),
-                        rs.getString("correlation_id"),
-                        rs.getBigDecimal("extracted_reading"),
-                        rs.getBigDecimal("confirmed_reading"),
-                        rs.getString("image_url"),
-                        rs.getObject("reading_date", LocalDate.class),
-                        rs.getObject("reading_time", LocalDateTime.class),
-                        rs.getString("channel"),
-                        toInteger(rs.getObject("quarantine_reason"))
-                ),
-                operatorId
-        );
+                sql, (rs, n) -> mapLatestFlowReadingRecord(rs), operatorId);
         return rows.stream().findFirst();
+    }
+
+    /** Maps the projection the three {@link TelemetryLatestFlowReadingRecord} lookups share. */
+    private TelemetryLatestFlowReadingRecord mapLatestFlowReadingRecord(ResultSet rs) throws SQLException {
+        return new TelemetryLatestFlowReadingRecord(
+                toLong(rs.getObject("id")),
+                toLong(rs.getObject("scheme_id")),
+                toLong(rs.getObject("created_by")),
+                rs.getString("correlation_id"),
+                rs.getBigDecimal("extracted_reading"),
+                rs.getBigDecimal("confirmed_reading"),
+                rs.getString("image_url"),
+                rs.getObject("reading_date", LocalDate.class),
+                rs.getObject("reading_time", LocalDateTime.class),
+                rs.getString("channel"),
+                toInteger(rs.getObject("quarantine_reason"))
+        );
     }
 
     /** "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}. */

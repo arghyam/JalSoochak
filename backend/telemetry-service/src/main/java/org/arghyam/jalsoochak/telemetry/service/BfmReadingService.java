@@ -48,6 +48,7 @@ public class BfmReadingService {
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final MeterReadingExtractor defaultOcrExtractor;
     private final TelemetryEventPublisher telemetryEventPublisher;
+    private final ReadingRepublisher readingRepublisher;
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
     private final OperatorContextService operatorContextService;
@@ -898,23 +899,6 @@ public class BfmReadingService {
     }
 
     /**
-     * The extracted reading to publish for a stored row. {@code extracted_reading} is NOT NULL, so every
-     * row whose value did not come from OCR carries a 0 sentinel — an API submission that supplied
-     * confirmed_reading, a hand-typed reading that opened the row, a reused placeholder. Republishing that
-     * 0 would file the row under "operator overrode the AI" (extracted <> confirmed) on the dashboards,
-     * which needs an AI reading to have existed; null keeps it out of both buckets. A row that really was
-     * extracted always has a positive value, so nothing legitimate is suppressed.
-     *
-     * <p>Rows written before that sentinel was introduced still hold the supplied value and keep
-     * publishing it — this is forward-only, with no backfill.
-     */
-    private static BigDecimal publishableExtractedReading(BigDecimal storedExtractedReading) {
-        return storedExtractedReading == null || storedExtractedReading.signum() == 0
-                ? null
-                : storedExtractedReading;
-    }
-
-    /**
      * The body both correction routes share once they have resolved the row to correct: apply the
      * supply-plausibility rule, then either write the value or refuse it.
      *
@@ -999,7 +983,7 @@ public class BfmReadingService {
         // where the repository guards on the column existing.
         telemetryTenantRepository.applyQuarantineReason(schemaName, reading.id(), QuarantineReason.NONE);
 
-        publishConfirmedReadingUpdate(eventTenantId, reading, confirmedReading);
+        readingRepublisher.republish(schemaName, eventTenantId, reading.id());
 
         return CreateReadingResponse.builder()
                 .success(true)
@@ -1102,44 +1086,6 @@ public class BfmReadingService {
         return (reading.readingAt() != null ? reading.readingAt() : ReadingTime.now()).toLocalDate();
     }
 
-    private void publishConfirmedReadingUpdate(Integer tenantId,
-                                               TelemetryLatestFlowReadingRecord reading,
-                                               BigDecimal confirmedReading) {
-        LocalDateTime readingAt = reading.readingAt() != null ? reading.readingAt() : ReadingTime.now();
-        LocalDate readingDate = readingDateOf(reading);
-        telemetryEventPublisher.publishMeterReadingRecorded(
-                tenantId,
-                reading.schemeId(),
-                reading.createdBy(),
-                publishableExtractedReading(reading.extractedReading()),
-                confirmedReading,
-                null,
-                reading.imageUrl(),
-                readingAt,
-                channelCodeFromReading(reading),
-                readingDate,
-                1,
-                0,
-                // ANOMALY-SUBMISSION-LINK: a correction republishes the same row, so it carries the
-                // row's own correlation id and the warehouse keeps pointing at one submission.
-                reading.correlationId()
-        );
-    }
-
-    /**
-     * Re-uses the channel persisted on the reading at submission so corrections keep the
-     * original channel (BFM/ELM/PDU...) and analytics does not recompute the water quantity
-     * with a different calculator. Returns {@code null} for legacy rows that never stored a
-     * channel, which analytics treats as the default (BFM).
-     */
-    private Integer channelCodeFromReading(TelemetryLatestFlowReadingRecord reading) {
-        String channelValue = reading.channel();
-        if (channelValue == null || channelValue.isBlank()) {
-            return null;
-        }
-        return ReadingChannel.fromChannelValue(channelValue).getCode();
-    }
-
     /**
      * Zeroes the operator's latest confirmed reading, scoped to the tenant the caller authenticated as.
      *
@@ -1195,12 +1141,12 @@ public class BfmReadingService {
                 operator.tenantId(),
                 latestReading.schemeId(),
                 operator.id(),
-                publishableExtractedReading(latestReading.extractedReading()),
+                ReadingRepublisher.publishableExtractedReading(latestReading.extractedReading()),
                 BigDecimal.ZERO,
                 null,
                 latestReading.imageUrl(),
                 readingAt,
-                channelCodeFromReading(latestReading),
+                ReadingRepublisher.channelCode(latestReading),
                 readingDate,
                 1,
                 0,

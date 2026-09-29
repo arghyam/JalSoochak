@@ -1,7 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -29,9 +28,6 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -55,6 +51,9 @@ class BfmReadingServicePhoneOptionalUpdateTest {
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
+
+    @Mock
+    private ReadingRepublisher readingRepublisher;
 
     @Mock
     private TenantConfigRepository tenantConfigRepository;
@@ -103,39 +102,6 @@ class BfmReadingServicePhoneOptionalUpdateTest {
         );
     }
 
-    /**
-     * extracted_reading = 0 is the "nothing extracted this" sentinel that every non-OCR row carries —
-     * an API submission that supplied confirmed_reading, or a hand-typed reading that opened the row.
-     * Republishing it as 0 on a correction would file the row under "operator overrode the AI" on the
-     * dashboards, which needs an AI reading to have existed.
-     */
-    @Test
-    void correctingARowWithNoExtractedValuePublishesNoExtractedReading() {
-        TelemetryOperator operator = new TelemetryOperator(1L, API_KEY_TENANT_ID, "op", "op@example.com", "919999999999", null);
-        when(telemetryTenantRepository.findSchemaNameByTenantId(API_KEY_TENANT_ID))
-                .thenReturn(Optional.of(API_KEY_SCHEMA));
-        when(telemetryTenantRepository.findFlowReadingDetailsByCorrelationId(API_KEY_SCHEMA, "corr-1"))
-                .thenReturn(Optional.of(assertedReading()));
-        when(telemetryTenantRepository.findOperatorById(API_KEY_SCHEMA, 1L)).thenReturn(Optional.of(operator));
-
-        service.updateConfirmedReading("corr-1", null, new BigDecimal("123"), API_KEY_TENANT_ID);
-
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                eq(API_KEY_TENANT_ID), eq(10L), eq(1L),
-                isNull(),
-                eq(new BigDecimal("123")), isNull(), eq(""), eq(READING_AT),
-                eq(ReadingChannel.BFM.getCode()), eq(READING_DATE), eq(1), eq(0), any());
-    }
-
-    private TelemetryLatestFlowReadingRecord assertedReading() {
-        return new TelemetryLatestFlowReadingRecord(
-                99L, 10L, 1L, "corr-1",
-                BigDecimal.ZERO,
-                new BigDecimal("100"),
-                "",
-                READING_DATE, READING_AT, "BFM", 0);
-    }
-
     @Test
     void updateWithCorrelationIdAndNoPhoneResolvesSchemaFromApiKeyTenant() {
         TelemetryOperator operator = new TelemetryOperator(1L, API_KEY_TENANT_ID, "op", "op@example.com", "919999999999", null);
@@ -153,20 +119,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
         assertEquals("corr-1", response.getCorrelationId());
         verify(telemetryTenantRepository).updateConfirmedReading(
                 API_KEY_SCHEMA, 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL);
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                API_KEY_TENANT_ID,
-                10L,
-                1L,
-                new BigDecimal("100"),
-                new BigDecimal("123"),
-                null,
-                "http://example.com/img.jpg",
-                READING_AT,
-                ReadingChannel.BFM.getCode(),
-                READING_DATE,
-                1,
-                0
-        , "corr-1");
+        verify(readingRepublisher).republish(API_KEY_SCHEMA, API_KEY_TENANT_ID, 99L);
     }
 
     /**
@@ -233,20 +186,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
 
         service.updateConfirmedReading("corr-1", null, new BigDecimal("123"), API_KEY_TENANT_ID);
 
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                API_KEY_TENANT_ID,
-                10L,
-                1L,
-                new BigDecimal("100"),
-                new BigDecimal("123"),
-                null,
-                "http://example.com/img.jpg",
-                READING_AT,
-                ReadingChannel.BFM.getCode(),
-                READING_DATE,
-                1,
-                0
-        , "corr-1");
+        verify(readingRepublisher).republish(API_KEY_SCHEMA, API_KEY_TENANT_ID, 99L);
     }
 
     @Test

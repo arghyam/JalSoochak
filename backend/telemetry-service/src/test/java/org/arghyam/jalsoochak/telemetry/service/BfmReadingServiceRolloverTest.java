@@ -64,6 +64,8 @@ class BfmReadingServiceRolloverTest {
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
+    private ReadingRepublisher readingRepublisher;
+    @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
     private OperatorContextService operatorContextService;
@@ -80,6 +82,7 @@ class BfmReadingServiceRolloverTest {
                 repo,
                 defaultOcrExtractor,
                 telemetryEventPublisher,
+                readingRepublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
                 operatorContextService,

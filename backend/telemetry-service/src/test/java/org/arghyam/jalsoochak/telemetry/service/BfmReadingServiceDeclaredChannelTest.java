@@ -72,6 +72,7 @@ class BfmReadingServiceDeclaredChannelTest {
                 repo,
                 defaultOcrExtractor,
                 telemetryEventPublisher,
+                null,
                 tenantConfigRepository,
                 new ObjectMapper(),
                 operatorContextService,

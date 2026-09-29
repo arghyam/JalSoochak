@@ -5,7 +5,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
- * The flow-reading row a correction resolves to, by correlation id or by the submitter's phone.
+ * The flow-reading row a correction resolves to, by correlation id or by the submitter's phone, and
+ * the row a republish reads back by id.
  *
  * @param quarantineReason SUPPLY-PLAUSIBILITY: the row's quarantine marker, {@code null} on a
  *        pre-V40 tenant schema where the column does not exist (and where the plausibility check is

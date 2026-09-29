@@ -66,6 +66,7 @@ class BfmReadingServiceAnomalyDedupTest {
                 telemetryTenantRepository,
                 defaultOcrExtractor,
                 telemetryEventPublisher,
+                null,
                 tenantConfigRepository,
                 new ObjectMapper(),
                 operatorContextService,

@@ -52,6 +52,9 @@ class BfmReadingServicePlaceholderRowTest {
     private TelemetryEventPublisher telemetryEventPublisher;
 
     @Mock
+    private ReadingRepublisher readingRepublisher;
+
+    @Mock
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
@@ -228,20 +231,7 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L,
                 RolloverResolutionService.SOURCE_MANUAL);
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                22,
-                10L,
-                1L,
-                new BigDecimal("100"),
-                new BigDecimal("123"),
-                null,
-                "http://example.com/img.jpg",
-                readingAt,
-                ReadingChannel.BFM.getCode(),
-                readingDate,
-                1,
-                0
-        , "corr-1");
+        verify(readingRepublisher).republish(schemaName, 22, 99L);
     }
 
     @Test
@@ -277,19 +267,6 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L,
                 RolloverResolutionService.SOURCE_MANUAL);
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                22,
-                10L,
-                1L,
-                new BigDecimal("100"),
-                new BigDecimal("123"),
-                null,
-                "http://example.com/img.jpg",
-                readingAt,
-                ReadingChannel.BFM.getCode(),
-                readingDate,
-                1,
-                0
-        , "corr-1");
+        verify(readingRepublisher).republish(schemaName, 22, 99L);
     }
 }

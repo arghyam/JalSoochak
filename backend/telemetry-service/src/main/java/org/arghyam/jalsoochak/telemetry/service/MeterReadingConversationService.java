@@ -3,6 +3,8 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
@@ -173,6 +175,8 @@ public class MeterReadingConversationService {
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final ObjectMapper objectMapper;
     private final LocationAffinityService locationAffinityService;
+    private final ReadingChannelResolver readingChannelResolver;
+    private final ReadingRepublisher readingRepublisher;
 
     public MeterReadingConversationService(OperatorContextService operatorContextService,
                                            ConversationLocalizationService localizationService,
@@ -181,7 +185,9 @@ public class MeterReadingConversationService {
                                            TelemetryTenantRepository telemetryTenantRepository,
                                            TelemetryEventPublisher telemetryEventPublisher,
                                            ObjectMapper objectMapper,
-                                           LocationAffinityService locationAffinityService) {
+                                           LocationAffinityService locationAffinityService,
+                                           ReadingChannelResolver readingChannelResolver,
+                                           ReadingRepublisher readingRepublisher) {
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
         this.tenantConfigRepository = tenantConfigRepository;
@@ -190,6 +196,8 @@ public class MeterReadingConversationService {
         this.telemetryEventPublisher = telemetryEventPublisher;
         this.objectMapper = objectMapper;
         this.locationAffinityService = locationAffinityService;
+        this.readingChannelResolver = readingChannelResolver;
+        this.readingRepublisher = readingRepublisher;
     }
 
     public IntroResponse meterChangeMessage(IntroRequest request) {
@@ -1394,6 +1402,17 @@ public class MeterReadingConversationService {
                 }
             }
 
+            // The manual value is a reading like any other, so analytics has to receive it: without
+            // this the row exists in telemetry only, with no fact row and no water quantity for the
+            // day. The channel is the operator's stored preference, as on the photo path. Published
+            // straight after the write, so a failure in the checks below cannot leave a stored
+            // reading unpublished.
+            ReadingChannel resolvedChannel = readingChannelResolver.resolve(
+                    operatorWithSchema.schemaName(), request.getContactId());
+            telemetryTenantRepository.updateFlowReadingChannel(
+                    operatorWithSchema.schemaName(), manualReadingId, resolvedChannel.name());
+            readingRepublisher.republish(operatorWithSchema.schemaName(), tenantId, manualReadingId);
+
             // LOCATION-AFFINITY: the manual path never reaches BfmReadingService.createReading, so it
             // needs its own call or an operator who types the reading in — typically after an
             // unreadable photo — escapes the boundary check entirely. No coordinates are passed: the
@@ -1517,7 +1536,7 @@ public class MeterReadingConversationService {
             }
             return response;
         } catch (Exception e) {
-            log.error("Error processing manual reading for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            log.error("Error processing manual reading for contactId {}: {}", maskPhone(request.getContactId()), e.getMessage(), e);
             String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Manual reading could not be saved.", languageKey);
             return CreateReadingResponse.builder()
@@ -1880,6 +1899,17 @@ public class MeterReadingConversationService {
             return "";
         }
         return value.stripTrailingZeros().toPlainString();
+    }
+
+    private static String maskPhone(String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            return "n/a";
+        }
+        String digits = phoneNumber.replaceAll("\\D", "");
+        if (digits.length() <= 4) {
+            return "****";
+        }
+        return "****" + digits.substring(digits.length() - 4);
     }
 
     private record WaterSupplyThreshold(double undersupplyThresholdPercent, double oversupplyThresholdPercent) {

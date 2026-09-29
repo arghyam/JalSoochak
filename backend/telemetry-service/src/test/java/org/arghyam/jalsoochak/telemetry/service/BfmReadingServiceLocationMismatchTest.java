@@ -115,7 +115,7 @@ class BfmReadingServiceLocationMismatchTest {
                 .thenReturn(new LocationVerdict.Outside(1201.0d, 500.0d));
 
         service = new BfmReadingService(
-                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
+                repo, defaultOcrExtractor, telemetryEventPublisher, null, tenantConfigRepository,
                 new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
@@ -266,7 +266,7 @@ class BfmReadingServiceLocationMismatchTest {
         // Matches how the OCR collaborators are treated: a unit test that does not exercise the
         // boundary check may pass null, and the reading must still go through.
         BfmReadingService withoutCheck = new BfmReadingService(
-                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
+                repo, defaultOcrExtractor, telemetryEventPublisher, null, tenantConfigRepository,
                 new ObjectMapper(), operatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
