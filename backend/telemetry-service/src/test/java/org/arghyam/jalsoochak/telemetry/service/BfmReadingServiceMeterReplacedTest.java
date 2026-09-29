@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,9 +46,6 @@ class BfmReadingServiceMeterReplacedTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private MeterReadingExtractor defaultOcrExtractor;
-
-    @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
 
     @Mock
@@ -55,9 +53,6 @@ class BfmReadingServiceMeterReplacedTest {
 
     @Mock
     private OperatorContextService operatorContextService;
-
-    @Mock
-    private OcrReadingsRetryService ocrReadingsRetryService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -72,6 +67,10 @@ class BfmReadingServiceMeterReplacedTest {
     // tests never set CreateReadingRequest.supplyPlausibilityChecked, so the guard is never consulted.
     @Mock
     private SupplyPlausibilityGuard supplyPlausibilityGuard;
+
+    // Declared so @InjectMocks supplies the real capture step: every submission here sends a value.
+    @Spy
+    private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture();
 
     @InjectMocks
     private BfmReadingService service;

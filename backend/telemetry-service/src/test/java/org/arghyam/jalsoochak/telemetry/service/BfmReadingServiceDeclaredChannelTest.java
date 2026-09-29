@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -54,8 +55,6 @@ class BfmReadingServiceDeclaredChannelTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private MeterReadingExtractor defaultOcrExtractor;
-    @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
@@ -72,19 +71,17 @@ class BfmReadingServiceDeclaredChannelTest {
     void setUp() {
         service = new BfmReadingService(
                 repo,
-                defaultOcrExtractor,
                 telemetryEventPublisher,
                 null,
                 tenantConfigRepository,
                 new ObjectMapper(),
                 operatorContextService,
-                null,
                 readingChannelResolver,
                 new RolloverResolutionService(true, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
                 null,
-                null,
+                new SubmittedValueCapture(),
                 null);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));

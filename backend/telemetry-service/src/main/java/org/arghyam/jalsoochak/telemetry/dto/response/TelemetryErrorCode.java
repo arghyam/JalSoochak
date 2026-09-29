@@ -49,6 +49,13 @@ public enum TelemetryErrorCode {
      */
     CHANNEL_NOT_SUPPORTED("CHANNEL_NOT_SUPPORTED"),
 
+    /**
+     * The submission's {@code reading_unit} is not one of the units its reading channel accepts, or a
+     * unit other than the channel's standard unit came with a photo and no {@code confirmed_reading}.
+     * Rejected rather than ignored, so a value is never stored in the wrong unit.
+     */
+    READING_UNIT_NOT_SUPPORTED("READING_UNIT_NOT_SUPPORTED"),
+
     /** Unclassified server-side failure while processing the reading. */
     PROCESSING_FAILED("PROCESSING_FAILED"),
 

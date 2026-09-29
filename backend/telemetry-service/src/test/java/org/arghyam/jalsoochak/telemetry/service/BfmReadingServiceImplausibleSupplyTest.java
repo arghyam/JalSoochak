@@ -18,6 +18,8 @@ import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
+import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -70,6 +72,8 @@ class BfmReadingServiceImplausibleSupplyTest {
     @Mock
     private MeterReadingExtractor defaultOcrExtractor;
     @Mock
+    private OcrProviderResolver ocrProviderResolver;
+    @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
@@ -106,12 +110,23 @@ class BfmReadingServiceImplausibleSupplyTest {
 
     private BfmReadingService service(SupplyPlausibilityProperties.Mode mode) {
         return new BfmReadingService(
-                repo, defaultOcrExtractor, telemetryEventPublisher, null, tenantConfigRepository,
-                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
+                repo,
+                telemetryEventPublisher,
+                null,
+                tenantConfigRepository,
+                new ObjectMapper(),
+                operatorContextService,
+                readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
-                null,
-                null,
+                new ImageReadingCapture(
+                        repo,
+                        telemetryEventPublisher,
+                        defaultOcrExtractor,
+                        null,
+                        ocrProviderResolver,
+                        null),
+                new SubmittedValueCapture(),
                 null);
     }
 

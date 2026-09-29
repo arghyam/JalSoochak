@@ -157,6 +157,33 @@ class MultiFormatReadingControllerTest {
     }
 
     @Test
+    void unsupportedReadingUnitReachesTheWireAs400WithItsCode() throws Exception {
+        when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(22));
+        when(imageWorkflowService.processCanonicalReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+                .success(false)
+                .qualityStatus("REJECTED")
+                .errorCode(TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED)
+                .message("Unsupported reading_unit for channel BFM. Allowed values are: m3, kL, L")
+                .build());
+        String body = CANONICAL_BODY.replace("\"confirmed_reading\": 123.4,",
+                "\"confirmed_reading\": 123.4,\n  \"reading_unit\": \"gal\",");
+
+        mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
+                        .header("X-Api-Key", "valid")
+                        .contentType("application/json")
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data.errorCode").value("READING_UNIT_NOT_SUPPORTED"))
+                .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"));
+
+        // The unit reaches the pipeline as sent: only the resolved channel can say whether it fits.
+        ArgumentCaptor<CanonicalReadingRequest> requestCaptor = ArgumentCaptor.forClass(CanonicalReadingRequest.class);
+        verify(imageWorkflowService).processCanonicalReading(requestCaptor.capture(), any());
+        assertEquals("gal", requestCaptor.getValue().getReadingUnit());
+    }
+
+    @Test
     void unknownFormatForAuthenticatedRequestReturns400() throws Exception {
         when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(1));
 

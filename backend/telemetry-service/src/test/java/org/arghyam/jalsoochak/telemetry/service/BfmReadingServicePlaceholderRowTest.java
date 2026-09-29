@@ -16,10 +16,12 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -64,6 +66,9 @@ class BfmReadingServicePlaceholderRowTest {
     @Mock
     private OcrReadingsRetryService ocrReadingsRetryService;
 
+    @Mock
+    private OcrProviderResolver ocrProviderResolver;
+
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
@@ -73,13 +78,37 @@ class BfmReadingServicePlaceholderRowTest {
     @Mock
     private RolloverResolutionService rolloverResolutionService;
 
-    // SUPPLY-PLAUSIBILITY: declared so @InjectMocks supplies it rather than leaving it null. These
-    // tests never set CreateReadingRequest.supplyPlausibilityChecked, so the guard is never consulted.
+    // SUPPLY-PLAUSIBILITY: these tests never set CreateReadingRequest.supplyPlausibilityChecked, so
+    // the guard is never consulted.
     @Mock
     private SupplyPlausibilityGuard supplyPlausibilityGuard;
 
-    @InjectMocks
     private BfmReadingService service;
+
+    // Built by hand rather than with @InjectMocks, so the photo goes through the real image capture
+    // and these tests still pin which OCR path each retry mode takes.
+    @BeforeEach
+    void setUp() {
+        service = new BfmReadingService(
+                telemetryTenantRepository,
+                telemetryEventPublisher,
+                readingRepublisher,
+                tenantConfigRepository,
+                objectMapper,
+                operatorContextService,
+                readingChannelResolver,
+                rolloverResolutionService,
+                supplyPlausibilityGuard,
+                new ImageReadingCapture(
+                        telemetryTenantRepository,
+                        telemetryEventPublisher,
+                        defaultOcrExtractor,
+                        ocrReadingsRetryService,
+                        ocrProviderResolver,
+                        null),
+                new SubmittedValueCapture(),
+                null);
+    }
 
     @AfterEach
     void clearTenantContext() {
@@ -169,6 +198,7 @@ class BfmReadingServicePlaceholderRowTest {
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
+        when(readingChannelResolver.resolve(schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
         when(ocrReadingsRetryService.extractReading("http://example.com/img.jpg"))
                 .thenThrow(new OcrReadingsUnavailableException("temporarily unavailable", new RuntimeException("timeout")));
 

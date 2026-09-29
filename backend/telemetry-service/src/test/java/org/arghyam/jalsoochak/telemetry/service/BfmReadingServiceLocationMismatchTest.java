@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService
 import org.arghyam.jalsoochak.telemetry.service.location.LocationVerdict;
 import org.arghyam.jalsoochak.telemetry.service.location.ReadingSubmission;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -75,8 +76,6 @@ class BfmReadingServiceLocationMismatchTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private MeterReadingExtractor defaultOcrExtractor;
-    @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
@@ -117,13 +116,18 @@ class BfmReadingServiceLocationMismatchTest {
                 .thenReturn(new LocationVerdict.Outside(1201.0d, 500.0d));
 
         service = new BfmReadingService(
-                repo, defaultOcrExtractor, telemetryEventPublisher, null, tenantConfigRepository,
-                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
+                repo,
+                telemetryEventPublisher,
+                null,
+                tenantConfigRepository,
+                new ObjectMapper(),
+                operatorContextService,
+                readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
                 null,
-                null,
+                new SubmittedValueCapture(),
                 locationAffinityService);
     }
 
@@ -268,12 +272,19 @@ class BfmReadingServiceLocationMismatchTest {
         // Matches how the OCR collaborators are treated: a unit test that does not exercise the
         // boundary check may pass null, and the reading must still go through.
         BfmReadingService withoutCheck = new BfmReadingService(
-                repo, defaultOcrExtractor, telemetryEventPublisher, null, tenantConfigRepository,
-                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
+                repo,
+                telemetryEventPublisher,
+                null,
+                tenantConfigRepository,
+                new ObjectMapper(),
+                operatorContextService,
+                readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
-                null, null, null);
+                null,
+                new SubmittedValueCapture(),
+                null);
 
         CreateReadingResponse response = withoutCheck.createReading(
                 submission(LAT, LNG), SCHEMA, operator, CONTACT, false);

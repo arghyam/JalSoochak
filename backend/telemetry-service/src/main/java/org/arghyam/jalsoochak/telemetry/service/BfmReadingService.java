@@ -6,7 +6,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
-import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -22,6 +21,12 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.CaptureInput;
+import org.arghyam.jalsoochak.telemetry.service.capture.CaptureOutcome;
+import org.arghyam.jalsoochak.telemetry.service.capture.CapturedReading;
+import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.ReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService;
 import org.arghyam.jalsoochak.telemetry.service.location.ReadingSubmission;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
@@ -48,23 +53,18 @@ import java.util.UUID;
 public class BfmReadingService {
 
     private final TelemetryTenantRepository telemetryTenantRepository;
-    private final MeterReadingExtractor defaultOcrExtractor;
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final ReadingRepublisher readingRepublisher;
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
     private final OperatorContextService operatorContextService;
-    private final OcrReadingsRetryService ocrReadingsRetryService;
     private final ReadingChannelResolver readingChannelResolver;
     private final RolloverResolutionService rolloverResolutionService;
     private final SupplyPlausibilityGuard supplyPlausibilityGuard;
-    // Per-tenant OCR provider selection. Nullable so unit tests that construct BfmReadingService with only
-    // the collaborators they exercise (passing null here) fall back to the built-in OCR provider path.
-    private final OcrProviderResolver ocrProviderResolver;
-    private final OcrProviderRegistry ocrProviderRegistry;
-    // LOCATION-AFFINITY: the scheme-boundary check. Nullable on the same terms as the OCR
-    // collaborators above — a unit test that does not exercise it may pass null, and the check is
-    // then simply not run rather than costing the reading.
+    private final ImageReadingCapture imageReadingCapture;
+    private final SubmittedValueCapture submittedValueCapture;
+    // LOCATION-AFFINITY: the scheme-boundary check. Nullable so a unit test that does not exercise it
+    // may pass null, and the check is then simply not run rather than costing the reading.
     private final LocationAffinityService locationAffinityService;
 
     /**
@@ -114,118 +114,54 @@ public class BfmReadingService {
         if (!belongsToScheme && !lenientIngestion) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Operator does not belong to the specified scheme");
         }
-        OcrReadingResult ocrResult = null;
-        BigDecimal finalReading = request.getReadingValue();
-        BigDecimal confidenceLevel = null;
-        String message = "Reading created successfully";
+        ReadingCapture capture = captureFor(request);
 
-        if (finalReading == null) {
-            if (request.getReadingUrl() == null || request.getReadingUrl().isBlank()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Either readingValue or readingUrl must be provided");
-            }
+        // The channel decides which units the submission may use and how its photo is read, so it is
+        // settled before anything is captured. A channel declared on the submission wins over the
+        // operator's stored preference: the submitting system knows the equipment behind this
+        // particular reading, whereas the preference is a default picked once in a WhatsApp
+        // conversation. Null means nothing was declared, which keeps the preference lookup, and so
+        // every existing caller, unchanged.
+        ReadingChannel resolvedChannel = request.getDeclaredChannel() != null
+                ? request.getDeclaredChannel()
+                : readingChannelResolver.resolve(schemaName, contactId);
+        Integer channel = resolvedChannel.getCode();
 
-            try {
-                OcrProviderSettings ocrSettings =
-                        ocrProviderResolver == null ? null : ocrProviderResolver.resolve(tenantId);
-                ocrResult = extractReading(request.getReadingUrl(), ocrSettings, ocrRetryMode);
-                log.info("readings_ocr ocr_result operatorId={} schemeId={} imageUrlHash={} result={}",
-                        operatorInRequest.id(),
-                        request.getSchemeId(),
-                        imageUrlHash(request.getReadingUrl()),
-                        summarizeOcrResult(ocrResult));
-                if (ocrResult == null || ocrResult.getAdjustedReading() == null) {
-                    String anomalyCorrelationId = buildImageAnomalyCorrelationId(
-                            AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                            operatorInRequest.id(),
-                            request.getSchemeId(),
-                            request.getReadingUrl()
-                    );
-                    recordImageAnomalyOncePerDay(
-                            schemaName,
-                            tenantId,
-                            operatorInRequest.id(),
-                            request.getSchemeId(),
-                            AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                            "Unreadable image. OCR could not extract a valid meter reading.",
-                            1,
-                            null,
-                            null,
-                            null,
-                            null,
-                            null,
-                            0,
-                            anomalyCorrelationId,
-                            // ANOMALY-SUBMISSION-LINK: the submission is rejected here, before any
-                            // flow_reading_table row is written, so there is nothing to point at.
-                            null,
-                            null
-                    );
-                    return CreateReadingResponse.builder()
-                            .success(false)
-                            .message(unreadableImageMessage(ocrResult))
-                            .correlationId(UUID.randomUUID().toString())
-                            .qualityStatus("REJECTED")
-                            .errorCode(TelemetryErrorCode.UNREADABLE_IMAGE)
-                            .build();
-                }
-                finalReading = ocrResult.getAdjustedReading();
-                confidenceLevel = ocrResult.getQualityConfidence();
-                log.info("readings_ocr ocr_accepted operatorId={} schemeId={} correlationId={} adjustedReading={} confidence={} qualityStatus={}",
-                        operatorInRequest.id(),
-                        request.getSchemeId(),
-                        sanitizeLogValue(ocrResult.getCorrelationId()),
-                        finalReading,
-                        confidenceLevel,
-                        sanitizeLogValue(ocrResult.getQualityStatus()));
-            } catch (OcrReadingsUnavailableException ex) {
-                log.warn("OCR temporarily unavailable for imageUrlHash={}: {}",
-                        imageUrlHash(request.getReadingUrl()),
-                        ex.getMessage());
+        CaptureOutcome outcome = capture.capture(new CaptureInput(
+                schemaName,
+                tenantId,
+                operatorInRequest.id(),
+                request.getSchemeId(),
+                resolvedChannel,
+                request.getReadingUrl(),
+                request.getReadingValue(),
+                request.getReadingUnit(),
+                request.isExternallyAsserted(),
+                ocrRetryMode));
+        CapturedReading captured;
+        switch (outcome) {
+            case CaptureOutcome.Captured(CapturedReading reading) -> captured = reading;
+            case CaptureOutcome.Rejected(TelemetryErrorCode errorCode, String rejection) -> {
                 return CreateReadingResponse.builder()
                         .success(false)
-                        .message("Meter reading service is temporarily unavailable. Please try again shortly.")
+                        .message(rejection)
+                        .correlationId(UUID.randomUUID().toString())
+                        .qualityStatus("REJECTED")
+                        .errorCode(errorCode)
+                        .build();
+            }
+            case CaptureOutcome.Retry(String retry) -> {
+                return CreateReadingResponse.builder()
+                        .success(false)
+                        .message(retry)
                         .correlationId(UUID.randomUUID().toString())
                         .qualityStatus("RETRY")
                         .build();
-            } catch (Exception ex) {
-                log.error("OCR failed for imageUrlHash={}: {}", imageUrlHash(request.getReadingUrl()), ex.getMessage(), ex);
-                if (log.isDebugEnabled()) {
-                    log.debug("OCR failed for URL: {}", request.getReadingUrl());
-                }
-                String anomalyCorrelationId = buildImageAnomalyCorrelationId(
-                        AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                        operatorInRequest.id(),
-                        request.getSchemeId(),
-                        request.getReadingUrl()
-                );
-                recordImageAnomalyOncePerDay(
-                        schemaName,
-                        tenantId,
-                        operatorInRequest.id(),
-                        request.getSchemeId(),
-                        AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                        "Unreadable image. OCR failed during extraction.",
-                        1,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        0,
-                        anomalyCorrelationId,
-                        // ANOMALY-SUBMISSION-LINK: rejected before any row is written — nothing to link.
-                        null,
-                        null
-                );
-                return CreateReadingResponse.builder()
-                        .success(false)
-                        .message("Could not read meter value from image. Please retry with a clearer photo.")
-                        .correlationId(UUID.randomUUID().toString())
-                        .qualityStatus("REJECTED")
-                        .errorCode(TelemetryErrorCode.FLOW_VISION_FAILED)
-                        .build();
             }
         }
+        OcrReadingResult ocrResult = captured.ocrResult();
+        BigDecimal finalReading = captured.value();
+        BigDecimal confidenceLevel = captured.confidence();
 
         boolean hasPositiveReading = finalReading != null
                 && finalReading.compareTo(BigDecimal.ZERO) > 0;
@@ -248,16 +184,17 @@ public class BfmReadingService {
         LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(ReadingTime.now());
 
         // READING-PROVENANCE: extracted_reading records what the OCR provider read off the meter photo. The
-        // OCR gate above runs only when the caller supplied no value, so on an API-asserted submission
+        // image capture runs only when the caller supplied no value, so on an API-asserted submission
         // nothing extracted anything — echoing the caller's own number back into extracted_reading made
         // such a row indistinguishable from an AI-extracted one, fed the duplicate-image guard below a
         // value no image ever produced, and counted the submission as "compliant" (extracted ==
         // confirmed) on the dashboards. ocrExtractedReading is null on that path and gates both; the
         // persisted column is NOT NULL, so it takes the same 0 sentinel every other non-OCR row already
         // uses (scheme-selection placeholder, manual entry, meter-change, issue-report).
-        BigDecimal ocrExtractedReading = ocrResult != null ? ocrResult.getAdjustedReading() : null;
+        BigDecimal ocrExtractedReading = captured.extractedReading();
         BigDecimal extractedReading = ocrExtractedReading != null ? ocrExtractedReading : BigDecimal.ZERO;
-        BigDecimal confirmedReading = request.getReadingValue() != null ? request.getReadingValue() : finalReading;
+        // In the channel's standard unit already, so every comparison below and the stored value agree.
+        BigDecimal confirmedReading = captured.value();
         BigDecimal effectiveConfirmedReading = confirmedReading;
 
         Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt = telemetryTenantRepository
@@ -407,11 +344,10 @@ public class BfmReadingService {
         // The resolved value seeds confirmed_reading and is the number surfaced to the operator for
         // confirmation; extracted_reading stays the model value (dedup/audit). When the resolver is not
         // applicable (empty result) effectiveConfirmedReading is left untouched — byte-identical to legacy.
-        // READING-PROVENANCE: an API-supplied value is not "as extracted" — nothing extracted it. Seeded
-        // here, ahead of the rollover resolver, which cannot run on this path (it needs an OCR result).
-        int confirmedReadingSource = request.isExternallyAsserted()
-                ? RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED
-                : RolloverResolutionService.SOURCE_AS_EXTRACTED;
+        // READING-PROVENANCE: an API-supplied value is not "as extracted" — nothing extracted it. The
+        // capture step says how the value arrived, ahead of the rollover resolver, which cannot run on
+        // that path (it needs an OCR result).
+        int confirmedReadingSource = captured.source();
         String rolloverAuditJson = null;
         Optional<RolloverResolutionService.ResolvedReading> rollover =
                 resolveRolloverIfApplicable(schemaName, request, ocrResult, isMeterReplaced, latestSnapshotOpt);
@@ -426,20 +362,8 @@ public class BfmReadingService {
         // number that will actually be stored — and before persistence so the publish/no-publish
         // decision is held in memory rather than depending on a second write succeeding.
         //
-        // The channel lookup is hoisted from below the insert for the same reason: only BFM readings
-        // are cumulative m3 indices, so the delta is meaningless on any other channel. There are no
-        // early returns between the old position and this one, so the resolver runs in exactly the
-        // cases it ran in before.
+        // Only BFM readings are cumulative m3 indices, so the delta is meaningless on any other channel.
         //
-        // A channel declared on the submission wins over the operator's stored preference: the
-        // submitting system knows the equipment behind this particular reading, whereas the
-        // preference is a default picked once in a WhatsApp conversation. Null means nothing was
-        // declared, which keeps the preference lookup — and so every existing caller — unchanged.
-        ReadingChannel resolvedChannel = request.getDeclaredChannel() != null
-                ? request.getDeclaredChannel()
-                : readingChannelResolver.resolve(schemaName, contactId);
-        Integer channel = resolvedChannel.getCode();
-
         // A pre-V40 tenant is skipped entirely rather than checked: storing a quarantined row it has
         // no column to mark would leave it indistinguishable from an accepted one, which is worse
         // than not checking at all.
@@ -476,9 +400,10 @@ public class BfmReadingService {
         }
 
         // Written by the insert itself rather than by a later UPDATE, so no stored reading is ever
-        // without its channel. Every value reaches here in the channel's standard unit.
+        // without its channel. The value is in the channel's standard unit; submitted_unit records the
+        // unit it arrived in.
         String channelName = resolvedChannel.name();
-        String submittedUnit = resolvedChannel.standardUnit().map(ReadingUnit::code).orElse(null);
+        String submittedUnit = captured.submittedUnit() != null ? captured.submittedUnit().code() : null;
         FlowReadingVersion storedReading;
         Optional<Long> placeholderIdOpt = telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
                 schemaName,
@@ -775,23 +700,17 @@ public class BfmReadingService {
     }
 
     /**
-     * Runs OCR for {@code readingUrl}. When {@code settings} is {@code null} the tenant has no per-tenant
-     * OCR override and the built-in provider path is used unchanged; otherwise the resolved provider is
-     * dispatched via {@link OcrProviderRegistry}. Honours the resilient (retry/circuit-breaker) path.
+     * A value sent with the submission is captured as it is, even when a photo came with it: the photo
+     * is kept on the row and OCR doesn't run. Only a submission with neither is refused here.
      */
-    private OcrReadingResult extractReading(String readingUrl, OcrProviderSettings settings, OcrRetryMode ocrRetryMode) {
-        if (ocrRetryMode == OcrRetryMode.RESILIENT && ocrReadingsRetryService != null) {
-            return settings == null
-                    ? ocrReadingsRetryService.extractReading(readingUrl)
-                    : ocrReadingsRetryService.extractReading(readingUrl, settings);
+    private ReadingCapture captureFor(CreateReadingRequest request) {
+        if (request.getReadingValue() != null) {
+            return submittedValueCapture;
         }
-        if (ocrRetryMode == OcrRetryMode.RESILIENT) {
-            log.warn("OCR readings retry service is not available; using direct OCR path");
+        if (request.getReadingUrl() == null || request.getReadingUrl().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Either readingValue or readingUrl must be provided");
         }
-        if (settings == null) {
-            return defaultOcrExtractor.extractReading(readingUrl, null);
-        }
-        return ocrProviderRegistry.get(settings.providerId()).extractReading(readingUrl, settings);
+        return imageReadingCapture;
     }
 
     @Transactional
@@ -1259,12 +1178,6 @@ public class BfmReadingService {
         return value.stripTrailingZeros().toPlainString();
     }
 
-    private String buildImageAnomalyCorrelationId(int anomalyType, Long userId, Long schemeId, String readingUrl) {
-        String normalizedUrl = readingUrl == null ? "" : readingUrl.trim();
-        String key = anomalyType + ":" + userId + ":" + schemeId + ":" + normalizedUrl;
-        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
-    }
-
     /**
      * SUPPLY-PLAUSIBILITY: one anomaly per operator, per scheme, per day.
      *
@@ -1272,87 +1185,11 @@ public class BfmReadingService {
      * dedups on it — a repeat is touched, not inserted. The date is in the key because the keys
      * analytics builds for itself carry none: without it every type-10 anomaly for an operator and
      * scheme would collapse into a single row forever, and the second day's rejection would be
-     * invisible. Same construction as {@link #buildImageAnomalyCorrelationId}.
+     * invisible. Same construction as the unreadable-image id in {@code ImageReadingCapture}.
      */
     private String buildSupplyAnomalyCorrelationId(int anomalyType, Long userId, Long schemeId, LocalDate readingDate) {
         String key = anomalyType + ":" + userId + ":" + schemeId + ":" + readingDate;
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
-    }
-
-    private void recordImageAnomalyOncePerDay(String schemaName,
-                                              Integer tenantId,
-                                              Long userId,
-                                              Long schemeId,
-                                              int anomalyType,
-                                              String reason,
-                                              int retries,
-                                              BigDecimal aiReading,
-                                              BigDecimal aiConfidencePercentage,
-                                              BigDecimal overriddenReading,
-                                              BigDecimal previousReading,
-                                              LocalDateTime previousReadingDate,
-                                              Integer consecutiveDaysMissed,
-                                              String correlationId,
-                                              Long flowReadingId,
-                                              String submissionCorrelationId) {
-//        int existingCount = telemetryTenantRepository.countAnomaliesByTypeForToday(
-//                schemaName,
-//                userId,
-//                schemeId,
-//                anomalyType
-//        );
-//        if (existingCount > 0) {
-//            telemetryTenantRepository.touchLatestAnomalyByTypeForToday(
-//                    schemaName,
-//                    userId,
-//                    schemeId,
-//                    anomalyType
-//            );
-//            int effectiveRetries = Math.max(retries, existingCount + 1);
-//            telemetryEventPublisher.publishAnomalyRecorded(
-//                    tenantId,
-//                    anomalyType,
-//                    userId,
-//                    schemeId,
-//                    aiReading,
-//                    aiConfidencePercentage,
-//                    overriddenReading,
-//                    effectiveRetries,
-//                    previousReading,
-//                    previousReadingDate,
-//                    consecutiveDaysMissed,
-//                    reason,
-//                    AnomalyConstants.STATUS_OPEN,
-//                    correlationId
-//            );
-//            log.info("Skipping duplicate image anomaly publish for userId={} schemeId={} anomalyType={} correlationId={}",
-//                    userId, schemeId, anomalyType, correlationId);
-//            return;
-//        }
-
-        telemetryTenantRepository.createTenantAnomalyRecord(
-                schemaName,
-                tenantAnomaly(userId, schemeId, anomalyType, reason, retries,
-                        aiReading, aiConfidencePercentage, overriddenReading,
-                        previousReading, previousReadingDate, flowReadingId)
-        );
-        telemetryEventPublisher.publishAnomalyRecorded(
-                tenantId,
-                anomalyType,
-                userId,
-                schemeId,
-                aiReading,
-                aiConfidencePercentage,
-                overriddenReading,
-                retries,
-                previousReading,
-                previousReadingDate,
-                consecutiveDaysMissed,
-                reason,
-                AnomalyConstants.STATUS_OPEN,
-                correlationId,
-                submissionCorrelationId
-        );
     }
 
     /**
@@ -1440,44 +1277,6 @@ public class BfmReadingService {
                 .previousReading(previousReading)
                 .previousReadingDate(previousReadingDate)
                 .build();
-    }
-
-    private String summarizeOcrResult(OcrReadingResult result) {
-        if (result == null) {
-            return "null";
-        }
-        return String.format(
-                "{adjustedReading=%s,qualityStatus=%s,qualityConfidence=%s,correlationId=%s}",
-                result.getAdjustedReading(),
-                sanitizeLogValue(result.getQualityStatus()),
-                result.getQualityConfidence(),
-                sanitizeLogValue(result.getCorrelationId())
-        );
-    }
-
-    private String unreadableImageMessage(OcrReadingResult result) {
-        String rejectionReason = Optional.ofNullable(result)
-                .map(OcrReadingResult::getRejectionReason)
-                .filter(reason -> !reason.isBlank())
-                .orElse(null);
-        if (rejectionReason == null) {
-            return "Could not read meter value from image. Please retry with a clearer photo.";
-        }
-        return "Could not read meter value from image. " + rejectionReason;
-    }
-
-    private String imageUrlHash(String readingUrl) {
-        if (readingUrl == null || readingUrl.isBlank()) {
-            return "n/a";
-        }
-        return Integer.toHexString(readingUrl.hashCode());
-    }
-
-    private String sanitizeLogValue(String value) {
-        if (value == null || value.isBlank()) {
-            return "n/a";
-        }
-        return value.replace('\n', ' ').replace('\r', ' ').trim();
     }
 
     private record WaterSupplyThreshold(double undersupplyThresholdPercent, double oversupplyThresholdPercent) {

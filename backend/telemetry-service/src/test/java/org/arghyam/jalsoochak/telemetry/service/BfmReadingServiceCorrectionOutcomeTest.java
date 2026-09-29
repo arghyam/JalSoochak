@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -83,8 +84,6 @@ class BfmReadingServiceCorrectionOutcomeTest {
     @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private MeterReadingExtractor defaultOcrExtractor;
-    @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private ReadingRepublisher readingRepublisher;
@@ -107,12 +106,17 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
     private BfmReadingService service(SupplyPlausibilityProperties.Mode mode) {
         return new BfmReadingService(
-                repo, defaultOcrExtractor, telemetryEventPublisher, readingRepublisher, tenantConfigRepository,
-                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
+                repo,
+                telemetryEventPublisher,
+                readingRepublisher,
+                tenantConfigRepository,
+                new ObjectMapper(),
+                operatorContextService,
+                readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
                 null,
-                null,
+                new SubmittedValueCapture(),
                 null);
     }
 

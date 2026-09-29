@@ -1,0 +1,216 @@
+package org.arghyam.jalsoochak.telemetry.service.capture;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
+import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
+import org.arghyam.jalsoochak.telemetry.service.AnomalyConstants;
+import org.arghyam.jalsoochak.telemetry.service.MeterReadingExtractor;
+import org.arghyam.jalsoochak.telemetry.service.OcrProviderRegistry;
+import org.arghyam.jalsoochak.telemetry.service.OcrProviderResolver;
+import org.arghyam.jalsoochak.telemetry.service.OcrProviderSettings;
+import org.arghyam.jalsoochak.telemetry.service.OcrReadingsRetryService;
+import org.arghyam.jalsoochak.telemetry.service.OcrReadingsUnavailableException;
+import org.arghyam.jalsoochak.telemetry.service.OcrRetryMode;
+import org.arghyam.jalsoochak.telemetry.service.RolloverResolutionService;
+import org.springframework.stereotype.Component;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Optional;
+import java.util.UUID;
+
+/**
+ * Captures a reading from a meter photo through OCR.
+ *
+ * <p>A photo that can't be read is rejected and recorded as an unreadable-image anomaly, once per
+ * attempt; a temporary OCR outage asks the submitter to retry. OCR reads the meter in the channel's
+ * standard unit, so a {@code reading_unit} other than that one is rejected before any OCR setting is
+ * read: it would describe a {@code confirmed_reading} that wasn't sent.
+ */
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class ImageReadingCapture implements ReadingCapture {
+
+    private static final String UNREADABLE_IMAGE_MESSAGE =
+            "Could not read meter value from image. Please retry with a clearer photo.";
+
+    private final TelemetryTenantRepository telemetryTenantRepository;
+    private final TelemetryEventPublisher telemetryEventPublisher;
+    private final MeterReadingExtractor defaultOcrExtractor;
+    private final OcrReadingsRetryService ocrReadingsRetryService;
+    private final OcrProviderResolver ocrProviderResolver;
+    private final OcrProviderRegistry ocrProviderRegistry;
+
+    @Override
+    public CaptureOutcome capture(CaptureInput input) {
+        Optional<CaptureOutcome> unitRejection = rejectUnitOtherThanStandard(input);
+        if (unitRejection.isPresent()) {
+            return unitRejection.get();
+        }
+
+        try {
+            OcrProviderSettings ocrSettings = ocrProviderResolver.resolve(input.tenantId());
+            OcrReadingResult ocrResult = extractReading(input.readingUrl(), ocrSettings, input.ocrRetryMode());
+            log.info("readings_ocr ocr_result operatorId={} schemeId={} imageUrlHash={} result={}",
+                    input.operatorId(),
+                    input.schemeId(),
+                    imageUrlHash(input.readingUrl()),
+                    summarizeOcrResult(ocrResult));
+            if (ocrResult == null || ocrResult.getAdjustedReading() == null) {
+                recordUnreadableImage(input, "Unreadable image. OCR could not extract a valid meter reading.");
+                return new CaptureOutcome.Rejected(TelemetryErrorCode.UNREADABLE_IMAGE, unreadableImageMessage(ocrResult));
+            }
+            log.info("readings_ocr ocr_accepted operatorId={} schemeId={} correlationId={} adjustedReading={} confidence={} qualityStatus={}",
+                    input.operatorId(),
+                    input.schemeId(),
+                    sanitizeLogValue(ocrResult.getCorrelationId()),
+                    ocrResult.getAdjustedReading(),
+                    ocrResult.getQualityConfidence(),
+                    sanitizeLogValue(ocrResult.getQualityStatus()));
+            return new CaptureOutcome.Captured(new CapturedReading(
+                    ocrResult.getAdjustedReading(),
+                    input.channel().standardUnit().orElse(null),
+                    ocrResult.getAdjustedReading(),
+                    ocrResult.getQualityConfidence(),
+                    RolloverResolutionService.SOURCE_AS_EXTRACTED,
+                    ocrResult));
+        } catch (OcrReadingsUnavailableException ex) {
+            log.warn("OCR temporarily unavailable for imageUrlHash={}: {}",
+                    imageUrlHash(input.readingUrl()),
+                    ex.getMessage());
+            return new CaptureOutcome.Retry(
+                    "Meter reading service is temporarily unavailable. Please try again shortly.");
+        } catch (Exception ex) {
+            log.error("OCR failed for imageUrlHash={}: {}", imageUrlHash(input.readingUrl()), ex.getMessage(), ex);
+            if (log.isDebugEnabled()) {
+                log.debug("OCR failed for URL: {}", input.readingUrl());
+            }
+            recordUnreadableImage(input, "Unreadable image. OCR failed during extraction.");
+            return new CaptureOutcome.Rejected(TelemetryErrorCode.FLOW_VISION_FAILED, UNREADABLE_IMAGE_MESSAGE);
+        }
+    }
+
+    /**
+     * A photo-only submission may name the channel's standard unit, which changes nothing, but no
+     * other: OCR has no way to read a meter in litres or hours.
+     */
+    private static Optional<CaptureOutcome> rejectUnitOtherThanStandard(CaptureInput input) {
+        if (!ReadingUnit.isDeclared(input.readingUnit())) {
+            return Optional.empty();
+        }
+        ReadingChannel channel = input.channel();
+        Optional<ReadingUnit> declared = ReadingUnit.parseFor(channel, input.readingUnit());
+        if (declared.isEmpty()) {
+            return Optional.of(new CaptureOutcome.Rejected(
+                    TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED,
+                    ReadingUnit.unsupportedMessage(channel)));
+        }
+        if (declared.equals(channel.standardUnit())) {
+            return Optional.empty();
+        }
+        return Optional.of(new CaptureOutcome.Rejected(
+                TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED,
+                "reading_unit applies only to confirmed_reading. A meter photo for channel " + channel.name()
+                        + " is read in " + channel.standardUnit().map(ReadingUnit::code).orElseThrow() + "."));
+    }
+
+    /**
+     * Runs OCR for {@code readingUrl}. When {@code settings} is {@code null} the tenant has no per-tenant
+     * OCR override and the built-in provider path is used unchanged; otherwise the resolved provider is
+     * dispatched via {@link OcrProviderRegistry}. Honours the resilient (retry/circuit-breaker) path.
+     */
+    private OcrReadingResult extractReading(String readingUrl, OcrProviderSettings settings, OcrRetryMode ocrRetryMode) {
+        if (ocrRetryMode == OcrRetryMode.RESILIENT) {
+            return settings == null
+                    ? ocrReadingsRetryService.extractReading(readingUrl)
+                    : ocrReadingsRetryService.extractReading(readingUrl, settings);
+        }
+        if (settings == null) {
+            return defaultOcrExtractor.extractReading(readingUrl, null);
+        }
+        return ocrProviderRegistry.get(settings.providerId()).extractReading(readingUrl, settings);
+    }
+
+    private void recordUnreadableImage(CaptureInput input, String reason) {
+        telemetryTenantRepository.createTenantAnomalyRecord(
+                input.schemaName(),
+                TenantAnomalyRecord.builder()
+                        .userId(input.operatorId())
+                        .schemeId(input.schemeId())
+                        .type(AnomalyConstants.TYPE_UNREADABLE_IMAGE)
+                        .reason(reason)
+                        .status(AnomalyConstants.STATUS_OPEN)
+                        .retries(1)
+                        .build());
+        telemetryEventPublisher.publishAnomalyRecorded(
+                input.tenantId(),
+                AnomalyConstants.TYPE_UNREADABLE_IMAGE,
+                input.operatorId(),
+                input.schemeId(),
+                null,
+                null,
+                null,
+                1,
+                null,
+                null,
+                0,
+                reason,
+                AnomalyConstants.STATUS_OPEN,
+                unreadableImageCorrelationId(input),
+                // ANOMALY-SUBMISSION-LINK: the submission is rejected here, before any
+                // flow_reading_table row is written, so there is nothing to point at.
+                null);
+    }
+
+    /** The same photo gives the same id on every attempt, so analytics keeps one anomaly for it. */
+    private static String unreadableImageCorrelationId(CaptureInput input) {
+        String normalizedUrl = input.readingUrl() == null ? "" : input.readingUrl().trim();
+        String key = AnomalyConstants.TYPE_UNREADABLE_IMAGE + ":" + input.operatorId() + ":"
+                + input.schemeId() + ":" + normalizedUrl;
+        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
+    }
+
+    private static String unreadableImageMessage(OcrReadingResult result) {
+        String rejectionReason = Optional.ofNullable(result)
+                .map(OcrReadingResult::getRejectionReason)
+                .filter(reason -> !reason.isBlank())
+                .orElse(null);
+        if (rejectionReason == null) {
+            return UNREADABLE_IMAGE_MESSAGE;
+        }
+        return "Could not read meter value from image. " + rejectionReason;
+    }
+
+    private static String summarizeOcrResult(OcrReadingResult result) {
+        if (result == null) {
+            return "null";
+        }
+        return String.format(
+                "{adjustedReading=%s,qualityStatus=%s,qualityConfidence=%s,correlationId=%s}",
+                result.getAdjustedReading(),
+                sanitizeLogValue(result.getQualityStatus()),
+                result.getQualityConfidence(),
+                sanitizeLogValue(result.getCorrelationId())
+        );
+    }
+
+    private static String imageUrlHash(String readingUrl) {
+        if (readingUrl == null || readingUrl.isBlank()) {
+            return "n/a";
+        }
+        return Integer.toHexString(readingUrl.hashCode());
+    }
+
+    private static String sanitizeLogValue(String value) {
+        if (value == null || value.isBlank()) {
+            return "n/a";
+        }
+        return value.replace('\n', ' ').replace('\r', ' ').trim();
+    }
+}

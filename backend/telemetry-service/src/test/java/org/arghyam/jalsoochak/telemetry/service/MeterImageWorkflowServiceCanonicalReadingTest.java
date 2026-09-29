@@ -1164,6 +1164,29 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
         assertNull(capturedCreateReadingRequest().getDeclaredChannel());
     }
 
+    @Test
+    void processCanonicalReadingPassesTheReadingUnitThroughUnchecked() {
+        // Whether the unit is accepted depends on the channel, which may only be known once the
+        // operator's preference is read, so it is checked when the reading is captured, not here.
+        CanonicalReadingRequest request = canonicalRequestWithChannel("PDU");
+        request.setReadingUnit(" H ");
+        stubCanonicalSubmission();
+
+        service.processCanonicalReading(request, 22);
+
+        assertEquals(" H ", capturedCreateReadingRequest().getReadingUnit());
+    }
+
+    @Test
+    void processCanonicalReadingLeavesTheReadingUnitUnsetWhenTheSubmissionOmitsIt() {
+        CanonicalReadingRequest request = canonicalRequestWithChannel("BFM");
+        stubCanonicalSubmission();
+
+        service.processCanonicalReading(request, 22);
+
+        assertNull(capturedCreateReadingRequest().getReadingUnit());
+    }
+
     private static CanonicalReadingRequest canonicalRequestWithChannel(String channel) {
         return CanonicalReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")

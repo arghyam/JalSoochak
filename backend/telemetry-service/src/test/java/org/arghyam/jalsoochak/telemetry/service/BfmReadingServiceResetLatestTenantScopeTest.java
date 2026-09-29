@@ -58,9 +58,6 @@ class BfmReadingServiceResetLatestTenantScopeTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private MeterReadingExtractor defaultOcrExtractor;
-
-    @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
 
     @Mock
@@ -71,9 +68,6 @@ class BfmReadingServiceResetLatestTenantScopeTest {
 
     @Mock
     private OperatorContextService operatorContextService;
-
-    @Mock
-    private OcrReadingsRetryService ocrReadingsRetryService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();

@@ -57,6 +57,18 @@ public class CanonicalReadingRequest {
     @JsonProperty("channel")
     private String channel;
 
+    /**
+     * Optional unit of {@link #confirmedReading}, as a UCUM code accepted by the reading's channel
+     * ({@code m3}, {@code kL} or {@code L} for BFM, {@code kW.h} for ELM, {@code min} or {@code h} for
+     * PDU), case-insensitive. Null or blank means the channel's standard unit.
+     *
+     * <p>Kept as raw text, like {@link #channel}: whether a unit is accepted depends on the channel,
+     * which may only be known once the operator's stored preference has been read, so it is checked
+     * there and answered with {@code READING_UNIT_NOT_SUPPORTED}.
+     */
+    @JsonProperty("reading_unit")
+    private String readingUnit;
+
     @JsonProperty("reading_date_time")
     private OffsetDateTime readingDateTime;
 

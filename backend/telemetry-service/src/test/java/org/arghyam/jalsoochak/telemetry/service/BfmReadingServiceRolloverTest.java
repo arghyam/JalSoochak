@@ -19,6 +19,8 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -63,6 +65,8 @@ class BfmReadingServiceRolloverTest {
     @Mock
     private MeterReadingExtractor defaultOcrExtractor;
     @Mock
+    private OcrProviderResolver ocrProviderResolver;
+    @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private ReadingRepublisher readingRepublisher;
@@ -81,19 +85,23 @@ class BfmReadingServiceRolloverTest {
     void setUp() {
         service = new BfmReadingService(
                 repo,
-                defaultOcrExtractor,
                 telemetryEventPublisher,
                 readingRepublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
                 operatorContextService,
-                null,
                 readingChannelResolver,
                 new RolloverResolutionService(true, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
-                null,
-                null,
+                new ImageReadingCapture(
+                        repo,
+                        telemetryEventPublisher,
+                        defaultOcrExtractor,
+                        null,
+                        ocrProviderResolver,
+                        null),
+                new SubmittedValueCapture(),
                 null);
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
     }
