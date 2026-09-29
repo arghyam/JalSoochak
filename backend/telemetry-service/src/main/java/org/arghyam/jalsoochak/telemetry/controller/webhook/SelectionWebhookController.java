@@ -173,8 +173,8 @@ public class SelectionWebhookController {
 
     /**
      * A reading submission's next screen is the scheme list. Carrying it on this answer saves the flow
-     * a second webhook round trip (1–2 s in Glific). Best effort: without it the flow calls
-     * {@code /schemes} itself, so a failure here must not spoil the selection.
+     * a second webhook round trip (1–2 s on the WhatsApp provider). Best effort: without it the flow
+     * calls {@code /schemes} itself, so a failure here must not spoil the selection.
      */
     private void attachSchemeList(SelectedItemRequest request, SelectionResponse response) {
         if (response == null || !response.isSuccess() || response.getSelected() == null
