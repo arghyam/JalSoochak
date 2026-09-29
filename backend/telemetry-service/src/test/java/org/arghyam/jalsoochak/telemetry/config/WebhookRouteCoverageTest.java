@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.config;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import org.arghyam.jalsoochak.telemetry.controller.ControllerRoutes;
 import org.arghyam.jalsoochak.telemetry.controller.ControllerRoutes.Route;
 import org.junit.jupiter.api.DisplayName;
@@ -76,6 +77,27 @@ class WebhookRouteCoverageTest {
                 .as("Mappings on @WebhookRoute controllers that WebhookRoutes.isProtected can "
                         + "never match, so the webhook gate would not authenticate them")
                 .isEmpty();
+    }
+
+    /**
+     * The webhook token is enforced by a servlet filter, which springdoc cannot see. Without the
+     * annotation a webhook controller falls back to the global {@code Bearer} requirement, so the
+     * published contract names a credential the chatbot never sends.
+     */
+    @Test
+    @DisplayName("every webhook controller documents the webhook token in the OpenAPI contract")
+    void everyWebhookControllerDeclaresTheWebhookTokenScheme() {
+        assertThat(webhookControllers())
+                .isNotEmpty()
+                .allSatisfy(controller -> {
+                    SecurityRequirement requirement = controller.getAnnotation(SecurityRequirement.class);
+                    assertThat(requirement)
+                            .as("%s has no @SecurityRequirement", controller.getSimpleName())
+                            .isNotNull();
+                    assertThat(requirement.name())
+                            .as("@SecurityRequirement of %s", controller.getSimpleName())
+                            .isEqualTo(OpenApiConfig.WEBHOOK_TOKEN_SCHEME);
+                });
     }
 
     @Test
