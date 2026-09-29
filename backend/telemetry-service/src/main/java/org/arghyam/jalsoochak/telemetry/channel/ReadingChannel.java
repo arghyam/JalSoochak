@@ -43,6 +43,19 @@ public enum ReadingChannel {
     }
 
     /**
+     * The unit {@code confirmed_reading} is stored in for this channel. Empty for IOT and MAN, which
+     * have no reading defined yet.
+     */
+    public Optional<ReadingUnit> standardUnit() {
+        return switch (this) {
+            case BFM -> Optional.of(ReadingUnit.CUBIC_METRE);
+            case ELM -> Optional.of(ReadingUnit.KILOWATT_HOUR);
+            case PDU -> Optional.of(ReadingUnit.MINUTE);
+            case IOT, MAN -> Optional.empty();
+        };
+    }
+
+    /**
      * Maps a stored {@code channel_value} to a {@link ReadingChannel}, defaulting to
      * {@link #BFM} for null/blank/unrecognised values. Matching is tolerant: it accepts
      * the canonical short code (e.g. {@code "BFM"}) as well as common labels left over

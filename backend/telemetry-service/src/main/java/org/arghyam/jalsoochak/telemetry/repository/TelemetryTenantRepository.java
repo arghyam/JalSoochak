@@ -31,6 +31,7 @@ public class TelemetryTenantRepository {
     private final PiiEncryptionService piiEncryptionService;
     private static final String SCHEME_SELECTION_CORRELATION_PREFIX = "scheme-selection-";
     private static final String OCR_CORRELATION_COLUMN = "ocr_correlation_id";
+    private static final String SUBMITTED_UNIT_COLUMN = "submitted_unit";
     private static final int OPERATOR_LOOKUP_CACHE_SIZE = 10_000;
     /** Mirrors {@code IngestionSource.NORMAL} — the column default, so it needs no tracking UPDATE. */
     private static final int NORMAL_INGESTION_SOURCE = 0;
@@ -359,7 +360,7 @@ public class TelemetryTenantRepository {
                         %s = ?,
                         reading_date = ?,
                         updated_by = ?,
-                        updated_at = NOW()
+                        updated_at = clock_timestamp()
                     WHERE id = ?
                     """, schemaName, timeColumn);
             jdbcTemplate.update(sql, schemeId, readingAt, readingDate, operatorId, existing.get().id());
@@ -716,7 +717,7 @@ public class TelemetryTenantRepository {
         }
         jdbcTemplate.update(String.format("""
                 UPDATE %s.flow_reading_table
-                SET confirmed_reading_source = ?, updated_at = NOW()
+                SET confirmed_reading_source = ?, updated_at = clock_timestamp()
                 WHERE id = ?
                 """, schemaName), confirmedReadingSource, readingId);
 
@@ -729,7 +730,7 @@ public class TelemetryTenantRepository {
                     UPDATE %s.flow_reading_table
                     SET payload_json = COALESCE(payload_json, '{}'::jsonb)
                                        || jsonb_build_object('rollover_resolution', CAST(? AS jsonb)),
-                        updated_at = NOW()
+                        updated_at = clock_timestamp()
                     WHERE id = ?
                     """, schemaName), rolloverAuditJson, readingId);
         } catch (RuntimeException ex) {
@@ -854,15 +855,48 @@ public class TelemetryTenantRepository {
                                                String submittedPhoneHash,
                                                Integer confirmedReadingSource,
                                                Integer quarantineReason) {
-        Long readingId;
+        return persistFlowReadingWithTracking(schemaName, existingReadingId, schemeId, operatorId, readingAt,
+                extractedReading, confirmedReading, correlationId, ocrCorrelationId, imageUrl,
+                meterChangeReason, ingestionSource, submittedStateSchemeId, submittedCentreSchemeId,
+                submittedPhoneHash, confirmedReadingSource, quarantineReason, null, null).id();
+    }
+
+    /**
+     * As above, plus the reading's {@code channel} and {@code submittedUnit} written by the insert or
+     * placeholder update itself. Returns the version that write gave the row: the markers written
+     * after it move {@code updated_at} on, but do not change what is published.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public FlowReadingVersion persistFlowReadingWithTracking(String schemaName,
+                                                             Long existingReadingId,
+                                                             Long schemeId,
+                                                             Long operatorId,
+                                                             LocalDateTime readingAt,
+                                                             BigDecimal extractedReading,
+                                                             BigDecimal confirmedReading,
+                                                             String correlationId,
+                                                             String ocrCorrelationId,
+                                                             String imageUrl,
+                                                             String meterChangeReason,
+                                                             int ingestionSource,
+                                                             String submittedStateSchemeId,
+                                                             String submittedCentreSchemeId,
+                                                             String submittedPhoneHash,
+                                                             Integer confirmedReadingSource,
+                                                             Integer quarantineReason,
+                                                             String channel,
+                                                             String submittedUnit) {
+        FlowReadingVersion version;
         if (existingReadingId != null) {
-            readingId = existingReadingId;
-            updateFlowReadingFromIngestion(schemaName, readingId, readingAt, extractedReading,
-                    confirmedReading, correlationId, ocrCorrelationId, imageUrl, meterChangeReason, operatorId);
+            version = updateFlowReadingFromIngestion(schemaName, existingReadingId, readingAt, extractedReading,
+                    confirmedReading, correlationId, ocrCorrelationId, imageUrl, meterChangeReason, operatorId,
+                    channel, submittedUnit);
         } else {
-            readingId = createFlowReading(schemaName, schemeId, operatorId, readingAt, extractedReading,
-                    confirmedReading, correlationId, ocrCorrelationId, imageUrl, meterChangeReason);
+            version = createFlowReading(schemaName, schemeId, operatorId, readingAt, extractedReading,
+                    confirmedReading, correlationId, ocrCorrelationId, imageUrl, meterChangeReason,
+                    channel, submittedUnit);
         }
+        Long readingId = version.id();
         // A NORMAL ingestion source carries no submitted-id metadata and matches the column defaults, so
         // the tracking UPDATE is skipped for rows that only need the provenance marker.
         boolean hasIngestionTracking = ingestionSource != NORMAL_INGESTION_SOURCE
@@ -879,7 +913,7 @@ public class TelemetryTenantRepository {
         if (quarantineReason != null) {
             applyQuarantineReason(schemaName, readingId, quarantineReason);
         }
-        return readingId;
+        return version;
     }
 
     public Optional<Long> findSectionOfficerUserIdForScheme(String schemaName, Long schemeId) {
@@ -978,98 +1012,80 @@ public class TelemetryTenantRepository {
                                   String ocrCorrelationId,
                                   String imageUrl,
                                   String meterChangeReason) {
+        return createFlowReading(schemaName, schemeId, operatorId, readingAt, extractedReading, confirmedReading,
+                correlationId, ocrCorrelationId, imageUrl, meterChangeReason, null, null).id();
+    }
+
+    /**
+     * Inserts a reading with its {@code channel} and {@code submittedUnit} in the same statement, and
+     * returns the row's id and the {@code updated_at} that statement wrote. {@code null} for either
+     * leaves the column NULL, which is how rows that hold no reading are stored. {@code submittedUnit}
+     * is dropped on a pre-V56 schema that has no column for it.
+     */
+    public FlowReadingVersion createFlowReading(String schemaName,
+                                                Long schemeId,
+                                                Long operatorId,
+                                                LocalDateTime readingAt,
+                                                BigDecimal extractedReading,
+                                                BigDecimal confirmedReading,
+                                                String correlationId,
+                                                String ocrCorrelationId,
+                                                String imageUrl,
+                                                String meterChangeReason,
+                                                String channel,
+                                                String submittedUnit) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
         String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
         boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
-        String ocrColumn = hasOcrCorrelationId ? ", " + ocrCorrelationColumn : "";
-        String ocrPlaceholder = hasOcrCorrelationId ? ", ?" : "";
-        String sql = hasPayloadJson
-                ? String.format("""
-                        INSERT INTO %s.flow_reading_table
-                            (scheme_id, %s, reading_date, extracted_reading, confirmed_reading, payload_json,
-                             correlation_id%s, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
-                        VALUES (?, ?, ?, ?, ?, jsonb_build_object('confirmed_reading', ?, 'extracted_reading', ?), ?%s, 0, NULL, ?, NULL, ?, ?, NOW(), ?, NOW())
-                        RETURNING id
-                        """, schemaName, timeColumn, ocrColumn, ocrPlaceholder)
-                : String.format("""
-                        INSERT INTO %s.flow_reading_table
-                            (scheme_id, %s, reading_date, extracted_reading, confirmed_reading,
-                             correlation_id%s, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?%s, 0, NULL, ?, NULL, ?, ?, NOW(), ?, NOW())
-                        RETURNING id
-                        """, schemaName, timeColumn, ocrColumn, ocrPlaceholder);
+        boolean hasSubmittedUnit = columnExists(schemaName, "flow_reading_table", SUBMITTED_UNIT_COLUMN);
 
-        Number id;
-        if (hasPayloadJson && hasOcrCorrelationId) {
-            id = jdbcTemplate.queryForObject(
-                    sql,
-                    Number.class,
-                    schemeId,
-                    readingAt,
-                    LocalDate.from(readingAt),
-                    extractedReading,
-                    confirmedReading,
-                    confirmedReading,
-                    extractedReading,
-                    correlationId,
-                    ocrCorrelationId,
-                    meterChangeReason,
-                    imageUrl != null ? imageUrl : "",
-                    operatorId,
-                    operatorId
-            );
-        } else if (hasPayloadJson) {
-            id = jdbcTemplate.queryForObject(
-                    sql,
-                    Number.class,
-                    schemeId,
-                    readingAt,
-                    LocalDate.from(readingAt),
-                    extractedReading,
-                    confirmedReading,
-                    confirmedReading,
-                    extractedReading,
-                    correlationId,
-                    meterChangeReason,
-                    imageUrl != null ? imageUrl : "",
-                    operatorId,
-                    operatorId
-            );
-        } else if (hasOcrCorrelationId) {
-            id = jdbcTemplate.queryForObject(
-                    sql,
-                    Number.class,
-                    schemeId,
-                    readingAt,
-                    LocalDate.from(readingAt),
-                    extractedReading,
-                    confirmedReading,
-                    correlationId,
-                    ocrCorrelationId,
-                    meterChangeReason,
-                    imageUrl != null ? imageUrl : "",
-                    operatorId,
-                    operatorId
-            );
-        } else {
-            id = jdbcTemplate.queryForObject(
-                    sql,
-                    Number.class,
-                    schemeId,
-                    readingAt,
-                    LocalDate.from(readingAt),
-                    extractedReading,
-                    confirmedReading,
-                    correlationId,
-                    meterChangeReason,
-                    imageUrl != null ? imageUrl : "",
-                    operatorId,
-                    operatorId
-            );
+        StringBuilder columns = new StringBuilder(
+                "scheme_id, " + timeColumn + ", reading_date, extracted_reading, confirmed_reading");
+        StringBuilder values = new StringBuilder("?, ?, ?, ?, ?");
+        List<Object> params = new ArrayList<>(List.of(
+                schemeId, readingAt, LocalDate.from(readingAt), extractedReading, confirmedReading));
+        if (hasPayloadJson) {
+            columns.append(", payload_json");
+            values.append(", jsonb_build_object('confirmed_reading', ?, 'extracted_reading', ?)");
+            params.add(confirmedReading);
+            params.add(extractedReading);
         }
-        return id != null ? id.longValue() : null;
+        columns.append(", correlation_id");
+        values.append(", ?");
+        params.add(correlationId);
+        if (hasOcrCorrelationId) {
+            columns.append(", ").append(ocrCorrelationColumn);
+            values.append(", ?");
+            params.add(ocrCorrelationId);
+        }
+        columns.append(", quantity, channel");
+        values.append(", 0, ?");
+        params.add(channel);
+        if (hasSubmittedUnit) {
+            columns.append(", ").append(SUBMITTED_UNIT_COLUMN);
+            values.append(", ?");
+            params.add(submittedUnit);
+        }
+        columns.append(", meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at");
+        values.append(", ?, NULL, ?, ?, NOW(), ?, clock_timestamp()");
+        params.add(meterChangeReason);
+        params.add(imageUrl != null ? imageUrl : "");
+        params.add(operatorId);
+        params.add(operatorId);
+
+        String sql = String.format("""
+                INSERT INTO %s.flow_reading_table (%s)
+                VALUES (%s)
+                RETURNING id, updated_at
+                """, schemaName, columns, values);
+        return jdbcTemplate.queryForObject(
+                sql,
+                (rs, n) -> new FlowReadingVersion(
+                        toLong(rs.getObject("id")),
+                        rs.getObject("updated_at", LocalDateTime.class)),
+                params.toArray());
     }
 
     /** Persists the resolved reading channel (short code, e.g. "BFM"/"ELM") on the flow reading row. */
@@ -1080,7 +1096,7 @@ public class TelemetryTenantRepository {
         }
         String sql = String.format("""
                 UPDATE %s.flow_reading_table
-                SET channel = ?, updated_at = NOW()
+                SET channel = ?, updated_at = clock_timestamp()
                 WHERE id = ?
                 """, schemaName);
         jdbcTemplate.update(sql, channel, readingId);
@@ -1100,14 +1116,14 @@ public class TelemetryTenantRepository {
                         INSERT INTO %s.flow_reading_table
                             (scheme_id, %s, reading_date, extracted_reading, confirmed_reading, payload_json,
                              correlation_id, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
-                        VALUES (?, ?, ?, 0, 0, jsonb_build_object('confirmed_reading', 0, 'extracted_reading', 0), ?, 0, NULL, ?, NULL, '', ?, NOW(), ?, NOW())
+                        VALUES (?, ?, ?, 0, 0, jsonb_build_object('confirmed_reading', 0, 'extracted_reading', 0), ?, 0, NULL, ?, NULL, '', ?, NOW(), ?, clock_timestamp())
                         RETURNING id
                         """, schemaName, timeColumn)
                 : String.format("""
                         INSERT INTO %s.flow_reading_table
                             (scheme_id, %s, reading_date, extracted_reading, confirmed_reading,
                              correlation_id, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
-                        VALUES (?, ?, ?, 0, 0, ?, 0, NULL, ?, NULL, '', ?, NOW(), ?, NOW())
+                        VALUES (?, ?, ?, 0, 0, ?, 0, NULL, ?, NULL, '', ?, NOW(), ?, clock_timestamp())
                         RETURNING id
                         """, schemaName, timeColumn);
 
@@ -1149,7 +1165,7 @@ public class TelemetryTenantRepository {
                                     'extracted_reading', COALESCE(extracted_reading, 0)
                                 ),
                                 updated_by = ?,
-                                updated_at = NOW()
+                                updated_at = clock_timestamp()
                             WHERE id = ?
                             """, schemaName, timeColumn)
                     : String.format("""
@@ -1159,7 +1175,7 @@ public class TelemetryTenantRepository {
                                 correlation_id = ?,
                                 issue_report_reason = ?,
                                 updated_by = ?,
-                                updated_at = NOW()
+                                updated_at = clock_timestamp()
                             WHERE id = ?
                             """, schemaName, timeColumn);
             jdbcTemplate.update(updateSql, readingAt, readingDate, correlationId, issueReason, operatorId, existingId.get());
@@ -1172,14 +1188,14 @@ public class TelemetryTenantRepository {
                         INSERT INTO %s.flow_reading_table
                             (scheme_id, %s, reading_date, extracted_reading, confirmed_reading, payload_json,
                              correlation_id, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
-                        VALUES (?, ?, ?, 0, 0, jsonb_build_object('confirmed_reading', 0, 'extracted_reading', 0), ?, 0, NULL, NULL, ?, '', ?, NOW(), ?, NOW())
+                        VALUES (?, ?, ?, 0, 0, jsonb_build_object('confirmed_reading', 0, 'extracted_reading', 0), ?, 0, NULL, NULL, ?, '', ?, NOW(), ?, clock_timestamp())
                         RETURNING id
                         """, schemaName, timeColumn)
                 : String.format("""
                         INSERT INTO %s.flow_reading_table
                             (scheme_id, %s, reading_date, extracted_reading, confirmed_reading,
                              correlation_id, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
-                        VALUES (?, ?, ?, 0, 0, ?, 0, NULL, NULL, ?, '', ?, NOW(), ?, NOW())
+                        VALUES (?, ?, ?, 0, 0, ?, 0, NULL, NULL, ?, '', ?, NOW(), ?, clock_timestamp())
                         RETURNING id
                         """, schemaName, timeColumn);
 
@@ -1304,7 +1320,7 @@ public class TelemetryTenantRepository {
                         reading_date = ?,
                         meter_change_reason = ?,
                         updated_by = ?,
-                        updated_at = NOW()
+                        updated_at = clock_timestamp()
                     WHERE id = ?
                     """, schemaName, timeColumn);
             jdbcTemplate.update(sql, readingAt, LocalDate.from(readingAt), reason, operatorId, pending.get().id());
@@ -1332,7 +1348,7 @@ public class TelemetryTenantRepository {
                         reading_date = ?,
                         issue_report_reason = ?,
                         updated_by = ?,
-                        updated_at = NOW()
+                        updated_at = clock_timestamp()
                     WHERE id = ?
                     """, schemaName, timeColumn);
             jdbcTemplate.update(sql, readingAt, LocalDate.from(readingAt), reason, operatorId, pending.get().id());
@@ -1355,7 +1371,7 @@ public class TelemetryTenantRepository {
                 SET deleted_at = NOW(),
                     deleted_by = ?,
                     updated_by = ?,
-                    updated_at = NOW()
+                    updated_at = clock_timestamp()
                 WHERE scheme_id = ?
                   AND created_by = ?
                   AND extracted_reading = 0
@@ -1381,7 +1397,7 @@ public class TelemetryTenantRepository {
                             confirmed_reading = ?,
                             payload_json = jsonb_build_object('confirmed_reading', ?, 'extracted_reading', ?),
                             updated_by = ?,
-                            updated_at = NOW()
+                            updated_at = clock_timestamp()
                         WHERE id = ?
                         """, schemaName)
                 : String.format("""
@@ -1389,7 +1405,7 @@ public class TelemetryTenantRepository {
                         SET extracted_reading = ?,
                             confirmed_reading = ?,
                             updated_by = ?,
-                            updated_at = NOW()
+                            updated_at = clock_timestamp()
                         WHERE id = ?
                         """, schemaName);
         if (hasPayloadJson) {
@@ -1408,7 +1424,7 @@ public class TelemetryTenantRepository {
                 UPDATE %s.flow_reading_table
                 SET meter_change_reason = ?,
                     updated_by = ?,
-                    updated_at = NOW()
+                    updated_at = clock_timestamp()
                 WHERE id = ?
                 """, schemaName);
         jdbcTemplate.update(sql, meterChangeReason, updatedBy, readingId);
@@ -1574,7 +1590,7 @@ public class TelemetryTenantRepository {
         }
         jdbcTemplate.update(String.format("""
                 UPDATE %s.flow_reading_table
-                SET quarantine_reason = ?, updated_at = NOW()
+                SET quarantine_reason = ?, updated_at = clock_timestamp()
                 WHERE id = ?
                 """, schemaName), quarantineReason, readingId);
     }
@@ -1842,7 +1858,7 @@ public class TelemetryTenantRepository {
                 ? "(correlation_id = ? OR " + ocrCorrelationColumn + " = ?)"
                 : "correlation_id = ?";
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time, %s AS quarantine_reason
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time, %s AS quarantine_reason, updated_at
                 FROM %s.flow_reading_table
                 WHERE %s
                   AND deleted_at IS NULL
@@ -1866,7 +1882,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time, %s AS quarantine_reason
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time, %s AS quarantine_reason, updated_at
                 FROM %s.flow_reading_table
                 WHERE id = ?
                   AND deleted_at IS NULL
@@ -1966,7 +1982,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time, %s AS quarantine_reason
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time, %s AS quarantine_reason, updated_at
                 FROM %s.flow_reading_table
                 WHERE created_by = ?
                   AND deleted_at IS NULL
@@ -1991,7 +2007,8 @@ public class TelemetryTenantRepository {
                 rs.getObject("reading_date", LocalDate.class),
                 rs.getObject("reading_time", LocalDateTime.class),
                 rs.getString("channel"),
-                toInteger(rs.getObject("quarantine_reason"))
+                toInteger(rs.getObject("quarantine_reason")),
+                rs.getObject("updated_at", LocalDateTime.class)
         );
     }
 
@@ -2351,7 +2368,7 @@ public class TelemetryTenantRepository {
                             confirmed_reading = ?,
                             payload_json = jsonb_build_object('confirmed_reading', ?, 'extracted_reading', ?),
                             updated_by = ?,
-                            updated_at = NOW()
+                            updated_at = clock_timestamp()
                         WHERE id = ?
                         """, schemaName)
                 : String.format("""
@@ -2359,7 +2376,7 @@ public class TelemetryTenantRepository {
                         SET extracted_reading = ?,
                             confirmed_reading = ?,
                             updated_by = ?,
-                            updated_at = NOW()
+                            updated_at = clock_timestamp()
                         WHERE id = ?
                         """, schemaName);
         if (hasPayloadJson) {
@@ -2394,12 +2411,12 @@ public class TelemetryTenantRepository {
                         SET confirmed_reading = ?,
                             payload_json = jsonb_build_object('confirmed_reading', ?, 'extracted_reading', COALESCE(extracted_reading, 0))%s,
                             updated_by = ?,
-                            updated_at = NOW()
+                            updated_at = clock_timestamp()
                         WHERE id = ?
                         """, schemaName, sourceAssignment)
                 : String.format("""
                         UPDATE %s.flow_reading_table
-                        SET confirmed_reading = ?%s, updated_by = ?, updated_at = NOW()
+                        SET confirmed_reading = ?%s, updated_by = ?, updated_at = clock_timestamp()
                         WHERE id = ?
                         """, schemaName, sourceAssignment);
         List<Object> params = new ArrayList<>();
@@ -2433,7 +2450,7 @@ public class TelemetryTenantRepository {
                 SET latitude = ?,
                     longitude = ?,
                     updated_by = ?,
-                    updated_at = NOW()
+                    updated_at = clock_timestamp()
                 WHERE id = ?
                 """, schemaName);
         jdbcTemplate.update(sql, latitude, longitude, updatedBy, readingId);
@@ -2487,112 +2504,88 @@ public class TelemetryTenantRepository {
                                                String imageUrl,
                                                String meterChangeReason,
                                                Long updatedBy) {
+        updateFlowReadingFromIngestion(schemaName, readingId, readingAt, extractedReading, confirmedReading,
+                correlationId, ocrCorrelationId, imageUrl, meterChangeReason, updatedBy, null, null);
+    }
+
+    /**
+     * Writes a reading onto an existing placeholder row, with its {@code channel} and
+     * {@code submittedUnit}, and returns the {@code updated_at} this statement wrote. {@code null} for
+     * either leaves the column as it is. {@code submittedUnit} is dropped on a pre-V56 schema that has
+     * no column for it.
+     */
+    public FlowReadingVersion updateFlowReadingFromIngestion(String schemaName,
+                                                             Long readingId,
+                                                             LocalDateTime readingAt,
+                                                             BigDecimal extractedReading,
+                                                             BigDecimal confirmedReading,
+                                                             String correlationId,
+                                                             String ocrCorrelationId,
+                                                             String imageUrl,
+                                                             String meterChangeReason,
+                                                             Long updatedBy,
+                                                             String channel,
+                                                             String submittedUnit) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
         String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
         boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
-        String correlationAssignment = String.format("""
-                            correlation_id = CASE
-                                WHEN correlation_id IS NULL
-                                  OR correlation_id = ''
-                                  OR correlation_id LIKE '%s%%'
-                                THEN COALESCE(?, correlation_id)
-                                ELSE correlation_id
-                            END,
-                """, SCHEME_SELECTION_CORRELATION_PREFIX);
-        String ocrAssignment = hasOcrCorrelationId
-                ? String.format("%1$s = COALESCE(?, %1$s),", ocrCorrelationColumn)
-                : "";
-        String sql = hasPayloadJson
-                ? String.format("""
-                        UPDATE %s.flow_reading_table
-                        SET %s = ?,
-                            reading_date = ?,
-                            extracted_reading = ?,
-                            confirmed_reading = ?,
-                            payload_json = jsonb_build_object('confirmed_reading', ?, 'extracted_reading', ?),
-                %s
-                            %s
-                            image_url = ?,
-                            meter_change_reason = ?,
-                            updated_by = ?,
-                            updated_at = NOW()
-                        WHERE id = ?
-                        """, schemaName, timeColumn, correlationAssignment, ocrAssignment)
-                : String.format("""
-                        UPDATE %s.flow_reading_table
-                        SET %s = ?,
-                            reading_date = ?,
-                            extracted_reading = ?,
-                            confirmed_reading = ?,
-                %s
-                            %s
-                            image_url = ?,
-                            meter_change_reason = ?,
-                            updated_by = ?,
-                            updated_at = NOW()
-                        WHERE id = ?
-                        """, schemaName, timeColumn, correlationAssignment, ocrAssignment);
-        if (hasPayloadJson && hasOcrCorrelationId) {
-            jdbcTemplate.update(
-                    sql,
-                    readingAt,
-                    LocalDate.from(readingAt),
-                    extractedReading,
-                    confirmedReading,
-                    confirmedReading,
-                    extractedReading,
-                    correlationId,
-                    ocrCorrelationId,
-                    imageUrl != null ? imageUrl : "",
-                    meterChangeReason,
-                    updatedBy,
-                    readingId
-            );
-        } else if (hasPayloadJson) {
-            jdbcTemplate.update(
-                    sql,
-                    readingAt,
-                    LocalDate.from(readingAt),
-                    extractedReading,
-                    confirmedReading,
-                    confirmedReading,
-                    extractedReading,
-                    correlationId,
-                    imageUrl != null ? imageUrl : "",
-                    meterChangeReason,
-                    updatedBy,
-                    readingId
-            );
-        } else if (hasOcrCorrelationId) {
-            jdbcTemplate.update(
-                    sql,
-                    readingAt,
-                    LocalDate.from(readingAt),
-                    extractedReading,
-                    confirmedReading,
-                    correlationId,
-                    ocrCorrelationId,
-                    imageUrl != null ? imageUrl : "",
-                    meterChangeReason,
-                    updatedBy,
-                    readingId
-            );
-        } else {
-            jdbcTemplate.update(
-                    sql,
-                    readingAt,
-                    LocalDate.from(readingAt),
-                    extractedReading,
-                    confirmedReading,
-                    correlationId,
-                    imageUrl != null ? imageUrl : "",
-                    meterChangeReason,
-                    updatedBy,
-                    readingId
-            );
+        boolean hasSubmittedUnit = columnExists(schemaName, "flow_reading_table", SUBMITTED_UNIT_COLUMN);
+
+        List<Object> params = new ArrayList<>(List.of(
+                readingAt, LocalDate.from(readingAt), extractedReading, confirmedReading));
+        StringBuilder assignments = new StringBuilder(String.format("""
+                %s = ?,
+                reading_date = ?,
+                extracted_reading = ?,
+                confirmed_reading = ?,
+                """, timeColumn));
+        if (hasPayloadJson) {
+            assignments.append("payload_json = jsonb_build_object('confirmed_reading', ?, 'extracted_reading', ?),\n");
+            params.add(confirmedReading);
+            params.add(extractedReading);
         }
+        assignments.append(String.format("""
+                correlation_id = CASE
+                    WHEN correlation_id IS NULL
+                      OR correlation_id = ''
+                      OR correlation_id LIKE '%s%%'
+                    THEN COALESCE(?, correlation_id)
+                    ELSE correlation_id
+                END,
+                """, SCHEME_SELECTION_CORRELATION_PREFIX));
+        params.add(correlationId);
+        if (hasOcrCorrelationId) {
+            assignments.append(String.format("%1$s = COALESCE(?, %1$s),\n", ocrCorrelationColumn));
+            params.add(ocrCorrelationId);
+        }
+        assignments.append("channel = COALESCE(?, channel),\n");
+        params.add(channel);
+        if (hasSubmittedUnit) {
+            assignments.append(String.format("%1$s = COALESCE(?, %1$s),\n", SUBMITTED_UNIT_COLUMN));
+            params.add(submittedUnit);
+        }
+        assignments.append("""
+                image_url = ?,
+                meter_change_reason = ?,
+                updated_by = ?,
+                updated_at = clock_timestamp()
+                """);
+        params.add(imageUrl != null ? imageUrl : "");
+        params.add(meterChangeReason);
+        params.add(updatedBy);
+        params.add(readingId);
+
+        String sql = String.format("""
+                UPDATE %s.flow_reading_table
+                SET %s
+                WHERE id = ?
+                RETURNING updated_at
+                """, schemaName, assignments);
+        List<LocalDateTime> rows = jdbcTemplate.query(
+                sql, (rs, n) -> rs.getObject("updated_at", LocalDateTime.class), params.toArray());
+        return new FlowReadingVersion(readingId, rows.stream().findFirst().orElse(null));
     }
 
     private Optional<TelemetryOperator> findOperatorByPhone(String schemaName, String rawPhoneNumber, String normalizedPhone) {

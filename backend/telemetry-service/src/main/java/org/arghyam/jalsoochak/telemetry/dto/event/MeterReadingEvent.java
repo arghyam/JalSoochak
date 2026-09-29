@@ -37,4 +37,12 @@ public class MeterReadingEvent {
      * {@code submission_correlation_id} to join against. Not unique — see {@code AnomalyEvent}.
      */
     private String correlationId;
+    /** {@code flow_reading_table.id}, which identifies the submission's one fact row in analytics. */
+    private Long sourceReadingId;
+    /**
+     * ISO-8601 local date-time of {@code flow_reading_table.updated_at}, the submission's version.
+     * Analytics keeps the newest version, so this is always the database's value, never the Java
+     * clock.
+     */
+    private String sourceUpdatedAt;
 }

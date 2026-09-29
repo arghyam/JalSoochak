@@ -11,6 +11,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.RolloverPosition;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -108,8 +109,8 @@ class BfmReadingServiceRolloverTest {
         when(repo.findRecentDailyConfirmedReadings(eq(SCHEMA), eq(10L), isNull(), anyInt()))
                 .thenReturn(history(100, 110, 120, 130, 140));
         when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
-                .thenReturn(99L);
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse resp = service.createReading(request(), SCHEMA, operator, "919999999999", false);
 
@@ -120,7 +121,7 @@ class BfmReadingServiceRolloverTest {
         ArgumentCaptor<BigDecimal> extracted = ArgumentCaptor.forClass(BigDecimal.class);
         ArgumentCaptor<BigDecimal> confirmed = ArgumentCaptor.forClass(BigDecimal.class);
         verify(repo).createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                extracted.capture(), confirmed.capture(), anyString(), any(), any(), any());
+                extracted.capture(), confirmed.capture(), anyString(), any(), any(), any(), any(), any());
         assertEquals(0, extracted.getValue().compareTo(new BigDecimal("250")), "extracted_reading stays the model value");
         assertEquals(0, confirmed.getValue().compareTo(new BigDecimal("150")), "confirmed_reading seeded with the resolved value");
 
@@ -144,8 +145,8 @@ class BfmReadingServiceRolloverTest {
 
         stubCommon(ocr);
         when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
-                .thenReturn(99L);
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse resp = service.createReading(request(), SCHEMA, operator, "919999999999", false);
 
@@ -154,7 +155,7 @@ class BfmReadingServiceRolloverTest {
 
         ArgumentCaptor<BigDecimal> confirmed = ArgumentCaptor.forClass(BigDecimal.class);
         verify(repo).createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), confirmed.capture(), anyString(), any(), any(), any());
+                any(BigDecimal.class), confirmed.capture(), anyString(), any(), any(), any(), any(), any());
         assertEquals(0, confirmed.getValue().compareTo(new BigDecimal("250")));
 
         // Common path: no extra history round-trip and no provenance write.
@@ -170,7 +171,7 @@ class BfmReadingServiceRolloverTest {
                     99L, 10L, 1L, "corr-1",
                     new BigDecimal("250"),  // extracted (model)
                     new BigDecimal("150"),  // confirmed (resolver's value)
-                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), "BFM", 0);
+                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), "BFM", 0, null);
             when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
                     .thenReturn(Optional.of(reading));
             when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
@@ -197,7 +198,7 @@ class BfmReadingServiceRolloverTest {
                     99L, 10L, 1L, "corr-1",
                     new BigDecimal("250"),  // extracted (model)
                     new BigDecimal("150"),  // confirmed (resolver's value)
-                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), "BFM", 0);
+                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), "BFM", 0, null);
             when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
                     .thenReturn(Optional.of(reading));
             when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
@@ -225,8 +226,8 @@ class BfmReadingServiceRolloverTest {
         stubCommon(ocr);
         when(repo.supportsConfirmedReadingSource(SCHEMA)).thenReturn(false);
         when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
-                .thenReturn(99L);
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse resp = service.createReading(request(), SCHEMA, operator, "919999999999", false);
 
@@ -235,7 +236,7 @@ class BfmReadingServiceRolloverTest {
 
         ArgumentCaptor<BigDecimal> confirmed = ArgumentCaptor.forClass(BigDecimal.class);
         verify(repo).createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), confirmed.capture(), anyString(), any(), any(), any());
+                any(BigDecimal.class), confirmed.capture(), anyString(), any(), any(), any(), any(), any());
         assertEquals(0, confirmed.getValue().compareTo(new BigDecimal("250")), "confirmed_reading left equal to extracted");
 
         // Pre-migration: never fetch trailing history and never write provenance.

@@ -353,7 +353,8 @@ class TelemetryEventPublisherTest {
         void publishesTheReadingWithItsDerivedDate() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L,
                     new BigDecimal("1234"), new BigDecimal("1234"), new BigDecimal("0.92"),
-                    "https://storage.example.org/img.jpg", LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, "flow-corr-1");
+                    "https://storage.example.org/img.jpg", LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, "flow-corr-1",
+                    99L, LocalDateTime.of(2026, 3, 1, 6, 31, 5, 123_456_000));
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getEventType()).isEqualTo("METER_READING_RECORDED");
@@ -367,12 +368,24 @@ class TelemetryEventPublisherTest {
             // submission. Previously the event carried no correlation id at all, so the warehouse
             // had nothing to match an anomaly against.
             assertThat(event.getCorrelationId()).isEqualTo("flow-corr-1");
+            // The submission's identity and version, which analytics keys its one fact row on. The
+            // version keeps the database's microseconds, so two writes in one second still order.
+            assertThat(event.getSourceReadingId()).isEqualTo(99L);
+            assertThat(event.getSourceUpdatedAt()).isEqualTo("2026-03-01T06:31:05.123456");
+        }
+
+        @Test
+        void leavesTheVersionNullWhenItIsNotKnown() {
+            publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null, 99L, null);
+
+            assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getSourceUpdatedAt()).isNull();
         }
 
         @Test
         void fallsBackToTheReadingTimestampsDateWhenNoReadingDateIsGiven() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
-                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, null, 1, 0, null);
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, null, 1, 0, null, null, null);
 
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getReadingDate()).isEqualTo("2026-03-01");
         }
@@ -384,7 +397,7 @@ class TelemetryEventPublisherTest {
             // analytics derives from two of them.
             publisher.publishMeterReadingRecorded(17, 7L, 11L,
                     new BigDecimal("1247.8"), new BigDecimal("1235.55"), null,
-                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null);
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null, null, null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getExtractedReading()).isEqualByComparingTo("1247.8");
@@ -394,7 +407,7 @@ class TelemetryEventPublisherTest {
         @Test
         void carriesNullReadingsThrough() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, null, null, null,
-                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null);
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null, null, null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getExtractedReading()).isNull();
@@ -404,7 +417,7 @@ class TelemetryEventPublisherTest {
         @Test
         void leavesTheDateNullWhenNeitherIsGiven() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
-                    null, null, 1, null, 1, 0, null);
+                    null, null, 1, null, 1, 0, null, null, null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getReadingDate()).isNull();
@@ -421,7 +434,7 @@ class TelemetryEventPublisherTest {
         })
         void normalisesModelConfidenceToAWholePercentage(String confidence, int expected) {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN,
-                    new BigDecimal(confidence), null, null, 1, DATE, 1, 0, null);
+                    new BigDecimal(confidence), null, null, 1, DATE, 1, 0, null, null, null);
 
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isEqualTo(expected);
         }
@@ -429,12 +442,12 @@ class TelemetryEventPublisherTest {
         @Test
         void treatsAMissingOrNegativeConfidenceAsUnknown() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN,
-                    null, null, null, 1, DATE, 1, 0, null);
+                    null, null, null, 1, DATE, 1, 0, null, null, null);
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isNull();
 
             org.mockito.Mockito.reset(kafkaProducer);
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN,
-                    new BigDecimal("-1"), null, null, 1, DATE, 1, 0, null);
+                    new BigDecimal("-1"), null, null, 1, DATE, 1, 0, null, null, null);
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isNull();
         }
     }

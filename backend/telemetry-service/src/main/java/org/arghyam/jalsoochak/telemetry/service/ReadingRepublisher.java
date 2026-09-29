@@ -19,7 +19,9 @@ import java.time.LocalDateTime;
  * written or changed it outside {@code BfmReadingService.createReading}.
  *
  * <p>The event is built from the row as it stands in {@code flow_reading_table}, read back by id, so
- * analytics receives exactly what telemetry holds, whichever path wrote it.
+ * analytics receives exactly what telemetry holds, whichever path wrote it. It carries the row's id
+ * and {@code updated_at}, so analytics updates the submission's one fact row instead of adding
+ * another, and ignores an older version that arrives late.
  *
  * <p>SUPPLY-PLAUSIBILITY: a row that is still quarantined is not published, as on the submission
  * path. Telemetry keeps it out of every baseline, so publishing it would put a reading in analytics
@@ -69,7 +71,10 @@ public class ReadingRepublisher {
                 0,
                 // ANOMALY-SUBMISSION-LINK: a republish carries the row's own correlation id, so the
                 // warehouse keeps pointing at one submission.
-                reading.correlationId()
+                reading.correlationId(),
+                reading.id(),
+                // Read in the same statement as the values above, so the version always matches them.
+                reading.updatedAt()
         );
     }
 
@@ -84,7 +89,7 @@ public class ReadingRepublisher {
      * <p>Rows written before that sentinel was introduced still hold the supplied value and keep
      * publishing it — this is forward-only, with no backfill.
      */
-    static BigDecimal publishableExtractedReading(BigDecimal storedExtractedReading) {
+    private static BigDecimal publishableExtractedReading(BigDecimal storedExtractedReading) {
         return storedExtractedReading == null || storedExtractedReading.signum() == 0
                 ? null
                 : storedExtractedReading;
@@ -96,7 +101,7 @@ public class ReadingRepublisher {
      * with a different calculator. Returns {@code null} for legacy rows that never stored a
      * channel, which analytics treats as the default (BFM).
      */
-    static Integer channelCode(TelemetryLatestFlowReadingRecord reading) {
+    private static Integer channelCode(TelemetryLatestFlowReadingRecord reading) {
         String channelValue = reading.channel();
         if (channelValue == null || channelValue.isBlank()) {
             return null;

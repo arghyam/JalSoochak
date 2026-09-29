@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
@@ -111,7 +112,7 @@ class BfmReadingServiceAssertedReadingTest {
                 isNull(), isNull(), isNull(), eq(IngestionSource.NORMAL), isNull(), isNull(), isNull(),
                 eq(RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED),
                 // SUPPLY-PLAUSIBILITY: unchecked path, so the row carries no quarantine marker.
-                isNull());
+                isNull(), any(), any());
     }
 
     @Test
@@ -150,8 +151,8 @@ class BfmReadingServiceAssertedReadingTest {
         when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(SCHEME_ID), eq(OPERATOR_ID),
                 any(LocalDate.class))).thenReturn(Optional.empty());
         when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
-                .thenReturn(99L);
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse response = service.createReading(
                 CreateReadingRequest.builder()
@@ -165,7 +166,7 @@ class BfmReadingServiceAssertedReadingTest {
         // The image path must not be routed through the tracking/provenance overload.
         verify(repo, org.mockito.Mockito.never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(),
                 anyLong(), any(), any(), any(), anyString(), any(), any(), any(), anyInt(), any(), any(),
-                any(), any());
+                any(), any(), any(), any(), any());
     }
 
     @Test
@@ -180,7 +181,7 @@ class BfmReadingServiceAssertedReadingTest {
         // count every API submission as an operator overriding the AI.
         verify(telemetryEventPublisher).publishMeterReadingRecorded(eq(TENANT_ID), eq(SCHEME_ID),
                 eq(OPERATOR_ID), isNull(), eq(new BigDecimal("150")), isNull(), isNull(),
-                any(LocalDateTime.class), anyInt(), any(LocalDate.class), eq(1), eq(0), any());
+                any(LocalDateTime.class), anyInt(), any(LocalDate.class), eq(1), eq(0), any(), any(), any());
     }
 
     @Test
@@ -220,7 +221,7 @@ class BfmReadingServiceAssertedReadingTest {
                 any(LocalDate.class))).thenReturn(Optional.empty());
         when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any()))
-                .thenReturn(99L);
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(99L, null));
     }
 }

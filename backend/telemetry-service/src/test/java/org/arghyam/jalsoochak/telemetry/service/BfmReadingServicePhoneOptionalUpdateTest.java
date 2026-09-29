@@ -98,7 +98,8 @@ class BfmReadingServicePhoneOptionalUpdateTest {
                 READING_DATE,
                 READING_AT,
                 "BFM",
-                0
+                0,
+                null
         );
     }
 

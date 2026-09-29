@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryFlowReadingDetails;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryPendingMeterChangeRecord;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
@@ -435,8 +436,9 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
-                any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any()))
-                .thenReturn(4242L);
+                any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
+                any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(4242L, null));
 
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
         when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(List.of());
@@ -465,7 +467,9 @@ class MeterReadingConversationServiceManualReadingTest {
                 ArgumentMatchers.isNull(), ArgumentMatchers.eq(""), ArgumentMatchers.isNull(),
                 ArgumentMatchers.eq(IngestionSource.NORMAL), ArgumentMatchers.isNull(),
                 ArgumentMatchers.isNull(), ArgumentMatchers.isNull(),
-                ArgumentMatchers.eq(RolloverResolutionService.SOURCE_MANUAL));
+                ArgumentMatchers.eq(RolloverResolutionService.SOURCE_MANUAL), ArgumentMatchers.isNull(),
+                // The operator's channel, and its standard unit: a typed-in value is never converted.
+                ArgumentMatchers.eq(ReadingChannel.BFM.name()), ArgumentMatchers.eq("m3"));
         // The two-statement route is what allowed a row to commit unmarked if the second write failed.
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(),
                 any(), any(), anyString(), anyString(), any());
@@ -494,7 +498,8 @@ class MeterReadingConversationServiceManualReadingTest {
         // The provenance write is inside the persist transaction, so its failure rolls the insert back
         // and surfaces here as one failed call — never as a committed row missing its marker.
         when(telemetryTenantRepository.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
-                any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any()))
+                any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
+                any(), any(), any()))
                 .thenThrow(new IllegalStateException("confirmed_reading_source write failed"));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
@@ -831,8 +836,9 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
-                any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any()))
-                .thenReturn(4242L);
+                any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
+                any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(4242L, null));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")
@@ -841,11 +847,12 @@ class MeterReadingConversationServiceManualReadingTest {
 
         assertEquals(true, resp.isSuccess());
         InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
+        // The channel goes in with the insert, so no separate channel write follows it.
         order.verify(telemetryTenantRepository).persistFlowReadingWithTracking(anyString(), any(), anyLong(),
                 anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(),
-                any(), any());
-        order.verify(telemetryTenantRepository).updateFlowReadingChannel("tenant_test", 4242L, ReadingChannel.BFM.name());
+                any(), any(), any(), ArgumentMatchers.eq(ReadingChannel.BFM.name()), ArgumentMatchers.eq("m3"));
         order.verify(readingRepublisher).republish("tenant_test", 1, 4242L);
+        verify(telemetryTenantRepository, never()).updateFlowReadingChannel(any(), any(), any());
         verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());
     }
 

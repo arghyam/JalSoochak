@@ -92,6 +92,8 @@ class TelemetryTenantRepositoryFlowReadingByIdIntegrationTest {
         assertEquals(READING_AT, row.readingAt());
         assertEquals("ELM", row.channel());
         assertEquals(1, row.quarantineReason());
+        assertEquals(jdbcTemplate.queryForObject("SELECT updated_at FROM " + MIGRATED_SCHEMA
+                + ".flow_reading_table WHERE id = ?", LocalDateTime.class, LIVE_ROW), row.updatedAt());
     }
 
     @Test

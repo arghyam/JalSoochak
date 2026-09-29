@@ -210,7 +210,9 @@ public class TelemetryEventPublisher {
                                             LocalDate readingDate,
                                             Integer submissionStatus,
                                             Integer readingType,
-                                            String correlationId) {
+                                            String correlationId,
+                                            Long sourceReadingId,
+                                            LocalDateTime sourceUpdatedAt) {
         LocalDate effectiveDate = readingDate != null ? readingDate : (readingAt != null ? readingAt.toLocalDate() : null);
         MeterReadingEvent event = MeterReadingEvent.builder()
                 .eventType(EVENT_METER_READING_RECORDED)
@@ -229,6 +231,8 @@ public class TelemetryEventPublisher {
                 // ANOMALY-SUBMISSION-LINK: the warehouse counterpart an anomaly's
                 // submission_correlation_id joins against.
                 .correlationId(correlationId)
+                .sourceReadingId(sourceReadingId)
+                .sourceUpdatedAt(sourceUpdatedAt != null ? sourceUpdatedAt.toString() : null)
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);

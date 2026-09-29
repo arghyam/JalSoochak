@@ -16,6 +16,8 @@ import java.time.LocalDateTime;
  *        refused correction writes nothing and an accepted one clears the flag unconditionally,
  *        whatever the row's prior state. Keeping it out of the control flow is what stops
  *        state-dependent branching, and the store divergence it caused, from creeping back in.
+ * @param updatedAt the row's version, read in the same statement as the values beside it, so a
+ *        republish never pairs one write's values with another write's version
  */
 public record TelemetryLatestFlowReadingRecord(
         Long id,
@@ -28,6 +30,7 @@ public record TelemetryLatestFlowReadingRecord(
         LocalDate readingDate,
         LocalDateTime readingAt,
         String channel,
-        Integer quarantineReason
+        Integer quarantineReason,
+        LocalDateTime updatedAt
 ) {
 }

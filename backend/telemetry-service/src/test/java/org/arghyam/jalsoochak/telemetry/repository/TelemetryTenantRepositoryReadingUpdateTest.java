@@ -174,14 +174,17 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason", 2L);
 
-            assertThat(capturedUpdateSql())
+            assertThat(allQuerySql().get(0))
                     .contains("payload_json")
                     .contains("ocr_correlation_id = COALESCE(?, ocr_correlation_id)")
-                    .contains("observation_time");
-            assertThat(capturedUpdateArgs()).containsExactly(
+                    .contains("observation_time")
+                    .contains("updated_at = clock_timestamp()")
+                    .contains("RETURNING updated_at");
+            // The legacy overload passes no channel or unit, which leaves both columns as they are.
+            assertThat(lastQueryArgs()).containsExactly(
                     READING_AT, DAY, new BigDecimal("10"), new BigDecimal("11"),
                     new BigDecimal("11"), new BigDecimal("10"), "corr-1", "ocr-1",
-                    "img", "reason", 2L, 5L);
+                    null, null, "img", "reason", 2L, 5L);
         }
 
         @Test
@@ -191,13 +194,13 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason", 2L);
 
-            assertThat(capturedUpdateSql())
+            assertThat(allQuerySql().get(0))
                     .doesNotContain("payload_json")
                     .doesNotContain("_correlation_id = COALESCE")
                     .contains("reading_at");
-            assertThat(capturedUpdateArgs()).containsExactly(
+            assertThat(lastQueryArgs()).containsExactly(
                     READING_AT, DAY, new BigDecimal("10"), new BigDecimal("11"),
-                    "corr-1", "img", "reason", 2L, 5L);
+                    "corr-1", null, "img", "reason", 2L, 5L);
         }
 
         @Test
@@ -207,8 +210,8 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason", 2L);
 
-            assertThat(capturedUpdateSql()).contains("payload_json").doesNotContain("_correlation_id = COALESCE");
-            assertThat(capturedUpdateArgs()).hasSize(11);
+            assertThat(allQuerySql().get(0)).contains("payload_json").doesNotContain("_correlation_id = COALESCE");
+            assertThat(lastQueryArgs()).hasSize(12);
         }
 
         @Test
@@ -218,8 +221,8 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason", 2L);
 
-            assertThat(capturedUpdateSql()).contains("ocr_correlation_id").doesNotContain("payload_json");
-            assertThat(capturedUpdateArgs()).hasSize(10);
+            assertThat(allQuerySql().get(0)).contains("ocr_correlation_id").doesNotContain("payload_json");
+            assertThat(lastQueryArgs()).hasSize(11);
         }
 
         @Test
@@ -231,7 +234,7 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
 
             // A real correlation id already on the row must survive; only the scheme-selection
             // placeholder (or an empty value) is replaced.
-            assertThat(capturedUpdateSql())
+            assertThat(allQuerySql().get(0))
                     .contains("correlation_id LIKE 'scheme-selection-%'")
                     .contains("ELSE correlation_id");
         }
@@ -243,7 +246,38 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
                     BigDecimal.ONE, BigDecimal.ONE, "corr-1", null, null, null, 2L);
 
-            assertThat(capturedUpdateArgs()).contains("");
+            assertThat(lastQueryArgs()).contains("");
+        }
+
+        /**
+         * A reading written onto a placeholder takes its channel and unit, and the version the update
+         * wrote comes back with the row id.
+         */
+        @Test
+        void writesTheChannelAndSubmittedUnitAndReturnsTheVersion() {
+            onColumnExists(true);
+            LocalDateTime updatedAt = LocalDateTime.of(2026, 3, 1, 6, 30, 9, 1_000);
+            onQuery("RETURNING updated_at", row("updated_at", updatedAt));
+
+            FlowReadingVersion version = repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
+                    BigDecimal.ZERO, new BigDecimal("90"), "corr-1", null, "", null, 2L, "PDU", "min");
+
+            assertThat(version).isEqualTo(new FlowReadingVersion(5L, updatedAt));
+            assertThat(allQuerySql().get(0))
+                    .contains("channel = COALESCE(?, channel)")
+                    .contains("submitted_unit = COALESCE(?, submitted_unit)");
+            assertThat(lastQueryArgs()).containsSequence("PDU", "min");
+        }
+
+        /** The row vanished between the placeholder lookup and this write: no version to publish. */
+        @Test
+        void returnsNoVersionWhenTheRowIsGone() {
+            onColumnExists(true);
+
+            FlowReadingVersion version = repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
+                    BigDecimal.ZERO, new BigDecimal("90"), "corr-1", null, "", null, 2L, "BFM", "m3");
+
+            assertThat(version).isEqualTo(new FlowReadingVersion(5L, null));
         }
 
         @Test
@@ -253,7 +287,7 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
                     BigDecimal.ONE, BigDecimal.ONE, "corr-1", "img", "reason", 2L);
 
-            assertThat(capturedUpdateArgs()).containsSequence("corr-1", null);
+            assertThat(lastQueryArgs()).containsSequence("corr-1", null);
         }
     }
 

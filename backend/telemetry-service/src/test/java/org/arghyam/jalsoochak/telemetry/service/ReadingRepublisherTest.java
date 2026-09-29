@@ -32,6 +32,7 @@ class ReadingRepublisherTest {
     private static final long READING_ID = 99L;
     private static final LocalDate READING_DATE = LocalDate.of(2026, 6, 22);
     private static final LocalDateTime READING_AT = LocalDateTime.of(2026, 6, 22, 9, 30);
+    private static final LocalDateTime UPDATED_AT = LocalDateTime.of(2026, 6, 23, 8, 15, 2, 345_678_000);
 
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
@@ -55,9 +56,13 @@ class ReadingRepublisherTest {
         return new TelemetryLatestFlowReadingRecord(
                 READING_ID, 10L, 1L, "corr-1",
                 extracted, new BigDecimal("123"), "http://example.com/img.jpg",
-                readingDate, READING_AT, channel, quarantineReason);
+                readingDate, READING_AT, channel, quarantineReason, UPDATED_AT);
     }
 
+    /**
+     * The row's id and updated_at identify the submission and its version, so analytics updates
+     * the one fact row it already holds for this reading instead of adding a second.
+     */
     @Test
     void publishesTheStoredRow() {
         when(telemetryTenantRepository.findFlowReadingById(SCHEMA, READING_ID))
@@ -78,7 +83,9 @@ class ReadingRepublisherTest {
                 READING_DATE,
                 1,
                 0,
-                "corr-1");
+                "corr-1",
+                READING_ID,
+                UPDATED_AT);
     }
 
     /**
@@ -96,7 +103,7 @@ class ReadingRepublisherTest {
 
         verify(telemetryEventPublisher).publishMeterReadingRecorded(
                 eq(TENANT_ID), eq(10L), eq(1L), isNull(), eq(new BigDecimal("123")), isNull(), any(),
-                any(), any(), any(), eq(1), eq(0), any());
+                any(), any(), any(), eq(1), eq(0), any(), any(), any());
     }
 
     /** Analytics reads a missing channel as BFM, so a legacy row must not be given one. */
@@ -108,7 +115,7 @@ class ReadingRepublisherTest {
         readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
 
         verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                any(), any(), any(), any(), any(), any(), any(), any(), isNull(), any(), any(), any(), any());
+                any(), any(), any(), any(), any(), any(), any(), any(), isNull(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -120,7 +127,7 @@ class ReadingRepublisherTest {
 
         verify(telemetryEventPublisher).publishMeterReadingRecorded(
                 any(), any(), any(), any(), any(), any(), any(), eq(READING_AT), any(),
-                eq(READING_AT.toLocalDate()), any(), any(), any());
+                eq(READING_AT.toLocalDate()), any(), any(), any(), any(), any());
     }
 
     /**
@@ -147,7 +154,7 @@ class ReadingRepublisherTest {
         readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
 
         verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test

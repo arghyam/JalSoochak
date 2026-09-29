@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -13,6 +14,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
@@ -473,7 +475,11 @@ public class BfmReadingService {
             quarantined = verdict instanceof Verdict.Quarantined && supplyPlausibilityGuard.isEnforcing();
         }
 
-        Long readingId;
+        // Written by the insert itself rather than by a later UPDATE, so no stored reading is ever
+        // without its channel. Every value reaches here in the channel's standard unit.
+        String channelName = resolvedChannel.name();
+        String submittedUnit = resolvedChannel.standardUnit().map(ReadingUnit::code).orElse(null);
+        FlowReadingVersion storedReading;
         Optional<Long> placeholderIdOpt = telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
                 schemaName,
                 request.getSchemeId(),
@@ -486,7 +492,7 @@ public class BfmReadingService {
             // tracking metadata. Covers both the new-insert and same-day placeholder-reuse paths.
             // READING-PROVENANCE: API-supplied values take the same transactional path — same inserts and
             // updates as before, plus the EXTERNALLY_ASSERTED marker committed with the row.
-            readingId = telemetryTenantRepository.persistFlowReadingWithTracking(
+            storedReading = telemetryTenantRepository.persistFlowReadingWithTracking(
                     schemaName,
                     placeholderIdOpt.orElse(null),
                     request.getSchemeId(),
@@ -505,12 +511,13 @@ public class BfmReadingService {
                     request.isExternallyAsserted() ? confirmedReadingSource : null,
                     // SUPPLY-PLAUSIBILITY: the marker commits inside the same transaction as the
                     // insert, so the row cannot land without it.
-                    quarantined ? QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY : null);
+                    quarantined ? QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY : null,
+                    channelName,
+                    submittedUnit);
         } else if (placeholderIdOpt.isPresent()) {
-            readingId = placeholderIdOpt.get();
-            telemetryTenantRepository.updateFlowReadingFromIngestion(
+            storedReading = telemetryTenantRepository.updateFlowReadingFromIngestion(
                     schemaName,
-                    readingId,
+                    placeholderIdOpt.get(),
                     readingAt,
                     extractedReading,
                     effectiveConfirmedReading,
@@ -518,10 +525,12 @@ public class BfmReadingService {
                     ocrCorrelationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason(),
-                    operatorInRequest.id()
+                    operatorInRequest.id(),
+                    channelName,
+                    submittedUnit
             );
         } else {
-            readingId = telemetryTenantRepository.createFlowReading(
+            storedReading = telemetryTenantRepository.createFlowReading(
                     schemaName,
                     request.getSchemeId(),
                     operatorInRequest.id(),
@@ -531,9 +540,12 @@ public class BfmReadingService {
                     storageCorrelationId,
                     ocrCorrelationId,
                     request.getReadingUrl(),
-                    request.getMeterChangeReason()
+                    request.getMeterChangeReason(),
+                    channelName,
+                    submittedUnit
             );
         }
+        Long readingId = storedReading.id();
 
         // ROLLOVER-RESOLVE: tag provenance + best-effort audit only when the resolver actually overrode
         // the model value. createReading is not @Transactional, so this runs as a separate guarded
@@ -599,7 +611,6 @@ public class BfmReadingService {
         // marks the operator absent and the scheme non-reporting for the day: intended, and called
         // out in the ops runbook so the daily-report gap is not chased as a pipeline fault.
         if (quarantined) {
-            telemetryTenantRepository.updateFlowReadingChannel(schemaName, readingId, resolvedChannel.name());
             recordAnomaly(
                     schemaName,
                     tenantId,
@@ -655,9 +666,6 @@ public class BfmReadingService {
                     .orElse(null);
         }
 
-        // ReadingChannelResolver.resolve never returns null (it falls back to DEFAULT/BFM). Resolved
-        // above, ahead of the supply check, which is scoped to BFM.
-        telemetryTenantRepository.updateFlowReadingChannel(schemaName, readingId, resolvedChannel.name());
         telemetryEventPublisher.publishMeterReadingRecorded(
                 tenantId,
                 request.getSchemeId(),
@@ -677,7 +685,12 @@ public class BfmReadingService {
                 0,
                 // ANOMALY-SUBMISSION-LINK: the same value written to flow_reading_table.correlation_id
                 // above, so the warehouse row can be found from an anomaly that names it.
-                storageCorrelationId
+                storageCorrelationId,
+                readingId,
+                // The version the write above gave the row. The markers written after it move
+                // updated_at on without changing anything published here, and a later republish
+                // reads the newer value, so analytics still keeps the latest.
+                storedReading.updatedAt()
         );
 
         // Surface the resolved value to the operator: the "please confirm" message text and the response
@@ -1135,24 +1148,9 @@ public class BfmReadingService {
         // warehouse. Same unconditional clear as the correction path, and the same no-op on pre-V40.
         telemetryTenantRepository.applyQuarantineReason(schemaName, latestReading.id(), QuarantineReason.NONE);
 
-        LocalDateTime readingAt = latestReading.readingAt() != null ? latestReading.readingAt() : ReadingTime.now();
-        LocalDate readingDate = latestReading.readingDate() != null ? latestReading.readingDate() : readingAt.toLocalDate();
-        telemetryEventPublisher.publishMeterReadingRecorded(
-                operator.tenantId(),
-                latestReading.schemeId(),
-                operator.id(),
-                ReadingRepublisher.publishableExtractedReading(latestReading.extractedReading()),
-                BigDecimal.ZERO,
-                null,
-                latestReading.imageUrl(),
-                readingAt,
-                ReadingRepublisher.channelCode(latestReading),
-                readingDate,
-                1,
-                0,
-                // ANOMALY-SUBMISSION-LINK: the reset republishes the row it just zeroed.
-                latestReading.correlationId()
-        );
+        // Published from the row as it now stands. Its created_by is operator.id(), because the row
+        // is the operator's own latest, so the event is credited as it was before.
+        readingRepublisher.republish(schemaName, operator.tenantId(), latestReading.id());
 
         return CreateReadingResponse.builder()
                 .success(true)

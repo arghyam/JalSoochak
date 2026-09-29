@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSupplyCounts;
@@ -106,10 +107,11 @@ class BfmReadingServiceLocationMismatchTest {
                 .thenReturn(Optional.empty());
         lenient().when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                any(), any(), any(), anyInt(), any(), any(), any(), any(), any())).thenReturn(READING_ID);
+                any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(READING_ID, null));
         lenient().when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
-                .thenReturn(READING_ID);
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(READING_ID, null));
         lenient().when(locationAffinityService.recordMismatchIfAny(
                 anyString(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new LocationVerdict.Outside(1201.0d, 500.0d));
@@ -152,7 +154,7 @@ class BfmReadingServiceLocationMismatchTest {
         assertThat(response.getErrorCode()).isNull();
         verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                any(), any(), any(), anyInt(), any(), any(), any(), any(), any());
+                any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test

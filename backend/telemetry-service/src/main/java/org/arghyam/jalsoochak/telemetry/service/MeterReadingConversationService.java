@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
@@ -1309,6 +1310,11 @@ public class MeterReadingConversationService {
                 }
             }
 
+            // The manual value is a reading like any other, so its row carries the channel it was
+            // taken on: the operator's stored preference, as on the photo path.
+            ReadingChannel resolvedChannel = readingChannelResolver.resolve(
+                    operatorWithSchema.schemaName(), request.getContactId());
+
             // ANOMALY-SUBMISSION-LINK: the flow_reading_table row the manual value lands on, captured
             // across all three branches below so the MANUAL_OVERRIDE anomaly recorded after them can
             // point at it. Every branch ends with a real row — one reused, one updated, one created —
@@ -1326,6 +1332,8 @@ public class MeterReadingConversationService {
                         operatorWithSchema.operator().id(),
                         RolloverResolutionService.SOURCE_MANUAL
                 );
+                telemetryTenantRepository.updateFlowReadingChannel(
+                        operatorWithSchema.schemaName(), manualReadingId, resolvedChannel.name());
                 if (isMeterReplaced) {
                     telemetryTenantRepository.updateMeterChangeReason(
                             operatorWithSchema.schemaName(),
@@ -1358,6 +1366,8 @@ public class MeterReadingConversationService {
                             RolloverResolutionService.manualConfirmSource(
                                     effectiveConfirmedReading, todaysFlow.confirmedReading())
                     );
+                    telemetryTenantRepository.updateFlowReadingChannel(
+                            operatorWithSchema.schemaName(), manualReadingId, resolvedChannel.name());
                     if (isMeterReplaced) {
                         telemetryTenantRepository.updateMeterChangeReason(
                                 operatorWithSchema.schemaName(),
@@ -1380,7 +1390,9 @@ public class MeterReadingConversationService {
                     // followed by a separate applyConfirmedReadingSource: a marker write that failed on its
                     // own would commit exactly the mislabelled row this is here to prevent. NORMAL
                     // ingestion with no submitted ids skips the tracking UPDATE, so this is the same two
-                    // statements the API path already runs, under one transaction.
+                    // statements the API path already runs, under one transaction. The channel and the
+                    // unit are written by the insert itself; a typed-in value is in the channel's
+                    // standard unit.
                     manualReadingId = telemetryTenantRepository.persistFlowReadingWithTracking(
                             operatorWithSchema.schemaName(),
                             null,
@@ -1397,20 +1409,17 @@ public class MeterReadingConversationService {
                             null,
                             null,
                             null,
-                            RolloverResolutionService.SOURCE_MANUAL
-                    );
+                            RolloverResolutionService.SOURCE_MANUAL,
+                            null,
+                            resolvedChannel.name(),
+                            resolvedChannel.standardUnit().map(ReadingUnit::code).orElse(null)
+                    ).id();
                 }
             }
 
-            // The manual value is a reading like any other, so analytics has to receive it: without
-            // this the row exists in telemetry only, with no fact row and no water quantity for the
-            // day. The channel is the operator's stored preference, as on the photo path. Published
-            // straight after the write, so a failure in the checks below cannot leave a stored
-            // reading unpublished.
-            ReadingChannel resolvedChannel = readingChannelResolver.resolve(
-                    operatorWithSchema.schemaName(), request.getContactId());
-            telemetryTenantRepository.updateFlowReadingChannel(
-                    operatorWithSchema.schemaName(), manualReadingId, resolvedChannel.name());
+            // Analytics has to receive the manual value: without this the row exists in telemetry
+            // only, with no fact row and no water quantity for the day. Published straight after the
+            // write, so a failure in the checks below cannot leave a stored reading unpublished.
             readingRepublisher.republish(operatorWithSchema.schemaName(), tenantId, manualReadingId);
 
             // LOCATION-AFFINITY: the manual path never reaches BfmReadingService.createReading, so it

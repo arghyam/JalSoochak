@@ -121,7 +121,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
         return new TelemetryLatestFlowReadingRecord(
                 READING_ID, SCHEME_ID, OPERATOR_ID, CORRELATION_ID,
                 new BigDecimal("948"), STANDING, "https://img/1.jpg",
-                READING_DATE, READING_AT, ReadingChannel.BFM.name(), quarantineReason);
+                READING_DATE, READING_AT, ReadingChannel.BFM.name(), quarantineReason, null);
     }
 
     /** The scheme is migrated, has 100 connections, and has an earlier reading to measure against. */
@@ -443,7 +443,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
                     new TelemetryLatestFlowReadingRecord(
                             READING_ID, SCHEME_ID, OPERATOR_ID, CORRELATION_ID,
                             new BigDecimal("948"), STANDING, "https://img/1.jpg",
-                            READING_DATE, READING_AT, ReadingChannel.ELM.name(), QuarantineReason.NONE)));
+                            READING_DATE, READING_AT, ReadingChannel.ELM.name(), QuarantineReason.NONE, null)));
             when(operatorContextService.resolveOperatorWithSchema(CONTACT, TENANT_ID))
                     .thenReturn(new TelemetryOperatorWithSchema(SCHEMA, operator));
 

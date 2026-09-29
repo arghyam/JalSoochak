@@ -31,8 +31,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -64,6 +62,9 @@ class BfmReadingServiceResetLatestTenantScopeTest {
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
+
+    @Mock
+    private ReadingRepublisher readingRepublisher;
 
     @Mock
     private TenantConfigRepository tenantConfigRepository;
@@ -108,7 +109,8 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                 READING_DATE,
                 READING_AT,
                 "BFM",
-                0
+                0,
+                READING_AT
         );
     }
 
@@ -116,26 +118,21 @@ class BfmReadingServiceResetLatestTenantScopeTest {
         return new TelemetryOperator(1L, tenantId, "op", "op@example.com", PHONE, null);
     }
 
-    /** Same sentinel rule as the correction path: a 0 extracted_reading means "no extraction", not 0. */
+    /**
+     * Published from the zeroed row, as every other correction is, so the event carries the row's id
+     * and version and analytics updates the submission's fact row instead of adding one.
+     */
     @Test
-    void resettingARowWithNoExtractedValuePublishesNoExtractedReading() {
+    void republishesTheResetRow() {
         when(operatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
                 .thenReturn(new TelemetryOperatorWithSchema(CALLER_SCHEMA, operator(CALLER_TENANT_ID)));
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
-                .thenReturn(Optional.of(new TelemetryLatestFlowReadingRecord(
-                        99L, 10L, 1L, "corr-1",
-                        BigDecimal.ZERO,
-                        new BigDecimal("1450"),
-                        "",
-                        READING_DATE, READING_AT, "BFM", 0)));
+                .thenReturn(Optional.of(reading()));
 
         service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID);
 
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                eq(CALLER_TENANT_ID), eq(10L), eq(1L),
-                isNull(),
-                eq(BigDecimal.ZERO), isNull(), eq(""), eq(READING_AT),
-                any(), eq(READING_DATE), eq(1), eq(0), any());
+        verify(readingRepublisher).republish(CALLER_SCHEMA, CALLER_TENANT_ID, 99L);
+        verifyNoInteractions(telemetryEventPublisher);
     }
 
     @Test
@@ -170,7 +167,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                         new BigDecimal("1450"),
                         "",
                         READING_DATE, READING_AT, "BFM",
-                        QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY)));
+                        QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY, READING_AT)));
 
         service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID);
 
@@ -216,7 +213,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
 
         assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
         verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
-        verifyNoInteractions(telemetryEventPublisher);
+        verifyNoInteractions(readingRepublisher);
     }
 
     @Test
@@ -280,6 +277,6 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                 () -> service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID));
 
         assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
-        verifyNoInteractions(telemetryEventPublisher);
+        verifyNoInteractions(readingRepublisher);
     }
 }

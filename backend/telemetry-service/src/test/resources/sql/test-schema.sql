@@ -83,6 +83,8 @@ CREATE TABLE tenant_as.flow_reading_table (
     extracted_reading NUMERIC      NOT NULL,
     confirmed_reading NUMERIC      NOT NULL,
     correlation_id    VARCHAR(255) NOT NULL,
+    -- Written by every insert, so createFlowReading can run against this table.
+    quantity          NUMERIC,
     channel           VARCHAR(64),
     image_url         TEXT DEFAULT '',
     created_by        INTEGER      NOT NULL,
@@ -96,6 +98,8 @@ CREATE TABLE tenant_as.flow_reading_table (
     -- boundary check depends on cannot be exercised for real without them.
     meter_change_reason  TEXT,
     issue_report_reason  TEXT,
+    -- V56. Absent on tenant_zz, so the insert's column probe is exercised both ways.
+    submitted_unit    VARCHAR(16),
     deleted_at        TIMESTAMP
 );
 
@@ -114,10 +118,15 @@ CREATE TABLE tenant_zz.flow_reading_table (
     extracted_reading NUMERIC      NOT NULL,
     confirmed_reading NUMERIC      NOT NULL,
     correlation_id    VARCHAR(255) NOT NULL,
+    -- The columns every insert writes, which a pre-V40 schema already had (V9/V11 for the reasons).
+    quantity          NUMERIC,
     channel           VARCHAR(64),
+    meter_change_reason  TEXT,
+    issue_report_reason  TEXT,
     image_url         TEXT DEFAULT '',
     created_by        INTEGER      NOT NULL,
     created_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_by        INTEGER,
     updated_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
     deleted_at        TIMESTAMP
 );

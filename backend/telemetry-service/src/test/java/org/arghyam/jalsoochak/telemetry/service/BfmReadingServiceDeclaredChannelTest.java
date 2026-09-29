@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -48,6 +49,7 @@ class BfmReadingServiceDeclaredChannelTest {
     private static final int TENANT_ID = 1;
     private static final String CONTACT = "919999999999";
     private static final long READING_ID = 99L;
+    private static final LocalDateTime UPDATED_AT = LocalDateTime.of(2026, 6, 22, 9, 30, 1, 250_000_000);
 
     @Mock
     private TelemetryTenantRepository repo;
@@ -94,8 +96,16 @@ class BfmReadingServiceDeclaredChannelTest {
                 any(LocalDate.class))).thenReturn(Optional.empty());
         lenient().when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any()))
-                .thenReturn(READING_ID);
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(READING_ID, UPDATED_AT));
+    }
+
+    /** The insert writes the channel, and the value's unit, which is the channel's standard unit. */
+    private void verifyStoredWith(String channel, String submittedUnit) {
+        verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
+                any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), eq(channel), eq(submittedUnit));
+        verify(repo, never()).updateFlowReadingChannel(any(), any(), any());
     }
 
     @Test
@@ -103,7 +113,7 @@ class BfmReadingServiceDeclaredChannelTest {
     void declaredChannelWinsOverTheStoredPreference() {
         service.createReading(requestWithChannel(ReadingChannel.PDU), SCHEMA, operator, CONTACT, false);
 
-        verify(repo).updateFlowReadingChannel(SCHEMA, READING_ID, "PDU");
+        verifyStoredWith("PDU", "min");
         verify(readingChannelResolver, never()).resolve(any(), any());
     }
 
@@ -115,7 +125,20 @@ class BfmReadingServiceDeclaredChannelTest {
         verify(telemetryEventPublisher).publishMeterReadingRecorded(eq(TENANT_ID), eq(SCHEME_ID),
                 eq(OPERATOR_ID), isNull(), eq(new BigDecimal("150")), isNull(), isNull(),
                 any(LocalDateTime.class), eq(ReadingChannel.ELM.getCode()), any(LocalDate.class),
-                eq(1), eq(0), any());
+                eq(1), eq(0), any(), any(), any());
+    }
+
+    /**
+     * The event names the row it came from and the version the insert gave it, so analytics can keep
+     * one fact row per submission and ignore an older version that arrives late.
+     */
+    @Test
+    @DisplayName("the event carries the stored row's id and the version its insert wrote")
+    void eventCarriesTheRowsIdentityAndVersion() {
+        service.createReading(requestWithChannel(ReadingChannel.BFM), SCHEMA, operator, CONTACT, false);
+
+        verify(telemetryEventPublisher).publishMeterReadingRecorded(any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), eq(READING_ID), eq(UPDATED_AT));
     }
 
     @Test
@@ -123,7 +146,7 @@ class BfmReadingServiceDeclaredChannelTest {
     void declaringBfmIsHonouredToo() {
         service.createReading(requestWithChannel(ReadingChannel.BFM), SCHEMA, operator, CONTACT, false);
 
-        verify(repo).updateFlowReadingChannel(SCHEMA, READING_ID, "BFM");
+        verifyStoredWith("BFM", "m3");
         verify(readingChannelResolver, never()).resolve(any(), any());
     }
 
@@ -135,7 +158,8 @@ class BfmReadingServiceDeclaredChannelTest {
         service.createReading(requestWithChannel(null), SCHEMA, operator, CONTACT, false);
 
         verify(readingChannelResolver).resolve(SCHEMA, CONTACT);
-        verify(repo).updateFlowReadingChannel(SCHEMA, READING_ID, "MAN");
+        // MAN has no reading defined yet, so there is no unit to record.
+        verifyStoredWith("MAN", null);
     }
 
     @Test
@@ -145,7 +169,7 @@ class BfmReadingServiceDeclaredChannelTest {
 
         service.createReading(requestWithChannel(null), SCHEMA, operator, CONTACT, false);
 
-        verify(repo).updateFlowReadingChannel(SCHEMA, READING_ID, "BFM");
+        verifyStoredWith("BFM", "m3");
     }
 
     private static CreateReadingRequest requestWithChannel(ReadingChannel channel) {

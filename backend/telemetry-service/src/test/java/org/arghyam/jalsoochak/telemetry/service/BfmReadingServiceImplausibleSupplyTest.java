@@ -9,6 +9,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSupplyCounts;
@@ -96,10 +97,11 @@ class BfmReadingServiceImplausibleSupplyTest {
                 eq(SCHEMA), eq(SCHEME_ID), eq(OPERATOR_ID), any(LocalDate.class))).thenReturn(Optional.empty());
         lenient().when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                any(), any(), any(), anyInt(), any(), any(), any(), any(), any())).thenReturn(READING_ID);
+                any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(READING_ID, null));
         lenient().when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
-                .thenReturn(READING_ID);
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(READING_ID, null));
     }
 
     private BfmReadingService service(SupplyPlausibilityProperties.Mode mode) {
@@ -153,7 +155,7 @@ class BfmReadingServiceImplausibleSupplyTest {
                     any(LocalDateTime.class), any(BigDecimal.class), eq(new BigDecimal("1100")), anyString(),
                     isNull(), isNull(), isNull(), eq(IngestionSource.NORMAL), isNull(), isNull(), isNull(),
                     eq(RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED),
-                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY));
+                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), any(), any());
         }
 
         @Test
@@ -166,7 +168,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             // publishMeterReadingRecorded is the single event that writes fact_meter_reading,
             // fact_operator_attendance and fact_water_quantity. Withholding it is the whole point.
             verify(telemetryEventPublisher, never()).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -176,7 +178,10 @@ class BfmReadingServiceImplausibleSupplyTest {
 
             submit(SupplyPlausibilityProperties.Mode.ENFORCE, "1100", true);
 
-            verify(repo).updateFlowReadingChannel(SCHEMA, READING_ID, ReadingChannel.BFM.name());
+            verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
+                    any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
+                    any(), any(), any(), anyInt(), any(), any(), any(), any(),
+                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), eq(ReadingChannel.BFM.name()), eq("m3"));
         }
 
         @Test
@@ -266,7 +271,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             assertThat(response.isSuccess()).isTrue();
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), eq(new BigDecimal("950")), anyString(),
-                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull());
+                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull(), any(), any());
             verify(repo, never()).createTenantAnomalyRecord(anyString(), any());
         }
 
@@ -296,10 +301,10 @@ class BfmReadingServiceImplausibleSupplyTest {
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
                     any(), any(), any(), anyInt(), any(), any(), any(), any(),
-                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY));
+                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), any(), any());
             verify(repo, never()).createFlowReading(anyString(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                    any(), any(), any());
+                    any(), any(), any(), any(), any());
         }
     }
 
@@ -326,10 +331,10 @@ class BfmReadingServiceImplausibleSupplyTest {
             submit(SupplyPlausibilityProperties.Mode.AUDIT, "1100", true);
 
             verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull());
+                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull(), any(), any());
         }
 
         @Test
@@ -358,7 +363,7 @@ class BfmReadingServiceImplausibleSupplyTest {
 
             assertThat(response.isSuccess()).isTrue();
             verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test

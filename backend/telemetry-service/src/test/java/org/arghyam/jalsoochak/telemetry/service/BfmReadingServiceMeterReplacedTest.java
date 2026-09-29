@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -109,8 +110,10 @@ class BfmReadingServiceMeterReplacedTest {
                 anyString(),
                 any(),
                 any(),
+                any(),
+                any(),
                 any()
-        )).thenReturn(99L);
+        )).thenReturn(new FlowReadingVersion(99L, null));
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
         assertNotNull(resp);
@@ -127,6 +130,8 @@ class BfmReadingServiceMeterReplacedTest {
                 any(BigDecimal.class),
                 any(BigDecimal.class),
                 anyString(),
+                any(),
+                any(),
                 any(),
                 any(),
                 any()
@@ -190,8 +195,10 @@ class BfmReadingServiceMeterReplacedTest {
                 anyString(),
                 any(),
                 any(),
+                any(),
+                any(),
                 any()
-        )).thenReturn(101L);
+        )).thenReturn(new FlowReadingVersion(101L, null));
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
@@ -208,6 +215,8 @@ class BfmReadingServiceMeterReplacedTest {
                 any(),
                 any(),
                 anyString(),
+                any(),
+                any(),
                 any(),
                 any(),
                 any()
@@ -248,8 +257,10 @@ class BfmReadingServiceMeterReplacedTest {
                 anyString(),
                 any(),
                 any(),
+                any(),
+                any(),
                 any()
-        )).thenReturn(99L);
+        )).thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", true);
 
@@ -266,6 +277,8 @@ class BfmReadingServiceMeterReplacedTest {
                 any(BigDecimal.class),
                 any(BigDecimal.class),
                 anyString(),
+                any(),
+                any(),
                 any(),
                 any(),
                 any()

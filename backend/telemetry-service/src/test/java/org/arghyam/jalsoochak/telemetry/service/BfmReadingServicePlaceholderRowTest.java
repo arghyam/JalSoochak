@@ -9,6 +9,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
@@ -120,6 +121,10 @@ class BfmReadingServicePlaceholderRowTest {
                 ReadingTime.today()
         )).thenReturn(Optional.of(99L));
         when(readingChannelResolver.resolve(schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
+        when(telemetryTenantRepository.updateFlowReadingFromIngestion(anyString(), anyLong(),
+                any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
+                anyString(), any(), anyLong(), any(), any()))
+                .thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
@@ -128,9 +133,10 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         assertEquals("corr-1", resp.getCorrelationId());
 
+        // The resolved channel is written onto the reused row by its short code, with its standard unit.
         verify(telemetryTenantRepository).updateFlowReadingFromIngestion(
                 anyString(),
-                anyLong(),
+                eq(99L),
                 any(LocalDateTime.class),
                 any(BigDecimal.class),
                 any(BigDecimal.class),
@@ -138,12 +144,14 @@ class BfmReadingServicePlaceholderRowTest {
                 eq("corr-1"),
                 anyString(),
                 any(),
-                anyLong()
+                anyLong(),
+                eq(ReadingChannel.BFM.name()),
+                eq("m3")
         );
-        // The resolved channel is persisted onto the reading row by its short code.
-        verify(telemetryTenantRepository).updateFlowReadingChannel(schemaName, 99L, ReadingChannel.BFM.name());
+        verify(telemetryTenantRepository, never()).updateFlowReadingChannel(any(), any(), any());
         verify(telemetryTenantRepository, never()).createFlowReading(
-                anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any()
+                anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(),
+                any(), any()
         );
     }
 
@@ -215,7 +223,8 @@ class BfmReadingServicePlaceholderRowTest {
                 readingDate,
                 readingAt,
                 "BFM",
-                0
+                0,
+                null
         );
 
         when(operatorContextService.resolveOperatorWithSchema("919999999999"))
@@ -252,7 +261,8 @@ class BfmReadingServicePlaceholderRowTest {
                 readingDate,
                 readingAt,
                 "BFM",
-                0
+                0,
+                null
         );
 
         when(telemetryTenantRepository.findFlowReadingDetailsByCorrelationId(schemaName, "corr-1"))
