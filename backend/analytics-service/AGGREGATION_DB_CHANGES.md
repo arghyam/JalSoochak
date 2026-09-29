@@ -50,12 +50,15 @@ therefore need two things:
    closes/opens a history row. A KPI bucket is built with the filter row **in force on its
    `period_end`**, so stored history stays reproducible when the filter changes later — the
    same contract as the water-norm snapshots.
-2. **Scoped rows** — `fact_region_metrics_table.work_status_scope` (`TENANT` | `NATIONAL`, part
-   of the unique key): `TENANT` rows are built with the tenant chain across both hierarchies and
-   all levels (what tenant dashboards read); `NATIONAL` rows with the uniform national chain at
-   LGD levels 1–2 only (all the national dashboard reads). The two stored value-sets can
-   legitimately differ — that divergence is the *intended* behaviour, confirmed by the
-   work-status fallback tests on `dev`.
+2. **Scoped rows** — `fact_region_metrics_table.work_status_scope` (`TENANT` | `NATIONAL` |
+   `ALL`, part of the unique key): `TENANT` rows are built with the tenant chain across both
+   hierarchies and all levels (what tenant dashboards read); `NATIONAL` rows with the uniform
+   national chain at LGD levels 1–2 only (all the national dashboard reads). The two stored
+   value-sets can legitimately differ — that divergence is the *intended* behaviour, confirmed by
+   the work-status fallback tests on `dev`. `ALL` rows are built **before any filter**, across
+   both hierarchies and all levels: every scheme in the region whatever its work status, so
+   schemes outside the filter in force are still stored per region, and their status-breakdown
+   counts are real rather than always 0. No current read uses `ALL`; every read pins its scope.
 
 The base grain (`fact_scheme_daily_table`) stays **unfiltered** — one row per scheme-day
 regardless of `work_status` — so a filter change never requires rebuilding it; only region
@@ -139,7 +142,8 @@ grain with the tenant chain — there is **no** pre-rolled distribution table (s
 | `is_supply_efficient` | SMALLINT | NOT NULL, DEFAULT 0 | 1 if `water_supplied_liters` within `[under, over]` band (norm snapshot) |
 | `outage_reason_code` | VARCHAR(64) | — | Outage reason that day (for distributions) |
 | `non_submission_reason_code` | VARCHAR(64) | — | Non-submission reason that day |
-| `scheme_status_code` | VARCHAR(32) | — | `dim_scheme_table.operating_status` snapshot |
+| `work_status` | INT | — | Work status snapshot: 1 Ongoing, 2 Completed, 3 Not Started, 4 Handed Over; NULL, 0 or any other code = Unknown. Read from the scheme's latest-written `dim_scheme_table` row |
+| `operating_status` | INT | — | Operating status snapshot: 0 Non-Operative, 1 Operative, 2 Partially Operative; NULL or any other code = Unknown. Same row as `work_status` |
 | `norm_required_lpcd` | INT | — | Norm value actually used (audit/repro) |
 | `norm_persons_per_household` | INT | — | Norm value actually used |
 | `norm_over_supply_pct` | INT | — | Norm value actually used |
@@ -174,13 +178,20 @@ into `water_supplied_liters`), `water_quantity_row_count` (equals `supplied` aft
 | `hierarchy` | VARCHAR(8) | NOT NULL | `LGD` \| `DEPT` |
 | `region_level` | SMALLINT | NOT NULL | Hierarchy level 1–6 |
 | `region_id` | INT | NOT NULL | LGD/department id at that level |
-| `work_status_scope` | VARCHAR(8) | NOT NULL, DEFAULT 'TENANT' | `TENANT` (tenant filter chain; all hierarchies/levels) \| `NATIONAL` (national chain; LGD levels 1–2) — filter resolved from the history in force on `period_end` |
+| `work_status_scope` | VARCHAR(8) | NOT NULL, DEFAULT 'TENANT' | `TENANT` (tenant filter chain; all hierarchies/levels) \| `NATIONAL` (national chain; LGD levels 1–2) \| `ALL` (no filter; all hierarchies/levels) — filters resolved from the history in force on `period_end` |
 | `days_in_range` | INT | NOT NULL, DEFAULT 0 | Days in the bucket |
 | `scheme_count` | INT | NOT NULL, DEFAULT 0 | Schemes in region (additive across nodes) |
 | `total_supply_days` | INT | NOT NULL, DEFAULT 0 | Σ `supplied` (additive) → regularity; also the divisor for average water per supply-day |
 | `total_submission_days` | INT | NOT NULL, DEFAULT 0 | Σ `submitted` (additive) → submission rate |
-| `active_scheme_count` | INT | NOT NULL, DEFAULT 0 | Active schemes |
-| `inactive_scheme_count` | INT | NOT NULL, DEFAULT 0 | Inactive schemes |
+| `work_status_ongoing_count` | INT | NOT NULL, DEFAULT 0 | Schemes with work status 1 Ongoing |
+| `work_status_completed_count` | INT | NOT NULL, DEFAULT 0 | 2 Completed |
+| `work_status_not_started_count` | INT | NOT NULL, DEFAULT 0 | 3 Not Started |
+| `work_status_handed_over_count` | INT | NOT NULL, DEFAULT 0 | 4 Handed Over |
+| `work_status_unknown_count` | INT | NOT NULL, DEFAULT 0 | NULL, 0 (lenient-ingest placeholder) or any other code |
+| `operating_status_non_operative_count` | INT | NOT NULL, DEFAULT 0 | Schemes with operating status 0 Non-Operative |
+| `operating_status_operative_count` | INT | NOT NULL, DEFAULT 0 | 1 Operative |
+| `operating_status_partially_operative_count` | INT | NOT NULL, DEFAULT 0 | 2 Partially Operative |
+| `operating_status_unknown_count` | INT | NOT NULL, DEFAULT 0 | NULL or any other code |
 | `total_water_supplied_liters` | BIGINT | NOT NULL, DEFAULT 0 | Σ `water_supplied_liters` — the **only** water total; national **and** region-wise cards read this |
 | `total_household_count` | BIGINT | NOT NULL, DEFAULT 0 | Σ households over distinct schemes |
 | `total_achieved_fhtc` | BIGINT | NOT NULL, DEFAULT 0 | Σ achieved FHTC |
@@ -203,6 +214,15 @@ into `water_supplied_liters`), `water_quantity_row_count` (equals `supplied` aft
 | `uq_fact_region_metrics` | UNIQUE(`period_scale`, `period_start`, `tenant_id`, `hierarchy`, `region_level`, `region_id`, `work_status_scope`) | Natural key; idempotent UPSERT (one row per filter scope) |
 | `idx_fact_region_metrics_lookup` | (`period_scale`, `tenant_id`, `hierarchy`, `region_level`, `region_id`, `period_start`) | Dashboard card / range reads |
 | `idx_fact_region_metrics_tenant` | (`tenant_id`, `period_scale`, `period_start`) | Tenant-wide scans |
+
+**Status breakdowns** replace the retired active/inactive pair (which collapsed
+`operating_status > 0` into a binary; `dev` removed that logic everywhere). Column names follow
+`SchemeWorkStatus` / `SchemeOperatingStatus` wire keys and are generated from those enums in
+`AggregationRepository`. Each set partitions `scheme_count` exactly: a scheme is counted once, under
+the status on its latest-written `dim_scheme_table` row (the dimension writer only rewrites that
+row, so a fanned-out scheme's other rows can hold a stale status). In `TENANT`/`NATIONAL` rows the
+counts cover the filtered scheme set, so excluded statuses read 0 there; use `ALL` rows for the
+full picture.
 
 **No derived-ratio columns are stored.** The three convenience averages
 `average_regularity` / `reading_submission_rate` / `avg_water_supply_per_scheme` were **dropped**:
@@ -229,7 +249,7 @@ Originally planned as a long-format distribution table (`OUTAGE_REASON` / `NON_S
 / `SUBMISSION_STATUS` / `SCHEME_STATUS` counts per region/period). **Removed before deployment**
 because it was write-only — the read path already computes reason/status distributions on the fly
 from `fact_scheme_daily_table` (`outage_reason_code`, `non_submission_reason_code`,
-`scheme_status_code`, `submitted`) with the tenant filter chain — and its per-bucket
+`work_status`, `operating_status`, `submitted`) with the tenant filter chain — and its per-bucket
 `COUNT(DISTINCT scheme_id)` is non-additive across arbitrary date ranges, so it could not serve the
 actual range queries anyway. It never had a migration.
 

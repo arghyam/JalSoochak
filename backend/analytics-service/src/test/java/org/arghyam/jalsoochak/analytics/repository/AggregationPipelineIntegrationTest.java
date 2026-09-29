@@ -117,6 +117,60 @@ class AggregationPipelineIntegrationTest {
         assertThat(s2.get("supplied")).isEqualTo(0);
         assertThat(((Number) s2.get("water_supplied_liters")).longValue()).isEqualTo(0L);
         assertThat(s2.get("is_supply_efficient")).isEqualTo(0);
+
+        // Each row snapshots the scheme's work and operating status codes.
+        Map<String, Object> statuses = jdbcTemplate.queryForMap("""
+                SELECT MAX(work_status) FILTER (WHERE scheme_id = 1)      AS s1_work,
+                       MAX(operating_status) FILTER (WHERE scheme_id = 1) AS s1_operating,
+                       MAX(work_status) FILTER (WHERE scheme_id = 2)      AS s2_work,
+                       MAX(operating_status) FILTER (WHERE scheme_id = 2) AS s2_operating
+                FROM analytics_schema.fact_scheme_daily_table
+                WHERE tenant_id = 1
+                """);
+        assertThat(statuses.get("s1_work")).isEqualTo(4);
+        assertThat(statuses.get("s1_operating")).isEqualTo(1);
+        assertThat(statuses.get("s2_work")).isEqualTo(1);
+        assertThat(statuses.get("s2_operating")).isEqualTo(2);
+    }
+
+    @Test
+    void schemeDaily_fannedOutScheme_takesStatusFromLatestWrittenRow_andCountsFromLargestRow() {
+        // A second mapping row for scheme 2, written later with the scheme's new status. The
+        // dimension writer only rewrites the row it finds last, so the original row still holds
+        // the old status (1 Ongoing / 2 Partially Operative) and the larger household counts.
+        insertScheme(2, 2, 11, 2, 0, 5, "NOW() + INTERVAL '1 hour'");
+
+        aggregationRepository.upsertSchemeDaily(D1, D1);
+
+        Map<String, Object> row = jdbcTemplate.queryForMap("""
+                SELECT work_status, operating_status, household_count, achieved_fhtc_count
+                FROM analytics_schema.fact_scheme_daily_table
+                WHERE tenant_id = 1 AND scheme_id = 2 AND reading_date = ?
+                """, D1);
+        assertThat(row.get("work_status")).isEqualTo(2);        // Completed, from the latest-written row
+        assertThat(row.get("operating_status")).isEqualTo(0);   // Non-Operative, from the latest-written row
+        assertThat(row.get("household_count")).isEqualTo(10);   // from the row with the most FHTCs
+        assertThat(row.get("achieved_fhtc_count")).isEqualTo(10);
+    }
+
+    @Test
+    void schemeDaily_duplicateWaterRows_useLatestRowOnly() {
+        // A later corrected row for scheme 1 / D1 supersedes the original 10 L (no double count).
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status)
+                VALUES (1, 1, 11, 25, ?, NOW(), NOW() + INTERVAL '1 hour', 1)
+                """, D1);
+
+        aggregationRepository.upsertSchemeDaily(D1, D1);
+
+        Map<String, Object> row = jdbcTemplate.queryForMap("""
+                SELECT supplied, water_supplied_liters
+                FROM analytics_schema.fact_scheme_daily_table
+                WHERE tenant_id = 1 AND scheme_id = 1 AND reading_date = ?
+                """, D1);
+        assertThat(row.get("supplied")).isEqualTo(1);
+        assertThat(((Number) row.get("water_supplied_liters")).longValue()).isEqualTo(25L);
     }
 
     @Test
@@ -142,6 +196,11 @@ class AggregationPipelineIntegrationTest {
         assertThat(((Number) day1.get("total_water_supplied_liters")).longValue()).isEqualTo(1009L);
         assertThat(day1.get("supply_days_in_efficient_range")).isEqualTo(1);
         assertThat(day1.get("continuous_scheme_count")).isEqualTo(2);
+
+        // Status breakdowns: scheme1 Handed Over / Operative, scheme2 Ongoing / Partially Operative.
+        assertStatusBreakdown(PeriodScale.DAY, D1, "TENANT", "LGD", 1, 1,
+                new int[]{1, 0, 0, 1, 0},   // ongoing, completed, not_started, handed_over, unknown
+                new int[]{0, 1, 1, 0});     // non_operative, operative, partially_operative, unknown
 
         // WEEK aggregate sums both days: supply days = scheme1(2) + scheme2(1: D2 is NOT_SUBMITTED) = 3;
         // water = 10 + 10 + 999 (the NOT_SUBMITTED 500 is excluded by the unified rule).
@@ -294,6 +353,33 @@ class AggregationPipelineIntegrationTest {
                 """, Integer.class);
         assertThat(nationalDeptRows).isZero();
 
+        // Breakdowns follow the row's scheme set: the TENANT D1 row only holds scheme1.
+        assertStatusBreakdown(PeriodScale.DAY, D1, "TENANT", "LGD", 1, 1,
+                new int[]{0, 0, 0, 1, 0}, new int[]{0, 1, 0, 0});
+
+        // ALL scope is built before any filter: both schemes, every measure, whatever the filter
+        // tiers say — so a scheme outside the filter is still stored for its region.
+        Map<String, Object> allD1 = jdbcTemplate.queryForMap("""
+                SELECT scheme_count, total_supply_days, total_water_supplied_liters, supply_days_in_efficient_range
+                FROM analytics_schema.fact_region_metrics_table
+                WHERE period_scale = 'DAY' AND work_status_scope = 'ALL'
+                  AND tenant_id = 1 AND hierarchy = 'LGD'
+                  AND region_level = 1 AND region_id = 1 AND period_start = ?
+                """, D1);
+        assertThat(allD1.get("scheme_count")).isEqualTo(2);
+        assertThat(allD1.get("total_supply_days")).isEqualTo(2);
+        assertThat(((Number) allD1.get("total_water_supplied_liters")).longValue()).isEqualTo(1009L);
+        assertThat(allD1.get("supply_days_in_efficient_range")).isEqualTo(1);
+        assertStatusBreakdown(PeriodScale.DAY, D1, "ALL", "LGD", 1, 1,
+                new int[]{1, 0, 0, 1, 0}, new int[]{0, 1, 1, 0});
+
+        // ALL rows cover both hierarchies (level 1 department 1 here), like TENANT.
+        Integer allDeptRows = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM analytics_schema.fact_region_metrics_table
+                WHERE work_status_scope = 'ALL' AND hierarchy = 'DEPT' AND period_start = ?
+                """, Integer.class, D1);
+        assertThat(allDeptRows).isPositive();
+
         // The national read path returns the NATIONAL-scope figures.
         var national = aggregateReadRepository.getNationalRegionMetrics(1, D1, D1);
         assertThat(national).isPresent();
@@ -330,6 +416,102 @@ class AggregationPipelineIntegrationTest {
         var critical = aggregateReadRepository.getCriticalSchemeCount(1, "LGD", 1, D2);
         assertThat(critical).isPresent();
         assertThat(critical.getAsLong()).isZero();
+    }
+
+    @Test
+    void regionRollup_unrecordedAndUnmappedStatusCodes_countAsUnknown_andBreakdownsPartitionSchemeCount() {
+        // work_status 0 is lenient ingest's placeholder, NULL is unrecorded; operating_status 7 is
+        // no known code. All of them are Unknown, exactly as dev's status-count endpoint serves them.
+        insertScheme(3, 1, 10, 0, 7, 10, "NOW()");
+        insertScheme(4, 1, 10, null, 0, 10, "NOW()");
+
+        aggregationRepository.upsertSchemeDaily(D1, D1);
+        aggregationRepository.upsertRegionMetrics(PeriodScale.DAY, D1, D1, true);
+
+        assertStatusBreakdown(PeriodScale.DAY, D1, "TENANT", "LGD", 1, 1,
+                new int[]{1, 0, 0, 1, 2}, new int[]{1, 1, 1, 1});
+
+        // Every row, every scope: each breakdown sums to scheme_count.
+        Integer mismatched = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM analytics_schema.fact_region_metrics_table
+                WHERE scheme_count <> work_status_ongoing_count + work_status_completed_count
+                                     + work_status_not_started_count + work_status_handed_over_count
+                                     + work_status_unknown_count
+                   OR scheme_count <> operating_status_non_operative_count + operating_status_operative_count
+                                     + operating_status_partially_operative_count + operating_status_unknown_count
+                """, Integer.class);
+        assertThat(mismatched).isZero();
+    }
+
+    @Test
+    void regionRollup_fannedOutScheme_countsItsLatestStatusOnce() {
+        // Scheme 2 gains a second mapping row in the same level-1 region, written later with the
+        // new status. It must be counted once, under the new status only.
+        insertScheme(2, 2, 11, 2, 0, 5, "NOW() + INTERVAL '1 hour'");
+
+        aggregationRepository.upsertSchemeDaily(D1, D1);
+        aggregationRepository.upsertRegionMetrics(PeriodScale.DAY, D1, D1, true);
+
+        assertStatusBreakdown(PeriodScale.DAY, D1, "TENANT", "LGD", 1, 1,
+                new int[]{0, 1, 0, 1, 0},   // scheme2 now Completed, scheme1 Handed Over
+                new int[]{1, 1, 0, 0});     // scheme2 now Non-Operative, scheme1 Operative
+    }
+
+    /**
+     * @param work      ongoing, completed, not_started, handed_over, unknown
+     * @param operating non_operative, operative, partially_operative, unknown
+     */
+    private void assertStatusBreakdown(PeriodScale scale, LocalDate periodStart, String scope,
+                                       String hierarchy, int level, int regionId,
+                                       int[] work, int[] operating) {
+        Map<String, Object> row = jdbcTemplate.queryForMap("""
+                SELECT scheme_count,
+                       work_status_ongoing_count, work_status_completed_count, work_status_not_started_count,
+                       work_status_handed_over_count, work_status_unknown_count,
+                       operating_status_non_operative_count, operating_status_operative_count,
+                       operating_status_partially_operative_count, operating_status_unknown_count
+                FROM analytics_schema.fact_region_metrics_table
+                WHERE period_scale = ? AND period_start = ? AND work_status_scope = ?
+                  AND tenant_id = 1 AND hierarchy = ? AND region_level = ? AND region_id = ?
+                """, scale.name(), periodStart, scope, hierarchy, level, regionId);
+        assertThat(new int[]{
+                ((Number) row.get("work_status_ongoing_count")).intValue(),
+                ((Number) row.get("work_status_completed_count")).intValue(),
+                ((Number) row.get("work_status_not_started_count")).intValue(),
+                ((Number) row.get("work_status_handed_over_count")).intValue(),
+                ((Number) row.get("work_status_unknown_count")).intValue()})
+                .as("work status breakdown (%s %s)", scope, periodStart)
+                .containsExactly(work);
+        assertThat(new int[]{
+                ((Number) row.get("operating_status_non_operative_count")).intValue(),
+                ((Number) row.get("operating_status_operative_count")).intValue(),
+                ((Number) row.get("operating_status_partially_operative_count")).intValue(),
+                ((Number) row.get("operating_status_unknown_count")).intValue()})
+                .as("operating status breakdown (%s %s)", scope, periodStart)
+                .containsExactly(operating);
+    }
+
+    /**
+     * Adds a dim_scheme_table row under level-1 LGD 1 / department 1 with its own parent LGD
+     * mapping, so an existing scheme id gains a second (fanned-out) row.
+     */
+    private void insertScheme(int schemeId, int parentLgdId, int level2LgdId, Integer workStatus,
+                              int operatingStatus, int fhtc, String updatedAtSql) {
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, work_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, 1, 'S' || ?, 1000 + ?, 2000 + ?, 0.0, 0.0, ?, 1, ?, NULL, NULL, NULL, NULL,
+                        1, 1, 1, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, NOW(), %s)
+                """.formatted(updatedAtSql),
+                schemeId, schemeId, schemeId, schemeId, parentLgdId, level2LgdId,
+                operatingStatus, workStatus, fhtc, fhtc, fhtc);
+        // Give the new scheme ids activity on D1 so they get a daily row.
+        if (schemeId > 2) {
+            insertReading(schemeId, 10, D1);
+        }
     }
 
     private void insertFilterHistory(int tenantId, LocalDate from, LocalDate to, List<Integer> statuses) {
@@ -395,8 +577,9 @@ class AggregationPipelineIntegrationTest {
                 VALUES (11, 1, 'u11@test.local', 1, NOW(), NOW(), 'User 11')
                 """);
 
-        // work_status: scheme1 = 4 (handed over), scheme2 = 1 (in progress) — inert while
-        // no filter tier is configured (env off), exercised by the filter-scope tests.
+        // work_status: scheme1 = 4 (Handed Over), scheme2 = 1 (Ongoing) — inert while no filter
+        // tier is configured (env off), exercised by the filter-scope tests.
+        // operating_status: scheme1 = 1 (Operative), scheme2 = 2 (Partially Operative).
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_scheme_table
                 (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
@@ -405,7 +588,7 @@ class AggregationPipelineIntegrationTest {
                  operating_status, work_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
                 VALUES
                 (1, 1, 'S1', 1001, 2001, 0.0, 0.0, 1, 1, 10, NULL, NULL, NULL, NULL, 1, 1, 1, NULL, NULL, NULL, NULL, 1, 4, 10, 10, 10, NOW(), NOW()),
-                (2, 1, 'S2', 1002, 2002, 0.0, 0.0, 1, 1, 10, NULL, NULL, NULL, NULL, 1, 1, 1, NULL, NULL, NULL, NULL, 1, 1, 10, 10, 10, NOW(), NOW())
+                (2, 1, 'S2', 1002, 2002, 0.0, 0.0, 1, 1, 10, NULL, NULL, NULL, NULL, 1, 1, 1, NULL, NULL, NULL, NULL, 2, 1, 10, 10, 10, NOW(), NOW())
                 """);
 
         // Meter readings drive `submitted` and the compliant/anomalous counts only

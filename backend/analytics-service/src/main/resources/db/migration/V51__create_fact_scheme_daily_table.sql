@@ -7,6 +7,9 @@
 -- the authority for non-additive KPIs (continuous / critical / distinct schemes)
 -- over arbitrary ranges.
 --
+-- Built BEFORE any work-status filter: every scheme with activity that day gets a
+-- row whatever its work_status, so a filter change never loses data here.
+--
 -- ONE water figure: water_supplied_liters follows the canonical supplied-water
 -- rule shared by every dashboard KPI (latest fact_water_quantity row per
 -- scheme/day; submission_status = 1 (SUBMITTED) or legacy NULL; quantity > 0).
@@ -45,7 +48,11 @@ CREATE TABLE analytics_schema.fact_scheme_daily_table (
 
     outage_reason_code         VARCHAR(64),
     non_submission_reason_code VARCHAR(64),
-    scheme_status_code         VARCHAR(32),
+
+    -- Scheme status snapshot, same codes as dim_scheme_table (see V46 comments), read from the
+    -- scheme's latest-written dimension row.
+    work_status                INT,       -- 1 Ongoing, 2 Completed, 3 Not Started, 4 Handed Over; NULL/0/other = Unknown
+    operating_status           INT,       -- 0 Non-Operative, 1 Operative, 2 Partially Operative; NULL/other = Unknown
 
     -- norm snapshot actually used for this scheme/day
     norm_required_lpcd         INT,

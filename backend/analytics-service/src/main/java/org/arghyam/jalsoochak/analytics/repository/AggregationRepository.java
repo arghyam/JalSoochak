@@ -1,14 +1,23 @@
 package org.arghyam.jalsoochak.analytics.repository;
 
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
+import org.arghyam.jalsoochak.analytics.enums.SchemeOperatingStatus;
+import org.arghyam.jalsoochak.analytics.enums.SchemeWorkStatus;
 import org.arghyam.jalsoochak.analytics.helper.DashboardWorkStatusFilter;
+import org.arghyam.jalsoochak.analytics.helper.WaterSqlFragments;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Set-based population of the pre-aggregation tables (fact_scheme_daily_table ->
@@ -30,7 +39,16 @@ import java.util.Set;
  * {@code TENANT} (own tenant → national → env chain; all hierarchies/levels — what tenant
  * dashboards read) and {@code NATIONAL} (national → env chain, uniform; LGD levels 1-2 —
  * what the national dashboard reads). This mirrors the legacy SQL's {@code {{WS}}} vs
- * {@code {{NWS}}} split while keeping stored history reproducible.</p>
+ * {@code {{NWS}}} split while keeping stored history reproducible. A third scope,
+ * {@code ALL}, is built before any filter (all hierarchies/levels), so schemes outside
+ * the filter in force are still stored per region and their status counts are real.</p>
+ *
+ * <p><b>Scheme status:</b> {@code dim_scheme_table} holds one row per mapping, and the
+ * dimension writer rewrites only the row it finds last, so a fanned-out scheme's new
+ * status sits on that row alone. Status (daily snapshot and region breakdowns) is read
+ * from that latest-written row ({@link SchemeRegularityRepository#canonicalSchemeRowOrder}),
+ * household counts from the row with the most FHTCs
+ * ({@link WaterSqlFragments#schemeAttributeRowOrder}), as dev's dashboard queries do.</p>
  */
 @Repository
 public class AggregationRepository {
@@ -39,6 +57,36 @@ public class AggregationRepository {
     public static final String SCOPE_TENANT = "TENANT";
     /** Scope value for rows built with the uniform national-chain filter (national dashboard). */
     public static final String SCOPE_NATIONAL = "NATIONAL";
+    /** Scope value for rows built before any work-status filter (every scheme in the region). */
+    public static final String SCOPE_ALL = "ALL";
+
+    /**
+     * Status breakdown columns of fact_region_metrics_table and the predicate each counts, over
+     * the canonical-status alias {@code cs}. Generated from the status vocabulary so the stored
+     * codes cannot drift from what the status-count API serves; each set ends with an Unknown
+     * bucket for NULL and any unmapped code, so every set partitions scheme_count exactly.
+     */
+    private static final Map<String, String> STATUS_BREAKDOWN_COLUMNS = statusBreakdownColumns();
+
+    private static Map<String, String> statusBreakdownColumns() {
+        Map<String, String> columns = new LinkedHashMap<>();
+        for (SchemeWorkStatus status : SchemeWorkStatus.values()) {
+            columns.put("work_status_" + status.getWireKey() + "_count", "cs.work_status = " + status.getCode());
+        }
+        columns.put("work_status_unknown_count", unknownPredicate("cs.work_status",
+                Arrays.stream(SchemeWorkStatus.values()).map(SchemeWorkStatus::getCode).toList()));
+        for (SchemeOperatingStatus status : SchemeOperatingStatus.values()) {
+            columns.put("operating_status_" + status.getWireKey() + "_count", "cs.operating_status = " + status.getCode());
+        }
+        columns.put("operating_status_unknown_count", unknownPredicate("cs.operating_status",
+                Arrays.stream(SchemeOperatingStatus.values()).map(SchemeOperatingStatus::getCode).toList()));
+        return columns;
+    }
+
+    private static String unknownPredicate(String column, List<Integer> knownCodes) {
+        return column + " IS NULL OR " + column + " NOT IN ("
+                + knownCodes.stream().map(String::valueOf).collect(Collectors.joining(", ")) + ")";
+    }
 
     private final JdbcTemplate jdbcTemplate;
     private final DashboardWorkStatusFilter workStatusFilter;
@@ -69,21 +117,20 @@ public class AggregationRepository {
     /**
      * Rebuild fact_scheme_daily_table for every (tenant, scheme, day) that has a meter
      * reading or a water-quantity row in [{@code from}, {@code to}]. Norm values are
-     * snapshotted from the SCD-2 history effective on each reading_date.
+     * snapshotted from the SCD-2 history effective on each reading_date. No work-status
+     * filter is applied: every scheme with activity gets its row.
      *
-     * <p>Water follows the canonical supplied-water rule shared with the legacy dashboard
-     * SQL ({@code SchemeRegularityRepository}): take the latest water-quantity row per
-     * (tenant, scheme, day) — {@code ORDER BY updated_at DESC, id DESC} — and count it only
-     * when {@code submission_status = 1 (SUBMITTED) OR IS NULL (legacy)} AND
-     * {@code water_quantity > 0}. {@code supplied} is 1 exactly when that day's water
-     * qualifies, so it doubles as the qualifying-row count. {@code dim_scheme_table} holds
-     * one row per parent mapping, so the location chain is taken from a deterministic
-     * representative row (highest FHTC — same dedup ordering as the legacy queries);
-     * without that dedup a multi-mapped scheme would make the UPSERT hit the same key
-     * twice and fail.</p>
+     * <p>Water follows the canonical supplied-water rule in {@link WaterSqlFragments}, shared
+     * with the legacy dashboard SQL and the situation reports: the latest water-quantity row per
+     * (tenant, scheme, day) counts only when {@code submission_status = 1 (SUBMITTED) OR IS NULL
+     * (legacy)} AND {@code water_quantity > 0}. {@code supplied} is 1 exactly when that day's
+     * water qualifies, so it doubles as the qualifying-row count. {@code dim_scheme_table} holds
+     * one row per parent mapping, so the location chain and household counts come from the row
+     * with the most FHTCs, and work/operating status from the latest-written row; without that
+     * dedup a multi-mapped scheme would make the UPSERT hit the same key twice and fail.</p>
      */
     public int upsertSchemeDaily(LocalDate from, LocalDate to) {
-        String sql = """
+        String sql = WaterSqlFragments.withWaterFragments("""
                 WITH days AS (
                     SELECT DISTINCT tenant_id, scheme_id, reading_date AS d
                     FROM analytics_schema.fact_meter_reading_table
@@ -107,24 +154,20 @@ public class AggregationRepository {
                     GROUP BY tenant_id, scheme_id, reading_date
                 ),
                 wq AS (
-                    -- Latest row per (tenant, scheme, day); qualifies under the supplied-water rule.
-                    SELECT tenant_id, scheme_id, d,
-                           CASE WHEN (submission_status = 1 OR submission_status IS NULL)
-                                 AND water_quantity > 0
-                                THEN water_quantity ELSE 0 END AS water_supplied_liters,
-                           CASE WHEN (submission_status = 1 OR submission_status IS NULL)
-                                 AND water_quantity > 0
-                                THEN 1 ELSE 0 END              AS supplied,
-                           outage_reason         AS outage_reason_code,
-                           non_submission_reason AS non_submission_reason_code
-                    FROM (
-                        SELECT DISTINCT ON (tenant_id, scheme_id, date)
-                               tenant_id, scheme_id, date AS d,
-                               water_quantity, submission_status, outage_reason, non_submission_reason
-                        FROM analytics_schema.fact_water_quantity_table
-                        WHERE date BETWEEN ? AND ?
-                        ORDER BY tenant_id, scheme_id, date, updated_at DESC, id DESC
-                    ) latest
+                    -- The de-duplicated source leaves one row per (tenant, scheme, day), so each aggregate reads that row.
+                    SELECT f.tenant_id, f.scheme_id, f.date AS d,
+                           {{SWS}}                                  AS water_supplied_liters,
+                           MAX(CASE WHEN {{SWD}} THEN 1 ELSE 0 END) AS supplied,
+                           MAX(f.outage_reason)                     AS outage_reason_code,
+                           MAX(f.non_submission_reason)             AS non_submission_reason_code
+                    FROM {{LWQ}} f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.tenant_id, f.scheme_id, f.date
+                ),
+                cs AS (
+                    SELECT DISTINCT ON (tenant_id, scheme_id) tenant_id, scheme_id, work_status, operating_status
+                    FROM analytics_schema.dim_scheme_table
+                    ORDER BY tenant_id, scheme_id, %1$s
                 )
                 INSERT INTO analytics_schema.fact_scheme_daily_table (
                     tenant_id, scheme_id, reading_date,
@@ -133,7 +176,7 @@ public class AggregationRepository {
                     submitted, supplied, water_supplied_liters,
                     compliant_count, anomalous_count,
                     household_count, achieved_fhtc_count, planned_fhtc_count, is_supply_efficient,
-                    outage_reason_code, non_submission_reason_code, scheme_status_code,
+                    outage_reason_code, non_submission_reason_code, work_status, operating_status,
                     norm_required_lpcd, norm_persons_per_household, norm_over_supply_pct, norm_under_supply_pct,
                     computed_at, is_final
                 )
@@ -162,7 +205,8 @@ public class AggregationRepository {
                        END,
                        wq.outage_reason_code,
                        wq.non_submission_reason_code,
-                       CAST(ds.operating_status AS varchar),
+                       cs.work_status,
+                       cs.operating_status,
                        norm.required_lpcd, norm.person_count_per_household,
                        norm.over_supply_range_percentage, norm.under_supply_range_percentage,
                        CURRENT_TIMESTAMP, (days.d < CURRENT_DATE)
@@ -170,10 +214,10 @@ public class AggregationRepository {
                 JOIN (
                     SELECT DISTINCT ON (tenant_id, scheme_id) *
                     FROM analytics_schema.dim_scheme_table
-                    ORDER BY tenant_id, scheme_id,
-                             COALESCE(fhtc_count, 0) DESC, COALESCE(house_hold_count, 0) DESC, COALESCE(planned_fhtc, 0) DESC
+                    ORDER BY tenant_id, scheme_id, %2$s
                 ) ds
                   ON ds.scheme_id = days.scheme_id AND ds.tenant_id = days.tenant_id
+                JOIN cs ON cs.tenant_id = ds.tenant_id AND cs.scheme_id = ds.scheme_id
                 LEFT JOIN LATERAL (
                     SELECT n.required_lpcd, n.person_count_per_household,
                            n.over_supply_range_percentage, n.under_supply_range_percentage
@@ -200,11 +244,12 @@ public class AggregationRepository {
                     planned_fhtc_count = EXCLUDED.planned_fhtc_count, is_supply_efficient = EXCLUDED.is_supply_efficient,
                     outage_reason_code = EXCLUDED.outage_reason_code,
                     non_submission_reason_code = EXCLUDED.non_submission_reason_code,
-                    scheme_status_code = EXCLUDED.scheme_status_code,
+                    work_status = EXCLUDED.work_status, operating_status = EXCLUDED.operating_status,
                     norm_required_lpcd = EXCLUDED.norm_required_lpcd, norm_persons_per_household = EXCLUDED.norm_persons_per_household,
                     norm_over_supply_pct = EXCLUDED.norm_over_supply_pct, norm_under_supply_pct = EXCLUDED.norm_under_supply_pct,
                     computed_at = EXCLUDED.computed_at, is_final = EXCLUDED.is_final
-                """;
+                """.formatted(SchemeRegularityRepository.canonicalSchemeRowOrder(""),
+                WaterSqlFragments.schemeAttributeRowOrder("")));
         return jdbcTemplate.update(sql, from, to, from, to, from, to, from, to);
     }
 
@@ -215,8 +260,9 @@ public class AggregationRepository {
     /**
      * Roll fact_scheme_daily_table into fact_region_metrics_table for one bucket:
      * TENANT-scope rows across both hierarchies and all levels (what tenant dashboards
-     * read), plus NATIONAL-scope rows at LGD levels 1-2 (all the national dashboard
-     * reads). Each scope applies its own work-status filter chain, resolved from the
+     * read), NATIONAL-scope rows at LGD levels 1-2 (all the national dashboard reads), and
+     * ALL-scope rows across both hierarchies and all levels, built before any filter.
+     * TENANT and NATIONAL each apply their own work-status filter chain, resolved from the
      * SCD-2 history as of the bucket's period_end.
      */
     public int upsertRegionMetrics(PeriodScale scale, LocalDate periodStart, LocalDate periodEnd, boolean isFinal) {
@@ -228,11 +274,13 @@ public class AggregationRepository {
                 WHERE period_scale = ? AND period_start = ?
                 """, scale.name(), periodStart);
         int total = 0;
-        for (int level = 1; level <= 6; level++) {
-            total += upsertRegionMetricsForLevel(scale, periodStart, periodEnd, "LGD",
-                    "level_" + level + "_lgd_id", level, isFinal, SCOPE_TENANT);
-            total += upsertRegionMetricsForLevel(scale, periodStart, periodEnd, "DEPT",
-                    "level_" + level + "_dept_id", level, isFinal, SCOPE_TENANT);
+        for (String scope : List.of(SCOPE_TENANT, SCOPE_ALL)) {
+            for (int level = 1; level <= 6; level++) {
+                total += upsertRegionMetricsForLevel(scale, periodStart, periodEnd, "LGD",
+                        "level_" + level + "_lgd_id", level, isFinal, scope);
+                total += upsertRegionMetricsForLevel(scale, periodStart, periodEnd, "DEPT",
+                        "level_" + level + "_dept_id", level, isFinal, scope);
+            }
         }
         for (int level = 1; level <= 2; level++) {
             total += upsertRegionMetricsForLevel(scale, periodStart, periodEnd, "LGD",
@@ -246,28 +294,56 @@ public class AggregationRepository {
                                             String workStatusScope) {
         requireAllowedColumn(levelColumn);
         long daysInRange = java.time.temporal.ChronoUnit.DAYS.between(periodStart, periodEnd) + 1;
-        // Filter in force for this bucket (as of period_end), per scope. Rendered against the
-        // dim_scheme_table alias "ds" used by every scheme-scope subquery below.
+        // Filter in force for this bucket (as of period_end), per scope; none for ALL. Rendered
+        // against the dim_scheme_table alias "ds" used by every scheme-scope subquery below.
         String asOf = dateLiteral(periodEnd);
-        String schemeFilter = SCOPE_NATIONAL.equals(workStatusScope)
-                ? workStatusFilter.andNationalHistoryPredicate("ds", asOf)
-                : workStatusFilter.andHistoryPredicate("ds", asOf);
+        String schemeFilter = switch (workStatusScope) {
+            case SCOPE_NATIONAL -> workStatusFilter.andNationalHistoryPredicate("ds", asOf);
+            case SCOPE_TENANT -> workStatusFilter.andHistoryPredicate("ds", asOf);
+            case SCOPE_ALL -> "";
+            default -> throw new IllegalArgumentException("Unknown work_status_scope: " + workStatusScope);
+        };
 
-        // s = scheme set per region (from dim_scheme — authoritative, includes inactive / no-activity schemes).
-        //     dim_scheme_table holds one row per parent mapping, so schemes are de-duplicated per region
-        //     (DISTINCT ON) before counting/summing — a multi-mapped scheme counts once per region node
-        //     but still appears under every region it maps to (same semantics as the legacy queries).
-        // a = additive activity sums per region: region membership comes from the dim_scheme mapping
-        //     rows joined to fact_scheme_daily_table by (tenant, scheme), NOT from the single location
-        //     chain stored on the daily row — a multi-mapped scheme's activity must land in every
-        //     region it maps to at this level.
-        // ps = per-scheme activity (for non-additive continuous / distinct-submitting counts)
+        List<String> breakdownColumns = new ArrayList<>(STATUS_BREAKDOWN_COLUMNS.keySet());
+        String breakdownInsertColumns = String.join(", ", breakdownColumns);
+        String breakdownSelect = breakdownColumns.stream()
+                .map(column -> "s." + column)
+                .collect(Collectors.joining(", "));
+        String breakdownCounts = STATUS_BREAKDOWN_COLUMNS.entrySet().stream()
+                .map(e -> "COUNT(*) FILTER (WHERE " + e.getValue() + ") AS " + e.getKey())
+                .collect(Collectors.joining(",\n                           "));
+        String breakdownUpdates = breakdownColumns.stream()
+                .map(column -> column + " = EXCLUDED." + column)
+                .collect(Collectors.joining(",\n                    "));
+
+        // cs = one status per scheme, from the row the dimension writer last touched.
+        // s  = scheme set per region (from dim_scheme — authoritative, includes schemes with no
+        //      activity). dim_scheme_table holds one row per parent mapping, so schemes are
+        //      de-duplicated per region (DISTINCT ON, household counts from the row with the most
+        //      FHTCs) before counting/summing — a multi-mapped scheme counts once per region node
+        //      but still appears under every region it maps to (same semantics as the legacy queries).
+        // a  = additive activity sums per region: region membership comes from the dim_scheme mapping
+        //      rows joined to fact_scheme_daily_table by (tenant, scheme), NOT from the single location
+        //      chain stored on the daily row — a multi-mapped scheme's activity must land in every
+        //      region it maps to at this level.
+        // c  = per-scheme activity (for non-additive continuous / distinct-submitting counts)
         String sql = ("""
+                WITH cs AS (
+                    SELECT DISTINCT ON (tenant_id, scheme_id) tenant_id, scheme_id, work_status, operating_status
+                    FROM analytics_schema.dim_scheme_table
+                    ORDER BY tenant_id, scheme_id, %3$s
+                ),
+                m AS (
+                    SELECT DISTINCT %1$s AS region_id, ds.tenant_id, ds.scheme_id
+                    FROM analytics_schema.dim_scheme_table ds
+                    WHERE %1$s IS NOT NULL%2$s
+                )
                 INSERT INTO analytics_schema.fact_region_metrics_table (
                     period_scale, period_start, period_end, tenant_id, hierarchy, region_level, region_id,
                     work_status_scope,
                     days_in_range, scheme_count, total_supply_days, total_submission_days,
-                    active_scheme_count, inactive_scheme_count, total_water_supplied_liters,
+                    %5$s,
+                    total_water_supplied_liters,
                     total_household_count, total_achieved_fhtc, total_planned_fhtc,
                     supply_days_in_efficient_range, compliant_submission_count, anomalous_submission_count,
                     continuous_scheme_count, critical_scheme_count, distinct_submitting_schemes,
@@ -278,7 +354,7 @@ public class AggregationRepository {
                        ?,
                        ?, s.scheme_count,
                        COALESCE(a.total_supply_days, 0), COALESCE(a.total_submission_days, 0),
-                       s.active_scheme_count, s.inactive_scheme_count,
+                       %6$s,
                        COALESCE(a.total_water_supplied_liters, 0),
                        s.total_household_count, s.total_achieved_fhtc, s.total_planned_fhtc,
                        COALESCE(a.supply_days_in_efficient_range, 0),
@@ -289,23 +365,22 @@ public class AggregationRepository {
                        a.norm_required_lpcd, a.norm_persons_per_household, a.norm_over_supply_pct, a.norm_under_supply_pct,
                        CURRENT_TIMESTAMP, ?
                 FROM (
-                    SELECT region_id, tenant_id,
+                    SELECT dedup.region_id, dedup.tenant_id,
                            COUNT(*) AS scheme_count,
-                           SUM(CASE WHEN operating_status > 0 THEN 1 ELSE 0 END) AS active_scheme_count,
-                           SUM(CASE WHEN operating_status > 0 THEN 0 ELSE 1 END) AS inactive_scheme_count,
-                           SUM(COALESCE(house_hold_count, 0))::bigint AS total_household_count,
-                           SUM(COALESCE(fhtc_count, 0))::bigint AS total_achieved_fhtc,
-                           SUM(COALESCE(planned_fhtc, 0))::bigint AS total_planned_fhtc
+                           %7$s,
+                           SUM(COALESCE(dedup.house_hold_count, 0))::bigint AS total_household_count,
+                           SUM(COALESCE(dedup.fhtc_count, 0))::bigint AS total_achieved_fhtc,
+                           SUM(COALESCE(dedup.planned_fhtc, 0))::bigint AS total_planned_fhtc
                     FROM (
                         SELECT DISTINCT ON (%1$s, ds.tenant_id, ds.scheme_id)
                                %1$s AS region_id, ds.tenant_id, ds.scheme_id,
-                               ds.operating_status, ds.house_hold_count, ds.fhtc_count, ds.planned_fhtc
+                               ds.house_hold_count, ds.fhtc_count, ds.planned_fhtc
                         FROM analytics_schema.dim_scheme_table ds
                         WHERE %1$s IS NOT NULL%2$s
-                        ORDER BY %1$s, ds.tenant_id, ds.scheme_id,
-                                 COALESCE(ds.fhtc_count, 0) DESC, COALESCE(ds.house_hold_count, 0) DESC, COALESCE(ds.planned_fhtc, 0) DESC
+                        ORDER BY %1$s, ds.tenant_id, ds.scheme_id, %4$s
                     ) dedup
-                    GROUP BY region_id, tenant_id
+                    JOIN cs ON cs.tenant_id = dedup.tenant_id AND cs.scheme_id = dedup.scheme_id
+                    GROUP BY dedup.region_id, dedup.tenant_id
                 ) s
                 LEFT JOIN (
                     SELECT m.region_id, sd.tenant_id,
@@ -319,11 +394,7 @@ public class AggregationRepository {
                            MAX(sd.norm_persons_per_household) AS norm_persons_per_household,
                            MAX(sd.norm_over_supply_pct) AS norm_over_supply_pct,
                            MAX(sd.norm_under_supply_pct) AS norm_under_supply_pct
-                    FROM (
-                        SELECT DISTINCT %1$s AS region_id, ds.tenant_id, ds.scheme_id
-                        FROM analytics_schema.dim_scheme_table ds
-                        WHERE %1$s IS NOT NULL%2$s
-                    ) m
+                    FROM m
                     JOIN analytics_schema.fact_scheme_daily_table sd
                       ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
                     WHERE sd.reading_date BETWEEN ? AND ?
@@ -338,11 +409,7 @@ public class AggregationRepository {
                         SELECT m.region_id, sd.tenant_id, sd.scheme_id,
                                SUM(sd.supplied) AS supply_days,
                                SUM(sd.submitted) AS submission_days
-                        FROM (
-                            SELECT DISTINCT %1$s AS region_id, ds.tenant_id, ds.scheme_id
-                            FROM analytics_schema.dim_scheme_table ds
-                            WHERE %1$s IS NOT NULL%2$s
-                        ) m
+                        FROM m
                         JOIN analytics_schema.fact_scheme_daily_table sd
                           ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
                         WHERE sd.reading_date BETWEEN ? AND ?
@@ -354,7 +421,7 @@ public class AggregationRepository {
                     period_end = EXCLUDED.period_end,
                     days_in_range = EXCLUDED.days_in_range, scheme_count = EXCLUDED.scheme_count,
                     total_supply_days = EXCLUDED.total_supply_days, total_submission_days = EXCLUDED.total_submission_days,
-                    active_scheme_count = EXCLUDED.active_scheme_count, inactive_scheme_count = EXCLUDED.inactive_scheme_count,
+                    %8$s,
                     total_water_supplied_liters = EXCLUDED.total_water_supplied_liters,
                     total_household_count = EXCLUDED.total_household_count,
                     total_achieved_fhtc = EXCLUDED.total_achieved_fhtc, total_planned_fhtc = EXCLUDED.total_planned_fhtc,
@@ -367,7 +434,10 @@ public class AggregationRepository {
                     norm_required_lpcd = EXCLUDED.norm_required_lpcd, norm_persons_per_household = EXCLUDED.norm_persons_per_household,
                     norm_over_supply_pct = EXCLUDED.norm_over_supply_pct, norm_under_supply_pct = EXCLUDED.norm_under_supply_pct,
                     computed_at = EXCLUDED.computed_at, is_final = EXCLUDED.is_final
-                """).formatted(levelColumn, schemeFilter);
+                """).formatted(levelColumn, schemeFilter,
+                SchemeRegularityRepository.canonicalSchemeRowOrder(""),
+                WaterSqlFragments.schemeAttributeRowOrder("ds"),
+                breakdownInsertColumns, breakdownSelect, breakdownCounts, breakdownUpdates);
 
         return jdbcTemplate.update(sql,
                 scale.name(), periodStart, periodEnd, hierarchy, level,

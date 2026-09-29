@@ -22,6 +22,9 @@
 --   TENANT   = built with the scheme's own-tenant filter chain (all hierarchies/levels)
 --   NATIONAL = built with the uniform national chain (LGD levels 1-2 only — all the
 --              national dashboard reads)
+--   ALL      = built before any filter (all hierarchies/levels): every scheme in the
+--              region whatever its work_status, so schemes outside today's filter are
+--              still stored and their status counts are real, not always 0
 -- The filter applied is the SCD-2 history row (dim_tenant_work_status_filter_table)
 -- in force on the bucket's period_end, so stored history remains reproducible when
 -- the filter changes later.
@@ -39,15 +42,26 @@ CREATE TABLE analytics_schema.fact_region_metrics_table (
     hierarchy                       VARCHAR(8) NOT NULL,   -- LGD | DEPT
     region_level                    SMALLINT   NOT NULL,   -- 1..6
     region_id                       INT        NOT NULL,
-    work_status_scope               VARCHAR(8) NOT NULL DEFAULT 'TENANT',  -- TENANT | NATIONAL
+    work_status_scope               VARCHAR(8) NOT NULL DEFAULT 'TENANT',  -- TENANT | NATIONAL | ALL
 
     -- additive measures (safe to sum across days / nodes)
     days_in_range                   INT        NOT NULL DEFAULT 0,
     scheme_count                    INT        NOT NULL DEFAULT 0,
     total_supply_days               INT        NOT NULL DEFAULT 0,
     total_submission_days           INT        NOT NULL DEFAULT 0,
-    active_scheme_count             INT        NOT NULL DEFAULT 0,
-    inactive_scheme_count           INT        NOT NULL DEFAULT 0,
+
+    -- scheme status breakdowns (codes in V46). Each set partitions scheme_count exactly:
+    -- a scheme is counted once, under the status on its latest-written dimension row.
+    work_status_ongoing_count                   INT NOT NULL DEFAULT 0,  -- 1
+    work_status_completed_count                 INT NOT NULL DEFAULT 0,  -- 2
+    work_status_not_started_count               INT NOT NULL DEFAULT 0,  -- 3
+    work_status_handed_over_count               INT NOT NULL DEFAULT 0,  -- 4
+    work_status_unknown_count                   INT NOT NULL DEFAULT 0,  -- NULL, 0 or any other code
+    operating_status_non_operative_count        INT NOT NULL DEFAULT 0,  -- 0
+    operating_status_operative_count            INT NOT NULL DEFAULT 0,  -- 1
+    operating_status_partially_operative_count  INT NOT NULL DEFAULT 0,  -- 2
+    operating_status_unknown_count              INT NOT NULL DEFAULT 0,  -- NULL or any other code
+
     total_water_supplied_liters     BIGINT     NOT NULL DEFAULT 0,  -- SUM(water_supplied_liters) — the only water total
     total_household_count           BIGINT     NOT NULL DEFAULT 0,
     total_achieved_fhtc             BIGINT     NOT NULL DEFAULT 0,

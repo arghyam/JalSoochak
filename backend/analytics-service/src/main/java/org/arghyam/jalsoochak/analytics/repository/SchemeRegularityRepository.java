@@ -257,9 +257,11 @@ public class SchemeRegularityRepository {
      * the current status and counts the scheme exactly once. {@code id} closes the ordering for rows written
      * in the same instant.
      *
+     * <p>Package-visible so {@link AggregationRepository} reads scheme status from the same row.
+     *
      * @param alias alias of {@code dim_scheme_table}, or blank when selecting from an earlier CTE
      */
-    private static String canonicalSchemeRowOrder(String alias) {
+    static String canonicalSchemeRowOrder(String alias) {
         String prefix = (alias == null || alias.isBlank()) ? "" : alias + ".";
         return prefix + "updated_at DESC NULLS LAST, "
                 + prefix + "created_at DESC NULLS LAST, "
