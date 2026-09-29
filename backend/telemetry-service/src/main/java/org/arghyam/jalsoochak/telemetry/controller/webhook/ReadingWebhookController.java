@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.controller.webhook;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import org.arghyam.jalsoochak.telemetry.config.OpenApiConfig;
 import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ClosingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
@@ -38,6 +40,7 @@ import java.util.UUID;
  */
 @RestController
 @WebhookRoute
+@SecurityRequirement(name = OpenApiConfig.WEBHOOK_TOKEN_SCHEME)
 @RequestMapping("/api/v1/telemetry")
 public class ReadingWebhookController {
     private static final Logger log = LoggerFactory.getLogger(ReadingWebhookController.class);
