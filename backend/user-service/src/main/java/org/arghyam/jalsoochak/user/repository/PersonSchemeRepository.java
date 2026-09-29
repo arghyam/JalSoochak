@@ -38,6 +38,13 @@ import java.util.Objects;
  *   <li>IN-clause placeholders — built as {@code "?, ?, ..."} strings from collection size.</li>
  * </ul>
  * No user-supplied data is ever concatenated into the query string.
+ *
+ * <p>These queries back the SO/SDO staff screens, which show bulk-flow-meter (BFM) readings only:
+ * every {@code flow_reading_table} read keeps {@code COALESCE(fr.channel, 'BFM') = 'BFM'}, a NULL
+ * channel being a legacy BFM row. The filter sits inside each CTE, before {@code LAG}, so an ELM or
+ * PDU value is never taken as a BFM reading's previous one. The analytics branch of the pump-operator
+ * list skips days whose latest {@code fact_meter_reading_table} reading is not BFM (code 1), the rule
+ * analytics itself uses to pick a day's channel.
  */
 @Repository
 @RequiredArgsConstructor
@@ -204,6 +211,7 @@ public class PersonSchemeRepository {
                         FROM %s.flow_reading_table fr
                         WHERE fr.deleted_at IS NULL
                           AND fr.scheme_id = ps.id
+                          AND COALESCE(fr.channel, 'BFM') = 'BFM'
                     )
                     SELECT confirmed_reading AS last_reading,
                            reading_at AS last_reading_at,
@@ -220,6 +228,7 @@ public class PersonSchemeRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.scheme_id = ps.id
+                      AND COALESCE(fr.channel, 'BFM') = 'BFM'
                       AND fr.reading_date = CURRENT_DATE - INTERVAL '1 day'
                     ORDER BY fr.%s DESC, fr.id DESC
                     LIMIT 1
@@ -334,6 +343,7 @@ public class PersonSchemeRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.scheme_id = sm.id
+                      AND COALESCE(fr.channel, 'BFM') = 'BFM'
                 ) rs ON true
                 LEFT JOIN LATERAL (
                     WITH bounds AS (
@@ -382,6 +392,7 @@ public class PersonSchemeRepository {
                   ON ut.id = u.user_type
                 WHERE fr.deleted_at IS NULL
                   AND fr.scheme_id = ?
+                  AND COALESCE(fr.channel, 'BFM') = 'BFM'
                   AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                 """, schemaName, schemaName);
         Long total = jdbcTemplate.queryForObject(sql, Long.class, schemeId);
@@ -409,6 +420,7 @@ public class PersonSchemeRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.scheme_id = ?
+                      AND COALESCE(fr.channel, 'BFM') = 'BFM'
                 )
                 SELECT o.created_by,
                        o.reading_at,
@@ -530,6 +542,7 @@ public class PersonSchemeRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.created_by = o.id
+                      AND COALESCE(fr.channel, 'BFM') = 'BFM'
                 ) fl ON true
                 %s
                 """, schemaName, schemaName, schemaName,
@@ -545,6 +558,13 @@ public class PersonSchemeRepository {
                           AND fwq.tenant_id = ?
                           AND COALESCE(fwq.submission_status, 1) = 1
                           AND fwq.scheme_id IN (SELECT scheme_id FROM person_schemes)
+                          AND COALESCE((SELECT fmr.channel
+                                        FROM analytics_schema.fact_meter_reading_table fmr
+                                        WHERE fmr.tenant_id = fwq.tenant_id
+                                          AND fmr.scheme_id = fwq.scheme_id
+                                          AND fmr.reading_date = fwq.date
+                                        ORDER BY fmr.reading_at DESC, fmr.id DESC
+                                        LIMIT 1), 1) = 1
                         ORDER BY fwq.date DESC, fwq.created_at DESC, fwq.id DESC
                         LIMIT 1
                         """
@@ -603,6 +623,9 @@ public class PersonSchemeRepository {
         args.add(limit);
         args.add(offset);
 
+        // fl's last_water_supplied is in litres, like the aw water_quantity it stands in for: the m3
+        // difference x 1000, rounded half away from zero as analytics' WaterVolumeUnits does. The
+        // COALESCE of the two therefore never mixes units.
         String sql = String.format("""
                 WITH person_schemes AS (
                     SELECT DISTINCT usm.scheme_id
@@ -652,11 +675,12 @@ public class PersonSchemeRepository {
                         FROM %s.flow_reading_table fr
                         WHERE fr.deleted_at IS NULL
                           AND fr.created_by = o.id
+                          AND COALESCE(fr.channel, 'BFM') = 'BFM'
                     )
                     SELECT reading_at AS last_submission_at,
                            CASE
                                WHEN prev_confirmed IS NULL THEN NULL
-                               ELSE confirmed_reading - prev_confirmed
+                               ELSE ROUND((confirmed_reading - prev_confirmed) * 1000)
                            END AS last_water_supplied
                     FROM ordered
                     ORDER BY reading_at DESC
@@ -668,6 +692,7 @@ public class PersonSchemeRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.created_by = o.id
+                      AND COALESCE(fr.channel, 'BFM') = 'BFM'
                 ) rs ON true
                 LEFT JOIN LATERAL (
                     WITH bounds AS (
@@ -698,6 +723,13 @@ public class PersonSchemeRepository {
                           AND fwq.tenant_id = ?
                           AND COALESCE(fwq.submission_status, 1) = 1
                           AND fwq.scheme_id IN (SELECT scheme_id FROM person_schemes)
+                          AND COALESCE((SELECT fmr.channel
+                                        FROM analytics_schema.fact_meter_reading_table fmr
+                                        WHERE fmr.tenant_id = fwq.tenant_id
+                                          AND fmr.scheme_id = fwq.scheme_id
+                                          AND fmr.reading_date = fwq.date
+                                        ORDER BY fmr.reading_at DESC, fmr.id DESC
+                                        LIMIT 1), 1) = 1
                         ORDER BY fwq.date DESC, fwq.created_at DESC, fwq.id DESC
                         LIMIT 1
                         """
@@ -843,6 +875,7 @@ public class PersonSchemeRepository {
                  AND sm.deleted_at IS NULL
                 WHERE fr.deleted_at IS NULL
                   AND fr.created_by = ?
+                  AND COALESCE(fr.channel, 'BFM') = 'BFM'
                   %s
                 """, schemaName, schemaName, filter);
         Long total = jdbcTemplate.queryForObject(sql, Long.class, args.toArray());
@@ -898,6 +931,7 @@ public class PersonSchemeRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.created_by = ?
+                      AND COALESCE(fr.channel, 'BFM') = 'BFM'
                 )
                 SELECT o.scheme_id,
                        o.reading_at,

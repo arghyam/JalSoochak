@@ -2029,7 +2029,12 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
-    /** "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}. */
+    /**
+     * "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}.
+     *
+     * <p>BFM rows only, a NULL channel being a legacy BFM row: this picks the row the SO/SDO correction
+     * (PATCH {@code yesterday-final-reading}) overwrites, and those screens show BFM readings only.
+     */
     public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingOnDate(String schemaName,
                                                                                         Long schemeId,
                                                                                         LocalDate readingDate) {
@@ -2045,6 +2050,7 @@ public class TelemetryTenantRepository {
                   AND reading_date = ?
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
+                  AND COALESCE(channel, 'BFM') = 'BFM'
                 ORDER BY %s DESC, created_at DESC, id DESC
                 LIMIT 1
                 """, schemaName, timeColumn);
@@ -2063,7 +2069,12 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
-    /** "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}. */
+    /**
+     * "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}.
+     *
+     * <p>BFM rows only, as {@link #findLatestCompletedFlowReadingOnDate}: the SO/SDO correction must
+     * not overwrite an ELM or PDU reading.
+     */
     public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingForScheme(String schemaName,
                                                                                            Long schemeId) {
         validateSchemaName(schemaName);
@@ -2077,6 +2088,7 @@ public class TelemetryTenantRepository {
                 WHERE scheme_id = ?
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
+                  AND COALESCE(channel, 'BFM') = 'BFM'
                 ORDER BY %s DESC, created_at DESC, id DESC
                 LIMIT 1
                 """, schemaName, timeColumn);
@@ -2104,6 +2116,9 @@ public class TelemetryTenantRepository {
      * baseline lookup here. A quarantined row was never published, so analytics measures its next
      * delta from the last row that <em>was</em>; taking it as the baseline on this path would
      * publish a water quantity the warehouse cannot reproduce.
+     *
+     * <p>The baseline side is BFM only (a NULL channel being a legacy BFM row), like the target the
+     * SO/SDO correction picks, so a BFM reading is never measured against an ELM or PDU value.
      */
     public Optional<TelemetryCompletedFlowReading> findPreviousFlowReadingForScheme(String schemaName,
                                                                                     Long readingId) {
@@ -2120,6 +2135,7 @@ public class TelemetryTenantRepository {
                 WHERE fr.scheme_id = target.scheme_id
                   AND fr.confirmed_reading > 0
                   AND fr.deleted_at IS NULL%3$s
+                  AND COALESCE(fr.channel, 'BFM') = 'BFM'
                   AND target.deleted_at IS NULL
                   AND (
                         fr.reading_date < target.reading_date
@@ -2243,7 +2259,12 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
-    /** "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}. */
+    /**
+     * "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}.
+     *
+     * <p>BFM rows only, like the target the SO/SDO correction picks, so its next-day delta never
+     * pairs the corrected BFM reading with an ELM or PDU value.
+     */
     public Optional<TelemetryCompletedFlowReading> findEarliestCompletedFlowReadingAfterDateForScheme(String schemaName,
                                                                                                        Long schemeId,
                                                                                                        LocalDate afterDate) {
@@ -2259,6 +2280,7 @@ public class TelemetryTenantRepository {
                   AND reading_date > ?
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
+                  AND COALESCE(channel, 'BFM') = 'BFM'
                 ORDER BY reading_date ASC, %s ASC, id ASC
                 LIMIT 1
                 """, schemaName, timeColumn);

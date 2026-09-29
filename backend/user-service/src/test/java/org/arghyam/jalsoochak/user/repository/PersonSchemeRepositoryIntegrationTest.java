@@ -10,6 +10,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,7 +19,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.dao.InvalidDataAccessApiUsageException;
@@ -32,6 +36,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
 
     private static final String SCHEMA = "tenant_mp";
+    /** tenant_master_table id of state code MP, which the repository resolves from {@link #SCHEMA}. */
+    private static final int TENANT_ID = 1;
+    private static final int ANALYTICS_BFM = 1;
+    private static final int ANALYTICS_ELM = 2;
 
     @Autowired PersonSchemeRepository repo;
     @Autowired PiiEncryptionService pii;
@@ -39,6 +47,8 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
 
     @BeforeEach
     void clean() {
+        jdbc.execute("DELETE FROM analytics_schema.fact_meter_reading_table");
+        jdbc.execute("DELETE FROM analytics_schema.fact_water_quantity_table");
         jdbc.execute("DELETE FROM tenant_mp.flow_reading_table");
         jdbc.execute("DELETE FROM tenant_mp.user_scheme_mapping_table");
         jdbc.execute("DELETE FROM tenant_mp.scheme_master_table");
@@ -84,6 +94,39 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
                 VALUES (?, ?, ?, ?, ?, 'corr-1', ?, ?)
                 """, schemeId, java.sql.Timestamp.valueOf(date.atStartOfDay()),
                 date, reading, reading, createdBy, createdBy);
+    }
+
+    private void insertReading(long schemeId, long createdBy, String reading, LocalDateTime readingAt,
+                               String channel) {
+        jdbc.update("""
+                INSERT INTO tenant_mp.flow_reading_table
+                    (scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading,
+                     correlation_id, channel, created_by, updated_by)
+                VALUES (?, ?, ?, ?, ?, 'corr-1', ?, ?, ?)
+                """, schemeId, Timestamp.valueOf(readingAt), readingAt.toLocalDate(),
+                new BigDecimal(reading), new BigDecimal(reading), channel, createdBy, createdBy);
+    }
+
+    private void insertWaterQuantityDay(long schemeId, long userId, LocalDate date, long litres,
+                                        int submissionStatus, String outageReason) {
+        jdbc.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                    (tenant_id, scheme_id, user_id, water_quantity, date, submission_status, outage_reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, TENANT_ID, schemeId, userId, litres, date, submissionStatus, outageReason);
+    }
+
+    private void insertAnalyticsReading(long schemeId, LocalDateTime readingAt, Integer channel) {
+        jdbc.update("""
+                INSERT INTO analytics_schema.fact_meter_reading_table
+                    (tenant_id, scheme_id, reading_at, reading_date, channel)
+                VALUES (?, ?, ?, ?, ?)
+                """, TENANT_ID, schemeId, Timestamp.valueOf(readingAt), readingAt.toLocalDate(), channel);
+    }
+
+    /** The database's date, which the queries' CURRENT_DATE uses; the JVM's may differ. */
+    private LocalDate dbToday() {
+        return jdbc.queryForObject("SELECT CURRENT_DATE", LocalDate.class);
     }
 
     // ── validateSchemaName ────────────────────────────────────────────────────
@@ -479,6 +522,206 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
             assertThat(result).hasSize(2);
             // desc order: most recent first
             assertThat(result.get(0).readingValue().doubleValue()).isEqualTo(200.0);
+        }
+    }
+
+    // ── staff screens show BFM readings only ─────────────────────────────────
+
+    @Nested
+    @DisplayName("staff screens read BFM readings only")
+    class BfmOnlyReadings {
+
+        private long personId;
+        private long poId;
+        private long schemeId;
+        private LocalDate today;
+
+        @BeforeEach
+        void mapOperatorAndOfficerToOneScheme() {
+            personId = insertUser("919876543301", 3, "Section Officer BFM");
+            poId = insertUser("919876543302", 4, "Pump Operator BFM");
+            schemeId = insertScheme("BFM-1");
+            mapUserToScheme(personId, schemeId);
+            mapUserToScheme(poId, schemeId);
+            today = dbToday();
+        }
+
+        private PersonSchemeDetailsDTO schemeRow() {
+            return repo.listSchemesByPerson(SCHEMA, personId, null, null, null, 0, 10).get(0);
+        }
+
+        private PumpOperatorSummaryWithMetricsDTO operatorRow() {
+            return repo.listPumpOperatorsByPerson(SCHEMA, personId, null, null, null, null, null,
+                    null, null, 0, 10).get(0);
+        }
+
+        @Test
+        @DisplayName("counts BFM and legacy NULL-channel readings")
+        void countsBfmAndLegacyReadings() {
+            insertReading(schemeId, poId, "100", today.minusDays(2).atTime(6, 0), "BFM");
+            insertReading(schemeId, poId, "101", today.minusDays(1).atTime(6, 0), null);
+
+            assertThat(repo.countSchemeReadings(SCHEMA, schemeId)).isEqualTo(2);
+            assertThat(repo.countPumpOperatorReadings(SCHEMA, poId, null)).isEqualTo(2);
+            assertThat(repo.listSchemeReadings(SCHEMA, schemeId, 0, 10).get(0).waterSupplied())
+                    .isEqualByComparingTo("1");
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @ValueSource(strings = {"ELM", "PDU"})
+        @DisplayName("a scheme with only non-BFM readings looks like one with no readings on the scheme screens")
+        void nonBfmOnlySchemeHasNoReadingsOnSchemeScreens(String channel) {
+            insertReading(schemeId, poId, "40", today.minusDays(2).atTime(6, 0), channel);
+            insertReading(schemeId, poId, "45", today.minusDays(1).atTime(6, 0), channel);
+
+            PersonSchemeDetailsDTO scheme = schemeRow();
+            assertThat(scheme.lastReading()).isNull();
+            assertThat(scheme.lastReadingAt()).isNull();
+            assertThat(scheme.lastWaterSupplied()).isNull();
+            assertThat(scheme.yesterdayReading()).isNull();
+
+            SchemeDetailsWithReportingDTO details = repo.getSchemeDetails(SCHEMA, schemeId);
+            assertThat(details.lastSubmissionAt()).isNull();
+            assertThat(details.reportingRatePercent()).isNull();
+
+            assertThat(repo.countSchemeReadings(SCHEMA, schemeId)).isZero();
+            assertThat(repo.listSchemeReadings(SCHEMA, schemeId, 0, 10)).isEmpty();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @ValueSource(strings = {"ELM", "PDU"})
+        @DisplayName("an operator with only non-BFM readings looks like one with no readings on the operator screens")
+        void nonBfmOnlyOperatorHasNoReadingsOnOperatorScreens(String channel) {
+            insertReading(schemeId, poId, "40", today.minusDays(2).atTime(6, 0), channel);
+            insertReading(schemeId, poId, "45", today.minusDays(1).atTime(6, 0), channel);
+
+            PumpOperatorSummaryWithMetricsDTO operator = operatorRow();
+            assertThat(operator.lastSubmissionAt()).isNull();
+            assertThat(operator.lastWaterSupplied()).isNull();
+            assertThat(operator.reportingRatePercent()).isNull();
+            assertThat(repo.countPumpOperatorsByPerson(SCHEMA, personId, null, null, 7, null, null)).isZero();
+
+            assertThat(repo.countPumpOperatorReadings(SCHEMA, poId, null)).isZero();
+            assertThat(repo.listPumpOperatorReadings(SCHEMA, poId, null, null, "desc", 0, 10)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("an ELM reading between two BFM readings is not the later one's previous value")
+        void lagSkipsAnElmReadingBetweenTwoBfmReadings() {
+            LocalDateTime lastBfmAt = today.minusDays(1).atTime(6, 0);
+            insertReading(schemeId, poId, "100", today.minusDays(3).atTime(6, 0), "BFM");
+            insertReading(schemeId, poId, "5000", today.minusDays(2).atTime(6, 0), "ELM");
+            insertReading(schemeId, poId, "101.25", lastBfmAt, "BFM");
+
+            PersonSchemeDetailsDTO scheme = schemeRow();
+            assertThat(scheme.lastReading()).isEqualByComparingTo("101.25");
+            assertThat(scheme.lastReadingAt()).isEqualTo(lastBfmAt);
+            assertThat(scheme.yesterdayReading()).isEqualByComparingTo("101.25");
+
+            List<SchemeReadingSubmissionDTO> schemeReadings = repo.listSchemeReadings(SCHEMA, schemeId, 0, 10);
+            assertThat(schemeReadings).hasSize(2);
+            assertThat(schemeReadings.get(0).waterSupplied()).isEqualByComparingTo("1.25");
+            assertThat(schemeReadings.get(1).waterSupplied()).isNull();
+
+            List<PumpOperatorReadingDetailDTO> operatorReadings =
+                    repo.listPumpOperatorReadings(SCHEMA, poId, null, null, "desc", 0, 10);
+            assertThat(operatorReadings).hasSize(2);
+            assertThat(operatorReadings.get(0).waterSupplied()).isEqualByComparingTo("1.25");
+
+            // Two BFM days out of the four since the first BFM one; the ELM day would make it three.
+            assertThat(repo.getSchemeDetails(SCHEMA, schemeId).reportingRatePercent()).isEqualByComparingTo("50");
+
+            PumpOperatorSummaryWithMetricsDTO operator = operatorRow();
+            assertThat(operator.lastSubmissionAt()).isEqualTo(lastBfmAt);
+            assertThat(operator.reportingRatePercent()).isEqualByComparingTo("50");
+        }
+    }
+
+    // ── pump-operator list: analytics days ───────────────────────────────────
+
+    @Nested
+    @DisplayName("listPumpOperatorsByPerson analytics days")
+    class PumpOperatorAnalyticsDays {
+
+        private long personId;
+        private long poId;
+        private long schemeId;
+        private LocalDate today;
+
+        @BeforeEach
+        void mapOperatorAndOfficerToOneScheme() {
+            personId = insertUser("919876543311", 3, "Section Officer Analytics");
+            poId = insertUser("919876543312", 4, "Pump Operator Analytics");
+            schemeId = insertScheme("AN-1");
+            mapUserToScheme(personId, schemeId);
+            mapUserToScheme(poId, schemeId);
+            today = dbToday();
+        }
+
+        private BigDecimal lastWaterSupplied() {
+            return repo.listPumpOperatorsByPerson(SCHEMA, personId, null, null, null, null, null,
+                    null, null, 0, 10).get(0).lastWaterSupplied();
+        }
+
+        /** An earlier BFM day, which the list falls back to when a later day is skipped. */
+        private void insertEarlierBfmDay() {
+            LocalDate day = today.minusDays(3);
+            insertWaterQuantityDay(schemeId, poId, day, 1250, 1, null);
+            insertAnalyticsReading(schemeId, day.atTime(6, 0), ANALYTICS_BFM);
+        }
+
+        @Test
+        @DisplayName("skips a day whose only readings are ELM")
+        void skipsAnElmOnlyDay() {
+            insertEarlierBfmDay();
+            LocalDate elmDay = today.minusDays(1);
+            insertWaterQuantityDay(schemeId, poId, elmDay, 9999, 1, null);
+            insertAnalyticsReading(schemeId, elmDay.atTime(6, 0), ANALYTICS_ELM);
+
+            assertThat(lastWaterSupplied()).isEqualByComparingTo("1250");
+        }
+
+        @Test
+        @DisplayName("skips a day whose latest reading is ELM, after a BFM one")
+        void skipsADayWhoseLatestReadingIsElm() {
+            insertEarlierBfmDay();
+            LocalDate mixedDay = today.minusDays(1);
+            insertWaterQuantityDay(schemeId, poId, mixedDay, 9999, 1, null);
+            insertAnalyticsReading(schemeId, mixedDay.atTime(6, 0), ANALYTICS_BFM);
+            insertAnalyticsReading(schemeId, mixedDay.atTime(8, 0), ANALYTICS_ELM);
+
+            assertThat(lastWaterSupplied()).isEqualByComparingTo("1250");
+        }
+
+        @Test
+        @DisplayName("shows a submitted day with no analytics reading, as a legacy BFM day")
+        void showsASubmittedDayWithNoAnalyticsReading() {
+            insertWaterQuantityDay(schemeId, poId, today.minusDays(1), 1250, 1, null);
+
+            assertThat(lastWaterSupplied()).isEqualByComparingTo("1250");
+        }
+
+        @Test
+        @DisplayName("still skips a day that only holds an outage reason")
+        void stillSkipsAnOutageOnlyDay() {
+            insertEarlierBfmDay();
+            insertWaterQuantityDay(schemeId, poId, today.minusDays(1), 0, 0, "POWER_CUT");
+
+            assertThat(lastWaterSupplied()).isEqualByComparingTo("1250");
+        }
+
+        @Test
+        @DisplayName("the duration filter of the count ignores a non-BFM day")
+        void countDurationFilterIgnoresANonBfmDay() {
+            LocalDate elmDay = today.minusDays(1);
+            insertWaterQuantityDay(schemeId, poId, elmDay, 9999, 1, null);
+            insertAnalyticsReading(schemeId, elmDay.atTime(6, 0), ANALYTICS_ELM);
+
+            assertThat(repo.countPumpOperatorsByPerson(SCHEMA, personId, null, null, 7, null, null)).isZero();
+
+            insertEarlierBfmDay();
+
+            assertThat(repo.countPumpOperatorsByPerson(SCHEMA, personId, null, null, 7, null, null)).isEqualTo(1);
         }
     }
 
