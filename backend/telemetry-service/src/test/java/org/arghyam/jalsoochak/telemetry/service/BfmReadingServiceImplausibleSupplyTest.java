@@ -164,7 +164,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             submit(SupplyPlausibilityProperties.Mode.ENFORCE, "1100", true);
 
             // publishMeterReadingRecorded is the single event that writes fact_meter_reading,
-            // dim_operator_attendance and fact_water_quantity. Withholding it is the whole point.
+            // fact_operator_attendance and fact_water_quantity. Withholding it is the whole point.
             verify(telemetryEventPublisher, never()).publishMeterReadingRecorded(
                     any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         }

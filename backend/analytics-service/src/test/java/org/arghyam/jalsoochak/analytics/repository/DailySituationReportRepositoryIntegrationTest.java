@@ -76,7 +76,7 @@ class DailySituationReportRepositoryIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate.execute("TRUNCATE analytics_schema.anomaly_table, "
+        jdbcTemplate.execute("TRUNCATE analytics_schema.fact_anomaly_table, "
                 + "analytics_schema.fact_meter_reading_table, "
                 + "analytics_schema.fact_water_quantity_table, "
                 + "analytics_schema.dim_user_scheme_mapping_table, "
@@ -367,7 +367,7 @@ class DailySituationReportRepositoryIntegrationTest {
 
     private void insertAnomalyAt(String uuid, String type, int schemeId, LocalDateTime createdAtUtc, boolean deleted) {
         jdbcTemplate.update("""
-                INSERT INTO analytics_schema.anomaly_table
+                INSERT INTO analytics_schema.fact_anomaly_table
                 (uuid, type, scheme_id, tenant_id, status, created_at, deleted_at)
                 VALUES (?, ?, ?, ?, 1, ?, ?)
                 """, uuid, type, schemeId, TENANT, createdAtUtc,

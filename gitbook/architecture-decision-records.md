@@ -32,7 +32,7 @@
 
 **Decision:** Integrate WhatsApp through Glific rather than the WhatsApp Business API directly.
 **Rationale:** Glific handles template registration, compliance, contact opt-in, and interactive flows; the team focuses on domain logic. Glific is itself open-source and DPG-aligned.
-**Status:** Accepted.
+**Status:** Accepted. *(Glific now sits behind the provider-neutral `WhatsAppSender` port in the message service, with `GlificWhatsAppSender` as its adapter, so business code no longer depends on it directly.)*
 {% endstep %}
 
 {% step %}
@@ -48,7 +48,7 @@
 
 **Decision:** Use Keycloak as the identity provider; every service is an OAuth2 resource server.
 **Rationale:** Standard OAuth2/OIDC, custom JWT claims (`tenant_state_code`, `user_type`) so services derive tenant and role without a DB call, and self-hosting keeps data in the deployment environment.
-**Status:** Accepted.
+**Status:** Accepted. *(telemetry-service is the exception: its chatbot webhooks and reading API authenticate with a webhook token and a per-tenant API key rather than a JWT.)*
 {% endstep %}
 
 {% step %}
@@ -56,7 +56,7 @@
 
 **Decision:** Run the analytics star-schema warehouse on a dedicated PostgreSQL instance, fed by Kafka.
 **Rationale:** Isolate heavy BI scans from operational read/write traffic; tune each database independently; expose read-only analytics safely.
-**Status:** Accepted.
+**Status:** Accepted. *(The reference deployment runs the warehouse as a separate `analytics` database on the same PostgreSQL host, reached through its own datasource URL.)*
 {% endstep %}
 
 {% step %}
@@ -64,7 +64,7 @@
 
 **Decision:** Use a reactive, non-blocking HTTP client for the message service's outbound calls to Glific / SendGrid.
 **Rationale:** A small thread pool can handle large bursts of concurrent outbound requests during the morning nudge window, with built-in retry/back-off for provider rate limits.
-**Status:** Accepted.
+**Status:** Accepted. *(In practice WhatsApp calls are paced — `whatsapp.request-interval-ms`, 500 ms by default — and wait on each response, retrying HTTP 429 with exponential back-off; failed notification events go to a dead-letter topic.)*
 {% endstep %}
 
 {% step %}

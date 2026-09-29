@@ -10,7 +10,7 @@ In this deployment topology:
 *   **Kubernetes (RKE) Cluster**: Runs all core microservices (scheme-service, telemetry-service, user-service, etc.), ingress-nginx, Keycloak (Auth), Kafka Kraft, Redis, MinIO, and the Prometheus-Grafana monitoring stack.
 *   **External VM**: Hosts a PostgreSQL engine that serves three independent databases:
     1.  `jalsoochak` (Stores schema and configurations for scheme-service, telemetry-service, tenant-service, user-service, message-service).
-    2.  `analytics` (Stores analysis tracking for the analytics service).
+    2.  `analytics` (Stores the PostGIS-enabled analytics data warehouse (`analytics_schema`) for analytics-service; anomaly-service also writes to it).
     3.  `keycloak` (Stores user identity, roles, and realm data for Keycloak).
 
 ---
@@ -40,13 +40,16 @@ Refer to the official package repository for your OS. For Ubuntu/Debian:
 ```bash  
 sudo apt update
 sudo apt install postgresql postgresql-contrib -y
+
+# PostGIS is required by the analytics database (replace 16 with your PostgreSQL major version)
+sudo apt install postgresql-16-postgis-3 -y
 ```
 
 ### 3.2. Configure Network Listening
 By default, PostgreSQL only listens on loopback (`localhost`). You must allow it to listen on the VM's network interface:
 1. Open the PostgreSQL config file (typically `/etc/postgresql/<version>/main/postgresql.conf`):
    ```bash
-   sudo nano /etc/postgresql/15/main/postgresql.conf
+   sudo nano /etc/postgresql/16/main/postgresql.conf
    ```
 2. Find the `listen_addresses` line, uncomment it, and set it to listen on all interfaces:
    ```ini
@@ -57,7 +60,7 @@ By default, PostgreSQL only listens on loopback (`localhost`). You must allow it
 Configure PostgreSQL to allow connections from the Kubernetes cluster's subnet:
 1. Open the HBA configuration file (typically `/etc/postgresql/<version>/main/pg_hba.conf`):
    ```bash
-   sudo nano /etc/postgresql/15/main/pg_hba.conf
+   sudo nano /etc/postgresql/16/main/pg_hba.conf
    ```
 2. Append a rule letting your Kubernetes cluster nodes and Pod CIDR access the databases (replace `10.0.0.0/16` with your actual Kubernetes node subnet or Pod network range):
    ```text
@@ -93,6 +96,17 @@ CREATE USER analytics_user WITH PASSWORD 'AnalyticsSecurePass123';
 GRANT ALL PRIVILEGES ON DATABASE jalsoochak TO jalsoochak_user;
 GRANT ALL PRIVILEGES ON DATABASE keycloak TO keycloak_user;
 GRANT ALL PRIVILEGES ON DATABASE analytics TO analytics_user;
+
+-- 4. Transfer Database Ownership
+-- (PostgreSQL 15+ no longer lets non-owners create objects in the `public` schema, which Flyway migrations use)
+ALTER DATABASE jalsoochak OWNER TO jalsoochak_user;
+ALTER DATABASE keycloak OWNER TO keycloak_user;
+ALTER DATABASE analytics OWNER TO analytics_user;
+
+-- 5. Enable PostGIS on the analytics database
+-- (Creating the extension requires superuser rights, so it cannot be left to the analytics-service migrations)
+\c analytics
+CREATE EXTENSION IF NOT EXISTS postgis;
 ```
 
 ---
