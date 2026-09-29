@@ -207,7 +207,7 @@ public class PersonSchemeRepository {
                     WITH ordered AS (
                         SELECT fr.%s AS reading_at,
                                %s AS confirmed_reading,
-                               LAG(%s) OVER (ORDER BY fr.%s DESC, fr.id DESC) AS prev_confirmed
+                               LAG(%s) OVER (ORDER BY fr.%s ASC, fr.id ASC) AS prev_confirmed
                         FROM %s.flow_reading_table fr
                         WHERE fr.deleted_at IS NULL
                           AND fr.scheme_id = ps.id
@@ -671,7 +671,10 @@ public class PersonSchemeRepository {
                     WITH ordered AS (
                         SELECT fr.%s AS reading_at,
                                %s AS confirmed_reading,
-                               LAG(%s) OVER (ORDER BY fr.%s DESC, fr.id DESC) AS prev_confirmed
+                               LAG(%s) OVER (
+                                   PARTITION BY fr.scheme_id
+                                   ORDER BY fr.%s ASC, fr.id ASC
+                               ) AS prev_confirmed
                         FROM %s.flow_reading_table fr
                         WHERE fr.deleted_at IS NULL
                           AND fr.created_by = o.id

@@ -616,6 +616,7 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
             PersonSchemeDetailsDTO scheme = schemeRow();
             assertThat(scheme.lastReading()).isEqualByComparingTo("101.25");
             assertThat(scheme.lastReadingAt()).isEqualTo(lastBfmAt);
+            assertThat(scheme.lastWaterSupplied()).isEqualByComparingTo("1.25");
             assertThat(scheme.yesterdayReading()).isEqualByComparingTo("101.25");
 
             List<SchemeReadingSubmissionDTO> schemeReadings = repo.listSchemeReadings(SCHEMA, schemeId, 0, 10);
@@ -633,6 +634,7 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
 
             PumpOperatorSummaryWithMetricsDTO operator = operatorRow();
             assertThat(operator.lastSubmissionAt()).isEqualTo(lastBfmAt);
+            assertThat(operator.lastWaterSupplied()).isEqualByComparingTo("1250");
             assertThat(operator.reportingRatePercent()).isEqualByComparingTo("50");
         }
     }
@@ -689,6 +691,27 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
             insertWaterQuantityDay(schemeId, poId, mixedDay, 9999, 1, null);
             insertAnalyticsReading(schemeId, mixedDay.atTime(6, 0), ANALYTICS_BFM);
             insertAnalyticsReading(schemeId, mixedDay.atTime(8, 0), ANALYTICS_ELM);
+
+            assertThat(lastWaterSupplied()).isEqualByComparingTo("1250");
+        }
+
+        @Test
+        @DisplayName("falls back to flow readings, in litres, when analytics has no day")
+        void fallsBackToFlowReadingsInLitres() {
+            insertReading(schemeId, poId, "100", today.minusDays(2).atTime(6, 0), "BFM");
+            insertReading(schemeId, poId, "101.25", today.minusDays(1).atTime(6, 0), "BFM");
+
+            assertThat(lastWaterSupplied()).isEqualByComparingTo("1250");
+        }
+
+        @Test
+        @DisplayName("the flow-reading fallback takes the previous reading from the same scheme")
+        void fallbackDiffStaysWithinOneScheme() {
+            long otherSchemeId = insertScheme("AN-2");
+            mapUserToScheme(poId, otherSchemeId);
+            insertReading(schemeId, poId, "100", today.minusDays(3).atTime(6, 0), "BFM");
+            insertReading(otherSchemeId, poId, "5000", today.minusDays(2).atTime(6, 0), "BFM");
+            insertReading(schemeId, poId, "101.25", today.minusDays(1).atTime(6, 0), "BFM");
 
             assertThat(lastWaterSupplied()).isEqualByComparingTo("1250");
         }
