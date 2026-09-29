@@ -1,5 +1,7 @@
 # API Specifications
 
+**Swagger UI:** [https://staging.jalsoochak.in/webjars/swagger-ui/index.html](https://staging.jalsoochak.in/webjars/swagger-ui/index.html)
+
 ## 9. API Specifications
 
 All APIs are RESTful and versioned under `/api/v1/`. Clients reach services through the **API Gateway**, either on the flat path (`/api/v1/...`) or by service prefix (`/user/**`, `/tenant/**`, `/scheme/**`, `/telemetry/**`, `/message/**`, `/analytics/**`, `/anomaly/**`), which the gateway strips; the gateway validates a Keycloak-issued (`jalsoochak-realm`) **`Authorization: Bearer <JWT>`** on every path the owning service does not publish anonymously, and forwards the request. Responses are wrapped as `{ "status", "message", "data" }`. Every service except anomaly-service publishes an OpenAPI document at `/v3/api-docs`; the gateway aggregates them into one interactive **Swagger UI** at `/swagger-ui.html`.
