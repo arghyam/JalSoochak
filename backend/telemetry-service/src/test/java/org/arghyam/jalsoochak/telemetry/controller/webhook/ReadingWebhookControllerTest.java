@@ -292,8 +292,8 @@ class ReadingWebhookControllerTest {
     }
 
     /**
-     * Each Glific webhook step costs the operator 1–2 s, so a successful answer carries the text of
-     * the screen that follows it: the image prompt after a location, the closing line after a
+     * Each WhatsApp-flow webhook step costs the operator 1–2 s, so a successful answer carries the
+     * text of the screen that follows it: the image prompt after a location, the closing line after a
      * reading. The flow then sends one message instead of calling /intro or /closing.
      */
     @Nested

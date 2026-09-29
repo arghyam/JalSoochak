@@ -158,7 +158,8 @@ class SelectionWebhookControllerTest {
 
     /**
      * "Submit reading" used to cost the flow a second webhook just to fetch the scheme list; each
-     * Glific webhook step adds 1–2 s the operator waits through. The list now rides on this answer.
+     * WhatsApp-flow webhook step adds 1–2 s the operator waits through. The list now rides on this
+     * answer.
      */
     @Test
     void readingSubmissionCarriesTheSchemeList() {

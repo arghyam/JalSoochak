@@ -31,8 +31,8 @@ public class ReadingsAsyncService {
 
     /**
      * Floor on the time between accepting an image and resuming the flow. The flow sends its "please
-     * wait" message and only then parks in its wait-for-result node; Glific accepts a resume that
-     * lands before that — and reports success — but the flow never sees it and sits out its full
+     * wait" message and only then parks in its wait-for-result node; the provider accepts a resume
+     * that lands before that — and reports success — but the flow never sees it and sits out its full
      * timeout. 0 disables the floor.
      */
     @Value("${whatsapp.resume.min-delay-ms:4000}")

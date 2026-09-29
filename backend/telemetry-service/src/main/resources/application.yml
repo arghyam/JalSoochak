@@ -53,7 +53,8 @@ whatsapp:
     base-url: ${WHATSAPP_RESUME_BASE_URL:https://api.arghyam.glific.com}
     flow-id: ${WHATSAPP_RESUME_FLOW_ID:40368}
     # Minimum ms between accepting an image and resuming the flow, so a fast OCR result cannot reach
-    # Glific before the flow has parked in its wait-for-result node (Glific drops such a resume).
+    # the WhatsApp provider before the flow has parked in its wait-for-result node (the provider
+    # drops such a resume).
     min-delay-ms: ${WHATSAPP_RESUME_MIN_DELAY_MS:4000}
     user:
       phone: ${WHATSAPP_RESUME_USER_PHONE:${WHATSAPP_SYNC_USER_PHONE:}}

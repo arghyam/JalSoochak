@@ -151,9 +151,9 @@ class ReadingsAsyncServiceTest {
 
     /**
      * The flow sends "We have received your image" and only then parks in its wait-for-result node.
-     * Glific accepts a resume that arrives before that — and reports success — but the flow never sees
-     * it and waits out its full timeout. A floor on the time between accepting the image and resuming
-     * keeps a fast result from overtaking the flow.
+     * The provider accepts a resume that arrives before that — and reports success — but the flow
+     * never sees it and waits out its full timeout. A floor on the time between accepting the image
+     * and resuming keeps a fast result from overtaking the flow.
      */
     @Test
     void holdsAFastResultUntilTheMinimumDelayHasPassed() {
