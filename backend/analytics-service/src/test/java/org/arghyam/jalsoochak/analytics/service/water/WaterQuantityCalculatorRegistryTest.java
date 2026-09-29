@@ -3,7 +3,6 @@ package org.arghyam.jalsoochak.analytics.service.water;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.junit.jupiter.api.Test;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,26 +20,16 @@ class WaterQuantityCalculatorRegistryTest {
         }
 
         @Override
-        public long calculate(WaterQuantityContext context) {
-            // Distinct from BFM: the reading itself is the day's quantity.
-            return context.currentReading() != null
-                    ? context.currentReading().max(BigDecimal.ZERO).longValue()
-                    : 0L;
+        public WaterQuantityOutcome calculate(WaterQuantityContext context) {
+            return WaterQuantityOutcome.notDerivable(WaterQuantityOutcome.Reason.MISSING_FORMULA);
         }
     }
 
     @Test
-    void resolve_nullChannel_returnsDefaultBfmCalculator() {
+    void resolve_legacyNullChannelCode_reachesTheBfmCalculator() {
         WaterQuantityCalculatorRegistry registry = new WaterQuantityCalculatorRegistry(List.of(bfm));
 
-        assertThat(registry.resolve(null)).contains(bfm);
-    }
-
-    @Test
-    void resolve_unknownChannelCode_returnsDefaultBfmCalculator() {
-        WaterQuantityCalculatorRegistry registry = new WaterQuantityCalculatorRegistry(List.of(bfm));
-
-        assertThat(registry.resolve(999)).contains(bfm);
+        assertThat(registry.resolve(ReadingChannel.fromCode(null))).contains(bfm);
     }
 
     @Test
@@ -53,7 +42,7 @@ class WaterQuantityCalculatorRegistryTest {
             if (channel == ReadingChannel.DEFAULT) {
                 continue;
             }
-            assertThat(registry.resolve(channel.getCode()))
+            assertThat(registry.resolve(channel))
                     .as("channel %s has no calculator and must not fall back to BFM", channel)
                     .isEmpty();
         }
@@ -64,8 +53,8 @@ class WaterQuantityCalculatorRegistryTest {
         ElmCalculator elm = new ElmCalculator();
         WaterQuantityCalculatorRegistry registry = new WaterQuantityCalculatorRegistry(List.of(bfm, elm));
 
-        assertThat(registry.resolve(ReadingChannel.ELM.getCode())).contains(elm);
-        assertThat(registry.resolve(ReadingChannel.BFM.getCode())).contains(bfm);
+        assertThat(registry.resolve(ReadingChannel.ELM)).contains(elm);
+        assertThat(registry.resolve(ReadingChannel.BFM)).contains(bfm);
     }
 
     @Test

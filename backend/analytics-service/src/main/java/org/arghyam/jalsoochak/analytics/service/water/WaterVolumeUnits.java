@@ -60,7 +60,7 @@ public final class WaterVolumeUnits {
         try {
             return litres.longValueExact();
         } catch (ArithmeticException e) {
-            throw new WaterVolumeOutOfRangeException(cubicMetres);
+            throw new WaterVolumeOutOfRangeException(cubicMetres, "m3");
         }
     }
 

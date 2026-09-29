@@ -9,12 +9,12 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Resolves the {@link WaterQuantityCalculator} for a reading's channel code.
+ * Resolves the {@link WaterQuantityCalculator} for a reading channel.
  *
  * <p>All {@link WaterQuantityCalculator} beans are registered by their
- * {@link WaterQuantityCalculator#channel() channel}. Unknown or {@code null}
- * channel codes fall back to the {@link ReadingChannel#DEFAULT BFM} calculator,
- * which keeps legacy events (channel == null) behaving as before.
+ * {@link WaterQuantityCalculator#channel() channel}. Legacy {@code null} and unknown channel codes
+ * become {@link ReadingChannel#DEFAULT BFM} in {@link ReadingChannel#fromCode(Integer)}, before they
+ * reach this class.
  */
 @Component
 public class WaterQuantityCalculatorRegistry {
@@ -37,18 +37,11 @@ public class WaterQuantityCalculatorRegistry {
     }
 
     /**
-     * Returns the calculator for the given numeric channel code, if one can be
-     * safely applied.
-     *
-     * <p>{@code null} and unknown codes resolve to the default
-     * ({@link ReadingChannel#DEFAULT BFM}) calculator via {@link ReadingChannel#fromCode(Integer)},
-     * preserving legacy behaviour. An <em>explicitly</em> non-default channel
-     * (e.g. ELM/PDU) with no registered calculator returns {@link Optional#empty()}
-     * rather than silently falling back to BFM — callers must skip rather than
-     * mis-derive the reading with the wrong calculator.
+     * Returns the channel's calculator. A channel with none (ELM/PDU until their calculators exist,
+     * IOT, MAN) returns {@link Optional#empty()} rather than falling back to BFM: callers must leave
+     * the day alone rather than mis-derive it with another channel's calculator.
      */
-    public Optional<WaterQuantityCalculator> resolve(Integer channelCode) {
-        ReadingChannel channel = ReadingChannel.fromCode(channelCode);
+    public Optional<WaterQuantityCalculator> resolve(ReadingChannel channel) {
         return Optional.ofNullable(byChannel.get(channel));
     }
 }

@@ -79,8 +79,10 @@ class WaterVolumeUnitsTest {
                 .isInstanceOf(WaterVolumeOutOfRangeException.class)
                 .isInstanceOf(ArithmeticException.class)
                 .asInstanceOf(throwable(WaterVolumeOutOfRangeException.class))
-                .extracting(WaterVolumeOutOfRangeException::getCubicMetres)
-                .isEqualTo(absurd);
+                .satisfies(e -> {
+                    assertThat(e.getValue()).isEqualTo(absurd);
+                    assertThat(e.getUnit()).isEqualTo("m3");
+                });
     }
 
     @Test

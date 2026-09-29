@@ -1,9 +1,12 @@
 package org.arghyam.jalsoochak.analytics.repository;
 
-import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.arghyam.jalsoochak.analytics.service.water.BfmWaterQuantityCalculator;
-import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityContext;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorRegistry;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityOutcome;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityRangeReporter;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityRecalculationService;
 import org.arghyam.jalsoochak.analytics.service.water.WaterVolumeOutOfRangeException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,16 +42,16 @@ import static org.assertj.core.api.Assertions.assertThat;
  * have written for the same day — otherwise the backfill introduces a third set of wrong numbers, and
  * a reading arriving mid-run would flip its day between two different "correct" answers.
  *
- * <p>Neither side is re-implemented here. The live side runs the production units the ingestion path
- * uses to derive the value — {@link FactMeterReadingRepository#findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc}
- * for the day's reading, {@link FactMeterReadingRepository#findLatestBefore} for the baseline, and
- * {@link BfmWaterQuantityCalculator} for the arithmetic. The backfill side runs
- * {@code db/scripts/recompute_water_quantity.sql} verbatim, which is the same file the Python script
- * reads. The surrounding save/find-existing plumbing is out of scope: it chooses which row to write,
- * not what value goes in it.
+ * <p>Neither side is re-implemented here. The live side runs {@link WaterQuantityRecalculationService}
+ * over the real repositories, with the production BFM calculator — {@code deriveDay} for a day's
+ * value, and {@code recalculateAfterReading} where the order readings arrive in is the point. The
+ * backfill side runs {@code db/scripts/recompute_water_quantity.sql} verbatim, which is the same file
+ * the Python script reads.
  *
  * <p>The fixture is the set of cases the two defects turned on — a scheme's first-ever reading, a gap
- * in submissions, two readings on one day, a zero reading, and a meter that went backwards.
+ * in submissions, two readings on one day, a zero reading, and a meter that went backwards — plus
+ * the channel rules: legacy NULL is BFM, a day belongs to its latest reading's channel, and only
+ * BFM readings are a BFM day's starting point.
  */
 @DataJpaTest
 @Testcontainers
@@ -76,14 +79,18 @@ class WaterQuantityBackfillParityIntegrationTest {
     private FactMeterReadingRepository meterReadingRepository;
 
     @Autowired
+    private FactWaterQuantityRepository waterQuantityRepository;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    private final BfmWaterQuantityCalculator calculator = new BfmWaterQuantityCalculator();
+    private WaterQuantityRecalculationService recalculation;
 
     private static final int TENANT = 1;
     private static final int SCHEME = 1;
     private static final int GAP_SCHEME = 2;
     private static final int DECIMAL_SCHEME = 3;
+    private static final int CHANNEL_SCHEME = 4;
 
     private static final LocalDate D1 = LocalDate.of(2026, 1, 1);
     private static final LocalDate D2 = LocalDate.of(2026, 1, 2);
@@ -91,8 +98,18 @@ class WaterQuantityBackfillParityIntegrationTest {
     private static final LocalDate D4 = LocalDate.of(2026, 1, 4);
     private static final LocalDate D5 = LocalDate.of(2026, 1, 5);
 
+    private static final Integer BFM = ReadingChannel.BFM.getCode();
+    private static final Integer ELM = ReadingChannel.ELM.getCode();
+
     @BeforeEach
     void setUp() {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        recalculation = new WaterQuantityRecalculationService(
+                meterReadingRepository,
+                waterQuantityRepository,
+                new WaterQuantityCalculatorRegistry(List.of(new BfmWaterQuantityCalculator())),
+                new WaterQuantityRangeReporter(meterRegistry, 100_000L),
+                meterRegistry);
         jdbcTemplate.execute("""
                 TRUNCATE TABLE
                     analytics_schema.fact_water_quantity_table,
@@ -118,7 +135,8 @@ class WaterQuantityBackfillParityIntegrationTest {
                  operating_status, created_at, updated_at)
                 VALUES (1, 1, 'Scheme A', 1001, 2001, 100, 200, 1, NOW(), NOW()),
                        (2, 1, 'Scheme B', 1002, 2002, 100, 200, 1, NOW(), NOW()),
-                       (3, 1, 'Scheme C', 1003, 2003, 100, 200, 1, NOW(), NOW())
+                       (3, 1, 'Scheme C', 1003, 2003, 100, 200, 1, NOW(), NOW()),
+                       (4, 1, 'Scheme D', 1004, 2004, 100, 200, 1, NOW(), NOW())
                 """);
     }
 
@@ -245,6 +263,80 @@ class WaterQuantityBackfillParityIntegrationTest {
         assertThat(recomputed.get(idOf(DECIMAL_SCHEME, D2))).isEqualTo(12_300L);
     }
 
+    @Test
+    void aLegacyNullChannelIsBfmOnBothSides() {
+        insertReading(CHANNEL_SCHEME, D1, "100", "2026-01-01T08:00:00", null);
+        insertReading(CHANNEL_SCHEME, D2, "130", "2026-01-02T08:00:00", BFM);
+        insertReading(CHANNEL_SCHEME, D3, "150", "2026-01-03T08:00:00", null);
+        seedLegacyQuantityRow(CHANNEL_SCHEME, D2, 0L);
+        seedLegacyQuantityRow(CHANNEL_SCHEME, D3, 0L);
+
+        Map<Long, Long> recomputed = runRecompute();
+
+        assertThat(recomputed.get(idOf(CHANNEL_SCHEME, D2))).isEqualTo(30_000L)
+                .isEqualTo(liveValueFor(idOf(CHANNEL_SCHEME, D2)));
+        assertThat(recomputed.get(idOf(CHANNEL_SCHEME, D3))).isEqualTo(20_000L)
+                .isEqualTo(liveValueFor(idOf(CHANNEL_SCHEME, D3)));
+    }
+
+    @Test
+    void aMixedChannelDayBelongsToItsLatestReadingsChannel() {
+        insertReading(CHANNEL_SCHEME, D1, "100", "2026-01-01T08:00:00", BFM);
+        // D2 ends on an ELM reading: not a BFM day, so neither side derives it.
+        insertReading(CHANNEL_SCHEME, D2, "130", "2026-01-02T08:00:00", BFM);
+        insertReading(CHANNEL_SCHEME, D2, "40", "2026-01-02T17:00:00", ELM);
+        // D3 ends on a BFM reading: a BFM day, measured from D2's BFM reading, not its ELM one.
+        insertReading(CHANNEL_SCHEME, D3, "45", "2026-01-03T08:00:00", ELM);
+        insertReading(CHANNEL_SCHEME, D3, "150", "2026-01-03T17:00:00", BFM);
+        seedLegacyQuantityRow(CHANNEL_SCHEME, D2, 30_000L);
+        seedLegacyQuantityRow(CHANNEL_SCHEME, D3, 0L);
+
+        Map<Long, Long> recomputed = runRecompute();
+
+        assertThat(recomputed.get(idOf(CHANNEL_SCHEME, D2))).isNull();
+        assertThat(liveValueFor(idOf(CHANNEL_SCHEME, D2))).isNull();
+        assertThat(recomputed.get(idOf(CHANNEL_SCHEME, D3))).isEqualTo(20_000L)
+                .isEqualTo(liveValueFor(idOf(CHANNEL_SCHEME, D3)));
+    }
+
+    @Test
+    void anElmReadingBetweenBfmDaysIsNeverTheStartingPoint() {
+        insertReading(CHANNEL_SCHEME, D1, "100", "2026-01-01T08:00:00", BFM);
+        insertReading(CHANNEL_SCHEME, D2, "40", "2026-01-02T08:00:00", ELM);
+        insertReading(CHANNEL_SCHEME, D3, "160", "2026-01-03T08:00:00", BFM);
+        seedLegacyQuantityRow(CHANNEL_SCHEME, D2, 0L);
+        seedLegacyQuantityRow(CHANNEL_SCHEME, D3, 0L);
+
+        Map<Long, Long> recomputed = runRecompute();
+
+        assertThat(recomputed.get(idOf(CHANNEL_SCHEME, D2))).isNull();
+        assertThat(liveValueFor(idOf(CHANNEL_SCHEME, D2))).isNull();
+        // (160 - 100) * 1000, not (160 - 40) * 1000.
+        assertThat(recomputed.get(idOf(CHANNEL_SCHEME, D3))).isEqualTo(60_000L)
+                .isEqualTo(liveValueFor(idOf(CHANNEL_SCHEME, D3)));
+    }
+
+    @Test
+    void readingsArrivingOutOfOrderEndOnWhatTheRecomputeDerives() {
+        // Telemetry publishes without a key, so D3's reading can be ingested before D1's and D2's.
+        // Each arrival runs the live write path; the next-day follow-up is what corrects D3.
+        arrive(D3, "160", "2026-01-03T08:00:00");
+        arrive(D1, "100", "2026-01-01T08:00:00");
+        arrive(D2, "130", "2026-01-02T08:00:00");
+        waterQuantityRepository.flush();
+
+        Map<Long, Long> recomputed = runRecompute();
+
+        assertThat(storedQuantity(CHANNEL_SCHEME, D1)).isZero();
+        assertThat(storedQuantity(CHANNEL_SCHEME, D2)).isEqualTo(30_000L);
+        assertThat(storedQuantity(CHANNEL_SCHEME, D3)).isEqualTo(30_000L);
+        for (LocalDate date : List.of(D1, D2, D3)) {
+            assertThat(recomputed.get(idOf(CHANNEL_SCHEME, date)))
+                    .as("recompute of %s", date)
+                    .isEqualTo(storedQuantity(CHANNEL_SCHEME, date));
+        }
+    }
+
     /**
      * Readings covering every case the previous-day baseline got wrong.
      *
@@ -279,7 +371,7 @@ class WaterQuantityBackfillParityIntegrationTest {
         insertReading(DECIMAL_SCHEME, D3, "1247.8005", "2026-01-03T08:00:00");
     }
 
-    /** The value {@code FactServiceImpl.updateWaterQuantityFromReading} would derive for that row. */
+    /** The value live ingestion would store for that row's day, or null where it stores none. */
     private Long liveValueFor(long factId) {
         Map<String, Object> row = jdbcTemplate.queryForMap(
                 "SELECT tenant_id, scheme_id, date FROM analytics_schema.fact_water_quantity_table WHERE id = ?",
@@ -288,32 +380,31 @@ class WaterQuantityBackfillParityIntegrationTest {
         Integer schemeId = (Integer) row.get("scheme_id");
         LocalDate date = ((java.sql.Date) row.get("date")).toLocalDate();
 
-        BigDecimal current = meterReadingRepository
-                .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(tenantId, schemeId, date)
-                .map(FactMeterReading::getConfirmedReading)
-                .orElse(null);
-        if (current == null) {
-            return null;
-        }
-        BigDecimal previous = meterReadingRepository
-                .findLatestBefore(tenantId, schemeId, date)
-                .map(FactMeterReading::getConfirmedReading)
-                .orElse(null);
-
         try {
-            return calculator.calculate(WaterQuantityContext.builder()
-                    .tenantId(tenantId)
-                    .schemeId(schemeId)
-                    .readingDate(date)
-                    .currentReading(current)
-                    .previousReading(previous)
-                    .channel(ReadingChannel.BFM.getCode())
-                    .build());
+            return recalculation.deriveDay(tenantId, schemeId, date)
+                    .filter(WaterQuantityOutcome.Derived.class::isInstance)
+                    .map(outcome -> ((WaterQuantityOutcome.Derived) outcome).litres())
+                    .orElse(null);
         } catch (WaterVolumeOutOfRangeException e) {
-            // Mirrors FactServiceImpl: it catches this and writes no volume for the day, so the value
-            // live ingestion would have stored is "none" — null, the same thing the recompute returns.
+            // Live ingestion catches this and writes no volume for the day, so the value it would
+            // have stored is "none" — null, the same thing the recompute returns.
             return null;
         }
+    }
+
+    /** One reading arriving: stored, then recalculated exactly as ingestion does. */
+    private void arrive(LocalDate readingDate, String confirmedReading, String readingAt) {
+        insertReading(CHANNEL_SCHEME, readingDate, confirmedReading, readingAt, BFM);
+        recalculation.recalculateAfterReading(TENANT, CHANNEL_SCHEME, readingDate, ReadingChannel.BFM);
+    }
+
+    private Long storedQuantity(int schemeId, LocalDate date) {
+        return jdbcTemplate.queryForObject("""
+                SELECT water_quantity FROM analytics_schema.fact_water_quantity_table
+                WHERE tenant_id = ? AND scheme_id = ? AND date = ?
+                ORDER BY updated_at DESC, id DESC
+                LIMIT 1
+                """, Long.class, TENANT, schemeId, date);
     }
 
     /** Runs the shipped recompute definition verbatim and returns {@code id -> new_qty}. */
@@ -355,15 +446,20 @@ class WaterQuantityBackfillParityIntegrationTest {
                 """, dateKey, date, date, date, date, date, date, date, date, date);
     }
 
-    /** {@code confirmedReading} is written as text so the fixture states an exact NUMERIC, not a double. */
     private void insertReading(int schemeId, LocalDate readingDate, String confirmedReading, String readingAt) {
+        insertReading(schemeId, readingDate, confirmedReading, readingAt, null);
+    }
+
+    /** {@code confirmedReading} is written as text so the fixture states an exact NUMERIC, not a double. */
+    private void insertReading(int schemeId, LocalDate readingDate, String confirmedReading, String readingAt,
+                               Integer channel) {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.fact_meter_reading_table
                 (tenant_id, scheme_id, user_id, extracted_reading, confirmed_reading,
-                 reading_at, reading_date, submission_status, reading_type, created_at)
-                VALUES (?, ?, 11, ?, ?, ?, ?, 1, 0, NOW())
+                 reading_at, reading_date, channel, submission_status, reading_type, created_at)
+                VALUES (?, ?, 11, ?, ?, ?, ?, ?, 1, 0, NOW())
                 """, TENANT, schemeId, new BigDecimal(confirmedReading), new BigDecimal(confirmedReading),
-                LocalDateTime.parse(readingAt), readingDate);
+                LocalDateTime.parse(readingAt), readingDate, channel);
     }
 
     private long seedLegacyQuantityRow(int schemeId, LocalDate date, long waterQuantity) {

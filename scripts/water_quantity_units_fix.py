@@ -46,6 +46,9 @@ Case classification
 Every in-window row is classified into exactly one case. The classification is evaluated
 in the order below, so the codes are mutually exclusive:
 
+  A4  the day's latest reading is not BFM              SKIP  — another channel's day. Only live
+                                                              ingestion calculates it, and its
+                                                              value is already litres.
   A2  reading row exists, confirmed_reading IS NULL    SKIP  — unconfirmed; becomes derivable
                                                               once someone confirms it (V15
                                                               made the column nullable, so
@@ -74,15 +77,17 @@ makes them unchanged and reported, so fix the underlying readings and re-run to 
 up. A3 is the benign remainder of A1: there is no reading to derive from, but the stored
 value is already 0, so there is no wrong value to carry forward and nothing a re-run would
 ever change. It is split out precisely so it stops padding the "skipped, still in cubic
-metres" figure that a reviewer is meant to act on.
+metres" figure that a reviewer is meant to act on. A4 is kept out of that figure for the
+same reason: the recompute covers BFM days only, and a non-BFM day's value was written in
+litres by the live path, so it is neither wrong nor this script's to change.
 
 Every row the repair declines to touch AND leaves holding a value (A1, A2, C4) is written
 to an Excel workbook — the run artefact — together with the full case split, the pre-flight
-checks, and the future-dated rows. A3 is reported as a count only: listing rows that are
-already 0 and always will be adds pages to the workbook and nothing to the review. The
-applied-but-notable cases (B2, C3, long gaps, duplicates) are likewise counts on the
-Summary sheet only; all of them stay queryable from public.fact_water_quantity_recompute
-by case_code / gap_days / is_latest.
+checks, and the future-dated rows. A3 and A4 are reported as counts only: listing rows that
+are already 0, or that belong to another channel, adds pages to the workbook and nothing to
+the review. The applied-but-notable cases (B2, C3, long gaps, duplicates) are likewise
+counts on the Summary sheet only; all of them stay queryable from
+public.fact_water_quantity_recompute by case_code / gap_days / is_latest.
 
 Phase 3 rescores every scheme that is PRESENT in dim_scheme_table, whatever its
 operating_status. This diverges from the scheduler's own `WHERE ds.operating_status > 0`
@@ -177,8 +182,9 @@ SAFE_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # Every case the classifier can emit: code -> (skipped_by_design, one-line meaning).
 # Listed in the order they are reported; the top-level A/B/C order matches the order the SQL
-# evaluates, with each family's sub-cases (A2/A3/A1, B2/B1) grouped rather than interleaved.
+# evaluates, with each family's sub-cases (A4/A2/A3/A1, B2/B1) grouped rather than interleaved.
 CASE_CATALOGUE: dict[str, tuple[bool, str]] = {
+    "A4": (True, "The day's latest reading is not BFM — another channel's day, left to live ingestion"),
     "A1": (True, "No reading row on the date at all — no derivable volume"),
     "A2": (True, "Reading row exists but confirmed_reading IS NULL — unconfirmed"),
     "A3": (True, "No reading row on the date, but already 0 — nothing to change"),
@@ -191,6 +197,10 @@ CASE_CATALOGUE: dict[str, tuple[bool, str]] = {
 }
 
 SKIPPED_CASES = tuple(code for code, (skipped, _) in CASE_CATALOGUE.items() if skipped)
+
+# Skipped rows still holding a value this repair was meant to fix, i.e. still in CUBIC METRES. A4 is
+# left out: its value belongs to another channel's live calculation and is already in litres.
+UNREPAIRED_NON_ZERO = "skipped_by_design AND old_qty <> 0 AND case_code <> 'A4'"
 
 # Mirrors SchemePerformanceSchedulerRepository.insertDailySchemePerformanceScores. Kept as one
 # expression so the replay cannot disagree with the scheduler on the thresholds; the "5" is the
@@ -238,11 +248,11 @@ DETAIL_SHEETS = [
      "neither causes nor fixes. Listed so the repair is not blamed for them."),
 ]
 
-# A3, B2, C3, long gaps, duplicates and dim-scheme drift are deliberately NOT dumped as detail
+# A3, A4, B2, C3, long gaps, duplicates and dim-scheme drift are deliberately NOT dumped as detail
 # sheets. Each is either applied (B2, C3, gaps, duplicates), resolved by --dim-drift-use-latest,
-# or — for A3 — already at the value it would be repaired to, so a reviewer needs the count, not
-# the rows. Their counts stay on the Summary sheet, and every one of them is still queryable from
-# RECOMPUTE_TABLE by case_code / gap_days / is_latest.
+# already at the value it would be repaired to (A3), or not BFM and so not this repair's (A4), so a
+# reviewer needs the count, not the rows. Their counts stay on the Summary sheet, and every one of
+# them is still queryable from RECOMPUTE_TABLE by case_code / gap_days / is_latest.
 
 
 # --------------------------------------------------------------------------------------
@@ -541,6 +551,10 @@ def identify(conn, start: dt.date, end: dt.date, threshold_litres: int) -> None:
             coded AS (
                 SELECT w.*,
                        CASE
+                           -- First: the recompute returns NULL for every non-BFM day, and
+                           -- the branches below would misread that as a missing reading or
+                           -- baseline. NULL day_channel (no reading at all) falls through.
+                           WHEN w.day_channel <> 1 THEN 'A4'
                            WHEN w.current_reading IS NULL THEN
                                CASE WHEN EXISTS (
                                         SELECT 1 FROM {READING_TABLE} mr
@@ -568,7 +582,7 @@ def identify(conn, start: dt.date, end: dt.date, threshold_litres: int) -> None:
                        END AS case_code
                 FROM windowed w
             )
-            SELECT id, tenant_id, scheme_id, date, old_qty, new_qty,
+            SELECT id, tenant_id, scheme_id, date, old_qty, new_qty, day_channel,
                    current_reading, previous_reading, previous_date, is_latest,
                    case_code,
                    (case_code = ANY(%s)) AS skipped_by_design,
@@ -592,7 +606,7 @@ def case_counts(conn) -> list[dict]:
                                       AND new_qty IS NOT NULL AND new_qty <> old_qty),
                    COUNT(*) FILTER (WHERE new_qty IS NOT NULL AND new_qty = old_qty),
                    COUNT(*) FILTER (WHERE skipped_by_design),
-                   COUNT(*) FILTER (WHERE skipped_by_design AND old_qty <> 0),
+                   COUNT(*) FILTER (WHERE {UNREPAIRED_NON_ZERO}),
                    COALESCE(SUM(old_qty), 0),
                    COALESCE(SUM(new_qty) FILTER (WHERE NOT skipped_by_design), 0)
             FROM {RECOMPUTE_TABLE}
@@ -701,8 +715,7 @@ def fetch_detail(conn, predicate: str, order_by: str, limit: int, long_gap_days:
 
 def log_skipped_samples(conn, limit: int) -> None:
     """Prints the skipped rows that hold a non-zero value, keeping the old log shape."""
-    total, rows = fetch_detail(conn, "skipped_by_design AND old_qty <> 0", "old_qty DESC, id",
-                               limit, 0)
+    total, rows = fetch_detail(conn, UNREPAIRED_NON_ZERO, "old_qty DESC, id", limit, 0)
     if not total:
         LOG.info("skipped: none — every skipped row already holds 0")
         return
@@ -717,8 +730,8 @@ def log_skipped_samples(conn, limit: int) -> None:
                     r[by_index["new_qty"]], r[by_index["previous_reading"]],
                     r[by_index["previous_date"]], r[by_index["current_reading"]])
     if total > limit:
-        LOG.warning("  ... %d more; see the workbook or: SELECT * FROM %s WHERE "
-                    "skipped_by_design AND old_qty <> 0", total - limit, RECOMPUTE_TABLE)
+        LOG.warning("  ... %d more; see the workbook or: SELECT * FROM %s WHERE %s",
+                    total - limit, RECOMPUTE_TABLE, UNREPAIRED_NON_ZERO)
 
 
 # --------------------------------------------------------------------------------------
@@ -964,7 +977,7 @@ def verify(conn, start: dt.date, end: dt.date) -> tuple[int, dict]:
 
     skipped = scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} WHERE skipped_by_design")
     skipped_non_zero = scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} "
-                                    "WHERE skipped_by_design AND old_qty <> 0")
+                                    f"WHERE {UNREPAIRED_NON_ZERO}")
     LOG.info("verify: %d row(s) skipped by design (%s); %d of them hold a non-zero value and "
              "remain in CUBIC METRES", skipped, "/".join(SKIPPED_CASES), skipped_non_zero)
 

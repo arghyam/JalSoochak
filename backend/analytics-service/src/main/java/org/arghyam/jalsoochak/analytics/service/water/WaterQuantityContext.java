@@ -1,39 +1,41 @@
 package org.arghyam.jalsoochak.analytics.service.water;
 
 import lombok.Builder;
+import org.arghyam.jalsoochak.analytics.dto.event.CalculationParameters;
+import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
- * Inputs available to a {@link WaterQuantityCalculator} when deriving a day's water quantity.
+ * Inputs to a {@link WaterQuantityCalculator}: an amount of the channel's own quantity, and what is
+ * needed to turn it into litres.
  *
- * <p><strong>The physical meaning of {@link #currentReading()} / {@link #previousReading()} is
- * channel-specific</strong> and is the responsibility of the resolved per-channel calculator —
- * the same numeric field carries a different quantity per channel:
+ * <p>The amount has already been worked out by the channel's {@link ReadingChannel#kind() kind}, in
+ * the channel's standard unit, so a calculator never sees raw readings:
  * <ul>
- *   <li>{@link org.arghyam.jalsoochak.analytics.enums.ReadingChannel#BFM BFM}: the cumulative
- *       bulk-flow-meter index in cubic metres (m&sup3; = KL); the day's quantity is the delta over the
- *       previous reading, converted to litres by the calculator.</li>
- *   <li>Future channels interpret the value differently (e.g. ELM: energy consumed in kWh;
- *       PDU: pump running duration in minutes) and additionally read per-scheme parameters
- *       (efficiency / head / discharge rate) keyed by {@link #tenantId()} / {@link #schemeId()}.</li>
+ *   <li>{@link org.arghyam.jalsoochak.analytics.enums.ReadingKind#METER_INDEX METER_INDEX}: the day's
+ *       increase over the latest reading before it, never negative, and 0 when there is no earlier
+ *       reading (BFM: m&sup3;, ELM: kWh).</li>
+ *   <li>{@link org.arghyam.jalsoochak.analytics.enums.ReadingKind#PERIOD_AMOUNT PERIOD_AMOUNT}: one
+ *       submission's amount (PDU: minutes). The day's litres are the sum over its submissions.</li>
  * </ul>
- * Because interpretation is delegated to the channel's calculator, a reading is only ever
- * processed by the calculator that understands its units; see
- * {@link WaterQuantityCalculatorRegistry#resolve(Integer)}.
  *
- * <p>The readings are {@code BigDecimal} because they are decimal at the source — bulk flow meters
- * carry a decimal digit — and because a channel whose reading is not a whole count of anything
- * (ELM's kWh, PDU's pump minutes) cannot be represented otherwise.
+ * <p>The amount is {@code BigDecimal} because it is decimal at the source: the meters carry a decimal
+ * digit, and kWh and minutes are not whole counts either.
+ *
+ * @param channel    the channel whose calculator this is for
+ * @param amount     the amount in the channel's standard unit, never null
+ * @param parameters the snapshot of the reading the amount belongs to (for {@code METER_INDEX}, the
+ *                   day's latest reading); null for BFM
  */
 @Builder
 public record WaterQuantityContext(
         Integer tenantId,
         Integer schemeId,
         LocalDate readingDate,
-        BigDecimal currentReading,
-        BigDecimal previousReading,
-        Integer channel
+        ReadingChannel channel,
+        BigDecimal amount,
+        CalculationParameters parameters
 ) {
 }

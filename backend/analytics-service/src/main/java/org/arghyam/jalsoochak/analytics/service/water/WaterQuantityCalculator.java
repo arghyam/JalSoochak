@@ -3,14 +3,13 @@ package org.arghyam.jalsoochak.analytics.service.water;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 
 /**
- * Per-channel strategy for deriving the day's water quantity from a meter reading.
+ * Per-channel strategy for turning an amount of the channel's quantity into litres.
  *
  * <p>Register a new implementation as a Spring bean to support a new channel;
- * {@link WaterQuantityCalculatorRegistry} picks it up automatically. The default
- * {@link BfmWaterQuantityCalculator} reproduces the historical cumulative-delta
- * behaviour and is used for {@link ReadingChannel#BFM} and for {@code null}/unknown
- * channel codes. An explicitly non-default channel with no registered calculator is
- * <em>not</em> silently treated as BFM (see {@link WaterQuantityCalculatorRegistry#resolve(Integer)}).
+ * {@link WaterQuantityCalculatorRegistry} picks it up automatically. How much of the quantity a day
+ * has is not the calculator's concern: {@link WaterQuantityRecalculationService} works that out
+ * from the channel's {@link ReadingChannel#kind() kind} and passes it in as
+ * {@link WaterQuantityContext#amount()}.
  */
 public interface WaterQuantityCalculator {
 
@@ -18,18 +17,12 @@ public interface WaterQuantityCalculator {
     ReadingChannel channel();
 
     /**
-     * Derives the (non-negative) water quantity for the reading's day from the
-     * {@link WaterQuantityContext}. The calculator owns the interpretation of the
-     * context's reading values for its channel (see {@link WaterQuantityContext}).
+     * Turns {@link WaterQuantityContext#amount()} into litres, the unit
+     * {@code fact_water_quantity_table.water_quantity} is denominated in.
      *
-     * <p>The return value is in <strong>litres</strong>, the unit
-     * {@code fact_water_quantity_table.water_quantity} is denominated in — regardless of the unit the
-     * channel's readings are expressed in. Each calculator normalises its own channel's unit on the
-     * way out; BFM does so through {@link WaterVolumeUnits}. It is {@code long} because a m&sup3;
-     * delta multiplied into litres does not reliably fit an {@code int}.
-     *
-     * @param context the reading inputs (readings, scheme identifiers, channel)
-     * @return the water quantity to persist, in litres (never negative)
+     * @param context the amount in the channel's standard unit, and the snapshot it belongs to
+     * @return the litres, or why there are none
+     * @throws WaterVolumeOutOfRangeException if the litres do not fit the {@code BIGINT} column
      */
-    long calculate(WaterQuantityContext context);
+    WaterQuantityOutcome calculate(WaterQuantityContext context);
 }

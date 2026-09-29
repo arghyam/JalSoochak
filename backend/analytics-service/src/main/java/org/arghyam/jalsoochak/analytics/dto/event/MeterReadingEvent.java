@@ -36,4 +36,16 @@ public class MeterReadingEvent {
      * events from a telemetry-service still on the old contract.
      */
     private String correlationId;
+    /**
+     * {@code flow_reading_table.id} of the submission, which identifies its one fact row. Null on
+     * events from a telemetry-service that does not send it yet; those are inserted as new rows.
+     */
+    private Long sourceReadingId;
+    /**
+     * ISO-8601 local date-time of {@code flow_reading_table.updated_at}, the submission's version. A
+     * re-published submission overwrites its fact row only when this is not older than the stored one.
+     */
+    private String sourceUpdatedAt;
+    /** Pump and formula snapshot for ELM and PDU; null otherwise. */
+    private CalculationParameters calculationParameters;
 }
