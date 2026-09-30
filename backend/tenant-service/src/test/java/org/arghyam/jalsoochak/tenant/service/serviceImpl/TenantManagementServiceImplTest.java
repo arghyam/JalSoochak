@@ -35,6 +35,7 @@ import org.arghyam.jalsoochak.tenant.config.properties.TenantDefaultsProperties;
 import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.ElmFormulaConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
@@ -55,6 +56,7 @@ import org.arghyam.jalsoochak.tenant.dto.response.TenantConfigStatusResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantSummaryResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.ConfigStatusEnum;
+import org.arghyam.jalsoochak.tenant.enums.ElmFormula;
 import org.arghyam.jalsoochak.tenant.enums.RegionTypeEnum;
 import org.arghyam.jalsoochak.tenant.enums.StatusEnum;
 import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum;
@@ -84,6 +86,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
@@ -1056,6 +1060,55 @@ class TenantManagementServiceImplTest {
 
             verify(tenantCommonRepository).upsertConfig(eq(tenantId),
                     eq(TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME.name()), anyString(), eq(100));
+        }
+
+        @Test
+        @DisplayName("ELM_WATER_QUANTITY_FORMULA accepts the code in any case and stores it in upper case")
+        void testSetTenantConfigs_elmFormula_storesLowerCaseCodeInUpperCase() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.ELM_WATER_QUANTITY_FORMULA, objectMapper.readTree("{\"formula\":\"f2\"}"));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            ArgumentCaptor<String> serialized = ArgumentCaptor.forClass(String.class);
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.ELM_WATER_QUANTITY_FORMULA.name()), serialized.capture(), eq(100)))
+                    .thenAnswer(inv -> Optional.of(ConfigDTO.builder()
+                            .configKey(TenantConfigKeyEnum.ELM_WATER_QUANTITY_FORMULA.name())
+                            .configValue(inv.getArgument(2))
+                            .build()));
+
+            TenantConfigResponseDTO result = tenantManagementService.setTenantConfigs(tenantId, request);
+
+            assertEquals("{\"formula\":\"F2\"}", serialized.getValue());
+            assertEquals(ElmFormula.F2, ((ElmFormulaConfigDTO) result.getConfigs()
+                    .get(TenantConfigKeyEnum.ELM_WATER_QUANTITY_FORMULA)).getFormula());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"{\"formula\":\"F4\"}", "{\"formula\":\"\"}", "{}", "{\"formula\":null}", "null"})
+        @DisplayName("ELM_WATER_QUANTITY_FORMULA rejects an unknown or empty formula before it reaches the database")
+        void testSetTenantConfigs_elmFormula_rejectsUnknownOrEmptyFormula(String value) throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.ELM_WATER_QUANTITY_FORMULA, objectMapper.readTree(value));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+            // There is no default formula, so a value that names none must not be stored.
+            assertThrows(InvalidConfigValueException.class,
+                    () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
         }
 
         @Test
