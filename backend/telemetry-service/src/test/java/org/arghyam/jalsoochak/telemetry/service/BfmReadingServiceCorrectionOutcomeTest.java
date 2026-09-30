@@ -134,7 +134,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
         when(repo.findSchemeSupplyCounts(SCHEMA, SCHEME_ID))
                 .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(100, 0, 0)));
         when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
-                SCHEMA, SCHEME_ID, READING_DATE, READING_ID))
+                SCHEMA, SCHEME_ID, ReadingChannel.BFM, READING_DATE, READING_ID))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
         when(repo.findLatestFlowReadingByOperator(SCHEMA, OPERATOR_ID))
                 .thenReturn(Optional.of(target(quarantineReason)));
@@ -149,6 +149,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
     private void verifyNoWrite() {
         verify(repo, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
         verify(repo, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any());
+        verify(repo, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
         verify(repo, never()).applyQuarantineReason(anyString(), anyLong(), anyInt());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
@@ -182,7 +183,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.ENFORCE, PLAUSIBLE);
 
-            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(PLAUSIBLE), eq(OPERATOR_ID), any());
+            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(PLAUSIBLE), eq(OPERATOR_ID), any(), eq("m3"));
             verify(repo).applyQuarantineReason(SCHEMA, READING_ID, QuarantineReason.NONE);
             verify(readingRepublisher).republish(SCHEMA, TENANT_ID, READING_ID);
             assertThat(response.isSuccess()).isTrue();
@@ -197,7 +198,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.ENFORCE, PLAUSIBLE);
 
-            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(PLAUSIBLE), eq(OPERATOR_ID), any());
+            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(PLAUSIBLE), eq(OPERATOR_ID), any(), eq("m3"));
             verify(repo).applyQuarantineReason(SCHEMA, READING_ID, QuarantineReason.NONE);
             verify(readingRepublisher).republish(SCHEMA, TENANT_ID, READING_ID);
             assertThat(response.isSuccess()).isTrue();
@@ -212,7 +213,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
             correct(SupplyPlausibilityProperties.Mode.ENFORCE, PLAUSIBLE);
 
             verify(repo).findLatestConfirmedReadingSnapshotBeforeDate(
-                    SCHEMA, SCHEME_ID, READING_DATE, READING_ID);
+                    SCHEMA, SCHEME_ID, ReadingChannel.BFM, READING_DATE, READING_ID);
         }
     }
 
@@ -388,7 +389,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.AUDIT, IMPLAUSIBLE);
 
-            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(IMPLAUSIBLE), eq(OPERATOR_ID), any());
+            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(IMPLAUSIBLE), eq(OPERATOR_ID), any(), eq("m3"));
             verify(repo, never()).createTenantAnomalyRecord(any(), any());
             assertThat(response.isSuccess()).isTrue();
         }
@@ -409,7 +410,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.OFF, IMPLAUSIBLE);
 
             verify(repo, never()).findSchemeSupplyCounts(any(), any());
-            verify(repo, never()).findLatestConfirmedReadingSnapshotBeforeDate(any(), any(), any(), any());
+            verify(repo, never()).findLatestConfirmedReadingSnapshotBeforeDate(any(), any(), any(), any(), any());
             verify(repo).applyQuarantineReason(SCHEMA, READING_ID, QuarantineReason.NONE);
             assertThat(response.isSuccess()).isTrue();
         }
@@ -429,7 +430,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.ENFORCE, IMPLAUSIBLE);
 
-            verify(repo, never()).findLatestConfirmedReadingSnapshotBeforeDate(any(), any(), any(), any());
+            verify(repo, never()).findLatestConfirmedReadingSnapshotBeforeDate(any(), any(), any(), any(), any());
             assertThat(response.isSuccess()).isTrue();
         }
 
@@ -453,7 +454,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.ENFORCE, IMPLAUSIBLE);
 
-            verify(repo, never()).findLatestConfirmedReadingSnapshotBeforeDate(any(), any(), any(), any());
+            verify(repo, never()).findLatestConfirmedReadingSnapshotBeforeDate(any(), any(), any(), any(), any());
             assertThat(response.isSuccess()).isTrue();
         }
     }
@@ -473,7 +474,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
             when(repo.findSchemeSupplyCounts(SCHEMA, SCHEME_ID))
                     .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(100, 0, 0)));
             when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
-                    SCHEMA, SCHEME_ID, READING_DATE, READING_ID))
+                    SCHEMA, SCHEME_ID, ReadingChannel.BFM, READING_DATE, READING_ID))
                     .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
 
             CreateReadingResponse response = service(SupplyPlausibilityProperties.Mode.ENFORCE)

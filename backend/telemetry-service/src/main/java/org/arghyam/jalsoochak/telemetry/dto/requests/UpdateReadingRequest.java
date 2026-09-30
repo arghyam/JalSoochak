@@ -31,4 +31,13 @@ public class UpdateReadingRequest {
     @JsonAlias("confirmedReading")
     @JsonProperty("confirmed_reading")
     private BigDecimal confirmedReading;
+
+    /**
+     * Optional unit of {@link #confirmedReading}, as a UCUM code accepted by the corrected reading's
+     * channel, case-insensitive. Null or blank means the channel's standard unit. Kept as raw text and
+     * checked once the reading, and so its channel, has been found.
+     */
+    @JsonAlias("readingUnit")
+    @JsonProperty("reading_unit")
+    private String readingUnit;
 }

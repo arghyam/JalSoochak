@@ -103,6 +103,38 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             assertThat(capturedUpdateArgs())
                     .containsExactly(new BigDecimal("1234"), new BigDecimal("1234"), 2L, 5L);
         }
+
+        @Test
+        void writesTheSubmittedUnitInTheSameStatement() {
+            onColumnsExisting("payload_json", "confirmed_reading_source", "submitted_unit");
+
+            repository.updateConfirmedReading(SCHEMA, 5L, new BigDecimal("1.5"), 2L, 3, "L");
+
+            assertThat(allUpdateSql()).hasSize(1);
+            assertThat(capturedUpdateSql()).contains("confirmed_reading_source = ?, submitted_unit = ?");
+            assertThat(capturedUpdateArgs())
+                    .containsExactly(new BigDecimal("1.5"), new BigDecimal("1.5"), 3, "L", 2L, 5L);
+        }
+
+        @Test
+        void leavesTheSubmittedUnitUntouchedWhenNoneIsGiven() {
+            onColumnsExisting("payload_json", "submitted_unit");
+
+            repository.updateConfirmedReading(SCHEMA, 5L, new BigDecimal("1234"), 2L, null, null);
+
+            assertThat(capturedUpdateSql()).doesNotContain("submitted_unit");
+        }
+
+        @Test
+        void dropsTheSubmittedUnitOnAPreV56Schema() {
+            onColumnsExisting("payload_json");
+
+            repository.updateConfirmedReading(SCHEMA, 5L, new BigDecimal("1234"), 2L, null, "m3");
+
+            assertThat(capturedUpdateSql()).doesNotContain("submitted_unit");
+            assertThat(capturedUpdateArgs())
+                    .containsExactly(new BigDecimal("1234"), new BigDecimal("1234"), 2L, 5L);
+        }
     }
 
     @Nested
@@ -341,12 +373,6 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
         }
 
         @Test
-        void findEarliestCompletedFlowReadingAfterDateAcceptsRowsWithNoExtractedValue() {
-            assertCompletedFilter(() ->
-                    repository.findEarliestCompletedFlowReadingAfterDate(SCHEMA, 7L, 2L, DAY));
-        }
-
-        @Test
         void findLatestCompletedFlowReadingOnDateForUserAcceptsRowsWithNoExtractedValue() {
             assertCompletedFilter(() ->
                     repository.findLatestCompletedFlowReadingOnDateForUser(SCHEMA, 7L, 2L, DAY));
@@ -366,12 +392,10 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
     }
 
     /**
-     * The scheme-scoped finders back the officer correction API, which picks the row to correct and the
-     * rows on either side of it to recompute the daily deltas from. They are named "completed" but had
-     * no completion predicate at all, so a scheme-selection placeholder, a location row, a meter-change
-     * record or a standalone issue report — every one of them confirmed_reading = 0 — could be returned
-     * as the reading to correct, or as the previous-day baseline, in which case the whole cumulative
-     * meter value is published as a single day's consumption.
+     * The scheme-scoped finders back the officer correction API, which picks the row to correct with
+     * them. They are named "completed" but had no completion predicate at all, so a scheme-selection
+     * placeholder, a location row, a meter-change record or a standalone issue report — every one of
+     * them confirmed_reading = 0 — could be returned as the reading to correct.
      */
     @Nested
     @DisplayName("scheme-level completion filter")
@@ -393,26 +417,9 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
         }
 
         @Test
-        void findPreviousFlowReadingForSchemeExcludesZeroConfirmedRows() {
-            call(() -> repository.findPreviousFlowReadingForScheme(SCHEMA, 100L));
-            // Only the candidate side is filtered; the target row is addressed by id.
-            assertThat(allQuerySql()).anySatisfy(sql -> assertThat(sql).contains("fr.confirmed_reading > 0"));
-        }
-
-        @Test
         void findLatestCompletedFlowReadingBeforeDateForSchemeExcludesZeroConfirmedRows() {
             assertCompletionFilter(() ->
                     repository.findLatestCompletedFlowReadingBeforeDateForScheme(SCHEMA, 7L, DAY));
-        }
-
-        @Test
-        void findEarliestCompletedFlowReadingAfterDateForSchemeExcludesZeroConfirmedRows() {
-            assertCompletionFilter(() ->
-                    repository.findEarliestCompletedFlowReadingAfterDateForScheme(SCHEMA, 7L, DAY));
-        }
-
-        private void call(Runnable r) {
-            r.run();
         }
     }
 
@@ -441,19 +448,6 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
         void findLatestCompletedFlowReadingForSchemeGuardsAnInvalidSchemeId() {
             assertThat(repository.findLatestCompletedFlowReadingForScheme(SCHEMA, null)).isEmpty();
             assertThat(repository.findLatestCompletedFlowReadingForScheme(SCHEMA, 0L)).isEmpty();
-        }
-
-        @Test
-        void findPreviousFlowReadingForSchemeJoinsAgainstTheTargetRow() {
-            onQuery("JOIN tenant_as.flow_reading_table target", completedRow());
-
-            assertThat(repository.findPreviousFlowReadingForScheme(SCHEMA, 100L)).isPresent();
-        }
-
-        @Test
-        void findPreviousFlowReadingForSchemeGuardsAnInvalidReadingId() {
-            assertThat(repository.findPreviousFlowReadingForScheme(SCHEMA, null)).isEmpty();
-            assertThat(repository.findPreviousFlowReadingForScheme(SCHEMA, 0L)).isEmpty();
         }
 
         @Test
@@ -491,27 +485,6 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             onQuery("reading_date < ?", completedRow());
 
             assertThat(repository.findLatestCompletedFlowReadingBeforeDateForScheme(SCHEMA, 7L, DAY)).isPresent();
-        }
-
-        @Test
-        void findEarliestCompletedFlowReadingAfterDateForSchemeGuardsItsArguments() {
-            assertThat(repository.findEarliestCompletedFlowReadingAfterDateForScheme(SCHEMA, null, DAY)).isEmpty();
-            assertThat(repository.findEarliestCompletedFlowReadingAfterDateForScheme(SCHEMA, 0L, DAY)).isEmpty();
-            assertThat(repository.findEarliestCompletedFlowReadingAfterDateForScheme(SCHEMA, 7L, null)).isEmpty();
-        }
-
-        @Test
-        void findEarliestCompletedFlowReadingAfterDateForSchemeMapsTheProjection() {
-            onQuery("flow_reading_table", completedRow());
-
-            assertThat(repository.findEarliestCompletedFlowReadingAfterDateForScheme(SCHEMA, 7L, DAY)).isPresent();
-        }
-
-        @Test
-        void findEarliestCompletedFlowReadingAfterDateMapsTheProjection() {
-            onQuery("flow_reading_table", completedRow());
-
-            assertThat(repository.findEarliestCompletedFlowReadingAfterDate(SCHEMA, 7L, 2L, DAY)).isPresent();
         }
     }
 }

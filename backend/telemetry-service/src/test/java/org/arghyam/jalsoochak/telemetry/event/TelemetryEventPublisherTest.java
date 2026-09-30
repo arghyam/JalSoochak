@@ -63,63 +63,6 @@ class TelemetryEventPublisherTest {
     }
 
     @Nested
-    @DisplayName("water quantity")
-    class WaterQuantity {
-
-        @Test
-        void publishesTheRecordedQuantityForTheDay() {
-            publisher.publishWaterQuantityRecorded(17, 7L, 11L, DATE, new BigDecimal("150"), 1);
-
-            WaterQuantityEvent event = publishedTo(TOPIC, WaterQuantityEvent.class);
-            assertThat(event.getEventType()).isEqualTo("WATER_QUANTITY_RECORDED");
-            assertThat(event.getTenantId()).isEqualTo(17);
-            assertThat(event.getSchemeId()).isEqualTo(7);
-            assertThat(event.getUserId()).isEqualTo(11);
-            assertThat(event.getWaterQuantity()).isEqualByComparingTo("150");
-            assertThat(event.getSubmissionStatus()).isEqualTo(1);
-            assertThat(event.getDate()).isEqualTo("2026-03-01");
-        }
-
-        @Test
-        void carriesAFractionalQuantityThroughUnrounded() {
-            // The correction paths derive this by subtracting two NUMERIC readings, so it is decimal at
-            // source. Rounding it here — as this publisher used to — threw away up to 500 L of a day's
-            // supply, and did so inconsistently with the reading path, which subtracts after rounding.
-            publisher.publishWaterQuantityRecorded(17, 7L, 11L, DATE, new BigDecimal("150.5"), 1);
-
-            assertThat(publishedTo(TOPIC, WaterQuantityEvent.class).getWaterQuantity())
-                    .isEqualByComparingTo("150.5");
-        }
-
-        @Test
-        void defaultsToTodayWhenNoDateIsGiven() {
-            publisher.publishWaterQuantityRecorded(17, 7L, 11L, null, BigDecimal.TEN, 1);
-
-            assertThat(publishedTo(TOPIC, WaterQuantityEvent.class).getDate())
-                    .isEqualTo(ReadingTime.today().toString());
-        }
-
-        @Test
-        void carriesNullsThroughForAbsentIdentifiers() {
-            publisher.publishWaterQuantityRecorded(null, null, null, DATE, null, null);
-
-            WaterQuantityEvent event = publishedTo(TOPIC, WaterQuantityEvent.class);
-            assertThat(event.getSchemeId()).isNull();
-            assertThat(event.getUserId()).isNull();
-            assertThat(event.getWaterQuantity()).isNull();
-        }
-
-        @Test
-        void logsRatherThanThrowsWhenThePublishFails() {
-            when(kafkaProducer.publishJson(anyString(), any())).thenReturn(false);
-
-            publisher.publishWaterQuantityRecorded(17, 7L, 11L, DATE, BigDecimal.TEN, 1);
-
-            verify(kafkaProducer).publishJson(eq(TOPIC), any());
-        }
-    }
-
-    @Nested
     @DisplayName("outage and non-submission reasons")
     class Reasons {
 

@@ -103,7 +103,7 @@ class BfmReadingServiceReadingUnitTest {
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);
-        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, null))
+        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
                         new BigDecimal("0.5"), ReadingTime.now().minusDays(1))));
         lenient().when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(SCHEME_ID), eq(OPERATOR_ID),
@@ -135,6 +135,55 @@ class BfmReadingServiceReadingUnitTest {
 
         verifyStored("90", "PDU", "h");
         verifyPublished("90");
+    }
+
+    @Test
+    @DisplayName("a PDU run of exactly a day is accepted")
+    void pduRunOfADayIsAccepted() {
+        CreateReadingResponse response = service.createReading(
+                assertedValue(ReadingChannel.PDU, "24", "h"), SCHEMA, operator, CONTACT, false);
+
+        assertThat(response.isSuccess()).isTrue();
+        verifyStored("1440", "PDU", "h");
+    }
+
+    @Test
+    @DisplayName("a PDU run longer than a day is refused, and nothing is stored or published")
+    void pduRunLongerThanADayIsRefused() {
+        CreateReadingResponse response = service.createReading(
+                assertedValue(ReadingChannel.PDU, "1441", null), SCHEMA, operator, CONTACT, false);
+
+        assertThat(response.isSuccess()).isFalse();
+        assertThat(response.getQualityStatus()).isEqualTo("REJECTED");
+        assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);
+        assertThat(response.getMessage()).isEqualTo(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE);
+        verifyNothingStoredOrPublished();
+    }
+
+    @Test
+    @DisplayName("a PDU response carries no last confirmed reading: a run has no earlier total")
+    void pduResponseHasNoLastConfirmedReading() {
+        CreateReadingResponse response = service.createReading(
+                assertedValue(ReadingChannel.PDU, "90", null), SCHEMA, operator, CONTACT, false);
+
+        assertThat(response.isSuccess()).isTrue();
+        assertThat(response.getLastConfirmedReading()).isNull();
+        verify(repo, never()).findLatestConfirmedReadingSnapshot(any(), any(), any(), any());
+        verify(repo, never()).findLastConfirmedReading(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("an ELM submission is compared with the scheme's ELM readings only")
+    void elmSubmissionIsComparedWithElmReadingsOnly() {
+        when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, ReadingChannel.ELM, null))
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
+                        new BigDecimal("4800"), ReadingTime.now().minusDays(1))));
+
+        CreateReadingResponse response = service.createReading(
+                assertedValue(ReadingChannel.ELM, "4821.5", null), SCHEMA, operator, CONTACT, false);
+
+        assertThat(response.getLastConfirmedReading()).isEqualByComparingTo("4800");
+        verify(repo, never()).findLatestConfirmedReadingSnapshot(any(), any(), eq(ReadingChannel.BFM), any());
     }
 
     @Test

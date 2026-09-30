@@ -149,7 +149,7 @@ class BfmReadingServicePhotoChannelTest {
     @Test
     @DisplayName("a PDU photo sent with a typed value is stored with the photo, and OCR doesn't run")
     void pduPhotoWithATypedValueIsAccepted() {
-        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, null))
+        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
                         new BigDecimal("30"), ReadingTime.now().minusDays(1))));
         lenient().when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(SCHEME_ID), eq(OPERATOR_ID),

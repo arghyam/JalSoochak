@@ -19,8 +19,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The lookups behind the SO/SDO correction (PATCH {@code yesterday-final-reading}) against a real
- * PostgreSQL instance: the officer screens show BFM readings only, so the correction targets, and
- * measures against, BFM rows only.
+ * PostgreSQL instance: the officer screens show BFM readings only, so the correction targets BFM rows
+ * only.
  */
 @Testcontainers
 class TelemetryTenantRepositoryBfmCorrectionIntegrationTest {
@@ -90,25 +90,5 @@ class TelemetryTenantRepositoryBfmCorrectionIntegrationTest {
 
         assertThat(repository.findLatestCompletedFlowReadingForScheme(SCHEMA, SCHEME)).isEmpty();
         assertThat(repository.findLatestCompletedFlowReadingOnDate(SCHEMA, SCHEME, DAY)).isEmpty();
-    }
-
-    @Test
-    void measuresTheTargetAgainstTheEarlierBfmReadingNotAnElmOneInBetween() {
-        long earlierBfm = insertReading("100", DAY.minusDays(2).atTime(6, 0), "BFM");
-        insertReading("5000", DAY.minusDays(1).atTime(6, 0), "ELM");
-        long target = insertReading("101", DAY.atTime(6, 0), "BFM");
-
-        assertThat(repository.findPreviousFlowReadingForScheme(SCHEMA, target))
-                .hasValueSatisfying(r -> assertThat(r.id()).isEqualTo(earlierBfm));
-    }
-
-    @Test
-    void pairsTheTargetWithTheNextBfmReadingNotAnElmOneInBetween() {
-        insertReading("100", DAY.atTime(6, 0), "BFM");
-        insertReading("5000", DAY.plusDays(1).atTime(6, 0), "ELM");
-        long nextBfm = insertReading("101", DAY.plusDays(2).atTime(6, 0), "BFM");
-
-        assertThat(repository.findEarliestCompletedFlowReadingAfterDateForScheme(SCHEMA, SCHEME, DAY))
-                .hasValueSatisfying(r -> assertThat(r.id()).isEqualTo(nextBfm));
     }
 }

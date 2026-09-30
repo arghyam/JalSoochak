@@ -111,6 +111,56 @@ class SubmittedValueCaptureTest {
                 .isEqualTo(RolloverResolutionService.SOURCE_MANUAL);
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "1440, ",
+            "24,   h"
+    })
+    @DisplayName("a PDU run of up to a day is captured")
+    void pduRunOfADayIsCaptured(String value, String unit) {
+        CapturedReading reading = captured(capture.capture(input(ReadingChannel.PDU, value, unit, true)));
+
+        assertThat(reading.value()).isEqualByComparingTo("1440");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "1441,  ",
+            "24.05, h"
+    })
+    @DisplayName("a PDU run longer than a day is rejected, measured in minutes after conversion")
+    void pduRunLongerThanADayIsRejected(String value, String unit) {
+        CaptureOutcome outcome = capture.capture(input(ReadingChannel.PDU, value, unit, true));
+
+        assertThat(outcome).isEqualTo(new CaptureOutcome.Rejected(
+                TelemetryErrorCode.ABNORMAL_READING, SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE));
+    }
+
+    @Test
+    @DisplayName("the day limit is PDU's alone")
+    void otherChannelsHaveNoDayLimit() {
+        assertThat(captured(capture.capture(input(ReadingChannel.BFM, "5000", null, true))).value())
+                .isEqualByComparingTo("5000");
+        assertThat(captured(capture.capture(input(ReadingChannel.ELM, "5000", null, true))).value())
+                .isEqualByComparingTo("5000");
+    }
+
+    @Test
+    @DisplayName("a correction follows the same unit and limit rules, and is marked MANUAL")
+    void correctionFollowsTheSameRules() {
+        CapturedReading reading = captured(capture.captureCorrection(ReadingChannel.BFM, new BigDecimal("1500"), "L"));
+        assertThat(reading.value()).isEqualByComparingTo("1.5");
+        assertThat(reading.submittedUnit()).isEqualTo(ReadingUnit.LITRE);
+        assertThat(reading.submittedUnitCode()).isEqualTo("L");
+        assertThat(reading.source()).isEqualTo(RolloverResolutionService.SOURCE_MANUAL);
+
+        assertThat(capture.captureCorrection(ReadingChannel.PDU, new BigDecimal("25"), "h"))
+                .isEqualTo(new CaptureOutcome.Rejected(
+                        TelemetryErrorCode.ABNORMAL_READING, SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE));
+        assertThat(capture.captureCorrection(ReadingChannel.PDU, new BigDecimal("1.5"), "m3"))
+                .isInstanceOf(CaptureOutcome.Rejected.class);
+    }
+
     private static CapturedReading captured(CaptureOutcome outcome) {
         assertThat(outcome).isInstanceOf(CaptureOutcome.Captured.class);
         return ((CaptureOutcome.Captured) outcome).reading();

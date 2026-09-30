@@ -157,7 +157,7 @@ class BfmReadingServiceAnomalyDedupTest {
                         .correlationId("ocr-correlation")
                         .build()
         );
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_up", 100L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_up", 100L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("123"), ReadingTime.now().minusDays(1))));
         when(tenantConfigRepository.findConfigValue(anyInt(), anyString())).thenReturn(Optional.empty());
 

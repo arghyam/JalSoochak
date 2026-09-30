@@ -4,13 +4,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
-import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -21,13 +24,13 @@ import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -35,9 +38,14 @@ import static org.mockito.Mockito.when;
  * {@code confirmed_reading} only. It used to go through {@code updateReadingValues}, which also
  * overwrote {@code extracted_reading} with the hand-typed number, destroying the only record of what
  * the OCR provider actually read off that day's photo.
+ *
+ * <p>The corrected row is published again, and analytics recalculates the day and the day after it.
+ * The correction follows the rules of the target row's channel, as a submission on it would.
  */
 @ExtendWith(MockitoExtension.class)
 class MeterReadingConversationServiceUpdatePreviousReadingTest {
+
+    private static final LocalDate TARGET_DATE = ReadingTime.today().minusDays(2);
 
     @Mock
     private OperatorContextService operatorContextService;
@@ -51,9 +59,14 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
 
-
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
+
+    @Mock
+    private ReadingRepublisher readingRepublisher;
+
+    @Spy
+    private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture();
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -61,162 +74,94 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
     @InjectMocks
     private MeterReadingConversationService service;
 
-    @Test
-    void updatePreviousReadingUpdatesWhenNoThresholdsConfigured() {
+    @BeforeEach
+    void operator() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
         );
-
         when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
-
-        LocalDate today = ReadingTime.today();
-        LocalDate targetDate = today.minusDays(2);
-        LocalDate previousDate = today.minusDays(3);
-        LocalDate nextDate = today.minusDays(1);
-        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, today))
-                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(22L, "corr-2", 1L, targetDate, new BigDecimal("1100"))));
-        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, targetDate))
-                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(11L, "corr-3", 1L, previousDate, new BigDecimal("1000"))));
-        when(telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDate("tenant_test", 10L, 1L, targetDate))
-                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(33L, "corr-1", 1L, nextDate, new BigDecimal("1200"))));
-
-        CreateReadingResponse resp = service.updatePreviousReadingMessage(UpdatedPreviousReadingRequest.builder()
-                .contactId("919999999999")
-                .reading("1100")
-                .build());
-
-        assertNotNull(resp);
-        assertEquals(true, resp.isSuccess());
-        assertEquals("CONFIRMED", resp.getQualityStatus());
-        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1100"), 1L, null);
-        verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
-        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
-                1,
-                10L,
-                1L,
-                targetDate,
-                new BigDecimal("100"),
-                1
-        );
-        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
-                1,
-                10L,
-                1L,
-                nextDate,
-                new BigDecimal("100"),
-                1
-        );
     }
 
     @Test
-    void updatePreviousReadingUpdatesWhenNotGreaterThanPreviousConfirmedReading() {
-        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
-                "tenant_test",
-                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
-        );
+    void correctionPublishesTheCorrectedRowAgainInsteadOfWaterQuantities() {
+        targetRow("BFM", "1100");
 
-        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
-        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
-        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        CreateReadingResponse resp = update("1000");
 
-        LocalDate today = ReadingTime.today();
-        LocalDate targetDate = today.minusDays(2);
-        LocalDate previousDate = today.minusDays(3);
-        LocalDate nextDate = today.minusDays(1);
-        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, today))
-                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(22L, "corr-2", 1L, targetDate, new BigDecimal("1100"))));
-        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, targetDate))
-                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(11L, "corr-3", 1L, previousDate, new BigDecimal("1000"))));
-        when(telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDate("tenant_test", 10L, 1L, targetDate))
-                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(33L, "corr-1", 1L, nextDate, new BigDecimal("1200"))));
-        CreateReadingResponse resp = service.updatePreviousReadingMessage(UpdatedPreviousReadingRequest.builder()
-                .contactId("919999999999")
-                .reading("1000")
-                .build());
-
-        assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("CONFIRMED", resp.getQualityStatus());
         assertEquals(new BigDecimal("1000"), resp.getMeterReading());
         assertEquals("corr-2", resp.getCorrelationId());
-        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1000"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
+        InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
+        order.verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1000"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
+        order.verify(readingRepublisher).republish("tenant_test", 1, 22L);
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
-        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
-                1,
-                10L,
-                1L,
-                targetDate,
-                BigDecimal.ZERO,
-                1
-        );
-        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
-                1,
-                10L,
-                1L,
-                nextDate,
-                new BigDecimal("200"),
-                1
-        );
+        verifyNoInteractions(telemetryEventPublisher);
     }
 
     @Test
-    void updatePreviousReadingUpdatesWhenGreaterThanPreviousConfirmedReading() {
-        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
-                "tenant_test",
-                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
-        );
+    void restatingTheStoredValueKeepsItsProvenance() {
+        targetRow("BFM", "1100");
 
-        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
-        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
-        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        CreateReadingResponse resp = update("1100");
 
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
-
-        LocalDate today = ReadingTime.today();
-        LocalDate targetDate = today.minusDays(2);
-        LocalDate previousDate = today.minusDays(3);
-        LocalDate nextDate = today.minusDays(1);
-        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, today))
-                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(22L, "corr-2", 1L, targetDate, new BigDecimal("1100"))));
-        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, targetDate))
-                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(11L, "corr-3", 1L, previousDate, new BigDecimal("1000"))));
-        when(telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDate("tenant_test", 10L, 1L, targetDate))
-                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(33L, "corr-1", 1L, nextDate, new BigDecimal("1200"))));
-        CreateReadingResponse resp = service.updatePreviousReadingMessage(UpdatedPreviousReadingRequest.builder()
-                .contactId("919999999999")
-                .reading("1110")
-                .build());
-
-        assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
-        assertEquals("CONFIRMED", resp.getQualityStatus());
-        assertEquals(new BigDecimal("1110"), resp.getMeterReading());
-        assertEquals("corr-2", resp.getCorrelationId());
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1100"), 1L, null, "m3");
+    }
+
+    @Test
+    void aLegacyRowWithNoChannelIsCorrectedAsBfm() {
+        targetRow(null, "1100");
+
+        update("1110");
+
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1110"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
-        verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
-        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
-                1,
-                10L,
-                1L,
-                targetDate,
-                new BigDecimal("110"),
-                1
-        );
-        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
-                1,
-                10L,
-                1L,
-                nextDate,
-                new BigDecimal("90"),
-                1
-        );
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
+    }
+
+    @Test
+    void aPduRowIsCorrectedInMinutes() {
+        targetRow("PDU", "90");
+
+        CreateReadingResponse resp = update("1440");
+
+        assertEquals(true, resp.isSuccess());
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1440"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL, "min");
+        verify(readingRepublisher).republish("tenant_test", 1, 22L);
+    }
+
+    @Test
+    void aPduRunLongerThanADayIsRejectedWithoutWritingAnything() {
+        targetRow("PDU", "90");
+        when(localizationService.localizeMessage(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE, "english"))
+                .thenReturn(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE);
+
+        CreateReadingResponse resp = update("1441");
+
+        assertEquals(false, resp.isSuccess());
+        assertEquals("REJECTED", resp.getQualityStatus());
+        assertEquals(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE, resp.getMessage());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
+    }
+
+    private void targetRow(String channel, String confirmedReading) {
+        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, ReadingTime.today()))
+                .thenReturn(Optional.of(new TelemetryLatestFlowReadingRecord(
+                        22L, 10L, 1L, "corr-2", BigDecimal.ZERO, new BigDecimal(confirmedReading), "",
+                        TARGET_DATE, TARGET_DATE.atTime(7, 0), channel, 0, TARGET_DATE.atTime(7, 0))));
+    }
+
+    private CreateReadingResponse update(String reading) {
+        return service.updatePreviousReadingMessage(UpdatedPreviousReadingRequest.builder()
+                .contactId("919999999999")
+                .reading(reading)
+                .build());
     }
 }

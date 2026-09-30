@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryPendingMeterChangeRe
 import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -83,6 +84,9 @@ class MeterReadingConversationServiceManualReadingTest {
     @Mock
     private ReadingRepublisher readingRepublisher;
 
+    @Spy
+    private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture();
+
     @InjectMocks
     private MeterReadingConversationService service;
 
@@ -105,7 +109,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
@@ -138,7 +142,7 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals("bfm-1", resp.getCorrelationId());
 
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("123"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
     }
@@ -157,7 +161,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
@@ -190,7 +194,7 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals("bfm-2", resp.getCorrelationId());
 
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 77L, new BigDecimal("123"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
     }
@@ -209,7 +213,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.empty());
 
         // Today's row already holds the resolver's value (150); the operator re-enters the same number.
@@ -240,7 +244,7 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals(true, resp.isSuccess());
         // Same value as the stored resolved reading → provenance left untouched (null source), so the row
         // keeps SOURCE_ROLLOVER_RESOLVED rather than being overwritten to MANUAL.
-        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("150"), 1L, null);
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("150"), 1L, null, "m3");
     }
 
     @Test
@@ -256,7 +260,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
@@ -281,7 +285,7 @@ class MeterReadingConversationServiceManualReadingTest {
 
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("100"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
         verify(telemetryTenantRepository, never()).updateMeterChangeReason(anyString(), anyLong(), anyString(), anyLong());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
@@ -322,7 +326,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
 
         // Snapshot is optional for this validation; it's only used as context in the anomaly record.
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.empty());
 
         // Thresholds: undersupply 50% of water norm (oversupply 0%).
@@ -367,7 +371,7 @@ class MeterReadingConversationServiceManualReadingTest {
         );
 
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 55L, new BigDecimal("40"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
     }
 
@@ -385,7 +389,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.empty());
 
         // Oversupply 10% above water norm.
@@ -409,7 +413,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 argThat(anomaly -> anomaly != null && anomaly.type() == AnomalyConstants.TYPE_OVER_WATER_SUPPLY)
         );
 
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
         verify(telemetryTenantRepository, never()).updateFlowReadingChannel(anyString(), anyLong(), anyString());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
@@ -429,7 +433,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.empty());
 
         // Nothing recorded for today yet: the manual value opens the row.
@@ -490,7 +494,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
@@ -533,7 +537,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
 
         // No confirmed reading before today => allow today's manual reading.
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, ReadingTime.today(), null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, ReadingChannel.BFM, ReadingTime.today(), null))
                 .thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
@@ -567,10 +571,10 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals(new BigDecimal("1000"), resp.getMeterReading());
         assertEquals("bfm-1", resp.getCorrelationId());
 
-        verify(telemetryTenantRepository).findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, ReadingTime.today(), null);
-        verify(telemetryTenantRepository, never()).findLatestConfirmedReadingSnapshot("tenant_test", 10L, null);
+        verify(telemetryTenantRepository).findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, ReadingChannel.BFM, ReadingTime.today(), null);
+        verify(telemetryTenantRepository, never()).findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null);
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("1000"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
     }
 
     @Test
@@ -587,7 +591,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
 
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
@@ -621,7 +625,7 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals("bfm-55", resp.getCorrelationId());
 
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 55L, new BigDecimal("100"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
         verify(telemetryTenantRepository).updateMeterChangeReason("tenant_test", 55L, "METER_REPLACED", 1L);
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
     }
@@ -642,7 +646,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findSectionOfficerUserIdsForScheme("tenant_test", 10L)).thenReturn(List.of(99L, 100L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
@@ -740,7 +744,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
@@ -797,7 +801,7 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals(true, resp.isSuccess());
         InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
         order.verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 88L, new BigDecimal("150"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
         order.verify(telemetryTenantRepository).updateFlowReadingChannel("tenant_test", 88L, ReadingChannel.BFM.name());
         order.verify(readingRepublisher).republish("tenant_test", 1, 88L);
         verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());
@@ -821,8 +825,9 @@ class MeterReadingConversationServiceManualReadingTest {
 
         assertEquals(true, resp.isSuccess());
         InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
+        // A typed-in value is in the channel's standard unit.
         order.verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("123"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
+                RolloverResolutionService.SOURCE_MANUAL, "kW.h");
         order.verify(telemetryTenantRepository).updateFlowReadingChannel("tenant_test", 99L, ReadingChannel.ELM.name());
         order.verify(readingRepublisher).republish("tenant_test", 1, 99L);
         verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());
@@ -856,6 +861,93 @@ class MeterReadingConversationServiceManualReadingTest {
         verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());
     }
 
+    @Test
+    void manualReadingOfAPduRunLongerThanADayIsRejectedWithoutWritingAnything() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("hi");
+        when(localizationService.normalizeLanguageKey("hi")).thenReturn("hindi");
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.PDU);
+        when(localizationService.localizeMessage(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE, "hindi"))
+                .thenReturn("localised");
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("1441")
+                .build());
+
+        assertEquals(false, resp.isSuccess());
+        assertEquals("REJECTED", resp.getQualityStatus());
+        assertEquals("localised", resp.getMessage());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(telemetryTenantRepository, never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
+                any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
+                any(), any(), any());
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(anyString(), any());
+        verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
+    }
+
+    @Test
+    void manualReadingOfAPduRunHasNoBaselineAndSkipsTheMaximumCheck() {
+        stubAcceptedManualReading();
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L, "pdu-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO)));
+        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.PDU);
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("1440")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        // A run is not a running total, so there is nothing earlier to compare it with.
+        verify(telemetryTenantRepository, never()).findLatestConfirmedReadingSnapshot(any(), any(), any(), any());
+        verify(telemetryTenantRepository, never()).findLatestConfirmedReadingSnapshotBeforeDate(any(), any(), any(), any(), any());
+        // The maximum is a water volume measured against a meter total, so its config isn't even read.
+        verify(tenantConfigRepository, never()).findConfigValue(anyInt(), ArgumentMatchers.eq("WATER_NORM"));
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("1440"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL, "min");
+        verify(readingRepublisher).republish("tenant_test", 1, 99L);
+    }
+
+    @Test
+    void manualReadingOnElmIsComparedWithElmReadingsOnlyAndSkipsTheMaximumCheck() {
+        stubAcceptedManualReading();
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L, "elm-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO)));
+        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.ELM);
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.ELM, null))
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
+                        new BigDecimal("4800"), ReadingTime.now().minusDays(1))));
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("4821.5")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        verify(tenantConfigRepository, never()).findConfigValue(anyInt(), ArgumentMatchers.eq("WATER_NORM"));
+        // The override anomaly records the ELM baseline, not whatever reading came last on the scheme.
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(ArgumentMatchers.eq("tenant_test"),
+                argThat(anomaly -> anomaly != null
+                        && anomaly.type() == AnomalyConstants.TYPE_MANUAL_OVERRIDE
+                        && new BigDecimal("4800").equals(anomaly.previousReading())));
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("4821.5"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL, "kW.h");
+    }
+
     /** Everything an accepted manual reading needs apart from the row it lands on. */
     private void stubAcceptedManualReading() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
@@ -866,7 +958,8 @@ class MeterReadingConversationServiceManualReadingTest {
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+        lenient().when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
+                        ArgumentMatchers.eq("tenant_test"), ArgumentMatchers.eq(10L), any(), ArgumentMatchers.isNull()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt()))
                 .thenReturn(0);

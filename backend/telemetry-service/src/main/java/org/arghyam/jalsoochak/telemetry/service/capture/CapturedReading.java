@@ -26,4 +26,9 @@ public record CapturedReading(
         BigDecimal confidence,
         int source,
         OcrReadingResult ocrResult) {
+
+    /** The code {@code submitted_unit} stores; null when there is no unit. */
+    public String submittedUnitCode() {
+        return submittedUnit == null ? null : submittedUnit.code();
+    }
 }

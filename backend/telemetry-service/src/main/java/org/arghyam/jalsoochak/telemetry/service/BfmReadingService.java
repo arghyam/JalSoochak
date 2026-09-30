@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -197,8 +198,14 @@ public class BfmReadingService {
         BigDecimal confirmedReading = captured.value();
         BigDecimal effectiveConfirmedReading = confirmedReading;
 
-        Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt = telemetryTenantRepository
-                .findLatestConfirmedReadingSnapshot(schemaName, request.getSchemeId(), null);
+        // A reading is compared only with earlier readings on its own channel: a kWh index is never a
+        // flow meter's previous reading. A PDU reading is one run's duration rather than a running
+        // total, so it has no earlier reading to compare with or to show back at all.
+        boolean comparesWithEarlierReadings = resolvedChannel != ReadingChannel.PDU;
+        Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt = comparesWithEarlierReadings
+                ? telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
+                        schemaName, request.getSchemeId(), resolvedChannel, null)
+                : Optional.empty();
 
         // For non-meter-replacement submissions, validate against the latest confirmed reading.
         // Meter-replacement submissions are treated as a new baseline.
@@ -350,7 +357,7 @@ public class BfmReadingService {
         int confirmedReadingSource = captured.source();
         String rolloverAuditJson = null;
         Optional<RolloverResolutionService.ResolvedReading> rollover =
-                resolveRolloverIfApplicable(schemaName, request, ocrResult, isMeterReplaced, latestSnapshotOpt);
+                resolveRolloverIfApplicable(schemaName, request, resolvedChannel, ocrResult, isMeterReplaced, latestSnapshotOpt);
         if (rollover.isPresent()) {
             effectiveConfirmedReading = rollover.get().confirmedReading();
             confirmedReadingSource = rollover.get().source();
@@ -383,6 +390,7 @@ public class BfmReadingService {
             supplyBaseline = telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate(
                     schemaName,
                     request.getSchemeId(),
+                    resolvedChannel,
                     LocalDate.from(readingAt),
                     null).orElse(null);
             Verdict verdict = supplyPlausibilityGuard.assess(
@@ -403,7 +411,7 @@ public class BfmReadingService {
         // without its channel. The value is in the channel's standard unit; submitted_unit records the
         // unit it arrived in.
         String channelName = resolvedChannel.name();
-        String submittedUnit = captured.submittedUnit() != null ? captured.submittedUnit().code() : null;
+        String submittedUnit = captured.submittedUnitCode();
         FlowReadingVersion storedReading;
         Optional<Long> placeholderIdOpt = telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
                 schemaName,
@@ -585,9 +593,9 @@ public class BfmReadingService {
         BigDecimal lastConfirmedReading = latestSnapshotOpt
                 .map(TelemetryConfirmedReadingSnapshot::confirmedReading)
                 .orElse(null);
-        if (lastConfirmedReading == null) {
+        if (lastConfirmedReading == null && comparesWithEarlierReadings) {
             lastConfirmedReading = telemetryTenantRepository
-                    .findLastConfirmedReading(schemaName, request.getSchemeId(), readingId)
+                    .findLastConfirmedReading(schemaName, request.getSchemeId(), resolvedChannel, readingId)
                     .orElse(null);
         }
 
@@ -677,6 +685,7 @@ public class BfmReadingService {
     private Optional<RolloverResolutionService.ResolvedReading> resolveRolloverIfApplicable(
             String schemaName,
             CreateReadingRequest request,
+            ReadingChannel channel,
             OcrReadingResult ocrResult,
             boolean isMeterReplaced,
             Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt) {
@@ -691,7 +700,7 @@ public class BfmReadingService {
             return Optional.empty();
         }
         List<DailyConfirmedReading> dailyHistory = telemetryTenantRepository
-                .findRecentDailyConfirmedReadings(schemaName, request.getSchemeId(), null, ROLLOVER_HISTORY_DAYS);
+                .findRecentDailyConfirmedReadings(schemaName, request.getSchemeId(), channel, null, ROLLOVER_HISTORY_DAYS);
         return Optional.of(rolloverResolutionService.resolve(
                 ocrResult,
                 dailyHistory,
@@ -718,7 +727,7 @@ public class BfmReadingService {
         if (correlationId == null || correlationId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "correlationId must be provided");
         }
-        return updateConfirmedReadingByCorrelationId(correlationId, confirmedReading, null);
+        return updateConfirmedReadingByCorrelationId(correlationId, confirmedReading, null, null);
     }
 
     @Transactional
@@ -741,12 +750,28 @@ public class BfmReadingService {
                                                         String phoneNumber,
                                                         BigDecimal confirmedReading,
                                                         Integer tenantId) {
+        return updateConfirmedReading(correlationId, phoneNumber, confirmedReading, null, tenantId);
+    }
+
+    /**
+     * As {@link #updateConfirmedReading(String, String, BigDecimal, Integer)}, with the unit
+     * {@code confirmedReading} is given in. The unit is checked against the corrected row's channel and
+     * the value converted to that channel's standard unit, as on a submission.
+     *
+     * @param readingUnit the declared unit, unchecked; null or blank means the channel's standard unit
+     */
+    @Transactional
+    public CreateReadingResponse updateConfirmedReading(String correlationId,
+                                                        String phoneNumber,
+                                                        BigDecimal confirmedReading,
+                                                        String readingUnit,
+                                                        Integer tenantId) {
         if (confirmedReading == null || confirmedReading.compareTo(BigDecimal.ZERO) < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "confirmedReading must be a non-negative number");
         }
 
         if (correlationId != null && !correlationId.isBlank()) {
-            return updateConfirmedReadingByCorrelationId(correlationId.trim(), confirmedReading, tenantId);
+            return updateConfirmedReadingByCorrelationId(correlationId.trim(), confirmedReading, readingUnit, tenantId);
         }
 
         if (phoneNumber == null || phoneNumber.isBlank()) {
@@ -770,11 +795,12 @@ public class BfmReadingService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, OPERATOR_LOOKUP_MISS));
 
         return applyConfirmedReadingCorrection(
-                schemaName, latestReading, confirmedReading, operator.id(), operator.tenantId());
+                schemaName, latestReading, confirmedReading, readingUnit, operator.id(), operator.tenantId());
     }
 
     private CreateReadingResponse updateConfirmedReadingByCorrelationId(String correlationId,
                                                                         BigDecimal confirmedReading,
+                                                                        String readingUnit,
                                                                         Integer tenantId) {
         String schemaName = resolveSchemaForCorrelationUpdate(tenantId);
 
@@ -805,6 +831,7 @@ public class BfmReadingService {
                 schemaName,
                 reading,
                 confirmedReading,
+                readingUnit,
                 reading.createdBy() != null ? reading.createdBy() : 1L,
                 eventTenantId);
     }
@@ -832,7 +859,8 @@ public class BfmReadingService {
 
     /**
      * The body both correction routes share once they have resolved the row to correct: apply the
-     * supply-plausibility rule, then either write the value or refuse it.
+     * submission rules of the row's channel (unit, PDU limit) and the supply-plausibility rule, then
+     * either write the value or refuse it.
      *
      * <p>SUPPLY-PLAUSIBILITY, §6.3. <strong>A failing correction never writes
      * {@code confirmed_reading}</strong>; a passing one writes it and clears the quarantine flag.
@@ -856,24 +884,50 @@ public class BfmReadingService {
      * chatbot image workflow and so needs one, whereas this method is reached only from
      * {@code PUT /readings} — the chatbot confirm path updates the repository directly.
      *
-     * @param updatedBy     the operator credited with the correction, and the operator the anomaly
-     *                      is filed against
-     * @param eventTenantId the tenant for the published event and for the household-size config
+     * @param submittedReading the corrected value, in {@code readingUnit}
+     * @param readingUnit      the unit the caller declared, unchecked; null or blank means the
+     *                         channel's standard unit
+     * @param updatedBy        the operator credited with the correction, and the operator the anomaly
+     *                         is filed against
+     * @param eventTenantId    the tenant for the published event and for the household-size config
      */
     private CreateReadingResponse applyConfirmedReadingCorrection(String schemaName,
                                                                   TelemetryLatestFlowReadingRecord reading,
-                                                                  BigDecimal confirmedReading,
+                                                                  BigDecimal submittedReading,
+                                                                  String readingUnit,
                                                                   Long updatedBy,
                                                                   Integer eventTenantId) {
         LocalDate readingDate = readingDateOf(reading);
+        // An absent channel reads as BFM, which is what analytics assumes for the same rows.
+        ReadingChannel channel = ReadingChannel.fromChannelValue(reading.channel());
+
+        // A correction can't store what the same channel's submission would have been refused. A
+        // refused unit or PDU run writes nothing, and no anomaly: it is the request that is wrong,
+        // not the reading.
+        CapturedReading captured;
+        switch (submittedValueCapture.captureCorrection(channel, submittedReading, readingUnit)) {
+            case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
+            case CaptureOutcome.Rejected(TelemetryErrorCode errorCode, String rejection) -> {
+                return CreateReadingResponse.builder()
+                        .success(false)
+                        .message(rejection)
+                        .correlationId(reading.correlationId())
+                        .qualityStatus("REJECTED")
+                        .errorCode(errorCode)
+                        .build();
+            }
+            case CaptureOutcome.Retry retry ->
+                    throw new IllegalStateException("A submitted value is never retried");
+        }
+        // In the channel's standard unit, so the checks below and the stored value agree.
+        BigDecimal confirmedReading = captured.value();
 
         // A pre-V40 tenant is skipped rather than checked, as on the submission path: refusing a
         // correction on a schema that cannot record a quarantine leaves the two stores' notion of
         // this row's status unexpressible. Only BFM rows are cumulative m3 indices, so the delta is
-        // not a water volume on any other channel; an absent channel reads as BFM, which is what
-        // analytics assumes for the same rows.
+        // not a water volume on any other channel.
         boolean supplyCheckApplies = !supplyPlausibilityGuard.isDisabled()
-                && ReadingChannel.fromChannelValue(reading.channel()) == ReadingChannel.BFM
+                && channel == ReadingChannel.BFM
                 && telemetryTenantRepository.supportsQuarantine(schemaName);
 
         if (supplyCheckApplies) {
@@ -882,7 +936,7 @@ public class BfmReadingService {
             // every correction would look like a tiny delta.
             TelemetryConfirmedReadingSnapshot baseline = telemetryTenantRepository
                     .findLatestConfirmedReadingSnapshotBeforeDate(
-                            schemaName, reading.schemeId(), readingDate, reading.id())
+                            schemaName, reading.schemeId(), channel, readingDate, reading.id())
                     .orElse(null);
             Verdict verdict = supplyPlausibilityGuard.assess(
                     schemaName,
@@ -905,7 +959,8 @@ public class BfmReadingService {
                 reading.id(),
                 confirmedReading,
                 updatedBy,
-                RolloverResolutionService.manualConfirmSource(confirmedReading, reading.confirmedReading())
+                RolloverResolutionService.manualConfirmSource(confirmedReading, reading.confirmedReading()),
+                captured.submittedUnitCode()
         );
         // SUPPLY-PLAUSIBILITY: the release path. Unconditional, and deliberately outside the check's
         // own branch — a clean row is set to the 0 it already holds, and a quarantined row is
@@ -1051,11 +1106,17 @@ public class BfmReadingService {
                 .findLatestFlowReadingByOperator(schemaName, operator.id())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, OPERATOR_LOOKUP_MISS));
 
+        // The reset has no unit field, so its 0 is in the standard unit of the row's channel, as on
+        // every correction path.
         telemetryTenantRepository.updateConfirmedReading(
                 schemaName,
                 latestReading.id(),
                 BigDecimal.ZERO,
-                operator.id()
+                operator.id(),
+                null,
+                ReadingChannel.fromChannelValue(latestReading.channel()).standardUnit()
+                        .map(ReadingUnit::code)
+                        .orElse(null)
         );
         // SUPPLY-PLAUSIBILITY: the marker described the value the reset has just destroyed, so it
         // cannot outlive it — 0 is not an implausible supply. Leaving it behind is not cosmetic:

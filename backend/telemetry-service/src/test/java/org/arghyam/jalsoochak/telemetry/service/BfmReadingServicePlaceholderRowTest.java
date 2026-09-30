@@ -139,7 +139,7 @@ class BfmReadingServicePlaceholderRowTest {
                         .build()
         );
 
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
@@ -268,7 +268,7 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals("corr-1", resp.getCorrelationId());
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
         verify(readingRepublisher).republish(schemaName, 22, 99L);
     }
 
@@ -305,7 +305,7 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals("corr-1", resp.getCorrelationId());
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
         verify(readingRepublisher).republish(schemaName, 22, 99L);
     }
 }

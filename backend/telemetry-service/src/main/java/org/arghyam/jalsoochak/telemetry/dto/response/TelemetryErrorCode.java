@@ -86,7 +86,7 @@ public enum TelemetryErrorCode {
 
     /**
      * The reading is not usable: the daily volume it implies is not plausible for the scheme that
-     * produced it.
+     * produced it, or a PDU run is longer than a day (1,440 minutes).
      *
      * <p><b>Deliberately vaguer than the anomaly it comes from.</b> Internally the same rejection is
      * {@code AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY} / {@code EscalationType

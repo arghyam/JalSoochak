@@ -96,7 +96,7 @@ class BfmReadingServiceLocationMismatchTest {
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);
-        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, null))
+        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
         lenient().when(tenantConfigRepository.findConfigValue(anyInt(), anyString()))
@@ -244,7 +244,7 @@ class BfmReadingServiceLocationMismatchTest {
         // of the other would lose a real signal.
         when(repo.supportsQuarantine(SCHEMA)).thenReturn(true);
         when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
-                eq(SCHEMA), eq(SCHEME_ID), any(LocalDate.class), isNull()))
+                eq(SCHEMA), eq(SCHEME_ID), eq(ReadingChannel.BFM), any(LocalDate.class), isNull()))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
         when(repo.findSchemeSupplyCounts(SCHEMA, SCHEME_ID))
                 .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(1, 0, 0)));

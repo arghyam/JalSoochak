@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
@@ -72,6 +73,10 @@ class BfmReadingServicePhoneOptionalUpdateTest {
     @Mock
     private SupplyPlausibilityGuard supplyPlausibilityGuard;
 
+    // Declared so @InjectMocks supplies the real capture step, which checks the corrected value.
+    @Spy
+    private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture();
+
     @InjectMocks
     private BfmReadingService service;
 
@@ -113,7 +118,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
         assertEquals(true, response.isSuccess());
         assertEquals("corr-1", response.getCorrelationId());
         verify(telemetryTenantRepository).updateConfirmedReading(
-                API_KEY_SCHEMA, 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL);
+                API_KEY_SCHEMA, 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL, "m3");
         verify(readingRepublisher).republish(API_KEY_SCHEMA, API_KEY_TENANT_ID, 99L);
     }
 
@@ -134,7 +139,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
         service.updateConfirmedReading("corr-1", null, new BigDecimal("123"), API_KEY_TENANT_ID);
 
         verify(telemetryTenantRepository).updateConfirmedReading(
-                API_KEY_SCHEMA, 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL);
+                API_KEY_SCHEMA, 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL, "m3");
     }
 
     /** Callers with no authenticated tenant (the correlationId-only overload) keep the header path. */
@@ -149,7 +154,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
         service.updateConfirmedReading("corr-1", null, new BigDecimal("123"), null);
 
         verify(telemetryTenantRepository).updateConfirmedReading(
-                "tenant_test", 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL);
+                "tenant_test", 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL, "m3");
     }
 
     @Test
@@ -164,7 +169,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
         service.updateConfirmedReading("corr-1", null, new BigDecimal("123"), 404);
 
         verify(telemetryTenantRepository).updateConfirmedReading(
-                "tenant_test", 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL);
+                "tenant_test", 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL, "m3");
     }
 
     /**

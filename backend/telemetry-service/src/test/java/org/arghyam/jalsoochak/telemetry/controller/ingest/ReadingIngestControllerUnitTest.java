@@ -869,6 +869,73 @@ class ReadingIngestControllerUnitTest {
         assertEquals(22, bfmReadingService.lastTenantId);
     }
 
+    /** Checked against the corrected row's channel by the service, so the controller passes it as sent. */
+    @Test
+    void updateReadingPassesTheReadingUnitToTheService() throws Exception {
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
+        ReadingIngestController controller = new ReadingIngestController(
+                new StubImageWorkflowService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                bfmReadingService
+        );
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
+                .build();
+
+        mockMvc.perform(put("/api/v1/telemetry/readings")
+                        .header("X-Api-Key", "js_valid_key")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "correlation_id": "corr-123",
+                                  "confirmed_reading": 1500,
+                                  "reading_unit": "L"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        assertEquals("L", bfmReadingService.lastReadingUnit);
+    }
+
+    @Test
+    void updateReadingAnswersAnUnsupportedUnitWithItsOwnCode() {
+        BfmReadingService rejecting = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null) {
+            @Override
+            public CreateReadingResponse updateConfirmedReading(String correlationId,
+                                                                String phoneNumber,
+                                                                BigDecimal confirmedReading,
+                                                                String readingUnit,
+                                                                Integer tenantId) {
+                return CreateReadingResponse.builder()
+                        .success(false)
+                        .message("Unsupported reading_unit for channel PDU. Allowed values are: min, h")
+                        .correlationId(correlationId)
+                        .qualityStatus("REJECTED")
+                        .errorCode(TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED)
+                        .build();
+            }
+        };
+        ReadingIngestController controller = new ReadingIngestController(
+                new StubImageWorkflowService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                rejecting
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .confirmedReading(new BigDecimal("45"))
+                        .readingUnit("m3")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED, response.getBody().getData().getErrorCode());
+    }
+
     @Test
     void updateReadingStillAcceptsPhoneNumberWithoutCorrelationId() {
         StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
@@ -942,6 +1009,7 @@ class ReadingIngestControllerUnitTest {
             public CreateReadingResponse updateConfirmedReading(String correlationId,
                                                                 String phoneNumber,
                                                                 BigDecimal confirmedReading,
+                                                                String readingUnit,
                                                                 Integer tenantId) {
                 throw new IllegalStateException("boom");
             }
@@ -979,6 +1047,7 @@ class ReadingIngestControllerUnitTest {
             public CreateReadingResponse updateConfirmedReading(String correlationId,
                                                                 String phoneNumber,
                                                                 BigDecimal confirmedReading,
+                                                                String readingUnit,
                                                                 Integer tenantId) {
                 return CreateReadingResponse.builder()
                         .success(false)
@@ -1145,6 +1214,7 @@ class ReadingIngestControllerUnitTest {
         private final ResponseStatusException failure;
         private String lastCorrelationId;
         private String lastPhoneNumber;
+        private String lastReadingUnit;
         private Integer lastTenantId;
         private boolean resetCalled;
         private Integer lastResetTenantId;
@@ -1172,9 +1242,11 @@ class ReadingIngestControllerUnitTest {
         public CreateReadingResponse updateConfirmedReading(String correlationId,
                                                             String phoneNumber,
                                                             BigDecimal confirmedReading,
+                                                            String readingUnit,
                                                             Integer tenantId) {
             this.lastCorrelationId = correlationId;
             this.lastPhoneNumber = phoneNumber;
+            this.lastReadingUnit = readingUnit;
             this.lastTenantId = tenantId;
             if (throwError) {
                 throw rejection();

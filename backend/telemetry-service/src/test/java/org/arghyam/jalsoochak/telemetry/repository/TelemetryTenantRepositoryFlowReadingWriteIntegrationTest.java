@@ -117,6 +117,21 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
     }
 
     @Test
+    void correctionWritesTheUnitItArrivedInAndDropsItOnAPreV56Schema() {
+        long migrated = insert(MIGRATED_SCHEMA, "PDU", "min").id();
+        long preV56 = insert(PRE_V56_SCHEMA, "PDU", null).id();
+
+        repository().updateConfirmedReading(MIGRATED_SCHEMA, migrated, new BigDecimal("120"), OPERATOR, 1, "h");
+        repository().updateConfirmedReading(PRE_V56_SCHEMA, preV56, new BigDecimal("120"), OPERATOR, 1, "h");
+
+        Map<String, Object> row = stored(MIGRATED_SCHEMA, migrated);
+        assertEquals(0, new BigDecimal("120").compareTo((BigDecimal) row.get("confirmed_reading")));
+        assertEquals("h", row.get("submitted_unit"));
+        assertEquals(0, new BigDecimal("120").compareTo(
+                (BigDecimal) stored(PRE_V56_SCHEMA, preV56).get("confirmed_reading")));
+    }
+
+    @Test
     void placeholderUpdateOfAMissingRowReturnsNoVersion() {
         FlowReadingVersion version = repository().updateFlowReadingFromIngestion(MIGRATED_SCHEMA, 404_404L,
                 READING_AT, BigDecimal.ZERO, BigDecimal.ONE, "corr-1", null, "", null, OPERATOR, "BFM", "m3");

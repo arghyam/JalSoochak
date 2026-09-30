@@ -140,7 +140,8 @@ class BfmReadingServiceResetLatestTenantScopeTest {
 
         assertTrue(response.isSuccess());
         assertEquals(BigDecimal.ZERO, response.getMeterReading());
-        verify(telemetryTenantRepository).updateConfirmedReading(CALLER_SCHEMA, 99L, BigDecimal.ZERO, 1L);
+        // The reset has no unit field, so its 0 is in the row's standard unit.
+        verify(telemetryTenantRepository).updateConfirmedReading(CALLER_SCHEMA, 99L, BigDecimal.ZERO, 1L, null, "m3");
     }
 
     /**
@@ -206,7 +207,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                 () -> service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID));
 
         assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
         verifyNoInteractions(readingRepublisher);
     }
 
@@ -248,7 +249,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
 
         assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
         verifyNoInteractions(operatorContextService);
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
     }
 
     @Test

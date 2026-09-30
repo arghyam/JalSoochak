@@ -409,6 +409,8 @@ class ConversationLocalizationServiceTest {
                             "इमेज से मीटर रीडिंग नहीं पढ़ी जा सकी। कृपया स्पष्ट फोटो भेजें।"),
                     Arguments.of("Meter photos are not supported for your reading channel.",
                             "आपके रीडिंग चैनल के लिए मीटर की फ़ोटो समर्थित नहीं है।"),
+                    Arguments.of("Pump running time can't be more than 24 hours (1440 minutes).",
+                            "पंप चलने का समय 24 घंटे (1440 मिनट) से अधिक नहीं हो सकता।"),
                     Arguments.of("OCR failed", "मीटर रीडिंग पढ़ने में त्रुटि हुई। कृपया स्पष्ट फोटो भेजें।"),
                     Arguments.of("Location saved successfully", "लोकेशन सफलतापूर्वक सेव हो गई।"),
                     Arguments.of("Reading updated successfully", "रीडिंग सफलतापूर्वक अपडेट हुई।")
