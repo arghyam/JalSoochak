@@ -35,6 +35,12 @@ public class SecurityConfig {
             @Value("${INTERNAL_JOB_SECRET:}") String internalJobSecret,
             @Value("${internal.jobs.path-prefix:/internal/}") String internalJobPathPrefix) throws Exception {
         boolean isProd = environment.acceptsProfiles(Profiles.of("prod"));
+        String normalizedInternalJobPathPrefix = internalJobPathPrefix;
+        while (normalizedInternalJobPathPrefix.endsWith("/")) {
+            normalizedInternalJobPathPrefix = normalizedInternalJobPathPrefix.substring(
+                0, normalizedInternalJobPathPrefix.length() - 1);
+        }
+        String internalJobPathPattern = normalizedInternalJobPathPrefix + "/**";
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -43,7 +49,7 @@ public class SecurityConfig {
                         BearerTokenAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers("/error", "/actuator/health/**", "/actuator/info").permitAll();
-                    auth.requestMatchers("/internal/**").permitAll();
+                    auth.requestMatchers(internalJobPathPattern).permitAll();
                     auth.requestMatchers(HttpMethod.GET,
                             "/api/v1/tenants",
                             "/api/v1/tenants/*/config/public",
