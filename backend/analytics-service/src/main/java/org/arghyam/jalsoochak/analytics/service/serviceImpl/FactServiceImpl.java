@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
+import org.arghyam.jalsoochak.analytics.exception.MalformedEventException;
 import org.arghyam.jalsoochak.analytics.repository.AnomalyRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimDateRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactOperatorAttendanceRepository;
@@ -381,8 +382,10 @@ public class FactServiceImpl implements FactService {
 
     /**
      * The submission's version. Unlike the other timestamps it never falls back to now: a version
-     * made up here would outrank the real ones. Unparseable is treated as absent, which the upsert
-     * never lets overwrite a versioned row.
+     * made up here would outrank the real ones. Nor is an unparseable one treated as absent, which
+     * the upsert would drop as stale against any stored version; the event fails instead.
+     *
+     * @throws MalformedEventException if the value is present but unparseable
      */
     private LocalDateTime parseSourceUpdatedAt(String value) {
         if (value == null || value.isBlank()) {
@@ -391,8 +394,8 @@ public class FactServiceImpl implements FactService {
         try {
             return LocalDateTime.parse(value);
         } catch (DateTimeParseException e) {
-            log.warn("Could not parse sourceUpdatedAt '{}'; treating the event's version as unknown", value);
-            return null;
+            meterRegistry.counter("meter_reading.source_updated_at.unparseable").increment();
+            throw new MalformedEventException("Could not parse sourceUpdatedAt '" + value + "'", e);
         }
     }
 

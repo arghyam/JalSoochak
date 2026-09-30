@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
+import org.arghyam.jalsoochak.analytics.exception.MalformedEventException;
 import org.arghyam.jalsoochak.analytics.repository.AnomalyRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimDateRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactOperatorAttendanceRepository;
@@ -52,6 +53,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -322,19 +324,18 @@ class FactServiceImplTest {
     }
 
     @Test
-    void ingestMeterReading_anUnparseableVersionIsUnknownRatherThanNow() {
-        // Falling back to now, as the other timestamps do, would let a broken event outrank every
-        // real version of the submission.
+    void ingestMeterReading_anUnparseableVersionFailsTheEventBeforeAnyWrite() {
+        // Falling back to now would let a broken event outrank every real version of the submission,
+        // and treating it as unknown would drop it as stale against any stored one.
         MeterReadingEvent event = readingEvent("40", "2026-01-02");
         event.setSourceReadingId(501L);
         event.setSourceUpdatedAt("not-a-timestamp");
-        storedAsNewRow();
 
-        service.ingestMeterReading(event);
+        assertThrows(MalformedEventException.class, () -> service.ingestMeterReading(event));
 
-        ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
-        verify(factIngestionRepository).upsertMeterReading(captor.capture());
-        assertThat(captor.getValue().getSourceUpdatedAt()).isNull();
+        assertThat(meterRegistry.counter("meter_reading.source_updated_at.unparseable").count()).isEqualTo(1.0);
+        verifyNoInteractions(factIngestionRepository, waterQuantityRecalculationService,
+                factOperatorAttendanceRepository);
     }
 
     @Test
