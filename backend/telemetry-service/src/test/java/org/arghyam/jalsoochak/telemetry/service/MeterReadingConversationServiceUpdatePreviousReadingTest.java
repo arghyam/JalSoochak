@@ -9,11 +9,13 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimitFixtures;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -23,11 +25,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -80,6 +85,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
 
     @BeforeEach
     void operator() {
+        PduDayLimitFixtures.allowsEveryRun(pduDayLimit);
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -158,8 +164,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
     @Test
     void aPduCorrectionTakingItsDayPastTheLimitIsRejectedWithoutWritingAnything() {
         targetRow("PDU", "90");
-        // On the corrected row's own day, with its old minutes left out.
-        when(pduDayLimit.wouldExceed("tenant_test", 10L, TARGET_DATE, new BigDecimal("600"), 22L)).thenReturn(true);
+        doReturn(Optional.empty()).when(pduDayLimit).writeWithinLimit(any(), any(), any(), any(), any(), any());
         when(localizationService.localizeMessage(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE, "english"))
                 .thenReturn(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE);
 
@@ -168,6 +173,12 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         assertEquals(false, resp.isSuccess());
         assertEquals("REJECTED", resp.getQualityStatus());
         assertEquals(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE, resp.getMessage());
+        // On the corrected row's own day, with its old minutes left out.
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Supplier<Long>> replaced = ArgumentCaptor.forClass(Supplier.class);
+        verify(pduDayLimit).writeWithinLimit(eq("tenant_test"), eq(10L), eq(TARGET_DATE), eq(new BigDecimal("600")),
+                replaced.capture(), any());
+        assertEquals(22L, replaced.getValue().get());
         verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }

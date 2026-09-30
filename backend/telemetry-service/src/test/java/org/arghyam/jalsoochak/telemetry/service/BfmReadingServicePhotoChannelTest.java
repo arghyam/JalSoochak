@@ -15,6 +15,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimitFixtures;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
@@ -85,6 +86,7 @@ class BfmReadingServicePhotoChannelTest {
 
     @BeforeEach
     void setUp() {
+        PduDayLimitFixtures.allowsEveryRun(pduDayLimit);
         OcrProviderResolver ocrProviderResolver = new OcrProviderResolver(
                 tenantConfigRepository, new MockEnvironment(), OcrProviderSettings.DEFAULT_PROVIDER_ID,
                 "https://flowvision.example/extract", "bfm-key", OcrProviderSettings.DEFAULT_AUTH_HEADER);

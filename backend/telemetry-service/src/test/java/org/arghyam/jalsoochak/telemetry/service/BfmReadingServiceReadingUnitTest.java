@@ -16,6 +16,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimitFixtures;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatcher;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -32,6 +34,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -40,6 +43,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -88,6 +92,7 @@ class BfmReadingServiceReadingUnitTest {
 
     @BeforeEach
     void setUp() {
+        PduDayLimitFixtures.allowsEveryRun(pduDayLimit);
         service = new BfmReadingService(
                 repo,
                 telemetryEventPublisher,
@@ -174,17 +179,27 @@ class BfmReadingServiceReadingUnitTest {
     void pduRunTakingItsDayPastTheLimitIsRefused() {
         CreateReadingRequest request = assertedValue(ReadingChannel.PDU, "2", "h");
         request.setReadingTime(LocalDateTime.of(2026, 9, 30, 18, 0));
-        // Checked in minutes, against the day the run is recorded for, and a new run replaces no row.
-        when(pduDayLimit.wouldExceed(eq(SCHEMA), eq(SCHEME_ID), eq(LocalDate.of(2026, 9, 30)),
-                argThat(sameValue("120")), eq(null))).thenReturn(true);
+        doReturn(Optional.empty()).when(pduDayLimit).writeWithinLimit(
+                any(), any(), any(), any(), any(), any());
 
         CreateReadingResponse response = service.createReading(request, SCHEMA, operator, CONTACT, false);
+
+        // Checked in minutes, against the day the run is recorded for, and a new run replaces no row.
+        ArgumentCaptor<Supplier<Long>> replaced = replacedRowCaptor();
+        verify(pduDayLimit).writeWithinLimit(eq(SCHEMA), eq(SCHEME_ID), eq(LocalDate.of(2026, 9, 30)),
+                argThat(sameValue("120")), replaced.capture(), any());
+        assertThat(replaced.getValue().get()).isNull();
 
         assertThat(response.isSuccess()).isFalse();
         assertThat(response.getQualityStatus()).isEqualTo("REJECTED");
         assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);
         assertThat(response.getMessage()).isEqualTo(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE);
         verifyNothingStoredOrPublished();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ArgumentCaptor<Supplier<Long>> replacedRowCaptor() {
+        return ArgumentCaptor.forClass(Supplier.class);
     }
 
     @Test

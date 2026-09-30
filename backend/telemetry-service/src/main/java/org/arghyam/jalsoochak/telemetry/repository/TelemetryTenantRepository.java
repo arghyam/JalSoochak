@@ -1945,6 +1945,21 @@ public class TelemetryTenantRepository {
     }
 
     /**
+     * Locks a scheme's PDU runs on {@code readingDate} until the transaction ends, so the day's total
+     * can be checked and written without another transaction changing it in between. Two days whose
+     * keys collide only make one of them wait.
+     */
+    @org.springframework.transaction.annotation.Transactional(
+            propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void lockPduDay(String schemaName, Long schemeId, LocalDate readingDate) {
+        validateSchemaName(schemaName);
+        String key = "pdu_day:" + schemaName + ":" + schemeId + ":" + readingDate;
+        jdbcTemplate.query("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
+                ps -> ps.setString(1, key),
+                rs -> null);
+    }
+
+    /**
      * The minutes of a scheme's PDU runs on {@code readingDate}, in total, 0 when there are none.
      *
      * @param excludeReadingId a row left out of the total, such as the one a correction replaces;

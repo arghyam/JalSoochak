@@ -14,11 +14,13 @@ import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimitFixtures;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
@@ -31,6 +33,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -40,6 +43,7 @@ import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.argThat;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -96,6 +100,7 @@ class MeterReadingConversationServiceManualReadingTest {
 
     @BeforeEach
     void defaultChannel() {
+        PduDayLimitFixtures.allowsEveryRun(pduDayLimit);
         lenient().when(readingChannelResolver.resolve(anyString(), anyString())).thenReturn(ReadingChannel.BFM);
     }
 
@@ -913,9 +918,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L, "pdu-1", 1L, BigDecimal.ZERO, new BigDecimal("300"))));
         when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.PDU);
-        // The value is written over today's row, so that row's old minutes don't count.
-        when(pduDayLimit.wouldExceed("tenant_test", 10L, ReadingTime.today(), new BigDecimal("600"), 99L))
-                .thenReturn(true);
+        doReturn(Optional.empty()).when(pduDayLimit).writeWithinLimit(any(), any(), any(), any(), any(), any());
         when(localizationService.localizeMessage(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE, "hindi"))
                 .thenReturn("localised");
 
@@ -927,6 +930,13 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals(false, resp.isSuccess());
         assertEquals("REJECTED", resp.getQualityStatus());
         assertEquals("localised", resp.getMessage());
+        // The value is written over today's row, so that row's old minutes don't count.
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Supplier<Long>> replaced = ArgumentCaptor.forClass(Supplier.class);
+        verify(pduDayLimit).writeWithinLimit(ArgumentMatchers.eq("tenant_test"), ArgumentMatchers.eq(10L),
+                ArgumentMatchers.eq(ReadingTime.today()), ArgumentMatchers.eq(new BigDecimal("600")),
+                replaced.capture(), any());
+        assertEquals(99L, replaced.getValue().get());
         verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
         verify(telemetryTenantRepository, never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),

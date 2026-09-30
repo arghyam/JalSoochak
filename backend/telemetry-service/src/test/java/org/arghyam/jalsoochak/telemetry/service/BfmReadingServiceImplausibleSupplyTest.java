@@ -20,6 +20,7 @@ import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimitFixtures;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -94,6 +95,7 @@ class BfmReadingServiceImplausibleSupplyTest {
 
     @BeforeEach
     void setUp() {
+        PduDayLimitFixtures.allowsEveryRun(pduDayLimit);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);

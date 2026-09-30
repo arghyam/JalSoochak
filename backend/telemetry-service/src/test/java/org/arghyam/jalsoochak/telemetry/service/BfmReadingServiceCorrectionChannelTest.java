@@ -11,24 +11,29 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimitFixtures;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -77,6 +82,7 @@ class BfmReadingServiceCorrectionChannelTest {
 
     @BeforeEach
     void setUp() {
+        PduDayLimitFixtures.allowsEveryRun(pduDayLimit);
         service = new BfmReadingService(
                 repo,
                 telemetryEventPublisher,
@@ -185,10 +191,16 @@ class BfmReadingServiceCorrectionChannelTest {
     @DisplayName("a PDU correction that takes its day past 1,440 minutes is refused, and nothing is written")
     void pduCorrectionTakingItsDayPastTheLimitIsRefused() {
         correcting("PDU", "90");
-        // In minutes, on the row's own day, with the row's old minutes left out.
-        when(pduDayLimit.wouldExceed(SCHEMA, 10L, READING_DATE, new BigDecimal("120"), READING_ID)).thenReturn(true);
+        doReturn(Optional.empty()).when(pduDayLimit).writeWithinLimit(any(), any(), any(), any(), any(), any());
 
         CreateReadingResponse response = correct("2", "h");
+
+        // In minutes, on the row's own day, with the row's old minutes left out.
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Supplier<Long>> replaced = ArgumentCaptor.forClass(Supplier.class);
+        verify(pduDayLimit).writeWithinLimit(eq(SCHEMA), eq(10L), eq(READING_DATE), eq(new BigDecimal("120")),
+                replaced.capture(), any());
+        assertThat(replaced.getValue().get()).isEqualTo(READING_ID);
 
         assertThat(response.isSuccess()).isFalse();
         assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);

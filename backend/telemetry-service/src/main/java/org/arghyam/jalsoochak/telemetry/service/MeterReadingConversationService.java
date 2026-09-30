@@ -44,6 +44,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 @Service
@@ -1067,8 +1068,139 @@ public class MeterReadingConversationService {
         }
     }
 
+    /** The row a manual value was written to, and the correlation id of that row's submission. */
+    private record ManualReadingRow(Long id, String correlationId) {
+    }
+
     /**
-     * The row {@link #manualReadingMessage} writes the value over, picked as it picks it: the pending
+     * Writes a manual value over the pending meter-change row, else over the operator's latest row
+     * today, else as a new row.
+     *
+     * @param newRowCorrelationId the correlation id a new row is given, and the one kept when the
+     *                            reused row today has none
+     */
+    private ManualReadingRow writeManualReading(TelemetryOperatorWithSchema operatorWithSchema,
+                                                Long schemeId,
+                                                LocalDate today,
+                                                Optional<TelemetryPendingMeterChangeRecord> pendingOpt,
+                                                BigDecimal value,
+                                                CapturedReading captured,
+                                                ReadingChannel channel,
+                                                boolean isMeterReplaced,
+                                                String meterChangeReason,
+                                                String newRowCorrelationId) {
+        if (pendingOpt.isPresent()) {
+            // Manual reading submissions should only update confirmed_reading (never extracted_reading).
+            // A pending meter-change row has confirmed_reading = 0 by query invariant, so it can never
+            // carry rollover-resolved provenance — tag MANUAL unconditionally, folded into the same UPDATE.
+            Long pendingId = pendingOpt.get().id();
+            telemetryTenantRepository.updateConfirmedReading(
+                    operatorWithSchema.schemaName(),
+                    pendingId,
+                    value,
+                    operatorWithSchema.operator().id(),
+                    RolloverResolutionService.SOURCE_MANUAL,
+                    captured.submittedUnitCode()
+            );
+            telemetryTenantRepository.updateFlowReadingChannel(
+                    operatorWithSchema.schemaName(), pendingId, channel.name());
+            if (isMeterReplaced) {
+                telemetryTenantRepository.updateMeterChangeReason(
+                        operatorWithSchema.schemaName(),
+                        pendingId,
+                        "METER_REPLACED",
+                        operatorWithSchema.operator().id()
+                );
+            }
+            return new ManualReadingRow(pendingId, pendingOpt.get().correlationId());
+        }
+
+        Optional<TelemetryFlowReadingDetails> todaysFlowOpt = telemetryTenantRepository.findLatestFlowReadingForDate(
+                operatorWithSchema.schemaName(),
+                schemeId,
+                operatorWithSchema.operator().id(),
+                today
+        );
+        if (todaysFlowOpt.isPresent()) {
+            TelemetryFlowReadingDetails todaysFlow = todaysFlowOpt.get();
+            // Manual reading submissions should only update confirmed_reading (never extracted_reading),
+            // regardless of whether extracted_reading exists for today's row. Today's row may have been
+            // rollover-resolved earlier, so retag MANUAL only when the value actually changes — a
+            // same-value re-entry keeps SOURCE_ROLLOVER_RESOLVED. Folded into the same UPDATE.
+            telemetryTenantRepository.updateConfirmedReading(
+                    operatorWithSchema.schemaName(),
+                    todaysFlow.id(),
+                    value,
+                    operatorWithSchema.operator().id(),
+                    RolloverResolutionService.manualConfirmSource(value, todaysFlow.confirmedReading()),
+                    captured.submittedUnitCode()
+            );
+            telemetryTenantRepository.updateFlowReadingChannel(
+                    operatorWithSchema.schemaName(), todaysFlow.id(), channel.name());
+            if (isMeterReplaced) {
+                telemetryTenantRepository.updateMeterChangeReason(
+                        operatorWithSchema.schemaName(),
+                        todaysFlow.id(),
+                        "METER_REPLACED",
+                        operatorWithSchema.operator().id()
+                );
+            }
+            String correlationId = todaysFlow.correlationId() != null && !todaysFlow.correlationId().isBlank()
+                    ? todaysFlow.correlationId()
+                    : newRowCorrelationId;
+            return new ManualReadingRow(todaysFlow.id(), correlationId);
+        }
+
+        // Nothing recorded for today yet, so the manual value opens the row: extracted_reading
+        // keeps the 0 sentinel (nothing extracted it) and the row is tagged MANUAL. Without the
+        // tag it would keep confirmed_reading_source at its DEFAULT 0 = AS_EXTRACTED and claim
+        // the AI picked a number it never saw.
+        //
+        // Both writes go through the @Transactional persist helper rather than an insert
+        // followed by a separate applyConfirmedReadingSource: a marker write that failed on its
+        // own would commit exactly the mislabelled row this is here to prevent. NORMAL
+        // ingestion with no submitted ids skips the tracking UPDATE, so this is the same two
+        // statements the API path already runs, under one transaction. The channel and the
+        // unit are written by the insert itself.
+        Long newRowId = telemetryTenantRepository.persistFlowReadingWithTracking(
+                operatorWithSchema.schemaName(),
+                null,
+                schemeId,
+                operatorWithSchema.operator().id(),
+                ReadingTime.now(),
+                BigDecimal.ZERO,
+                value,
+                newRowCorrelationId,
+                null,
+                "",
+                isMeterReplaced ? "METER_REPLACED" : meterChangeReason,
+                IngestionSource.NORMAL,
+                null,
+                null,
+                null,
+                RolloverResolutionService.SOURCE_MANUAL,
+                null,
+                channel.name(),
+                captured.submittedUnitCode()
+        ).id();
+        return new ManualReadingRow(newRowId, newRowCorrelationId);
+    }
+
+    private CreateReadingResponse rejectedManualReading(String message,
+                                                        String languageKey,
+                                                        String correlationId,
+                                                        BigDecimal manualReadingValue) {
+        return CreateReadingResponse.builder()
+                .success(false)
+                .message(localizationService.localizeMessage(message, languageKey))
+                .qualityStatus("REJECTED")
+                .correlationId(correlationId)
+                .meterReading(manualReadingValue)
+                .build();
+    }
+
+    /**
+     * The row {@link #writeManualReading} writes the value over, picked as it picks it: the pending
      * meter-change row, else the operator's latest row today. Null when the value adds a row.
      */
     private Long rowTheManualValueReplaces(TelemetryOperatorWithSchema operatorWithSchema,
@@ -1144,8 +1276,8 @@ public class MeterReadingConversationService {
 
             // The same rules as any other submitted value. WhatsApp has no unit field, so the value is
             // in the channel's standard unit.
-            LocalDate today = ReadingTime.today();
-            CaptureOutcome outcome = submittedValueCapture.capture(new CaptureInput(
+            CapturedReading captured;
+            switch (submittedValueCapture.capture(new CaptureInput(
                     operatorWithSchema.schemaName(),
                     tenantId,
                     operatorWithSchema.operator().id(),
@@ -1155,24 +1287,10 @@ public class MeterReadingConversationService {
                     manualReadingValue,
                     null,
                     false,
-                    OcrRetryMode.NONE));
-            if (resolvedChannel == ReadingChannel.PDU
-                    && outcome instanceof CaptureOutcome.Captured(CapturedReading run)
-                    && pduDayLimit.wouldExceed(operatorWithSchema.schemaName(), schemeId, today, run.value(),
-                            rowTheManualValueReplaces(operatorWithSchema, schemeId, pendingOpt, today))) {
-                outcome = PduDayLimit.EXCEEDED;
-            }
-            CapturedReading captured;
-            switch (outcome) {
+                    OcrRetryMode.NONE))) {
                 case CaptureOutcome.Captured(CapturedReading reading) -> captured = reading;
                 case CaptureOutcome.Rejected rejected -> {
-                    return CreateReadingResponse.builder()
-                            .success(false)
-                            .message(localizationService.localizeMessage(rejected.message(), languageKey))
-                            .qualityStatus("REJECTED")
-                            .correlationId(correlationId)
-                            .meterReading(manualReadingValue)
-                            .build();
+                    return rejectedManualReading(rejected.message(), languageKey, correlationId, manualReadingValue);
                 }
                 case CaptureOutcome.Retry retry ->
                         throw new IllegalStateException("A submitted value is never retried");
@@ -1183,6 +1301,7 @@ public class MeterReadingConversationService {
             // - If isManualReading=false, compare against the most recent confirmed reading strictly before today.
             // - If the meter is replaced, load latest snapshot for anomaly/audit context only.
             // - A PDU reading is one run's duration rather than a running total, so it has none.
+            LocalDate today = ReadingTime.today();
             boolean compareWithLatest = request.getIsManualReading() == null || Boolean.TRUE.equals(request.getIsManualReading());
             Optional<TelemetryConfirmedReadingSnapshot> previousSnapshotOpt;
             if (resolvedChannel == ReadingChannel.PDU) {
@@ -1374,108 +1493,28 @@ public class MeterReadingConversationService {
                 }
             }
 
-            // ANOMALY-SUBMISSION-LINK: the flow_reading_table row the manual value lands on, captured
-            // across all three branches below so the MANUAL_OVERRIDE anomaly recorded after them can
-            // point at it. Every branch ends with a real row — one reused, one updated, one created —
-            // so this is never null by the time the anomaly is written.
-            Long manualReadingId;
-            if (pendingOpt.isPresent()) {
-                // Manual reading submissions should only update confirmed_reading (never extracted_reading).
-                // A pending meter-change row has confirmed_reading = 0 by query invariant, so it can never
-                // carry rollover-resolved provenance — tag MANUAL unconditionally, folded into the same UPDATE.
-                manualReadingId = pendingOpt.get().id();
-                telemetryTenantRepository.updateConfirmedReading(
-                        operatorWithSchema.schemaName(),
-                        pendingOpt.get().id(),
-                        effectiveConfirmedReading,
-                        operatorWithSchema.operator().id(),
-                        RolloverResolutionService.SOURCE_MANUAL,
-                        captured.submittedUnitCode()
-                );
-                telemetryTenantRepository.updateFlowReadingChannel(
-                        operatorWithSchema.schemaName(), manualReadingId, resolvedChannel.name());
-                if (isMeterReplaced) {
-                    telemetryTenantRepository.updateMeterChangeReason(
-                            operatorWithSchema.schemaName(),
-                            pendingOpt.get().id(),
-                            "METER_REPLACED",
-                            operatorWithSchema.operator().id()
-                    );
+            // ANOMALY-SUBMISSION-LINK: the flow_reading_table row the manual value lands on, which the
+            // MANUAL_OVERRIDE anomaly recorded below points at. Every branch of the write ends with a real
+            // row — one reused, one updated, one created — so it is never null.
+            String newRowCorrelationId = correlationId;
+            Supplier<ManualReadingRow> write = () -> writeManualReading(operatorWithSchema, schemeId, today, pendingOpt,
+                    effectiveConfirmedReading, captured, resolvedChannel, isMeterReplaced,
+                    request.getMeterChangeReason(), newRowCorrelationId);
+            ManualReadingRow manualReadingRow;
+            if (resolvedChannel == ReadingChannel.PDU) {
+                Optional<ManualReadingRow> written = pduDayLimit.writeWithinLimit(
+                        operatorWithSchema.schemaName(), schemeId, today, effectiveConfirmedReading,
+                        () -> rowTheManualValueReplaces(operatorWithSchema, schemeId, pendingOpt, today), write);
+                if (written.isEmpty()) {
+                    return rejectedManualReading(
+                            PduDayLimit.EXCEEDED.message(), languageKey, correlationId, manualReadingValue);
                 }
-                correlationId = pendingOpt.get().correlationId();
+                manualReadingRow = written.get();
             } else {
-                Optional<TelemetryFlowReadingDetails> todaysFlowOpt = telemetryTenantRepository.findLatestFlowReadingForDate(
-                        operatorWithSchema.schemaName(),
-                        schemeId,
-                        operatorWithSchema.operator().id(),
-                        today
-                );
-
-                if (todaysFlowOpt.isPresent()) {
-                    TelemetryFlowReadingDetails todaysFlow = todaysFlowOpt.get();
-                    manualReadingId = todaysFlow.id();
-                    // Manual reading submissions should only update confirmed_reading (never extracted_reading),
-                    // regardless of whether extracted_reading exists for today's row. Today's row may have been
-                    // rollover-resolved earlier, so retag MANUAL only when the value actually changes — a
-                    // same-value re-entry keeps SOURCE_ROLLOVER_RESOLVED. Folded into the same UPDATE.
-                    telemetryTenantRepository.updateConfirmedReading(
-                            operatorWithSchema.schemaName(),
-                            todaysFlow.id(),
-                            effectiveConfirmedReading,
-                            operatorWithSchema.operator().id(),
-                            RolloverResolutionService.manualConfirmSource(
-                                    effectiveConfirmedReading, todaysFlow.confirmedReading()),
-                            captured.submittedUnitCode()
-                    );
-                    telemetryTenantRepository.updateFlowReadingChannel(
-                            operatorWithSchema.schemaName(), manualReadingId, resolvedChannel.name());
-                    if (isMeterReplaced) {
-                        telemetryTenantRepository.updateMeterChangeReason(
-                                operatorWithSchema.schemaName(),
-                                todaysFlow.id(),
-                                "METER_REPLACED",
-                                operatorWithSchema.operator().id()
-                        );
-                    }
-
-                    if (todaysFlow.correlationId() != null && !todaysFlow.correlationId().isBlank()) {
-                        correlationId = todaysFlow.correlationId();
-                    }
-                } else {
-                    // Nothing recorded for today yet, so the manual value opens the row: extracted_reading
-                    // keeps the 0 sentinel (nothing extracted it) and the row is tagged MANUAL. Without the
-                    // tag it would keep confirmed_reading_source at its DEFAULT 0 = AS_EXTRACTED and claim
-                    // the AI picked a number it never saw.
-                    //
-                    // Both writes go through the @Transactional persist helper rather than an insert
-                    // followed by a separate applyConfirmedReadingSource: a marker write that failed on its
-                    // own would commit exactly the mislabelled row this is here to prevent. NORMAL
-                    // ingestion with no submitted ids skips the tracking UPDATE, so this is the same two
-                    // statements the API path already runs, under one transaction. The channel and the
-                    // unit are written by the insert itself.
-                    manualReadingId = telemetryTenantRepository.persistFlowReadingWithTracking(
-                            operatorWithSchema.schemaName(),
-                            null,
-                            schemeId,
-                            operatorWithSchema.operator().id(),
-                            ReadingTime.now(),
-                            BigDecimal.ZERO,
-                            effectiveConfirmedReading,
-                            correlationId,
-                            null,
-                            "",
-                            isMeterReplaced ? "METER_REPLACED" : request.getMeterChangeReason(),
-                            IngestionSource.NORMAL,
-                            null,
-                            null,
-                            null,
-                            RolloverResolutionService.SOURCE_MANUAL,
-                            null,
-                            resolvedChannel.name(),
-                            captured.submittedUnitCode()
-                    ).id();
-                }
+                manualReadingRow = write.get();
             }
+            Long manualReadingId = manualReadingRow.id();
+            correlationId = manualReadingRow.correlationId();
 
             // Analytics has to receive the manual value: without this the row exists in telemetry
             // only, with no fact row and no water quantity for the day. Published straight after the
@@ -1812,26 +1851,12 @@ public class MeterReadingConversationService {
 
             // The corrected value follows the rules of the target row's channel, as a submission on it
             // would. WhatsApp has no unit field, so the value is in that channel's standard unit.
-            // The row's old minutes don't count towards its day.
             ReadingChannel channel = ReadingChannel.fromChannelValue(targetDayRecord.channel());
-            CaptureOutcome outcome = submittedValueCapture.captureCorrection(channel, readingValue, null);
-            if (channel == ReadingChannel.PDU
-                    && outcome instanceof CaptureOutcome.Captured(CapturedReading run)
-                    && pduDayLimit.wouldExceed(operatorWithSchema.schemaName(), schemeId,
-                            targetDayRecord.readingDate(), run.value(), targetDayRecord.id())) {
-                outcome = PduDayLimit.EXCEEDED;
-            }
             CapturedReading captured;
-            switch (outcome) {
+            switch (submittedValueCapture.captureCorrection(channel, readingValue, null)) {
                 case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
                 case CaptureOutcome.Rejected rejected -> {
-                    return CreateReadingResponse.builder()
-                            .success(false)
-                            .message(localizationService.localizeMessage(rejected.message(), languageKey))
-                            .qualityStatus("REJECTED")
-                            .correlationId(request.getContactId())
-                            .meterReading(readingValue)
-                            .build();
+                    return rejectedManualReading(rejected.message(), languageKey, request.getContactId(), readingValue);
                 }
                 case CaptureOutcome.Retry retry ->
                         throw new IllegalStateException("A submitted value is never retried");
@@ -1843,15 +1868,28 @@ public class MeterReadingConversationService {
             // record of what the OCR provider read off that day's photo. Retag MANUAL only when the value
             // actually moves, so restating the stored number keeps an existing ROLLOVER_RESOLVED or
             // EXTERNALLY_ASSERTED marker.
-            telemetryTenantRepository.updateConfirmedReading(
-                    operatorWithSchema.schemaName(),
-                    targetDayRecord.id(),
-                    correctedReading,
-                    operatorId,
-                    RolloverResolutionService.manualConfirmSource(
-                            correctedReading, targetDayRecord.confirmedReading()),
-                    captured.submittedUnitCode()
-            );
+            Supplier<Long> write = () -> {
+                telemetryTenantRepository.updateConfirmedReading(
+                        operatorWithSchema.schemaName(),
+                        targetDayRecord.id(),
+                        correctedReading,
+                        operatorId,
+                        RolloverResolutionService.manualConfirmSource(
+                                correctedReading, targetDayRecord.confirmedReading()),
+                        captured.submittedUnitCode()
+                );
+                return targetDayRecord.id();
+            };
+            if (channel == ReadingChannel.PDU) {
+                // The row's old minutes don't count towards its day.
+                if (pduDayLimit.writeWithinLimit(operatorWithSchema.schemaName(), schemeId,
+                        targetDayRecord.readingDate(), correctedReading, targetDayRecord::id, write).isEmpty()) {
+                    return rejectedManualReading(
+                            PduDayLimit.EXCEEDED.message(), languageKey, request.getContactId(), readingValue);
+                }
+            } else {
+                write.get();
+            }
 
             // Analytics recalculates the corrected day and the day after it from the stored readings, so
             // the corrected row is published again rather than a water quantity worked out here. This

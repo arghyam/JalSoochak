@@ -15,6 +15,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimitFixtures;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -78,6 +79,7 @@ class BfmReadingServiceDeclaredChannelTest {
 
     @BeforeEach
     void setUp() {
+        PduDayLimitFixtures.allowsEveryRun(pduDayLimit);
         service = new BfmReadingService(
                 repo,
                 telemetryEventPublisher,

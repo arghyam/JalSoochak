@@ -48,6 +48,7 @@ import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 @Service
 @RequiredArgsConstructor
@@ -142,24 +143,11 @@ public class BfmReadingService {
                 request.getReadingUnit(),
                 request.isExternallyAsserted(),
                 ocrRetryMode));
-        LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(ReadingTime.now());
-        // A new run: whichever row it lands on, a placeholder or a new one, holds no minutes yet.
-        if (resolvedChannel == ReadingChannel.PDU
-                && outcome instanceof CaptureOutcome.Captured(CapturedReading run)
-                && pduDayLimit.wouldExceed(schemaName, request.getSchemeId(), readingAt.toLocalDate(), run.value(), null)) {
-            outcome = PduDayLimit.EXCEEDED;
-        }
         CapturedReading captured;
         switch (outcome) {
             case CaptureOutcome.Captured(CapturedReading reading) -> captured = reading;
             case CaptureOutcome.Rejected(TelemetryErrorCode errorCode, String rejection) -> {
-                return CreateReadingResponse.builder()
-                        .success(false)
-                        .message(rejection)
-                        .correlationId(UUID.randomUUID().toString())
-                        .qualityStatus("REJECTED")
-                        .errorCode(errorCode)
-                        .build();
+                return rejected(errorCode, rejection);
             }
             case CaptureOutcome.Retry(String retry) -> {
                 return CreateReadingResponse.builder()
@@ -192,6 +180,7 @@ public class BfmReadingService {
                 .map(OcrReadingResult::getCorrelationId)
                 .filter(value -> !value.isBlank())
                 .orElse(null);
+        LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(ReadingTime.now());
 
         // READING-PROVENANCE: extracted_reading records what the OCR provider read off the meter photo. The
         // image capture runs only when the caller supplied no value, so on an API-asserted submission
@@ -421,71 +410,88 @@ public class BfmReadingService {
         // unit it arrived in.
         String channelName = resolvedChannel.name();
         String submittedUnit = captured.submittedUnitCode();
+        // Fixed here because a PDU run is written through a callback, inside its day's lock.
+        BigDecimal valueToStore = effectiveConfirmedReading;
+        Integer assertedSource = request.isExternallyAsserted() ? confirmedReadingSource : null;
+        boolean storeQuarantined = quarantined;
+        Supplier<FlowReadingVersion> store = () -> {
+            Optional<Long> placeholderIdOpt = telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
+                    schemaName,
+                    request.getSchemeId(),
+                    operatorInRequest.id(),
+                    LocalDate.from(readingAt)
+            );
+            if (lenientIngestion || request.isExternallyAsserted() || storeQuarantined) {
+                // LENIENT-INGEST: persist the reading and its ingestion tracking (source + submitted scheme
+                // ids / phone hash) atomically, so a failure can never leave a recorded reading without its
+                // tracking metadata. Covers both the new-insert and same-day placeholder-reuse paths.
+                // READING-PROVENANCE: API-supplied values take the same transactional path — same inserts and
+                // updates as before, plus the EXTERNALLY_ASSERTED marker committed with the row.
+                return telemetryTenantRepository.persistFlowReadingWithTracking(
+                        schemaName,
+                        placeholderIdOpt.orElse(null),
+                        request.getSchemeId(),
+                        operatorInRequest.id(),
+                        readingAt,
+                        extractedReading,
+                        valueToStore,
+                        storageCorrelationId,
+                        ocrCorrelationId,
+                        request.getReadingUrl(),
+                        request.getMeterChangeReason(),
+                        request.getIngestionSource() != null ? request.getIngestionSource() : IngestionSource.NORMAL,
+                        request.getSubmittedStateSchemeId(),
+                        request.getSubmittedCentreSchemeId(),
+                        request.getSubmittedPhoneHash(),
+                        assertedSource,
+                        // SUPPLY-PLAUSIBILITY: the marker commits inside the same transaction as the
+                        // insert, so the row cannot land without it.
+                        storeQuarantined ? QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY : null,
+                        channelName,
+                        submittedUnit);
+            }
+            if (placeholderIdOpt.isPresent()) {
+                return telemetryTenantRepository.updateFlowReadingFromIngestion(
+                        schemaName,
+                        placeholderIdOpt.get(),
+                        readingAt,
+                        extractedReading,
+                        valueToStore,
+                        storageCorrelationId,
+                        ocrCorrelationId,
+                        request.getReadingUrl(),
+                        request.getMeterChangeReason(),
+                        operatorInRequest.id(),
+                        channelName,
+                        submittedUnit
+                );
+            }
+            return telemetryTenantRepository.createFlowReading(
+                    schemaName,
+                    request.getSchemeId(),
+                    operatorInRequest.id(),
+                    readingAt,
+                    extractedReading,
+                    valueToStore,
+                    storageCorrelationId,
+                    ocrCorrelationId,
+                    request.getReadingUrl(),
+                    request.getMeterChangeReason(),
+                    channelName,
+                    submittedUnit
+            );
+        };
         FlowReadingVersion storedReading;
-        Optional<Long> placeholderIdOpt = telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
-                schemaName,
-                request.getSchemeId(),
-                operatorInRequest.id(),
-                LocalDate.from(readingAt)
-        );
-        if (lenientIngestion || request.isExternallyAsserted() || quarantined) {
-            // LENIENT-INGEST: persist the reading and its ingestion tracking (source + submitted scheme
-            // ids / phone hash) atomically, so a failure can never leave a recorded reading without its
-            // tracking metadata. Covers both the new-insert and same-day placeholder-reuse paths.
-            // READING-PROVENANCE: API-supplied values take the same transactional path — same inserts and
-            // updates as before, plus the EXTERNALLY_ASSERTED marker committed with the row.
-            storedReading = telemetryTenantRepository.persistFlowReadingWithTracking(
-                    schemaName,
-                    placeholderIdOpt.orElse(null),
-                    request.getSchemeId(),
-                    operatorInRequest.id(),
-                    readingAt,
-                    extractedReading,
-                    effectiveConfirmedReading,
-                    storageCorrelationId,
-                    ocrCorrelationId,
-                    request.getReadingUrl(),
-                    request.getMeterChangeReason(),
-                    request.getIngestionSource() != null ? request.getIngestionSource() : IngestionSource.NORMAL,
-                    request.getSubmittedStateSchemeId(),
-                    request.getSubmittedCentreSchemeId(),
-                    request.getSubmittedPhoneHash(),
-                    request.isExternallyAsserted() ? confirmedReadingSource : null,
-                    // SUPPLY-PLAUSIBILITY: the marker commits inside the same transaction as the
-                    // insert, so the row cannot land without it.
-                    quarantined ? QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY : null,
-                    channelName,
-                    submittedUnit);
-        } else if (placeholderIdOpt.isPresent()) {
-            storedReading = telemetryTenantRepository.updateFlowReadingFromIngestion(
-                    schemaName,
-                    placeholderIdOpt.get(),
-                    readingAt,
-                    extractedReading,
-                    effectiveConfirmedReading,
-                    storageCorrelationId,
-                    ocrCorrelationId,
-                    request.getReadingUrl(),
-                    request.getMeterChangeReason(),
-                    operatorInRequest.id(),
-                    channelName,
-                    submittedUnit
-            );
+        if (resolvedChannel == ReadingChannel.PDU) {
+            // A new run: whichever row it lands on, a placeholder or a new one, holds no minutes yet.
+            Optional<FlowReadingVersion> stored = pduDayLimit.writeWithinLimit(
+                    schemaName, request.getSchemeId(), LocalDate.from(readingAt), valueToStore, () -> null, store);
+            if (stored.isEmpty()) {
+                return rejected(PduDayLimit.EXCEEDED.errorCode(), PduDayLimit.EXCEEDED.message());
+            }
+            storedReading = stored.get();
         } else {
-            storedReading = telemetryTenantRepository.createFlowReading(
-                    schemaName,
-                    request.getSchemeId(),
-                    operatorInRequest.id(),
-                    readingAt,
-                    extractedReading,
-                    effectiveConfirmedReading,
-                    storageCorrelationId,
-                    ocrCorrelationId,
-                    request.getReadingUrl(),
-                    request.getMeterChangeReason(),
-                    channelName,
-                    submittedUnit
-            );
+            storedReading = store.get();
         }
         Long readingId = storedReading.id();
 
@@ -718,6 +724,17 @@ public class BfmReadingService {
                 isMeterReplaced));
     }
 
+    /** A submission refused before anything is stored, so it has no correlation id of its own yet. */
+    private static CreateReadingResponse rejected(TelemetryErrorCode errorCode, String message) {
+        return CreateReadingResponse.builder()
+                .success(false)
+                .message(message)
+                .correlationId(UUID.randomUUID().toString())
+                .qualityStatus("REJECTED")
+                .errorCode(errorCode)
+                .build();
+    }
+
     /**
      * A value sent with the submission is captured as it is, even when a photo came with it: the photo
      * is kept on the row and OCR doesn't run. Only a submission with neither is refused here.
@@ -913,24 +930,12 @@ public class BfmReadingService {
 
         // A correction can't store what the same channel's submission would have been refused. A
         // refused unit, PDU run or PDU day writes nothing, and no anomaly: it is the request that is
-        // wrong, not the reading. The corrected row's old minutes don't count towards its day.
-        CaptureOutcome outcome = submittedValueCapture.captureCorrection(channel, submittedReading, readingUnit);
-        if (channel == ReadingChannel.PDU
-                && outcome instanceof CaptureOutcome.Captured(CapturedReading run)
-                && pduDayLimit.wouldExceed(schemaName, reading.schemeId(), readingDate, run.value(), reading.id())) {
-            outcome = PduDayLimit.EXCEEDED;
-        }
+        // wrong, not the reading.
         CapturedReading captured;
-        switch (outcome) {
+        switch (submittedValueCapture.captureCorrection(channel, submittedReading, readingUnit)) {
             case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
             case CaptureOutcome.Rejected(TelemetryErrorCode errorCode, String rejection) -> {
-                return CreateReadingResponse.builder()
-                        .success(false)
-                        .message(rejection)
-                        .correlationId(reading.correlationId())
-                        .qualityStatus("REJECTED")
-                        .errorCode(errorCode)
-                        .build();
+                return rejectedCorrection(reading, errorCode, rejection);
             }
             case CaptureOutcome.Retry retry ->
                     throw new IllegalStateException("A submitted value is never retried");
@@ -970,14 +975,26 @@ public class BfmReadingService {
             }
         }
 
-        telemetryTenantRepository.updateConfirmedReading(
-                schemaName,
-                reading.id(),
-                confirmedReading,
-                updatedBy,
-                RolloverResolutionService.manualConfirmSource(confirmedReading, reading.confirmedReading()),
-                captured.submittedUnitCode()
-        );
+        Supplier<Long> write = () -> {
+            telemetryTenantRepository.updateConfirmedReading(
+                    schemaName,
+                    reading.id(),
+                    confirmedReading,
+                    updatedBy,
+                    RolloverResolutionService.manualConfirmSource(confirmedReading, reading.confirmedReading()),
+                    captured.submittedUnitCode()
+            );
+            return reading.id();
+        };
+        if (channel == ReadingChannel.PDU) {
+            // The corrected row's old minutes don't count towards its day.
+            if (pduDayLimit.writeWithinLimit(
+                    schemaName, reading.schemeId(), readingDate, confirmedReading, reading::id, write).isEmpty()) {
+                return rejectedCorrection(reading, PduDayLimit.EXCEEDED.errorCode(), PduDayLimit.EXCEEDED.message());
+            }
+        } else {
+            write.get();
+        }
         // SUPPLY-PLAUSIBILITY: the release path. Unconditional, and deliberately outside the check's
         // own branch — a clean row is set to the 0 it already holds, and a quarantined row is
         // published below for the first time. Clearing here rather than only when the check ran is
@@ -994,6 +1011,19 @@ public class BfmReadingService {
                 .correlationId(reading.correlationId())
                 .meterReading(confirmedReading)
                 .qualityStatus("CONFIRMED")
+                .build();
+    }
+
+    /** A correction refused for breaking its channel's submission rules: nothing is written. */
+    private static CreateReadingResponse rejectedCorrection(TelemetryLatestFlowReadingRecord reading,
+                                                            TelemetryErrorCode errorCode,
+                                                            String message) {
+        return CreateReadingResponse.builder()
+                .success(false)
+                .message(message)
+                .correlationId(reading.correlationId())
+                .qualityStatus("REJECTED")
+                .errorCode(errorCode)
                 .build();
     }
 
