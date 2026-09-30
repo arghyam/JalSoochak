@@ -168,7 +168,7 @@ public class AnalyticsRegularityController {
                     description = """
                             Time aggregation scale.
                             - day: per-day buckets
-                            - week: rolling 7-day buckets anchored to start_date (not ISO-week aligned)
+                            - week: calendar weeks running Sunday -> Saturday
                             - month/quarter/year: calendar-aligned buckets (month=Jan/Feb..., quarter=Jan-Mar/Apr-Jun..., year=Jan 1-Dec 31)
                             """,
                     required = true,
@@ -244,7 +244,7 @@ public class AnalyticsRegularityController {
                     description = """
                             Time aggregation scale.
                             - day: per-day buckets
-                            - week: rolling 7-day buckets anchored to start_date (not ISO-week aligned)
+                            - week: calendar weeks running Sunday -> Saturday
                             - month/quarter/year: calendar-aligned buckets (month=Jan/Feb..., quarter=Jan-Mar/Apr-Jun..., year=Jan 1-Dec 31)
                             """,
                     required = true,

@@ -42,6 +42,7 @@ class RouteParityTest {
             "GET /api/v1/analytics/submission-status/user",
             "GET /api/v1/analytics/non-submission-reasons",
             "GET /api/v1/analytics/non-submission-reasons/user",
+            "GET /api/v1/analytics/submission-activity/hourly",
             // Water quantity
             "GET /api/v1/analytics/water-supply/average-per-region",
             "GET /api/v1/analytics/water-quantity/region-wise",

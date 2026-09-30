@@ -225,15 +225,16 @@ class AnalyticsWaterQuantityControllerTest {
     void getPeriodicWaterQuantity_validRoutes(String idParam, String idValue, String scale, boolean lgdRoute) throws Exception {
         if (lgdRoute) {
             when(schemeRegularityService.getPeriodicWaterQuantityByLgdId(
-                    Integer.parseInt(idValue), START, END, PeriodScale.fromValue(scale)))
+                    1, Integer.parseInt(idValue), START, END, PeriodScale.fromValue(scale)))
                     .thenReturn(periodicWaterQuantityResponse());
         } else {
             when(schemeRegularityService.getPeriodicWaterQuantityByDepartment(
-                    Integer.parseInt(idValue), START, END, PeriodScale.fromValue(scale)))
+                    1, Integer.parseInt(idValue), START, END, PeriodScale.fromValue(scale)))
                     .thenReturn(periodicWaterQuantityResponse());
         }
 
         mockMvc.perform(get(BASE + "/water-quantity/periodic")
+                        .param("tenant_id", "1")
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("scale", scale)
@@ -246,6 +247,7 @@ class AnalyticsWaterQuantityControllerTest {
     @Test
     void getPeriodicWaterQuantity_withBothIds_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/water-quantity/periodic")
+                        .param("tenant_id", "1")
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("scale", "day")
@@ -259,6 +261,7 @@ class AnalyticsWaterQuantityControllerTest {
     @Test
     void getPeriodicWaterQuantity_withNoId_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/water-quantity/periodic")
+                        .param("tenant_id", "1")
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("scale", "day"))
@@ -270,6 +273,7 @@ class AnalyticsWaterQuantityControllerTest {
     @Test
     void getPeriodicWaterQuantity_withUnsupportedScale_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/water-quantity/periodic")
+                        .param("tenant_id", "1")
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("scale", "decade")
@@ -281,10 +285,11 @@ class AnalyticsWaterQuantityControllerTest {
 
     @Test
     void getPeriodicWaterQuantity_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
-        when(schemeRegularityService.getPeriodicWaterQuantityByLgdId(eq(101), eq(START), eq(END), any()))
+        when(schemeRegularityService.getPeriodicWaterQuantityByLgdId(eq(1), eq(101), eq(START), eq(END), any()))
                 .thenThrow(new RuntimeException("boom"));
 
         mockMvc.perform(get(BASE + "/water-quantity/periodic")
+                        .param("tenant_id", "1")
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("scale", "day")

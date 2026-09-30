@@ -615,32 +615,76 @@ class SchemeRegularityRepositoryIntegrationTest {
     @Test
     void getPeriodicWaterQuantityByLgdId_weekScale_returnsExpectedRowsAndAverages() {
         List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> rows =
-                repository.getPeriodicWaterQuantityByLgdId(100, D1, D10, PeriodScale.WEEK);
+                repository.getPeriodicWaterQuantityByLgdId(1, 100, D1, D10, PeriodScale.WEEK);
 
         assertThat(rows).hasSize(2);
 
         SchemeRegularityRepository.PeriodicWaterQuantityMetrics weekOne = rows.get(0);
         SchemeRegularityRepository.PeriodicWaterQuantityMetrics weekTwo = rows.get(1);
 
-        assertThat(weekOne.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
-        assertThat(weekOne.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 7));
-        assertThat(weekOne.averageWaterQuantity()).isEqualByComparingTo(new BigDecimal("116.6667"));
+        // Sunday-aligned weeks: Jan 1-3 fall in the week starting Sun 2025-12-28;
+        // Jan 4-10 fall in the week starting Sun 2026-01-04.
+        assertThat(weekOne.periodStartDate()).isEqualTo(LocalDate.of(2025, 12, 28));
+        assertThat(weekOne.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 3));
+        // Unified water figure: only SUBMITTED/NULL rows with positive quantity count.
+        // Week one: scheme 1 D2 (200, SUBMITTED) qualifies; D1 rows (100, 50) are
+        // NOT_SUBMITTED and excluded => avg 200.
+        assertThat(weekOne.averageWaterQuantity()).isEqualByComparingTo(new BigDecimal("200.0000"));
         assertThat(weekOne.householdCount()).isEqualTo(30);
 
-        assertThat(weekTwo.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 8));
-        assertThat(weekTwo.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 14));
-        assertThat(weekTwo.averageWaterQuantity()).isEqualByComparingTo(new BigDecimal("185.0000"));
+        assertThat(weekTwo.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 4));
+        assertThat(weekTwo.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 10));
+        // Week two (D8 rows 300, 70) has only NOT_SUBMITTED rows => no qualifying water => 0.
+        assertThat(weekTwo.averageWaterQuantity()).isEqualByComparingTo(new BigDecimal("0.0000"));
         assertThat(weekTwo.householdCount()).isEqualTo(30);
     }
 
     @Test
     void getPeriodicWaterQuantityByDepartment_monthScale_returnsSingleMonthMetric() {
         List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> rows =
-                repository.getPeriodicWaterQuantityByDepartment(200, D1, D10, PeriodScale.MONTH);
+                repository.getPeriodicWaterQuantityByDepartment(1, 200, D1, D10, PeriodScale.MONTH);
 
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
-        assertThat(rows.get(0).averageWaterQuantity()).isEqualByComparingTo("144.0000");
+        // Unified water figure: only scheme 1 D2 (200, SUBMITTED) qualifies across the month => avg 200.
+        assertThat(rows.get(0).averageWaterQuantity()).isEqualByComparingTo("200.0000");
+        assertThat(rows.get(0).householdCount()).isEqualTo(30);
+    }
+
+    @Test
+    void getPeriodicWaterQuantityByDepartment_isolatesTenants() {
+        // Department and scheme ids are unique only within a tenant. Tenant 2 gets a scheme under the
+        // same department id (200) and a water row reusing tenant 1's scheme id 1; neither may reach
+        // tenant 1's figures.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_tenant_table
+                (tenant_id, state_code, title, country_code, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+                """, 2, "up", "Uttar Pradesh", "IN", 1);
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 3, 2, "Tenant 2 scheme", 3001, 4001, 0.0, 0.0,
+                100, 100, 101, null, null, null, null,
+                201, 200, 201, null, null, null, null,
+                1, 500, 500, 500);
+        for (Object[] row : List.of(new Object[]{3, 900, D2}, new Object[]{1, 1000, D3})) {
+            jdbcTemplate.update("""
+                    INSERT INTO analytics_schema.fact_water_quantity_table
+                    (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                    VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                    """, 2, row[0], 11, row[1], row[2], SubmissionStatus.SUBMITTED.getCode(), null, null);
+        }
+
+        List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> rows =
+                repository.getPeriodicWaterQuantityByDepartment(1, 200, D1, D10, PeriodScale.MONTH);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).averageWaterQuantity()).isEqualByComparingTo("200.0000");
         assertThat(rows.get(0).householdCount()).isEqualTo(30);
     }
 
@@ -652,8 +696,9 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(rows).hasSize(2);
 
         SchemeRegularityRepository.PeriodicSchemeRegularityMetrics weekOne = rows.get(0);
-        assertThat(weekOne.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
-        assertThat(weekOne.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 7));
+        // Sunday-aligned: meter readings on Jan 1-3 fall in the week starting Sun 2025-12-28.
+        assertThat(weekOne.periodStartDate()).isEqualTo(LocalDate.of(2025, 12, 28));
+        assertThat(weekOne.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 3));
         assertThat(weekOne.schemeCount()).isEqualTo(2);
         // Water-based supply days: scheme 1 supplied only on D2 (SUBMITTED) in week one => 1.
         assertThat(weekOne.totalSupplyDays()).isEqualTo(1);
@@ -661,8 +706,8 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(weekOne.totalWaterQuantity()).isEqualTo(200L);
 
         SchemeRegularityRepository.PeriodicSchemeRegularityMetrics weekTwo = rows.get(1);
-        assertThat(weekTwo.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 8));
-        assertThat(weekTwo.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 14));
+        assertThat(weekTwo.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 4));
+        assertThat(weekTwo.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 10));
         assertThat(weekTwo.schemeCount()).isEqualTo(2);
         assertThat(weekTwo.totalSupplyDays()).isEqualTo(0);
         assertThat(weekTwo.totalWaterQuantity()).isEqualTo(0L);
@@ -711,7 +756,7 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
-    void getPeriodicOutageReasonSchemeCountByLgdId_weekScale_splitsAcrossRollingWeeksAnchoredToStartDate() {
+    void getPeriodicOutageReasonSchemeCountByLgdId_weekScale_splitsAcrossSundayAlignedWeeks() {
         List<SchemeRegularityRepository.PeriodicOutageReasonSchemeCountRow> rows =
                 repository.getPeriodicOutageReasonSchemeCountByLgdId(100, D1, D10, PeriodScale.WEEK);
 
@@ -720,19 +765,20 @@ class SchemeRegularityRepositoryIntegrationTest {
                         .count())
                 .isEqualTo(2);
 
+        // Sunday-aligned: Jan 1 outages -> week of Sun 2025-12-28; Jan 8 outages -> week of Sun 2026-01-04.
         assertThat(rows)
                 .anySatisfy(r -> {
-                    assertThat(r.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
+                    assertThat(r.periodStartDate()).isEqualTo(LocalDate.of(2025, 12, 28));
                     assertThat(r.outageReason()).isEqualTo("draught");
                     assertThat(r.schemeCount()).isEqualTo(1);
                 })
                 .anySatisfy(r -> {
-                    assertThat(r.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
+                    assertThat(r.periodStartDate()).isEqualTo(LocalDate.of(2025, 12, 28));
                     assertThat(r.outageReason()).isEqualTo("no_electricity");
                     assertThat(r.schemeCount()).isEqualTo(1);
                 })
                 .anySatisfy(r -> {
-                    assertThat(r.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 8));
+                    assertThat(r.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 4));
                     assertThat(r.outageReason()).isEqualTo("no_electricity");
                     assertThat(r.schemeCount()).isEqualTo(2);
                 });
