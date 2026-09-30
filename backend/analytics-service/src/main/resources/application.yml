@@ -181,7 +181,9 @@ analytics:
       cron: ${ANALYTICS_DIM_DATE_BACKFILL_CRON:0 10 0 * * *}
 
   # KPI pre-aggregation pipeline
-  read-from-aggregates: ${ANALYTICS_READ_FROM_AGGREGATES:true}
+  # Off by default: turn on per environment only after its backfill has finished, or dashboards
+  # read partly empty tables. Off = the live queries, so this is also the kill switch.
+  read-from-aggregates: ${ANALYTICS_READ_FROM_AGGREGATES:false}
   cache:
     ttl-hours: ${ANALYTICS_CACHE_TTL_HOURS:1}
   aggregation:

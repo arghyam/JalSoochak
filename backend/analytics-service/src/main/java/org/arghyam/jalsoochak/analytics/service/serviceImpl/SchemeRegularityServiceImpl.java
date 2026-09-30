@@ -105,8 +105,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     @Value("${analytics.scheduler.scheme-status.critical-after-days:30}")
     private int criticalAfterDays;
 
-    /** When true, serve metrics from the pre-aggregation tables (legacy SQL is the fallback). */
-    @Value("${analytics.read-from-aggregates:true}")
+    /**
+     * When true, serve metrics from the pre-aggregation tables (legacy SQL is the fallback). Off by
+     * default: an environment opts in once its backfill has finished.
+     */
+    @Value("${analytics.read-from-aggregates:false}")
     private boolean readFromAggregates;
 
     /**
