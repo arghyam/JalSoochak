@@ -7,7 +7,6 @@ import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantSummaryResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
 import org.arghyam.jalsoochak.tenant.service.PiiEncryptionService;
-import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -61,8 +60,6 @@ class TenantCommonRepositoryIntegrationTest {
     @SuppressWarnings("rawtypes")
     private KafkaTemplate kafkaTemplate;
 
-    @MockBean
-    private TenantSchedulerManager tenantSchedulerManager;
 
     /** Suppress PII encryption startup — PiiEncryptionService requires env vars that are absent in tests. */
     @MockBean

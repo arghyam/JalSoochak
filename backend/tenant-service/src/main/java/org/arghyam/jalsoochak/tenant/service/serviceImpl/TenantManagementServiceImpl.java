@@ -73,7 +73,6 @@ import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
 import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantManagementService;
-import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
 import org.arghyam.jalsoochak.tenant.util.TenantConstants;
@@ -102,7 +101,6 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     private final AppProperties appProperties;
     private final TenantDefaultsProperties tenantDefaults;
     private final ApplicationEventPublisher eventPublisher;
-    private final TenantSchedulerManager schedulerManager;
     private final ObjectStorageService objectStorageService;
     private final SystemManagementService systemManagementService;
     private final ApiKeyService apiKeyService;
@@ -404,31 +402,6 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 String schemaName = "tenant_" + tenant.getStateCode().toLowerCase();
                 handleSpecializedConfig(schemaName, key, dto, currentUserId);
                 results.put(key, dto);
-            }
-        }
-
-        // Only reschedule when a schedule-bearing key was actually updated, and defer
-        // the call to after the transaction commits so a bad schedule config cannot
-        // roll back an otherwise-valid config write (e.g. SUPPORTED_LANGUAGES).
-        Set<TenantConfigKeyEnum> scheduleKeys = EnumSet.of(
-                TenantConfigKeyEnum.PUMP_OPERATOR_REMINDER_NUDGE_TIME,
-                TenantConfigKeyEnum.FIELD_STAFF_ESCALATION_RULES,
-                TenantConfigKeyEnum.DAILY_SITUATION_REPORT_TIME,
-                TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME);
-        boolean hasScheduleKey = request.getConfigs().keySet().stream()
-                .anyMatch(scheduleKeys::contains);
-        if (hasScheduleKey) {
-            final int finalTenantId = tenantId;
-            final String finalStateCode = tenant.getStateCode();
-            if (TransactionSynchronizationManager.isSynchronizationActive()) {
-                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        schedulerManager.rescheduleForTenant(finalTenantId, finalStateCode);
-                    }
-                });
-            } else {
-                schedulerManager.rescheduleForTenant(finalTenantId, finalStateCode);
             }
         }
 

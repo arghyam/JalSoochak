@@ -9,7 +9,6 @@ import org.arghyam.jalsoochak.tenant.enums.RegionTypeEnum;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 import org.arghyam.jalsoochak.tenant.exception.LocationHierarchyStructureLockedException;
 import org.arghyam.jalsoochak.tenant.service.PiiEncryptionService;
-import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -62,8 +61,6 @@ class TenantSchemaRepositoryIntegrationTest {
     @SuppressWarnings("rawtypes")
     private KafkaTemplate kafkaTemplate;
 
-    @MockBean
-    private TenantSchedulerManager tenantSchedulerManager;
 
     @MockBean
     private PiiEncryptionService piiEncryptionService;

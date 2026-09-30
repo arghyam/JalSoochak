@@ -28,7 +28,7 @@ import static org.mockito.Mockito.*;
  * Unit tests for {@link EscalationSchedulerService} business logic.
  *
  * <p>Each test calls {@code processEscalationsForTenant} directly; tenant iteration
- * is handled by {@link TenantSchedulerManager} and is not exercised here.</p>
+ * is handled by the external CronJob and is not exercised here.</p>
  */
 @ExtendWith(MockitoExtension.class)
 class EscalationSchedulerServiceTest {
