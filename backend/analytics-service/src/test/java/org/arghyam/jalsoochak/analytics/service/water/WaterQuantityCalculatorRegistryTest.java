@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.analytics.service.water;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.junit.jupiter.api.Test;
 
@@ -55,6 +56,22 @@ class WaterQuantityCalculatorRegistryTest {
 
         assertThat(registry.resolve(ReadingChannel.ELM)).contains(elm);
         assertThat(registry.resolve(ReadingChannel.BFM)).contains(bfm);
+    }
+
+    @Test
+    void resolve_withTheProductionCalculators_coversBfmElmAndPduOnly() {
+        PumpParameterAggregator aggregator = new PumpParameterAggregator(new SimpleMeterRegistry());
+        ElmWaterQuantityCalculator elm = new ElmWaterQuantityCalculator(
+                List.of(new ConsumptionRateFormula(), new MotorPowerFormula(), new HydraulicEnergyFormula()),
+                aggregator);
+        PduWaterQuantityCalculator pdu = new PduWaterQuantityCalculator(aggregator);
+        WaterQuantityCalculatorRegistry registry = new WaterQuantityCalculatorRegistry(List.of(bfm, elm, pdu));
+
+        assertThat(registry.resolve(ReadingChannel.BFM)).contains(bfm);
+        assertThat(registry.resolve(ReadingChannel.ELM)).contains(elm);
+        assertThat(registry.resolve(ReadingChannel.PDU)).contains(pdu);
+        assertThat(registry.resolve(ReadingChannel.IOT)).isEmpty();
+        assertThat(registry.resolve(ReadingChannel.MAN)).isEmpty();
     }
 
     @Test

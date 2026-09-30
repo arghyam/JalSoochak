@@ -94,4 +94,28 @@ class WaterVolumeUnitsTest {
         assertThatThrownBy(() -> WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("9223372036854775.808")))
                 .isInstanceOf(WaterVolumeOutOfRangeException.class);
     }
+
+    @Test
+    void wholeLitres_roundsOnceToTheNearestLitreHalfUp() {
+        // The ELM and PDU formulas compute at full precision and round only here, the same way the
+        // BFM conversion does.
+        assertThat(WaterVolumeUnits.wholeLitres(new BigDecimal("53640.87434625184"))).isEqualTo(53_641L);
+        assertThat(WaterVolumeUnits.wholeLitres(new BigDecimal("0.5"))).isEqualTo(1L);
+        assertThat(WaterVolumeUnits.wholeLitres(new BigDecimal("0.49"))).isZero();
+        assertThat(WaterVolumeUnits.wholeLitres(new BigDecimal("45000.00"))).isEqualTo(45_000L);
+    }
+
+    @Test
+    void wholeLitres_pastBigintIsSignalledWithTheLitres() {
+        assertThat(WaterVolumeUnits.wholeLitres(new BigDecimal("9223372036854775807.4")))
+                .isEqualTo(Long.MAX_VALUE);
+
+        BigDecimal unstorable = new BigDecimal("9223372036854775807.5");
+        assertThatThrownBy(() -> WaterVolumeUnits.wholeLitres(unstorable))
+                .asInstanceOf(throwable(WaterVolumeOutOfRangeException.class))
+                .satisfies(e -> {
+                    assertThat(e.getValue()).isEqualTo(unstorable);
+                    assertThat(e.getUnit()).isEqualTo("L");
+                });
+    }
 }

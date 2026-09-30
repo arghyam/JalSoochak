@@ -37,9 +37,9 @@ public class WaterQuantityCalculatorRegistry {
     }
 
     /**
-     * Returns the channel's calculator. A channel with none (ELM/PDU until their calculators exist,
-     * IOT, MAN) returns {@link Optional#empty()} rather than falling back to BFM: callers must leave
-     * the day alone rather than mis-derive it with another channel's calculator.
+     * Returns the channel's calculator. A channel with none (IOT, MAN) returns
+     * {@link Optional#empty()} rather than falling back to BFM: callers must leave the day alone
+     * rather than mis-derive it with another channel's calculator.
      */
     public Optional<WaterQuantityCalculator> resolve(ReadingChannel channel) {
         return Optional.ofNullable(byChannel.get(channel));
