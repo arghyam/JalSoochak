@@ -263,6 +263,153 @@ class WaterQuantityRecalculationServiceTest {
         assertThat(saved.getNonSubmissionReason()).isNull();
     }
 
+    // ---- a meter-index day with no starting point (Q17) --------------------------------------
+
+    @Test
+    void aDayWithNoStartingPointIsWorkedOutFromAnotherChannelsReadingThatDay() {
+        // The scheme's first ELM reading ends D2, after the day's BFM reading. ELM has no starting
+        // point, so the day is worked out from BFM, and credited to the BFM reading's operator.
+        WaterQuantityRecalculationService elmService = serviceWith(new StubPduCalculator(), new StubElmCalculator());
+        FactMeterReading firstElm = reading(ReadingChannel.ELM, "40", OPERATOR_B, D2);
+        FactMeterReading bfm = reading(ReadingChannel.BFM, "150", OPERATOR_A, D2);
+        bfm.setSubmissionStatus(0);
+        latestOn(D2, firstElm);
+        noStartingPoint(D2, ReadingChannel.ELM);
+        readingsOn(D2, firstElm, bfm);
+        startingPoint(D2, ReadingChannel.BFM, "100");
+        noDayRow(D2);
+
+        elmService.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement().satisfies(row -> {
+            assertThat(row.getWaterQuantity()).isEqualTo(50_000L);
+            assertThat(row.getUserId()).isEqualTo(OPERATOR_A);
+            assertThat(row.getSubmissionStatus()).isZero();
+        });
+    }
+
+    @Test
+    void aDayWithNoStartingPointIsWorkedOutFromAPeriodAmountChannel() {
+        FactMeterReading firstBfm = reading(ReadingChannel.BFM, "1250000", OPERATOR_A, D2);
+        FactMeterReading run = reading(ReadingChannel.PDU, "30", OPERATOR_B, D2, PUMP_SNAPSHOT);
+        latestOn(D2, firstBfm);
+        readingsOn(D2, firstBfm, run);
+        dayReadings(D2, run);
+        noDayRow(D2);
+
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement().satisfies(row -> {
+            assertThat(row.getWaterQuantity()).isEqualTo(3_000L);
+            assertThat(row.getUserId()).isEqualTo(OPERATOR_B);
+        });
+    }
+
+    @Test
+    void theLatestOtherChannelThatGivesATotalOfItsOwnDecides() {
+        // Latest first: IOT has no calculator and BFM has no starting point either, so neither gives
+        // the day a total. The PDU run does.
+        WaterQuantityRecalculationService elmService = serviceWith(new StubPduCalculator(), new StubElmCalculator());
+        FactMeterReading firstElm = reading(ReadingChannel.ELM, "40", OPERATOR_A, D2);
+        FactMeterReading iot = reading(ReadingChannel.IOT, "7", OPERATOR_A, D2);
+        FactMeterReading firstBfm = reading(ReadingChannel.BFM, "150", OPERATOR_A, D2);
+        FactMeterReading run = reading(ReadingChannel.PDU, "30", OPERATOR_B, D2, PUMP_SNAPSHOT);
+        latestOn(D2, firstElm);
+        noStartingPoint(D2, ReadingChannel.ELM);
+        readingsOn(D2, firstElm, iot, firstBfm, run);
+        noStartingPoint(D2, ReadingChannel.BFM);
+        dayReadings(D2, run);
+        noDayRow(D2);
+
+        elmService.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement().satisfies(row -> {
+            assertThat(row.getWaterQuantity()).isEqualTo(3_000L);
+            assertThat(row.getUserId()).isEqualTo(OPERATOR_B);
+        });
+    }
+
+    @Test
+    void anotherChannelIsTriedInTheOrderOfItsLatestReading() {
+        // BFM's reading is later than the PDU run, so BFM decides and the run is never added up.
+        WaterQuantityRecalculationService elmService = serviceWith(new StubPduCalculator(), new StubElmCalculator());
+        FactMeterReading firstElm = reading(ReadingChannel.ELM, "40", OPERATOR_B, D2);
+        FactMeterReading bfm = reading(ReadingChannel.BFM, "150", OPERATOR_A, D2);
+        FactMeterReading run = reading(ReadingChannel.PDU, "30", OPERATOR_B, D2, PUMP_SNAPSHOT);
+        latestOn(D2, firstElm);
+        noStartingPoint(D2, ReadingChannel.ELM);
+        readingsOn(D2, firstElm, bfm, run);
+        startingPoint(D2, ReadingChannel.BFM, "100");
+        noDayRow(D2);
+
+        elmService.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement()
+                .extracting(FactWaterQuantity::getWaterQuantity).isEqualTo(50_000L);
+        verify(meterReadingRepository, never()).findDayReadings(any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void withNoOtherChannelGivingATotalTheDayIsZeroOnItsOwnChannel() {
+        WaterQuantityRecalculationService elmService = serviceWith(new StubPduCalculator(), new StubElmCalculator());
+        FactMeterReading firstElm = reading(ReadingChannel.ELM, "40", OPERATOR_B, D2);
+        FactMeterReading firstBfm = reading(ReadingChannel.BFM, "150", OPERATOR_A, D2);
+        latestOn(D2, firstElm);
+        noStartingPoint(D2, ReadingChannel.ELM);
+        readingsOn(D2, firstElm, firstBfm);
+        noStartingPoint(D2, ReadingChannel.BFM);
+        noDayRow(D2);
+
+        elmService.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement().satisfies(row -> {
+            assertThat(row.getWaterQuantity()).isZero();
+            assertThat(row.getUserId()).isEqualTo(OPERATOR_B);
+        });
+    }
+
+    @Test
+    void anotherChannelWhoseTotalCannotBeCalculatedLeavesTheDayWithNone() {
+        // The PDU run decides the day, as the day's own channel would, even though its total can't be
+        // calculated: a 0 from the BFM reading would be silently too low.
+        FactMeterReading firstBfm = reading(ReadingChannel.BFM, "150", OPERATOR_A, D2);
+        FactMeterReading runWithNoPump = reading(ReadingChannel.PDU, "30", OPERATOR_B, D2, null);
+        latestOn(D2, firstBfm);
+        readingsOn(D2, firstBfm, runWithNoPump);
+        dayReadings(D2, runWithNoPump);
+
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        verify(waterQuantityRepository, never()).save(any());
+        verify(waterQuantityRepository).deleteReadingDerivedDay(TENANT, SCHEME, D2);
+        assertThat(meterRegistry.counter("water_quantity.not_derivable",
+                "channel", "3", "reason", "NO_ACTIVE_PUMP").count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void aDayWithAStartingPointNeverLooksAtOtherChannels() {
+        latestOn(D2, reading(ReadingChannel.BFM, "150", OPERATOR_A, D2));
+        startingPoint(D2, ReadingChannel.BFM, "100");
+        noDayRow(D2);
+
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        verify(meterReadingRepository, never())
+                .findByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(any(), any(), any());
+    }
+
+    @Test
+    void aDayWhoseChannelHasNoCalculatorIsNotWorkedOutFromAnotherChannel() {
+        // ELM has no calculator here: the day keeps its row (Q14), whatever its other readings are.
+        latestOn(D2, reading(ReadingChannel.ELM, "40", OPERATOR_A, D2));
+
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        verify(meterReadingRepository, never())
+                .findByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(any(), any(), any());
+        verify(waterQuantityRepository, never()).save(any());
+    }
+
     // ---- who the day is credited to ---------------------------------------------------------
 
     @Test
@@ -604,6 +751,12 @@ class WaterQuantityRecalculationServiceTest {
     private void noNextReadingDate(LocalDate after, ReadingChannel channel) {
         when(meterReadingRepository.findNextReadingDate(TENANT, SCHEME, after, channel.getCode()))
                 .thenReturn(Optional.empty());
+    }
+
+    /** Every reading on {@code date}, on any channel, as the repository returns them: latest first. */
+    private void readingsOn(LocalDate date, FactMeterReading... latestFirst) {
+        when(meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(
+                TENANT, SCHEME, date)).thenReturn(List.of(latestFirst));
     }
 
     private void dayReadings(LocalDate date, FactMeterReading... readings) {

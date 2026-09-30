@@ -29,7 +29,8 @@ public interface FactMeterReadingRepository extends JpaRepository<FactMeterReadi
 
     /**
      * The day's latest reading, on any channel: the last row recorded on {@code readingDate}. Its
-     * channel is the day's channel, and it is who the day is credited to.
+     * channel is the day's channel, and it is who the day is credited to, unless it is a meter-index
+     * reading with no starting point and the day is worked out from another channel's reading.
      *
      * <p>The {@code id} tiebreak matters. A correction from an older telemetry-service re-publishes
      * with the <em>original</em> {@code readingAt} as a new row, so a corrected day can hold two rows
@@ -37,6 +38,17 @@ public interface FactMeterReadingRepository extends JpaRepository<FactMeterReadi
      * arbitrarily. Highest id is the later write.
      */
     Optional<FactMeterReading> findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(
+            Integer tenantId,
+            Integer schemeId,
+            LocalDate readingDate
+    );
+
+    /**
+     * Every reading dated {@code readingDate}, on any channel, latest first, in the order
+     * {@link #findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc} picks the latest.
+     * A meter-index day with no starting point looks here for another channel to be worked out from.
+     */
+    List<FactMeterReading> findByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(
             Integer tenantId,
             Integer schemeId,
             LocalDate readingDate

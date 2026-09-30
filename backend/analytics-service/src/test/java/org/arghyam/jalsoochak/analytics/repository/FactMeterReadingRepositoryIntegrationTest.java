@@ -248,6 +248,23 @@ class FactMeterReadingRepositoryIntegrationTest {
                 .containsExactly(new BigDecimal("90"), new BigDecimal("30"));
     }
 
+    @Test
+    void findByReadingDate_returnsTheDaysReadingsOnEveryChannelLatestFirstAndBreaksTiesOnId() {
+        insertReading(SCHEME, D2, "130", "2026-01-02T08:00:00", BFM);
+        insertReading(SCHEME, D2, "40", "2026-01-02T17:00:00", ELM);
+        insertReading(SCHEME, D2, "30", "2026-01-02T12:00:00", PDU);
+        // A corrected re-publish of the 08:00 reading: same timestamp, higher id, so the later write.
+        insertReading(SCHEME, D2, "131", "2026-01-02T08:00:00", null);
+        insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00", BFM);
+        insertReading(OTHER_SCHEME, D2, "900", "2026-01-02T09:00:00", BFM);
+
+        assertThat(repository.findByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(TENANT, SCHEME, D2))
+                .extracting(FactMeterReading::getConfirmedReading)
+                .usingElementComparator(BigDecimal::compareTo)
+                .containsExactly(new BigDecimal("40"), new BigDecimal("30"), new BigDecimal("131"),
+                        new BigDecimal("130"));
+    }
+
     private void insertReading(int schemeId, LocalDate readingDate, String confirmedReading, String readingAt) {
         insertReading(schemeId, readingDate, confirmedReading, readingAt, null);
     }

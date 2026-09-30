@@ -39,6 +39,10 @@
 --                              a volume; without one there is no derivable supply for the day.
 --   another channel read    -> 0, as for no previous reading. The dates in between were counted on the
 --   the scheme in between      other channel, so measuring across them would count their water twice.
+--   no previous reading,    -> new_qty NULL. The live path works such a day out from the other channel's
+--   and another channel        reading when that gives the day a total, which needs that channel's
+--   read the scheme on the     calculator and starting point, so this declines rather than write a 0
+--   date                       over it. The caller skips these days, like a non-BFM day.
 --
 -- Takes no parameters and covers the whole table: callers wrap it in a CTE and apply their own window
 -- so that this text stays runnable as-is from psql and from a test.
@@ -54,6 +58,14 @@ SELECT fwq.id,
        CASE
            WHEN cur.day_channel <> 1 THEN NULL
            WHEN cur.confirmed_reading IS NULL THEN NULL
+           WHEN prev.confirmed_reading IS NULL AND EXISTS (
+               SELECT 1
+               FROM analytics_schema.fact_meter_reading_table o
+               WHERE o.tenant_id = fwq.tenant_id
+                 AND o.scheme_id = fwq.scheme_id
+                 AND o.reading_date = fwq.date
+                 AND COALESCE(o.channel, 1) <> 1
+           ) THEN NULL
            WHEN prev.confirmed_reading IS NULL THEN 0
            -- Past what the BIGINT column holds (a reading around 9.2e15 m3), so there is no value to
            -- write — exactly the case where live ingestion catches WaterVolumeOutOfRangeException and

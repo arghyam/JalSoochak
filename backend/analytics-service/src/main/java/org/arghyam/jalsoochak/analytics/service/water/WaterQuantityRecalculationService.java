@@ -20,7 +20,10 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -35,7 +38,8 @@ import java.util.Optional;
  *
  * <p>A day's channel is the channel of its latest reading (legacy {@code NULL} is BFM). The
  * channel's {@link ReadingKind} decides the day's amount; its {@link WaterQuantityCalculator} turns
- * that into litres.
+ * that into litres. A meter-index day with no starting point is worked out from another channel's
+ * reading that day instead, when one gives the day a total (see {@link #deriveMeterIndexDay}).
  *
  * <p>Callers must hold {@link org.arghyam.jalsoochak.analytics.repository.FactIngestionRepository#lockScheme}
  * for the scheme, in the same transaction; recalculating therefore requires one.
@@ -53,6 +57,13 @@ public class WaterQuantityRecalculationService {
     private final WaterQuantityCalculatorRegistry calculatorRegistry;
     private final WaterQuantityRangeReporter rangeReporter;
     private final MeterRegistry meterRegistry;
+
+    /**
+     * A day's result and the reading it was worked out from, which the day is credited to: the day's
+     * latest reading, or another channel's reading that day.
+     */
+    private record DayResult(FactMeterReading basis, WaterQuantityOutcome outcome) {
+    }
 
     /** Whether a recalculated day is written even when its row would not change. */
     private enum WriteMode {
@@ -96,7 +107,8 @@ public class WaterQuantityRecalculationService {
     public Optional<WaterQuantityOutcome> deriveDay(Integer tenantId, Integer schemeId, LocalDate date) {
         return meterReadingRepository
                 .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(tenantId, schemeId, date)
-                .flatMap(this::derive);
+                .flatMap(this::derive)
+                .map(DayResult::outcome);
     }
 
     private void recalculateDay(Integer tenantId, Integer schemeId, LocalDate date, WriteMode mode) {
@@ -107,9 +119,9 @@ public class WaterQuantityRecalculationService {
                     tenantId, schemeId, date);
             return;
         }
-        Optional<WaterQuantityOutcome> outcome;
+        Optional<DayResult> result;
         try {
-            outcome = derive(latest.get());
+            result = derive(latest.get());
         } catch (WaterVolumeOutOfRangeException e) {
             // The reading itself is already saved and stays saved: this runs inside the ingestion
             // transaction, so letting this propagate would roll the reading back, and the consumer
@@ -118,15 +130,15 @@ public class WaterQuantityRecalculationService {
             rangeReporter.reportUnstorable(e, tenantId, schemeId, date, SOURCE);
             return;
         }
-        outcome.ifPresent(result -> {
-            switch (result) {
-                case Derived derived -> writeDayTotal(latest.get(), derived.litres(), mode);
-                case NotDerivable notDerivable -> removeDayTotal(latest.get(), notDerivable.reason());
+        result.ifPresent(day -> {
+            switch (day.outcome()) {
+                case Derived derived -> writeDayTotal(day.basis(), derived.litres(), mode);
+                case NotDerivable notDerivable -> removeDayTotal(day.basis(), notDerivable.reason());
             }
         });
     }
 
-    private Optional<WaterQuantityOutcome> derive(FactMeterReading latest) {
+    private Optional<DayResult> derive(FactMeterReading latest) {
         ReadingChannel channel = ReadingChannel.fromCode(latest.getChannel());
         Optional<ReadingKind> kind = channel.kind();
         Optional<WaterQuantityCalculator> calculator = calculatorRegistry.resolve(channel);
@@ -142,43 +154,94 @@ public class WaterQuantityRecalculationService {
         }
         return switch (kind.get()) {
             case METER_INDEX -> deriveMeterIndexDay(latest, channel, calculator.get());
-            case PERIOD_AMOUNT -> derivePeriodAmountDay(latest, channel, calculator.get());
+            case PERIOD_AMOUNT -> derivePeriodAmountDay(latest, channel, calculator.get())
+                    .map(outcome -> new DayResult(latest, outcome));
         };
     }
 
     /**
-     * The day's latest reading minus the day's starting point, never negative. With no starting point
-     * the amount is 0: a running total needs one to be a volume, and treating its absence as 0 would
-     * write the whole meter index as one day.
+     * The day's latest reading minus the day's starting point, never negative.
+     *
+     * <p>With no starting point, the day is worked out from another channel's reading that day when one
+     * gives the day a total of its own ({@link #otherChannelTotal}). The day a scheme starts reading a
+     * new meter then keeps what the old one measured, instead of showing no supply. Otherwise the
+     * amount is 0: a running total needs a starting point to be a volume, and treating its absence as
+     * 0 would write the whole meter index as one day.
      */
-    private Optional<WaterQuantityOutcome> deriveMeterIndexDay(FactMeterReading latest, ReadingChannel channel,
-                                                              WaterQuantityCalculator calculator) {
-        BigDecimal current = latest.getConfirmedReading();
-        if (current == null) {
+    private Optional<DayResult> deriveMeterIndexDay(FactMeterReading latest, ReadingChannel channel,
+                                                    WaterQuantityCalculator calculator) {
+        if (latest.getConfirmedReading() == null) {
             log.warn("Skipping water quantity update; the day's latest reading is unconfirmed "
                             + "(tenantId={}, schemeId={}, date={})",
                     latest.getTenantId(), latest.getSchemeId(), latest.getReadingDate());
             return Optional.empty();
         }
-        // Subtract at the readings' own precision; the calculator rounds once, on the way into litres.
-        BigDecimal amount = startingPoint(latest, channel)
-                .map(FactMeterReading::getConfirmedReading)
-                .map(previous -> current.subtract(previous).max(BigDecimal.ZERO))
-                .orElse(BigDecimal.ZERO);
-        return Optional.of(calculator.calculate(context(latest, channel, amount)));
+        Optional<FactMeterReading> start = startingPoint(latest, channel);
+        if (start.isPresent()) {
+            return Optional.of(new DayResult(latest,
+                    calculator.calculate(context(latest, channel, increase(latest, start.get())))));
+        }
+        return otherChannelTotal(latest, channel)
+                .or(() -> Optional.of(new DayResult(latest,
+                        calculator.calculate(context(latest, channel, BigDecimal.ZERO)))));
+    }
+
+    /** Subtracted at the readings' own precision; the calculator rounds once, on the way into litres. */
+    private static BigDecimal increase(FactMeterReading reading, FactMeterReading start) {
+        return reading.getConfirmedReading().subtract(start.getConfirmedReading()).max(BigDecimal.ZERO);
     }
 
     /**
-     * The latest reading on the day's channel before the day, unless another channel has a reading
-     * dated in between. Those dates were counted on the other channel, so measuring across them would
-     * count their water twice.
+     * The day's result from the latest reading on another channel that gives the day a total of its
+     * own: a meter-index reading with a starting point, or a period-amount channel's submissions. A
+     * channel with no calculator, or an unconfirmed reading, gives none. The first channel that gives
+     * one decides, even when its total can't be calculated, as the day's own channel would.
      */
-    private Optional<FactMeterReading> startingPoint(FactMeterReading latest, ReadingChannel channel) {
+    private Optional<DayResult> otherChannelTotal(FactMeterReading latest, ReadingChannel channel) {
+        return latestOnEachOtherChannel(latest, channel).stream()
+                .map(this::ownTotal)
+                .flatMap(Optional::stream)
+                .findFirst();
+    }
+
+    /** Each other channel's latest reading on the day, latest first. */
+    private Collection<FactMeterReading> latestOnEachOtherChannel(FactMeterReading latest, ReadingChannel channel) {
+        Map<ReadingChannel, FactMeterReading> latestByChannel = new LinkedHashMap<>();
+        meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(
+                        latest.getTenantId(), latest.getSchemeId(), latest.getReadingDate())
+                .forEach(reading -> latestByChannel.putIfAbsent(ReadingChannel.fromCode(reading.getChannel()), reading));
+        latestByChannel.remove(channel);
+        return latestByChannel.values();
+    }
+
+    private Optional<DayResult> ownTotal(FactMeterReading reading) {
+        ReadingChannel channel = ReadingChannel.fromCode(reading.getChannel());
+        Optional<ReadingKind> kind = channel.kind();
+        Optional<WaterQuantityCalculator> calculator = calculatorRegistry.resolve(channel);
+        if (kind.isEmpty() || calculator.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<WaterQuantityOutcome> outcome = switch (kind.get()) {
+            case METER_INDEX -> reading.getConfirmedReading() == null
+                    ? Optional.empty()
+                    : startingPoint(reading, channel).map(start ->
+                            calculator.get().calculate(context(reading, channel, increase(reading, start))));
+            case PERIOD_AMOUNT -> derivePeriodAmountDay(reading, channel, calculator.get());
+        };
+        return outcome.map(result -> new DayResult(reading, result));
+    }
+
+    /**
+     * The latest reading on {@code reading}'s channel before its day, unless another channel has a
+     * reading dated in between. Those dates were counted on the other channel, so measuring across
+     * them would count their water twice.
+     */
+    private Optional<FactMeterReading> startingPoint(FactMeterReading reading, ReadingChannel channel) {
         return meterReadingRepository
-                .findLatestBefore(latest.getTenantId(), latest.getSchemeId(), latest.getReadingDate(), channel)
+                .findLatestBefore(reading.getTenantId(), reading.getSchemeId(), reading.getReadingDate(), channel)
                 .filter(previous -> !meterReadingRepository.existsOnAnotherChannelBetween(
-                        latest.getTenantId(), latest.getSchemeId(),
-                        previous.getReadingDate(), latest.getReadingDate(), channel.getCode()));
+                        reading.getTenantId(), reading.getSchemeId(),
+                        previous.getReadingDate(), reading.getReadingDate(), channel.getCode()));
     }
 
     /**
@@ -230,17 +293,17 @@ public class WaterQuantityRecalculationService {
     }
 
     /**
-     * Writes the day's total. The day is credited to its latest reading's operator and status, not
-     * the triggering event's: a follow-up day has no event of its own, and the SO/SDO pump-operator
-     * list matches operators on this row's {@code user_id}.
+     * Writes the day's total. The day is credited to the operator and status of the reading it was
+     * worked out from, not the triggering event's: a follow-up day has no event of its own, and the
+     * SO/SDO pump-operator list matches operators on this row's {@code user_id}.
      */
-    private void writeDayTotal(FactMeterReading latest, long litres, WriteMode mode) {
-        Integer tenantId = latest.getTenantId();
-        Integer schemeId = latest.getSchemeId();
-        LocalDate date = latest.getReadingDate();
-        Integer userId = latest.getUserId();
+    private void writeDayTotal(FactMeterReading basis, long litres, WriteMode mode) {
+        Integer tenantId = basis.getTenantId();
+        Integer schemeId = basis.getSchemeId();
+        LocalDate date = basis.getReadingDate();
+        Integer userId = basis.getUserId();
         Integer submissionStatus = Objects.requireNonNullElse(
-                latest.getSubmissionStatus(), SubmissionStatus.SUBMITTED.getCode());
+                basis.getSubmissionStatus(), SubmissionStatus.SUBMITTED.getCode());
 
         Optional<FactWaterQuantity> existing = waterQuantityRepository
                 .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(tenantId, schemeId, date);
@@ -286,17 +349,17 @@ public class WaterQuantityRecalculationService {
      * removed, so the day ends up the same whatever order its readings arrived in; a row holding an
      * outage, non-submission or meter-change reason stays.
      */
-    private void removeDayTotal(FactMeterReading latest, WaterQuantityOutcome.Reason reason) {
-        ReadingChannel channel = ReadingChannel.fromCode(latest.getChannel());
+    private void removeDayTotal(FactMeterReading basis, WaterQuantityOutcome.Reason reason) {
+        ReadingChannel channel = ReadingChannel.fromCode(basis.getChannel());
         log.warn("Water quantity cannot be calculated: {} (channel={}, tenantId={}, schemeId={}, date={}); "
                         + "the day gets no total",
-                reason, channel, latest.getTenantId(), latest.getSchemeId(), latest.getReadingDate());
+                reason, channel, basis.getTenantId(), basis.getSchemeId(), basis.getReadingDate());
         meterRegistry.counter("water_quantity.not_derivable",
                         "channel", channelTag(channel),
                         "reason", reason.name())
                 .increment();
         int removed = waterQuantityRepository.deleteReadingDerivedDay(
-                latest.getTenantId(), latest.getSchemeId(), latest.getReadingDate());
+                basis.getTenantId(), basis.getSchemeId(), basis.getReadingDate());
         if (removed > 0) {
             meterRegistry.counter("water_quantity.day_total_removed", "channel", channelTag(channel))
                     .increment();

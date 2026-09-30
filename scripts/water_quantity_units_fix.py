@@ -58,6 +58,9 @@ in the order below, so the codes are mutually exclusive:
                                                                so the repair is a no-op here.
   A1  no reading row on the date, and the stored       SKIP  — nothing to derive a volume from
       value is non-zero (or NULL)
+  B3  no usable baseline, and another channel read     SKIP  — live ingestion may work the day
+      the scheme on the date                                   out from that channel's reading,
+                                                               and its value is already litres.
   B1  first-ever reading for the scheme                apply 0
   B2  earlier readings exist, none usable as a         apply 0
       baseline (all <= 0 or NULL, or another
@@ -78,15 +81,16 @@ makes them unchanged and reported, so fix the underlying readings and re-run to 
 up. A3 is the benign remainder of A1: there is no reading to derive from, but the stored
 value is already 0, so there is no wrong value to carry forward and nothing a re-run would
 ever change. It is split out precisely so it stops padding the "skipped, still in cubic
-metres" figure that a reviewer is meant to act on. A4 is kept out of that figure for the
-same reason: the recompute covers BFM days only, and a non-BFM day's value was written in
-litres by the live path, so it is neither wrong nor this script's to change.
+metres" figure that a reviewer is meant to act on. A4 and B3 are kept out of that figure for
+the same reason: the recompute covers BFM days only, and a day another channel decides, or may
+decide, was written in litres by the live path, so it is neither wrong nor this script's to
+change.
 
 Every row the repair declines to touch AND leaves holding a value (A1, A2, C4) is written
 to an Excel workbook — the run artefact — together with the full case split, the pre-flight
-checks, and the future-dated rows. A3 and A4 are reported as counts only: listing rows that
-are already 0, or that belong to another channel, adds pages to the workbook and nothing to
-the review. The applied-but-notable cases (B2, C3, long gaps, duplicates) are likewise
+checks, and the future-dated rows. A3, A4 and B3 are reported as counts only: listing rows
+that are already 0, or that belong to another channel, adds pages to the workbook and nothing
+to the review. The applied-but-notable cases (B2, C3, long gaps, duplicates) are likewise
 counts on the Summary sheet only; all of them stay queryable from
 public.fact_water_quantity_recompute by case_code / gap_days / is_latest.
 
@@ -183,7 +187,7 @@ SAFE_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # Every case the classifier can emit: code -> (skipped_by_design, one-line meaning).
 # Listed in the order they are reported; the top-level A/B/C order matches the order the SQL
-# evaluates, with each family's sub-cases (A4/A2/A3/A1, B2/B1) grouped rather than interleaved.
+# evaluates, with each family's sub-cases (A4/A2/A3/A1, B3/B2/B1) grouped rather than interleaved.
 CASE_CATALOGUE: dict[str, tuple[bool, str]] = {
     "A4": (True, "The day's latest reading is not BFM — another channel's day, left to live ingestion"),
     "A1": (True, "No reading row on the date at all — no derivable volume"),
@@ -191,6 +195,7 @@ CASE_CATALOGUE: dict[str, tuple[bool, str]] = {
     "A3": (True, "No reading row on the date, but already 0 — nothing to change"),
     "B1": (False, "First-ever reading for the scheme — no baseline, correctly 0"),
     "B2": (False, "Earlier readings exist but none usable as a baseline — correctly 0"),
+    "B3": (True, "No usable baseline, and another channel read the scheme that day — left to live ingestion"),
     "C3": (False, "current < previous (meter rollover/replacement) — clamped to 0, LOSSY"),
     "C4": (True, "Recomputes above the implausible threshold — bad reading, left unchanged"),
     "C2": (False, "A gap precedes the date — delta spans more than one day"),
@@ -199,9 +204,10 @@ CASE_CATALOGUE: dict[str, tuple[bool, str]] = {
 
 SKIPPED_CASES = tuple(code for code, (skipped, _) in CASE_CATALOGUE.items() if skipped)
 
-# Skipped rows still holding a value this repair was meant to fix, i.e. still in CUBIC METRES. A4 is
-# left out: its value belongs to another channel's live calculation and is already in litres.
-UNREPAIRED_NON_ZERO = "skipped_by_design AND old_qty <> 0 AND case_code <> 'A4'"
+# Skipped rows still holding a value this repair was meant to fix, i.e. still in CUBIC METRES. A4 and
+# B3 are left out: their value belongs to live ingestion, which may have worked it out from another
+# channel, and is already in litres.
+UNREPAIRED_NON_ZERO = "skipped_by_design AND old_qty <> 0 AND case_code NOT IN ('A4', 'B3')"
 
 # Mirrors SchemePerformanceSchedulerRepository.insertDailySchemePerformanceScores. Kept as one
 # expression so the replay cannot disagree with the scheduler on the thresholds; the "5" is the
@@ -249,9 +255,9 @@ DETAIL_SHEETS = [
      "neither causes nor fixes. Listed so the repair is not blamed for them."),
 ]
 
-# A3, A4, B2, C3, long gaps, duplicates and dim-scheme drift are deliberately NOT dumped as detail
+# A3, A4, B2, B3, C3, long gaps, duplicates and dim-scheme drift are deliberately NOT dumped as detail
 # sheets. Each is either applied (B2, C3, gaps, duplicates), resolved by --dim-drift-use-latest,
-# already at the value it would be repaired to (A3), or not BFM and so not this repair's (A4), so a
+# already at the value it would be repaired to (A3), or left to live ingestion (A4, B3), so a
 # reviewer needs the count, not the rows. Their counts stay on the Summary sheet, and every one of
 # them is still queryable from RECOMPUTE_TABLE by case_code / gap_days / is_latest.
 
@@ -534,7 +540,7 @@ def identify(conn, start: dt.date, end: dt.date, threshold_litres: int) -> None:
     The value columns come verbatim from the canonical recompute; everything added here is
     classification, so the shared SQL that the parity test asserts against stays untouched.
 
-    The two EXISTS probes that separate A1/A2 and B1/B2 sit inside the branches of the outer CASE
+    The EXISTS probes that separate A1/A2 and B3/B2/B1 sit inside the branches of the outer CASE
     rather than as top-level columns, so Postgres only evaluates them for rows that actually reach
     those branches — a few tens of thousands of index probes rather than one per row.
     """
@@ -570,7 +576,16 @@ def identify(conn, start: dt.date, end: dt.date, threshold_litres: int) -> None:
                                     WHEN w.old_qty = 0 THEN 'A3'
                                     ELSE 'A1' END
                            WHEN w.previous_reading IS NULL THEN
+                               -- B3 first: the recompute returns NULL for it, as live ingestion
+                               -- may work the day out from another channel's reading that day.
                                CASE WHEN EXISTS (
+                                        SELECT 1 FROM {READING_TABLE} mr
+                                        WHERE mr.tenant_id = w.tenant_id
+                                          AND mr.scheme_id = w.scheme_id
+                                          AND mr.reading_date = w.date
+                                          AND COALESCE(mr.channel, 1) <> 1)
+                                    THEN 'B3'
+                                    WHEN EXISTS (
                                         SELECT 1 FROM {READING_TABLE} mr
                                         WHERE mr.tenant_id = w.tenant_id
                                           AND mr.scheme_id = w.scheme_id

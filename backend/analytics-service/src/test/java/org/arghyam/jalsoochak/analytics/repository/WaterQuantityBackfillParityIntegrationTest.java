@@ -3,7 +3,9 @@ package org.arghyam.jalsoochak.analytics.repository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.arghyam.jalsoochak.analytics.service.water.BfmWaterQuantityCalculator;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculator;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorRegistry;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityContext;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityOutcome;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityRangeReporter;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityRecalculationService;
@@ -51,7 +53,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>The fixture is the set of cases the two defects turned on — a scheme's first-ever reading, a gap
  * in submissions, two readings on one day, a zero reading, and a meter that went backwards — plus
  * the channel rules: legacy NULL is BFM, a day belongs to its latest reading's channel, only BFM
- * readings are a BFM day's starting point, and not one from before another channel's reading.
+ * readings are a BFM day's starting point, and not one from before another channel's reading. A
+ * meter-index day with no starting point may be worked out from another channel's reading that day,
+ * which only the live path does: the recompute declines those days.
  */
 @DataJpaTest
 @Testcontainers
@@ -318,6 +322,35 @@ class WaterQuantityBackfillParityIntegrationTest {
     }
 
     @Test
+    void aNewMetersFirstReadingLeavesTheDayToTheOldMeterOnTheLivePathOnly() {
+        // The scheme's first ELM reading ends D2. ELM has no starting point, so the live path works D2
+        // out from its BFM reading. D2 is not a BFM day, so the recompute leaves it alone.
+        insertReading(CHANNEL_SCHEME, D1, "100", "2026-01-01T08:00:00", BFM);
+        insertReading(CHANNEL_SCHEME, D2, "130", "2026-01-02T08:00:00", BFM);
+        insertReading(CHANNEL_SCHEME, D2, "40", "2026-01-02T17:00:00", ELM);
+        seedLegacyQuantityRow(CHANNEL_SCHEME, D2, 30_000L);
+
+        assertThat(runRecompute().get(idOf(CHANNEL_SCHEME, D2))).isNull();
+        assertThat(recalculationWithElm().deriveDay(TENANT, CHANNEL_SCHEME, D2))
+                .contains(WaterQuantityOutcome.derived(30_000L));
+    }
+
+    @Test
+    void aBfmDayWithNoStartingPointAndAnotherChannelsReadingIsLeftToTheLivePath() {
+        // D2's first BFM reading has no starting point, and the day's ELM reading has one on D1, so the
+        // live path works D2 out from ELM. The recompute can't tell whether another channel gives the
+        // day a total, so it declines rather than write the BFM reading's 0 over it.
+        insertReading(CHANNEL_SCHEME, D1, "40", "2026-01-01T08:00:00", ELM);
+        insertReading(CHANNEL_SCHEME, D2, "45", "2026-01-02T08:00:00", ELM);
+        insertReading(CHANNEL_SCHEME, D2, "500", "2026-01-02T17:00:00", BFM);
+        seedLegacyQuantityRow(CHANNEL_SCHEME, D2, 5_000L);
+
+        assertThat(runRecompute().get(idOf(CHANNEL_SCHEME, D2))).isNull();
+        assertThat(recalculationWithElm().deriveDay(TENANT, CHANNEL_SCHEME, D2))
+                .contains(WaterQuantityOutcome.derived(5_000L));
+    }
+
+    @Test
     void readingsArrivingOutOfOrderEndOnWhatTheRecomputeDerives() {
         // Telemetry publishes without a key, so D3's reading can be ingested before D1's and D2's.
         // Each arrival runs the live write path; the next-day follow-up is what corrects D3.
@@ -392,6 +425,30 @@ class WaterQuantityBackfillParityIntegrationTest {
         insertReading(DECIMAL_SCHEME, D1, "1235.5", "2026-01-01T08:00:00");
         insertReading(DECIMAL_SCHEME, D2, "1247.8", "2026-01-02T08:00:00");
         insertReading(DECIMAL_SCHEME, D3, "1247.8005", "2026-01-03T08:00:00");
+    }
+
+    /** The live path once ELM has a calculator: {@link ThousandLitresPerKilowattHour} stands in for it. */
+    private WaterQuantityRecalculationService recalculationWithElm() {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        return new WaterQuantityRecalculationService(
+                meterReadingRepository,
+                waterQuantityRepository,
+                new WaterQuantityCalculatorRegistry(
+                        List.of(new BfmWaterQuantityCalculator(), new ThousandLitresPerKilowattHour())),
+                new WaterQuantityRangeReporter(meterRegistry, 100_000L),
+                meterRegistry);
+    }
+
+    private static final class ThousandLitresPerKilowattHour implements WaterQuantityCalculator {
+        @Override
+        public ReadingChannel channel() {
+            return ReadingChannel.ELM;
+        }
+
+        @Override
+        public WaterQuantityOutcome calculate(WaterQuantityContext context) {
+            return WaterQuantityOutcome.derived(context.amount().multiply(BigDecimal.valueOf(1000)).longValueExact());
+        }
     }
 
     /** The value live ingestion would store for that row's day, or null where it stores none. */
