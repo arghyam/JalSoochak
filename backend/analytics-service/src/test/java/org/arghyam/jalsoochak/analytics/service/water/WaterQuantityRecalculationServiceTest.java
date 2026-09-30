@@ -689,6 +689,69 @@ class WaterQuantityRecalculationServiceTest {
                 .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(TENANT, SCHEME, D3);
     }
 
+    // ---- a day a corrected reading moved off ------------------------------------------------
+
+    @Test
+    void aDayLeftWithNoReadingLosesItsReadingDerivedTotal() {
+        service.recalculateAfterRemoval(TENANT, SCHEME, D2);
+
+        verify(waterQuantityRepository).deleteReadingDerivedDay(TENANT, SCHEME, D2);
+        verify(waterQuantityRepository, never()).save(any());
+    }
+
+    @Test
+    void aDayLeftWithReadingsIsWorkedOutFromThoseThatRemain() {
+        latestOn(D2, reading(ReadingChannel.BFM, "150", OPERATOR_A, D2));
+        startingPoint(D2, ReadingChannel.BFM, "100");
+        // Worked out from the reading that moved off, a later one of 180.
+        FactWaterQuantity movedOffTotal = dayRow(D2, 80_000L, OPERATOR_B, 1);
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(TENANT, SCHEME, D2))
+                .thenReturn(Optional.of(movedOffTotal));
+
+        service.recalculateAfterRemoval(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement().satisfies(row -> {
+            assertThat(row.getWaterQuantity()).isEqualTo(50_000L);
+            assertThat(row.getUserId()).isEqualTo(OPERATOR_A);
+        });
+        verify(waterQuantityRepository, never()).deleteReadingDerivedDay(any(), any(), any());
+    }
+
+    @Test
+    void aDayLeftWhoseTotalDidNotChangeKeepsItsUpdatedAt() {
+        // Nobody submitted for the day, so the SO/SDO list's last submission time must not move.
+        latestOn(D2, reading(ReadingChannel.BFM, "150", OPERATOR_A, D2));
+        startingPoint(D2, ReadingChannel.BFM, "100");
+        FactWaterQuantity untouched = dayRow(D2, 50_000L, OPERATOR_A, 1);
+        LocalDateTime lastSubmission = untouched.getUpdatedAt();
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(TENANT, SCHEME, D2))
+                .thenReturn(Optional.of(untouched));
+
+        service.recalculateAfterRemoval(TENANT, SCHEME, D2);
+
+        verify(waterQuantityRepository, never()).save(any());
+        assertThat(untouched.getUpdatedAt()).isEqualTo(lastSubmission);
+    }
+
+    @Test
+    void theNextDayAfterADayLeftIsFollowedUp() {
+        // D2's reading was D3's starting point. With D2 left empty, D3 starts from D1.
+        noReadingOn(D2);
+        nextReadingDate(D2, ReadingChannel.BFM, D3);
+        latestOn(D3, reading(ReadingChannel.BFM, "180", OPERATOR_B, D3));
+        startingPoint(D3, ReadingChannel.BFM, "100", D1);
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(TENANT, SCHEME, D3))
+                .thenReturn(Optional.of(dayRow(D3, 30_000L, OPERATOR_B, 1)));
+
+        service.recalculateAfterRemoval(TENANT, SCHEME, D2);
+
+        verify(waterQuantityRepository).deleteReadingDerivedDay(TENANT, SCHEME, D2);
+        assertThat(savedRows()).singleElement().satisfies(row -> {
+            assertThat(row.getDate()).isEqualTo(D3);
+            assertThat(row.getWaterQuantity()).isEqualTo(80_000L);
+        });
+    }
+
     // ---- a channel with no calculator (Q14) -------------------------------------------------
 
     @Test
@@ -824,6 +887,12 @@ class WaterQuantityRecalculationServiceTest {
     private void latestOn(LocalDate date, FactMeterReading reading) {
         when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(
                 TENANT, SCHEME, date)).thenReturn(Optional.of(reading));
+    }
+
+    /** Stubbed for the same reason as {@link #noStartingPoint}. */
+    private void noReadingOn(LocalDate date) {
+        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(
+                TENANT, SCHEME, date)).thenReturn(Optional.empty());
     }
 
     private void startingPoint(LocalDate date, ReadingChannel channel, String confirmedReading) {

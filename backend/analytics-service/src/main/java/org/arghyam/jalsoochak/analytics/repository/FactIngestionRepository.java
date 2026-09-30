@@ -11,14 +11,17 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Types;
+import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
 /**
  * SQL that meter-reading and water-quantity ingestion needs and Spring Data cannot express: the
- * per-scheme advisory lock and the one-row-per-submission upsert. It joins the caller's transaction,
- * so its writes and the JPA ones commit or roll back together.
+ * per-scheme advisory lock, the one-row-per-submission upsert, and where a submission is stored
+ * before it is overwritten. It joins the caller's transaction, so its writes and the JPA ones commit
+ * or roll back together.
  */
 @Repository
 @RequiredArgsConstructor
@@ -82,6 +85,10 @@ public class FactIngestionRepository {
 
     private final JdbcTemplate jdbcTemplate;
 
+    /** Where a submission's reading is stored: a correction can move it to another scheme or day. */
+    public record SchemeDay(int schemeId, LocalDate readingDate) {
+    }
+
     /**
      * Serialises every write to one scheme's readings and day totals for the rest of the surrounding
      * transaction. Take it before the transaction's first write.
@@ -99,14 +106,53 @@ public class FactIngestionRepository {
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void lockScheme(Integer tenantId, Integer schemeId) {
+        acquireSchemeLock(schemeLockKey(tenantId, schemeId));
+    }
+
+    /**
+     * {@link #lockScheme} for each of the tenant's {@code schemeIds}, taken in ascending key order: two
+     * transactions locking the same schemes then queue on the first one instead of deadlocking.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void lockSchemes(Integer tenantId, Collection<Integer> schemeIds) {
+        schemeIds.stream()
+                .map(schemeId -> schemeLockKey(tenantId, schemeId))
+                .distinct()
+                .sorted()
+                .forEach(this::acquireSchemeLock);
+    }
+
+    /** Two schemes whose keys collide only make one of them wait. */
+    private static int schemeLockKey(Integer tenantId, Integer schemeId) {
+        return Objects.hash(tenantId, schemeId);
+    }
+
+    private void acquireSchemeLock(int key) {
         // Two int keys rather than one bigint, so the namespace keeps these apart from other locks.
-        // Two schemes whose keys collide only make one of them wait.
         jdbcTemplate.query("SELECT pg_advisory_xact_lock(?, ?)",
                 ps -> {
                     ps.setInt(1, SCHEME_LOCK_NAMESPACE);
-                    ps.setInt(2, Objects.hash(tenantId, schemeId));
+                    ps.setInt(2, key);
                 },
                 rs -> null);
+    }
+
+    /**
+     * The scheme and day the submission is stored under. Read with SQL rather than through the
+     * entity, so a call made after {@link #lockSchemes} sees what other transactions committed before
+     * the lock was granted, not a copy already cached in this transaction.
+     *
+     * @return empty when the submission has no row yet
+     */
+    public Optional<SchemeDay> findSchemeDay(Integer tenantId, Long sourceReadingId) {
+        return jdbcTemplate.query("""
+                        SELECT scheme_id, reading_date FROM analytics_schema.fact_meter_reading_table
+                        WHERE tenant_id = ? AND source_reading_id = ?
+                        """,
+                (rs, rowNum) -> new SchemeDay(rs.getInt("scheme_id"), rs.getObject("reading_date", LocalDate.class)),
+                tenantId, sourceReadingId)
+                .stream()
+                .findFirst();
     }
 
     /**

@@ -69,10 +69,12 @@ class FactIngestionRepositoryIntegrationTest {
 
     private static final int TENANT = 1;
     private static final int SCHEME = 1;
+    private static final int OTHER_SCHEME = 2;
     private static final int OTHER_TENANT = 2;
     private static final int OTHER_TENANT_SCHEME = 3;
 
     private static final LocalDate D2 = LocalDate.of(2026, 1, 2);
+    private static final LocalDate D3 = LocalDate.of(2026, 1, 3);
 
     @BeforeEach
     void setUp() {
@@ -95,6 +97,7 @@ class FactIngestionRepositoryIntegrationTest {
                  parent_lgd_location_id, parent_department_location_id,
                  operating_status, created_at, updated_at)
                 VALUES (1, 1, 'Scheme A', 1001, 2001, 100, 200, 1, NOW(), NOW()),
+                       (2, 1, 'Scheme B', 1002, 2002, 100, 200, 1, NOW(), NOW()),
                        (3, 2, 'Scheme C', 1003, 2003, 100, 200, 1, NOW(), NOW())
                 """);
     }
@@ -209,12 +212,66 @@ class FactIngestionRepositoryIntegrationTest {
                 .isEqualTo(snapshot);
     }
 
+    // ---- findSchemeDay ----------------------------------------------------------------------
+
+    @Test
+    void findSchemeDay_isWhereTheSubmissionIsStored() {
+        repository.upsertMeterReading(submission(TENANT, SCHEME, 501L, "2026-01-02T08:00:00", "140"));
+
+        assertThat(repository.findSchemeDay(TENANT, 501L)).contains(new FactIngestionRepository.SchemeDay(SCHEME, D2));
+    }
+
+    @Test
+    void findSchemeDay_followsTheRowWhenANewerVersionMovesIt() {
+        repository.upsertMeterReading(submission(TENANT, SCHEME, 501L, "2026-01-02T08:00:00", "140"));
+        FactMeterReading moved = submission(TENANT, OTHER_SCHEME, 501L, "2026-01-03T08:00:00", "140");
+        moved.setReadingDate(D3);
+        repository.upsertMeterReading(moved);
+
+        assertThat(repository.findSchemeDay(TENANT, 501L))
+                .contains(new FactIngestionRepository.SchemeDay(OTHER_SCHEME, D3));
+    }
+
+    @Test
+    void findSchemeDay_isEmptyForASubmissionNotStoredInTheTenant() {
+        repository.upsertMeterReading(submission(TENANT, SCHEME, 501L, "2026-01-02T08:00:00", "140"));
+
+        assertThat(repository.findSchemeDay(TENANT, 502L)).isEmpty();
+        assertThat(repository.findSchemeDay(OTHER_TENANT, 501L)).isEmpty();
+    }
+
     // ---- lockScheme -------------------------------------------------------------------------
 
     @Test
     void lockScheme_holdsATransactionScopedAdvisoryLockInItsOwnNamespace() {
         repository.lockScheme(TENANT, SCHEME);
 
+        assertThat(schemeLockHeld(TENANT, SCHEME)).isTrue();
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void lockScheme_outsideATransactionFailsRatherThanGuardingNothing() {
+        assertThatThrownBy(() -> repository.lockScheme(TENANT, SCHEME))
+                .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    void lockSchemes_holdsEachSchemesLock() {
+        repository.lockSchemes(TENANT, List.of(OTHER_SCHEME, SCHEME));
+
+        assertThat(schemeLockHeld(TENANT, SCHEME)).isTrue();
+        assertThat(schemeLockHeld(TENANT, OTHER_SCHEME)).isTrue();
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void lockSchemes_outsideATransactionFailsRatherThanGuardingNothing() {
+        assertThatThrownBy(() -> repository.lockSchemes(TENANT, List.of(SCHEME, OTHER_SCHEME)))
+                .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    private boolean schemeLockHeld(int tenantId, int schemeId) {
         // A two-int advisory lock shows in pg_locks as classid = first key, objid = second key,
         // objsubid = 2; both columns are oid, so compare them as unsigned.
         Integer held = jdbcTemplate.queryForObject("""
@@ -224,15 +281,8 @@ class FactIngestionRepositoryIntegrationTest {
                   AND classid::bigint = ? AND objid::bigint = ?
                 """, Integer.class,
                 Integer.toUnsignedLong(FactIngestionRepository.SCHEME_LOCK_NAMESPACE),
-                Integer.toUnsignedLong(Objects.hash(TENANT, SCHEME)));
-        assertThat(held).isEqualTo(1);
-    }
-
-    @Test
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    void lockScheme_outsideATransactionFailsRatherThanGuardingNothing() {
-        assertThatThrownBy(() -> repository.lockScheme(TENANT, SCHEME))
-                .isInstanceOf(IllegalTransactionStateException.class);
+                Integer.toUnsignedLong(Objects.hash(tenantId, schemeId)));
+        return held == 1;
     }
 
     private static FactMeterReading submission(int tenantId, int schemeId, Long sourceReadingId,

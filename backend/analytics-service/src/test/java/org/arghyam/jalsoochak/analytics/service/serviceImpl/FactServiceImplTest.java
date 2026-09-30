@@ -19,6 +19,7 @@ import org.arghyam.jalsoochak.analytics.repository.FactOperatorAttendanceReposit
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactIngestionRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactIngestionRepository.SchemeDay;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactWaterQuantityRepository;
@@ -32,6 +33,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 
@@ -41,6 +43,7 @@ import java.time.LocalDateTime;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -363,6 +366,93 @@ class FactServiceImplTest {
         verify(dimDateRepository, never()).findByFullDate(any());
     }
 
+    // ---- a correction that moves the reading to another scheme or day ------------------------
+
+    @Test
+    void ingestMeterReading_aReadingMovedToAnotherSchemeLocksBothAndRecalculatesTheDayItLeft() {
+        MeterReadingEvent event = versionedReadingEvent("2026-01-02");
+        when(factIngestionRepository.findSchemeDay(1, 501L))
+                .thenReturn(Optional.of(new SchemeDay(12, LocalDate.of(2026, 1, 1))));
+        storedAsNewRow();
+
+        service.ingestMeterReading(event);
+
+        InOrder order = inOrder(factIngestionRepository, waterQuantityRecalculationService);
+        order.verify(factIngestionRepository).findSchemeDay(1, 501L);
+        order.verify(factIngestionRepository).lockSchemes(1, Set.of(11, 12));
+        // Read again under the locks: another event may have moved it in between.
+        order.verify(factIngestionRepository).findSchemeDay(1, 501L);
+        order.verify(factIngestionRepository).upsertMeterReading(any());
+        order.verify(waterQuantityRecalculationService).recalculateAfterReading(1, 11, LocalDate.of(2026, 1, 2));
+        order.verify(waterQuantityRecalculationService).recalculateAfterRemoval(1, 12, LocalDate.of(2026, 1, 1));
+    }
+
+    @Test
+    void ingestMeterReading_aReadingMovedToAnotherDayRecalculatesTheDayItLeft() {
+        MeterReadingEvent event = versionedReadingEvent("2026-01-02");
+        when(factIngestionRepository.findSchemeDay(1, 501L))
+                .thenReturn(Optional.of(new SchemeDay(11, LocalDate.of(2026, 1, 1))));
+        storedAsNewRow();
+
+        service.ingestMeterReading(event);
+
+        verify(factIngestionRepository).lockSchemes(1, Set.of(11));
+        verify(waterQuantityRecalculationService).recalculateAfterReading(1, 11, LocalDate.of(2026, 1, 2));
+        verify(waterQuantityRecalculationService).recalculateAfterRemoval(1, 11, LocalDate.of(2026, 1, 1));
+    }
+
+    @Test
+    void ingestMeterReading_aCorrectionThatStaysOnItsDayRecalculatesOnlyThatDay() {
+        MeterReadingEvent event = versionedReadingEvent("2026-01-02");
+        when(factIngestionRepository.findSchemeDay(1, 501L))
+                .thenReturn(Optional.of(new SchemeDay(11, LocalDate.of(2026, 1, 2))));
+        storedAsNewRow();
+
+        service.ingestMeterReading(event);
+
+        verify(waterQuantityRecalculationService).recalculateAfterReading(1, 11, LocalDate.of(2026, 1, 2));
+        verify(waterQuantityRecalculationService, never()).recalculateAfterRemoval(any(), any(), any());
+    }
+
+    @Test
+    void ingestMeterReading_aReadingMovedToASchemeNotLockedMeanwhileIsRetried() {
+        // Stored under scheme 11 when first looked up, and moved to 13 by another event before the
+        // locks were granted: writing now would change scheme 13's readings without its lock.
+        MeterReadingEvent event = versionedReadingEvent("2026-01-02");
+        when(factIngestionRepository.findSchemeDay(1, 501L)).thenReturn(
+                Optional.of(new SchemeDay(11, LocalDate.of(2026, 1, 2))),
+                Optional.of(new SchemeDay(13, LocalDate.of(2026, 1, 2))));
+
+        assertThrows(ConcurrencyFailureException.class, () -> service.ingestMeterReading(event));
+
+        verify(factIngestionRepository, never()).upsertMeterReading(any());
+        verify(waterQuantityRecalculationService, never()).recalculateAfterReading(any(), any(), any());
+    }
+
+    @Test
+    void ingestMeterReading_aStaleEventLeavesTheDayItsSubmissionIsStoredOnAlone() {
+        MeterReadingEvent event = versionedReadingEvent("2026-01-02");
+        when(factIngestionRepository.findSchemeDay(1, 501L))
+                .thenReturn(Optional.of(new SchemeDay(12, LocalDate.of(2026, 1, 1))));
+        when(factIngestionRepository.upsertMeterReading(any())).thenReturn(Optional.empty());
+
+        service.ingestMeterReading(event);
+
+        verify(waterQuantityRecalculationService, never()).recalculateAfterRemoval(any(), any(), any());
+    }
+
+    @Test
+    void ingestMeterReading_aLegacyEventLocksOnlyItsSchemeAndNeverLooksUpAStoredRow() {
+        MeterReadingEvent event = readingEvent("40", "2026-01-02");
+        storedAsNewRow();
+
+        service.ingestMeterReading(event);
+
+        verify(factIngestionRepository).lockScheme(1, 11);
+        verify(factIngestionRepository, never()).findSchemeDay(any(), any());
+        verify(waterQuantityRecalculationService, never()).recalculateAfterRemoval(any(), any(), any());
+    }
+
     @Test
     void ingestWaterQuantity_locksTheSchemeBeforeItsFirstWrite() {
         // Both writers of a day's row find it and then update or insert; the reading path holds the
@@ -425,6 +515,14 @@ class FactServiceImplTest {
         event.setReadingDate(readingDate);
         event.setSubmissionStatus(1);
         event.setReadingType(0);
+        return event;
+    }
+
+    /** A reading from a telemetry-service that sends the submission's identity and version. */
+    private static MeterReadingEvent versionedReadingEvent(String readingDate) {
+        MeterReadingEvent event = readingEvent("40", readingDate);
+        event.setSourceReadingId(501L);
+        event.setSourceUpdatedAt(readingDate + "T10:15:30.123456");
         return event;
     }
 

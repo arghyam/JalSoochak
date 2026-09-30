@@ -23,6 +23,7 @@ import org.arghyam.jalsoochak.analytics.repository.FactOperatorAttendanceReposit
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactIngestionRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactIngestionRepository.SchemeDay;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactWaterQuantityRepository;
@@ -35,6 +36,7 @@ import org.arghyam.jalsoochak.analytics.service.water.WaterVolumeUnits;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,8 +50,10 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.format.TextStyle;
 import java.time.temporal.WeekFields;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -120,7 +124,7 @@ public class FactServiceImpl implements FactService {
 
         // Before the first write, so a concurrent event for the same scheme cannot recalculate from a
         // half-applied set of readings.
-        factIngestionRepository.lockScheme(event.getTenantId(), event.getSchemeId());
+        Optional<SchemeDay> stored = lockSchemes(fact);
         if (factIngestionRepository.upsertMeterReading(fact).isEmpty()) {
             // A newer version of this submission is already stored, and everything below already ran
             // for it. Recalculating now would change nothing, so the event is dropped here.
@@ -133,7 +137,47 @@ public class FactServiceImpl implements FactService {
         ensureDateExists(readingDate);
         updateOperatorAttendance(event, readingDate);
         recalculateWaterQuantity(event, readingDate);
+        stored.filter(previous -> !previous.equals(new SchemeDay(fact.getSchemeId(), readingDate)))
+                .ifPresent(previous -> {
+                    log.info("Reading sourceReadingId={} moved from schemeId={} date={} to schemeId={} date={} "
+                                    + "(tenantId={}); recalculating the day it left",
+                            event.getSourceReadingId(), previous.schemeId(), previous.readingDate(),
+                            event.getSchemeId(), readingDate, event.getTenantId());
+                    waterQuantityRecalculationService.recalculateAfterRemoval(
+                            event.getTenantId(), previous.schemeId(), previous.readingDate());
+                });
         log.info("Ingested fact_meter_reading_table for scheme={} tenant={}", event.getSchemeId(), event.getTenantId());
+    }
+
+    /**
+     * Locks the reading's scheme and, when the submission is stored under another one, that scheme
+     * too: a correction can move a reading to another scheme or day, and both days are rewritten.
+     * Where it is stored is read again once the locks are held, since another event for the same
+     * submission may have moved it in between.
+     *
+     * @return where the submission was stored before this event; empty for a new or legacy one
+     * @throws ConcurrencyFailureException if the submission was moved to a scheme not locked here.
+     *         The consumer retries, and the retry locks the scheme it is stored under by then.
+     */
+    private Optional<SchemeDay> lockSchemes(FactMeterReading fact) {
+        Integer tenantId = fact.getTenantId();
+        Long sourceReadingId = fact.getSourceReadingId();
+        if (sourceReadingId == null) {
+            factIngestionRepository.lockScheme(tenantId, fact.getSchemeId());
+            return Optional.empty();
+        }
+        Set<Integer> schemeIds = new HashSet<>();
+        schemeIds.add(fact.getSchemeId());
+        factIngestionRepository.findSchemeDay(tenantId, sourceReadingId)
+                .ifPresent(unlocked -> schemeIds.add(unlocked.schemeId()));
+        factIngestionRepository.lockSchemes(tenantId, schemeIds);
+        Optional<SchemeDay> stored = factIngestionRepository.findSchemeDay(tenantId, sourceReadingId);
+        if (stored.isPresent() && !schemeIds.contains(stored.get().schemeId())) {
+            throw new ConcurrencyFailureException(
+                    "Reading sourceReadingId=%d (tenantId=%d) moved to schemeId=%d while its schemes were being locked"
+                            .formatted(sourceReadingId, tenantId, stored.get().schemeId()));
+        }
+        return stored;
     }
 
     // REPORTED-METRIC: persist a pre-anomaly submission reject. Resolves the submitted gov scheme id to

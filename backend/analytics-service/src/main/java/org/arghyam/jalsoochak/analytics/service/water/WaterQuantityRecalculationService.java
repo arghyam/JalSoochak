@@ -78,20 +78,46 @@ public class WaterQuantityRecalculationService {
     }
 
     /**
-     * Recalculates {@code readingDate}, the day a reading was just written for. Then, for each
-     * {@link ReadingKind#METER_INDEX meter-index} channel, recalculates the next date with a reading
-     * on that channel, whatever {@code readingDate}'s own result was. That date's amount may now start
-     * from this day's reading, if it is on the same channel, or may no longer be allowed to start from
-     * before this day, if it is on another (see {@link #deriveMeterIndexDay}). Only that one date per
-     * channel is affected, so the follow-up goes no further.
+     * Recalculates {@code readingDate}, the day a reading was just written for. Then recalculates the
+     * next date on each meter-index channel ({@link #recalculateNextMeterIndexDays}), whatever
+     * {@code readingDate}'s own result was.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void recalculateAfterReading(Integer tenantId, Integer schemeId, LocalDate readingDate) {
         recalculateDay(tenantId, schemeId, readingDate, WriteMode.ALWAYS);
+        recalculateNextMeterIndexDays(tenantId, schemeId, readingDate);
+    }
+
+    /**
+     * Recalculates {@code date}, a day a corrected reading has just moved off, and then the next date
+     * on each meter-index channel as {@link #recalculateAfterReading} does. Nobody submitted for the
+     * day, so it is written only if it changed. A day with no reading left loses the total worked out
+     * from its readings; a row holding a reason stays.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recalculateAfterRemoval(Integer tenantId, Integer schemeId, LocalDate date) {
+        if (meterReadingRepository
+                .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(tenantId, schemeId, date)
+                .isPresent()) {
+            recalculateDay(tenantId, schemeId, date, WriteMode.ON_CHANGE);
+        } else {
+            int removed = waterQuantityRepository.deleteReadingDerivedDay(tenantId, schemeId, date);
+            log.info("Removed {} water quantity row(s) for a day with no reading left (tenantId={}, schemeId={}, date={})",
+                    removed, tenantId, schemeId, date);
+        }
+        recalculateNextMeterIndexDays(tenantId, schemeId, date);
+    }
+
+    /**
+     * For each {@link ReadingKind#METER_INDEX meter-index} channel, the next date with a reading on
+     * that channel. That date's amount may now start from {@code date}'s reading, if it is on the same
+     * channel, or may no longer be allowed to start from before {@code date}, if it is on another (see
+     * {@link #deriveMeterIndexDay}). Only that one date per channel is affected, so this goes no further.
+     */
+    private void recalculateNextMeterIndexDays(Integer tenantId, Integer schemeId, LocalDate date) {
         Arrays.stream(ReadingChannel.values())
                 .filter(channel -> channel.kind().orElse(null) == ReadingKind.METER_INDEX)
-                .map(channel -> meterReadingRepository
-                        .findNextReadingDate(tenantId, schemeId, readingDate, channel.getCode()))
+                .map(channel -> meterReadingRepository.findNextReadingDate(tenantId, schemeId, date, channel.getCode()))
                 .flatMap(Optional::stream)
                 .distinct()
                 .sorted()

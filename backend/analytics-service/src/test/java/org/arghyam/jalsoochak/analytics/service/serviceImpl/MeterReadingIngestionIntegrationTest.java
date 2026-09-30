@@ -27,6 +27,7 @@ import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -113,8 +114,12 @@ class MeterReadingIngestionIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private TestEntityManager entityManager;
+
     private static final int TENANT = 1;
     private static final int SCHEME = 1;
+    private static final int OTHER_SCHEME = 2;
     private static final int OPERATOR = 7;
     private static final int OTHER_OPERATOR = 8;
 
@@ -144,7 +149,8 @@ class MeterReadingIngestionIntegrationTest {
                 (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id,
                  parent_lgd_location_id, parent_department_location_id,
                  operating_status, created_at, updated_at)
-                VALUES (1, 1, 'Scheme A', 1001, 2001, 100, 200, 1, NOW(), NOW())
+                VALUES (1, 1, 'Scheme A', 1001, 2001, 100, 200, 1, NOW(), NOW()),
+                       (2, 1, 'Scheme B', 1002, 2002, 100, 200, 1, NOW(), NOW())
                 """);
     }
 
@@ -218,18 +224,59 @@ class MeterReadingIngestionIntegrationTest {
         assertThat(notDerivable.count()).isEqualTo(2.0);
     }
 
-    /** Deserialises the JSON telemetry publishes and ingests it as the Kafka consumer does. */
+    @Test
+    void aReadingCorrectedOntoAnotherDay_leavesTheDayItLeftWithNoTotal() throws Exception {
+        ingest(1, BFM, "2026-03-01T08:00", "100.0", OPERATOR, null);
+        ingest(2, BFM, "2026-03-02T08:00", "110.0", OPERATOR, null);
+        assertThat(litres(D2)).contains(10_000L);
+
+        // A newer version of submission 2, now dated D3.
+        ingest(2, BFM, "2026-03-03T08:00", "120.0", OPERATOR, null);
+
+        assertThat(day(D2)).isEmpty();
+        assertThat(litres(D3)).contains(20_000L);
+    }
+
+    @Test
+    void aReadingCorrectedOntoAnotherScheme_isTakenOutOfTheDayItLeft() throws Exception {
+        ingest(1, BFM, "2026-03-01T08:00", "100.0", OPERATOR, null);
+        ingest(2, BFM, "2026-03-02T08:00", "110.0", OPERATOR, null);
+        ingest(3, BFM, "2026-03-02T09:00", "112.0", OPERATOR, null);
+        assertThat(litres(D2)).contains(12_000L);
+
+        // A newer version of submission 3, now on the other scheme.
+        ingest(3, OTHER_SCHEME, BFM, "2026-03-02T09:30", "112.0", OPERATOR, null);
+
+        // Worked out from the reading the day still has.
+        assertThat(litres(D2)).contains(10_000L);
+        // The other scheme's first reading has no starting point.
+        assertThat(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
+                TENANT, OTHER_SCHEME, D2)).get().extracting(FactWaterQuantity::getWaterQuantity).isEqualTo(0L);
+    }
+
     private void ingest(long sourceReadingId, int channel, String readingAt, String reading, int userId,
                         String calculationParameters) throws Exception {
+        ingest(sourceReadingId, SCHEME, channel, readingAt, reading, userId, calculationParameters);
+    }
+
+    /**
+     * Deserialises the JSON telemetry publishes and ingests it as the Kafka consumer does, each event in
+     * a persistence context of its own, as each event's own transaction would have. The version is
+     * derived from {@code readingAt}, so a later {@code readingAt} is a newer version.
+     */
+    private void ingest(long sourceReadingId, int schemeId, int channel, String readingAt, String reading,
+                        int userId, String calculationParameters) throws Exception {
         String json = """
                 {"eventType": "METER_READING_RECORDED", "tenantId": %d, "schemeId": %d, "userId": %d,
                  "extractedReading": %s, "confirmedReading": %s, "confidence": null, "imageUrl": null,
                  "readingAt": "%s", "channel": %d, "readingDate": "%s", "submissionStatus": 1, "readingType": 0,
                  "correlationId": "corr-%d", "sourceReadingId": %d, "sourceUpdatedAt": "%s:05.123456",
                  "calculationParameters": %s}
-                """.formatted(TENANT, SCHEME, userId, reading, reading, readingAt, channel, readingAt.substring(0, 10),
+                """.formatted(TENANT, schemeId, userId, reading, reading, readingAt, channel, readingAt.substring(0, 10),
                 sourceReadingId, sourceReadingId, readingAt, calculationParameters);
         factService.ingestMeterReading(objectMapper.readValue(json, MeterReadingEvent.class));
+        entityManager.flush();
+        entityManager.clear();
     }
 
     private static String elmSnapshot(String formula, String kFactor) {
