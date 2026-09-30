@@ -378,6 +378,9 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 // job for this tenant on the next startup. The cron fields carry the same risk as
                 // weekStartDay — validateScheduleConfig rejects all four alike — so both are checked.
                 WeeklyReportTimingConfigDTO weeklyDto = (WeeklyReportTimingConfigDTO) dto;
+                if (weeklyDto == null) {
+                    throw new InvalidConfigValueException("WEEKLY_SITUATION_REPORT_TIME must not be null");
+                }
                 weeklyDto.validatedWeekStartDay();
                 weeklyDto.validateSchedule();
             }

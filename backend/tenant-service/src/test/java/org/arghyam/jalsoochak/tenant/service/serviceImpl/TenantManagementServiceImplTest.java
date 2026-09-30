@@ -1036,6 +1036,26 @@ class TenantManagementServiceImplTest {
         }
 
         @Test
+        @DisplayName("Rejects a JSON null value as invalid instead of failing with a NullPointerException")
+        void testSetTenantConfigs_weeklyReport_rejectsNullValue() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME, objectMapper.readTree("null"));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+            // treeToValue binds JSON null to a null DTO, so the range checks must not be called on it.
+            assertThrows(InvalidConfigValueException.class,
+                    () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
         @DisplayName("An omitted schedule still writes: missing fields mean the application default")
         void testSetTenantConfigs_weeklyReport_allowsAnOmittedSchedule() throws Exception {
             Integer tenantId = 1;
