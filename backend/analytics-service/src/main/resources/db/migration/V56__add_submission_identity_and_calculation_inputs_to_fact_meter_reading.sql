@@ -7,7 +7,7 @@
 --   + calculation_parameters  JSONB      -- telemetry's pump/formula snapshot (ELM and PDU only)
 --
 -- A re-published submission (a correction) updates its own row instead of adding one, and only
--- when its version is at least the stored one; see FactMeterReadingRepositoryCustomImpl.upsert.
+-- when its version is at least the stored one; see FactIngestionRepository.upsertMeterReading.
 -- correlation_id cannot be that key: the WhatsApp flows share it across rows (V48).
 --
 -- All three are nullable. Rows written before this migration, and events from a telemetry-service
