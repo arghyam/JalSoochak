@@ -485,6 +485,23 @@ class AggregationPipelineIntegrationTest {
                 new int[]{0, 1, 0, 1, 0}, new int[]{1, 1, 0, 0});
     }
 
+    @Test
+    void aggregationLock_isHeldPerTransaction_acrossSessions() throws Exception {
+        // Another pod = another database session. While it holds the lock in an open transaction,
+        // this session's try must fail; once that transaction ends, the lock is free again.
+        javax.sql.DataSource dataSource = jdbcTemplate.getDataSource();
+        try (java.sql.Connection otherPod = dataSource.getConnection()) {
+            otherPod.setAutoCommit(false);
+            try (java.sql.Statement st = otherPod.createStatement()) {
+                st.execute("SELECT pg_advisory_xact_lock(" + AggregationRepository.AGGREGATION_LOCK_KEY + ")");
+            }
+            assertThat(aggregationRepository.tryLockAggregation()).isFalse();
+
+            otherPod.rollback();
+            assertThat(aggregationRepository.tryLockAggregation()).isTrue();
+        }
+    }
+
     /**
      * @param work      ongoing, completed, not_started, handed_over, unknown
      * @param operating non_operative, operative, partially_operative, unknown

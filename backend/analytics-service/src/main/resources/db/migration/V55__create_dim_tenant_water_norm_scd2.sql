@@ -57,7 +57,7 @@ INSERT INTO analytics_schema.dim_tenant_water_norm_table
      person_count_per_household, over_supply_range_percentage,
      under_supply_range_percentage, created_at)
 SELECT t.tenant_id,
-       COALESCE(t.created_at::date, CURRENT_DATE),
+       COALESCE(t.created_at::date, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date),
        NULL,
        t.required_lpcd,
        COALESCE(t.person_count_per_household, 5),

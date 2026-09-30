@@ -46,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_dim_tenant_work_status_filter_lookup
 INSERT INTO analytics_schema.dim_tenant_work_status_filter_table
     (tenant_id, effective_from, effective_to, included_work_statuses, created_at)
 SELECT t.tenant_id,
-       COALESCE(t.created_at::date, CURRENT_DATE),
+       COALESCE(t.created_at::date, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date),
        NULL,
        t.included_work_statuses,
        CURRENT_TIMESTAMP

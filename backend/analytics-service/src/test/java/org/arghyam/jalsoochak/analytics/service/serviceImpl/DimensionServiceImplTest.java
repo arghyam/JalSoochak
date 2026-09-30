@@ -272,9 +272,53 @@ class DimensionServiceImplTest {
         verify(dimTenantWorkStatusFilterRepository, times(1)).save(captor.capture());
         DimTenantWorkStatusFilter opened = captor.getValue();
         assertThat(opened.getTenantId()).isEqualTo(1);
-        assertThat(opened.getEffectiveFrom()).isEqualTo(LocalDate.now());
+        assertThat(opened.getEffectiveFrom()).isEqualTo(LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")));
         assertThat(opened.getEffectiveTo()).isNull();
         assertThat(opened.getIncludedWorkStatuses()).containsExactly(1, 4);
+    }
+
+    /** 2026-03-10 20:00 UTC = 2026-03-11 01:30 IST: the two calendars disagree on the date. */
+    private static final java.time.Instant IST_EARLY_MORNING = java.time.Instant.parse("2026-03-10T20:00:00Z");
+    private static final LocalDate IST_DATE = LocalDate.of(2026, 3, 11);
+
+    @Test
+    void updateWaterNorm_historyRowsAreDatedByTheIndianCalendar() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
+                java.time.Clock.fixed(IST_EARLY_MORNING, java.time.ZoneOffset.UTC));
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(
+                DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build()));
+        DimTenantWaterNorm open = DimTenantWaterNorm.builder()
+                .id(5L).tenantId(1).effectiveFrom(LocalDate.of(2026, 1, 1))
+                .requiredLpcd(50).personCountPerHousehold(6)
+                .overSupplyRangePercentage(15).underSupplyRangePercentage(20)
+                .build();
+        when(dimTenantWaterNormRepository.findByTenantIdAndEffectiveToIsNull(1)).thenReturn(Optional.of(open));
+
+        service.updateWaterNorm(new WaterNormUpdatedEvent("WATER_NORM_UPDATED", 1, "MP", 70));
+
+        assertThat(open.getEffectiveTo()).isEqualTo(IST_DATE);
+        ArgumentCaptor<DimTenantWaterNorm> opened = ArgumentCaptor.forClass(DimTenantWaterNorm.class);
+        verify(dimTenantWaterNormRepository).save(opened.capture());
+        assertThat(opened.getValue().getEffectiveFrom()).isEqualTo(IST_DATE);
+    }
+
+    @Test
+    void updateIncludedWorkStatuses_historyRowsAreDatedByTheIndianCalendar() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
+                java.time.Clock.fixed(IST_EARLY_MORNING, java.time.ZoneOffset.UTC));
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(
+                DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build()));
+        DimTenantWorkStatusFilter open = DimTenantWorkStatusFilter.builder()
+                .tenantId(1).effectiveFrom(LocalDate.of(2026, 1, 1)).includedWorkStatuses(List.of(1, 4)).build();
+        when(dimTenantWorkStatusFilterRepository.findByTenantIdAndEffectiveToIsNull(1)).thenReturn(Optional.of(open));
+
+        service.updateIncludedWorkStatuses(new IncludedWorkStatusesUpdatedEvent(
+                "INCLUDED_WORK_STATUSES_UPDATED", 1, "MP", List.of(4)));
+
+        assertThat(open.getEffectiveTo()).isEqualTo(IST_DATE);
+        ArgumentCaptor<DimTenantWorkStatusFilter> opened = ArgumentCaptor.forClass(DimTenantWorkStatusFilter.class);
+        verify(dimTenantWorkStatusFilterRepository).save(opened.capture());
+        assertThat(opened.getValue().getEffectiveFrom()).isEqualTo(IST_DATE);
     }
 
     @Test
@@ -285,7 +329,7 @@ class DimensionServiceImplTest {
                 DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build()));
         DimTenantWorkStatusFilter open = DimTenantWorkStatusFilter.builder()
                 .tenantId(1)
-                .effectiveFrom(LocalDate.now().minusDays(30))
+                .effectiveFrom(LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).minusDays(30))
                 .includedWorkStatuses(List.of(1, 4))
                 .build();
         when(dimTenantWorkStatusFilterRepository.findByTenantIdAndEffectiveToIsNull(1))
@@ -293,7 +337,7 @@ class DimensionServiceImplTest {
 
         service.updateIncludedWorkStatuses(event);
 
-        assertThat(open.getEffectiveTo()).isEqualTo(LocalDate.now());
+        assertThat(open.getEffectiveTo()).isEqualTo(LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")));
         verify(dimTenantWorkStatusFilterRepository, times(1)).saveAndFlush(open);
         ArgumentCaptor<DimTenantWorkStatusFilter> captor =
                 ArgumentCaptor.forClass(DimTenantWorkStatusFilter.class);
@@ -311,7 +355,7 @@ class DimensionServiceImplTest {
                 DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build()));
         DimTenantWorkStatusFilter open = DimTenantWorkStatusFilter.builder()
                 .tenantId(1)
-                .effectiveFrom(LocalDate.now().minusDays(30))
+                .effectiveFrom(LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).minusDays(30))
                 .includedWorkStatuses(List.of(1, 4))
                 .build();
         when(dimTenantWorkStatusFilterRepository.findByTenantIdAndEffectiveToIsNull(1))
@@ -422,14 +466,14 @@ class DimensionServiceImplTest {
         verify(dimTenantWaterNormRepository, times(1)).saveAndFlush(closedCaptor.capture());
         DimTenantWaterNorm closed = closedCaptor.getValue();
         assertThat(closed.getId()).isEqualTo(5L);
-        assertThat(closed.getEffectiveTo()).isEqualTo(LocalDate.now());
+        assertThat(closed.getEffectiveTo()).isEqualTo(LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")));
 
         // New current row opened via save, carrying non-changed norm fields forward.
         ArgumentCaptor<DimTenantWaterNorm> openedCaptor = ArgumentCaptor.forClass(DimTenantWaterNorm.class);
         verify(dimTenantWaterNormRepository, times(1)).save(openedCaptor.capture());
         DimTenantWaterNorm opened = openedCaptor.getValue();
         assertThat(opened.getId()).isNull();
-        assertThat(opened.getEffectiveFrom()).isEqualTo(LocalDate.now());
+        assertThat(opened.getEffectiveFrom()).isEqualTo(LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")));
         assertThat(opened.getEffectiveTo()).isNull();
         assertThat(opened.getRequiredLpcd()).isEqualTo(70);
         assertThat(opened.getPersonCountPerHousehold()).isEqualTo(6);

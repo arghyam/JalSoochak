@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +39,9 @@ import java.util.stream.IntStream;
  */
 @Repository
 public class AggregateReadRepository {
+
+    /** Reporting days are Indian calendar days, whatever the database session's time zone. */
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
 
     private final JdbcTemplate jdbcTemplate;
     private final DashboardWorkStatusFilter workStatusFilter;
@@ -606,8 +610,8 @@ public class AggregateReadRepository {
      */
     public OptionalLong getCriticalSchemeCount(int tenantId, String hierarchy, int regionId, LocalDate cutoffDate) {
         String orClause = regionMembershipOrClause(hierarchy, "ds");
-        // Critical is a current-state KPI, so the filter in force today applies.
-        String schemeFilter = workStatusFilter.andHistoryPredicate("ds", "CURRENT_DATE");
+        // Critical is a current-state KPI, so the filter in force today (Indian date) applies.
+        String schemeFilter = workStatusFilter.andHistoryPredicate("ds", dateLiteral(LocalDate.now(IST_ZONE)));
 
         Object[] existsParams = new Object[1 + 6 + 1];
         existsParams[0] = tenantId;

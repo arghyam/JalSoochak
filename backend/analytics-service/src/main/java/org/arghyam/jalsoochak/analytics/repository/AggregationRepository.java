@@ -11,6 +11,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -61,6 +62,15 @@ public class AggregationRepository {
     public static final String SCOPE_ALL = "ALL";
 
     /**
+     * Postgres advisory-lock key that serialises writes to the pre-aggregation tables across
+     * analytics-service pods. Arbitrary but fixed; no other code in the database uses it.
+     */
+    public static final long AGGREGATION_LOCK_KEY = 7_042_026_001L;
+
+    /** Reporting days are Indian calendar days, whatever the database session's time zone. */
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
+
+    /**
      * Status breakdown columns of fact_region_metrics_table and the predicate each counts, over
      * the canonical-status alias {@code cs}. Generated from the status vocabulary so the stored
      * codes cannot drift from what the status-count API serves; each set ends with an Unknown
@@ -96,6 +106,24 @@ public class AggregationRepository {
             @Value("${analytics.dashboard.included-work-statuses:4}") String includedWorkStatusesCsv) {
         this.jdbcTemplate = jdbcTemplate;
         this.workStatusFilter = new DashboardWorkStatusFilter(includedWorkStatusesCsv);
+    }
+
+    /**
+     * Takes the aggregation lock for the current transaction if it is free, without waiting.
+     * Released automatically when the transaction ends. {@code false} means another pod is
+     * aggregating right now, so a scheduled run for the same window can simply be skipped.
+     */
+    public boolean tryLockAggregation() {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+                "SELECT pg_try_advisory_xact_lock(?)", Boolean.class, AGGREGATION_LOCK_KEY));
+    }
+
+    /**
+     * Takes the aggregation lock for the current transaction, waiting for any other holder to
+     * finish. For work that must not be skipped (the backfill).
+     */
+    public void lockAggregation() {
+        jdbcTemplate.query("SELECT pg_advisory_xact_lock(?)", rs -> null, AGGREGATION_LOCK_KEY);
     }
 
     /** Whitelisted hierarchy level columns on dim_scheme_table / fact_scheme_daily_table. */
@@ -209,7 +237,7 @@ public class AggregationRepository {
                        cs.operating_status,
                        norm.required_lpcd, norm.person_count_per_household,
                        norm.over_supply_range_percentage, norm.under_supply_range_percentage,
-                       CURRENT_TIMESTAMP, (days.d < CURRENT_DATE)
+                       CURRENT_TIMESTAMP, (days.d < ?)
                 FROM days
                 JOIN (
                     SELECT DISTINCT ON (tenant_id, scheme_id) *
@@ -250,7 +278,7 @@ public class AggregationRepository {
                     computed_at = EXCLUDED.computed_at, is_final = EXCLUDED.is_final
                 """.formatted(SchemeRegularityRepository.canonicalSchemeRowOrder(""),
                 WaterSqlFragments.schemeAttributeRowOrder("")));
-        return jdbcTemplate.update(sql, from, to, from, to, from, to, from, to);
+        return jdbcTemplate.update(sql, from, to, from, to, from, to, from, to, LocalDate.now(IST_ZONE));
     }
 
     // ============================================================

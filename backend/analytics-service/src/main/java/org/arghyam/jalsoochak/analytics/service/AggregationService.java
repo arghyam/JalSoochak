@@ -29,10 +29,24 @@ public class AggregationService {
     /**
      * Recompute all grains (base scheme/day + DAY/WEEK/MONTH region rollups) for every
      * bucket touched by [{@code from}, {@code to}]. Safe to call repeatedly (idempotent
-     * UPSERTs) — used by the nightly lookback and by the backfill runner.
+     * UPSERTs) — used by the nightly lookback. Skipped when another pod holds the
+     * aggregation lock: with several pods every one fires the same cron, and one run is enough.
      */
     @Transactional
     public void aggregateWindow(LocalDate from, LocalDate to) {
+        if (skippedForAnotherPod("window " + from + ".." + to)) {
+            return;
+        }
+        aggregate(from, to, true);
+    }
+
+    /**
+     * Same work as {@link #aggregateWindow}, for the backfill: waits for the aggregation lock
+     * instead of skipping, since a skipped backfill chunk would leave a gap.
+     */
+    @Transactional
+    public void backfillWindow(LocalDate from, LocalDate to) {
+        aggregationRepository.lockAggregation();
         aggregate(from, to, true);
     }
 
@@ -46,7 +60,22 @@ public class AggregationService {
      */
     @Transactional
     public void aggregateDayGrain(LocalDate from, LocalDate to) {
+        if (skippedForAnotherPod("day grain " + from + ".." + to)) {
+            return;
+        }
         aggregate(from, to, false);
+    }
+
+    /**
+     * Takes the aggregation lock for this transaction, or reports that another pod holds it.
+     * The lock is released when the transaction commits or rolls back.
+     */
+    private boolean skippedForAnotherPod(String what) {
+        if (aggregationRepository.tryLockAggregation()) {
+            return false;
+        }
+        log.info("[aggregation] skipped {}: another instance is aggregating", what);
+        return true;
     }
 
     private void aggregate(LocalDate from, LocalDate to, boolean includeWeekAndMonth) {
@@ -86,6 +115,9 @@ public class AggregationService {
     /** Aggregate reading-submission activity for a single hour. */
     @Transactional
     public void aggregateHour(LocalDateTime hourStart) {
+        if (skippedForAnotherPod("hour " + hourStart)) {
+            return;
+        }
         LocalDateTime truncated = hourStart.withMinute(0).withSecond(0).withNano(0);
         int rows = aggregationRepository.upsertSubmissionActivityHourly(truncated);
         log.info("[aggregation] hourly submission activity upserted rows={} hour={}", rows, truncated);

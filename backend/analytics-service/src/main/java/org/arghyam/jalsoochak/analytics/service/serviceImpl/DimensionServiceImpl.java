@@ -34,8 +34,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -61,6 +63,14 @@ public class DimensionServiceImpl implements DimensionService {
     private final DimTenantWaterNormRepository dimTenantWaterNormRepository;
     private final DimTenantWorkStatusFilterRepository dimTenantWorkStatusFilterRepository;
     private final JdbcTemplate jdbcTemplate;
+
+    /**
+     * Dates the norm and work-status filter history rows. Those dates decide which rule applies to
+     * which reporting day, and reporting days are Indian calendar days, so they are read in IST
+     * whatever the server's zone. The clock supplies only the instant (replaceable in tests).
+     */
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
+    private Clock clock = Clock.systemUTC();
 
     @Override
     @Transactional
@@ -274,7 +284,7 @@ public class DimensionServiceImpl implements DimensionService {
      */
     private void applyWaterNormChange(Integer tenantId, DimTenant tenant,
                                       Integer newLpcd, Integer newOverPct, Integer newUnderPct) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.ofInstant(clock.instant(), IST_ZONE);
         DimTenantWaterNorm open =
                 dimTenantWaterNormRepository.findByTenantIdAndEffectiveToIsNull(tenantId).orElse(null);
 
@@ -333,7 +343,7 @@ public class DimensionServiceImpl implements DimensionService {
      * so the "one open row per tenant" partial unique index never sees two open rows.
      */
     private void applyWorkStatusFilterChange(Integer tenantId, List<Integer> newStatuses) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.ofInstant(clock.instant(), IST_ZONE);
         DimTenantWorkStatusFilter open =
                 dimTenantWorkStatusFilterRepository.findByTenantIdAndEffectiveToIsNull(tenantId).orElse(null);
 

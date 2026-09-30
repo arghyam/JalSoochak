@@ -2,21 +2,30 @@ package org.arghyam.jalsoochak.analytics.service;
 
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.repository.AggregationRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit test for the calendar-bucket computation in {@link AggregationService}
@@ -31,6 +40,38 @@ class AggregationServiceTest {
 
     @InjectMocks
     private AggregationService service;
+
+    @BeforeEach
+    void thisPodHoldsTheLock() {
+        lenient().when(aggregationRepository.tryLockAggregation()).thenReturn(true);
+    }
+
+    @Test
+    void scheduledRuns_skipWhenAnotherPodIsAggregating() {
+        // A second analytics-service pod fires the same cron at the same moment; it must not write.
+        when(aggregationRepository.tryLockAggregation()).thenReturn(false);
+        LocalDate day = LocalDate.of(2026, 1, 5);
+
+        service.aggregateWindow(day, day);
+        service.aggregateDayGrain(day, day);
+        service.aggregateHour(LocalDateTime.of(2026, 1, 5, 9, 0));
+
+        verify(aggregationRepository, never()).upsertSchemeDaily(any(), any());
+        verify(aggregationRepository, never()).upsertRegionMetrics(any(), any(), any(), anyBoolean());
+        verify(aggregationRepository, never()).upsertSubmissionActivityHourly(any());
+    }
+
+    @Test
+    void backfillWindow_waitsForTheLockInsteadOfSkipping() {
+        LocalDate day = LocalDate.of(2026, 1, 5);
+
+        service.backfillWindow(day, day);
+
+        InOrder order = inOrder(aggregationRepository);
+        order.verify(aggregationRepository).lockAggregation();
+        order.verify(aggregationRepository).upsertSchemeDaily(day, day);
+        verify(aggregationRepository, never()).tryLockAggregation();
+    }
 
     @Test
     void aggregateWindow_buildsDaySundayWeekAndCalendarMonthBuckets() {
