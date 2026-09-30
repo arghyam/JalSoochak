@@ -45,6 +45,9 @@ import static org.mockito.Mockito.when;
 class BfmReadingServiceAnomalyDedupTest {
 
     @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
@@ -86,6 +89,7 @@ class BfmReadingServiceAnomalyDedupTest {
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
+                calculationParametersSnapshotter,
                 null);
         // The channel is resolved before the photo is read, so every submission here needs it.
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);

@@ -72,6 +72,9 @@ class BfmReadingServiceMeterReplacedTest {
     @Spy
     private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture();
 
+    @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
     @InjectMocks
     private BfmReadingService service;
 

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
+import org.arghyam.jalsoochak.telemetry.dto.event.CalculationParameters;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
@@ -24,6 +25,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -51,6 +53,9 @@ class BfmReadingServiceDeclaredChannelTest {
     private static final String CONTACT = "919999999999";
     private static final long READING_ID = 99L;
     private static final LocalDateTime UPDATED_AT = LocalDateTime.of(2026, 6, 22, 9, 30, 1, 250_000_000);
+
+    @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
 
     @Mock
     private TelemetryTenantRepository repo;
@@ -82,6 +87,7 @@ class BfmReadingServiceDeclaredChannelTest {
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
                 null,
                 new SubmittedValueCapture(),
+                calculationParametersSnapshotter,
                 null);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
@@ -122,7 +128,7 @@ class BfmReadingServiceDeclaredChannelTest {
         verify(telemetryEventPublisher).publishMeterReadingRecorded(eq(TENANT_ID), eq(SCHEME_ID),
                 eq(OPERATOR_ID), isNull(), eq(new BigDecimal("150")), isNull(), isNull(),
                 any(LocalDateTime.class), eq(ReadingChannel.ELM.getCode()), any(LocalDate.class),
-                eq(1), eq(0), any(), any(), any());
+                eq(1), eq(0), any(), any(), any(), any());
     }
 
     /**
@@ -135,7 +141,21 @@ class BfmReadingServiceDeclaredChannelTest {
         service.createReading(requestWithChannel(ReadingChannel.BFM), SCHEMA, operator, CONTACT, false);
 
         verify(telemetryEventPublisher).publishMeterReadingRecorded(any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), any(), any(), any(), eq(READING_ID), eq(UPDATED_AT));
+                any(), any(), any(), any(), any(), any(), any(), eq(READING_ID), eq(UPDATED_AT), any());
+    }
+
+    /** An ELM or PDU reading carries what its water quantity is calculated from, taken for its channel. */
+    @Test
+    @DisplayName("the event carries the calculation snapshot taken for the reading's channel")
+    void eventCarriesTheSnapshotForTheResolvedChannel() {
+        CalculationParameters snapshot = new CalculationParameters(CalculationParameters.VERSION, null, null, List.of());
+        when(calculationParametersSnapshotter.snapshot(SCHEMA, TENANT_ID, SCHEME_ID, ReadingChannel.PDU))
+                .thenReturn(snapshot);
+
+        service.createReading(requestWithChannel(ReadingChannel.PDU), SCHEMA, operator, CONTACT, false);
+
+        verify(telemetryEventPublisher).publishMeterReadingRecorded(any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), eq(snapshot));
     }
 
     @Test

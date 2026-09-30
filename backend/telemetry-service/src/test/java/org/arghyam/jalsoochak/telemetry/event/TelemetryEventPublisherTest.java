@@ -1,6 +1,9 @@
 package org.arghyam.jalsoochak.telemetry.event;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.event.AnomalyEvent;
+import org.arghyam.jalsoochak.telemetry.dto.event.CalculationParameters;
 import org.arghyam.jalsoochak.telemetry.dto.event.EscalationEvent;
 import org.arghyam.jalsoochak.telemetry.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.telemetry.dto.event.SubmissionRejectedEvent;
@@ -24,6 +27,7 @@ import org.mockito.quality.Strictness;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -297,7 +301,7 @@ class TelemetryEventPublisherTest {
             publisher.publishMeterReadingRecorded(17, 7L, 11L,
                     new BigDecimal("1234"), new BigDecimal("1234"), new BigDecimal("0.92"),
                     "https://storage.example.org/img.jpg", LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, "flow-corr-1",
-                    99L, LocalDateTime.of(2026, 3, 1, 6, 31, 5, 123_456_000));
+                    99L, LocalDateTime.of(2026, 3, 1, 6, 31, 5, 123_456_000), null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getEventType()).isEqualTo("METER_READING_RECORDED");
@@ -317,10 +321,41 @@ class TelemetryEventPublisherTest {
             assertThat(event.getSourceUpdatedAt()).isEqualTo("2026-03-01T06:31:05.123456");
         }
 
+        /**
+         * Analytics reads the snapshot into its own copy of the record, so the field names are the
+         * contract. The values go through exactly as stored.
+         */
+        @Test
+        void carriesTheCalculationParametersUnderTheContractsNames() throws Exception {
+            CalculationParameters snapshot = new CalculationParameters(1, "F2", new BigDecimal("0.95"), List.of(
+                    new CalculationParameters.Pump(12L, new BigDecimal("500"), new BigDecimal("0.7"),
+                            new BigDecimal("40"), new BigDecimal("7.5"), "HP", new BigDecimal("0.85"),
+                            new BigDecimal("5"))));
+
+            publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 2, DATE, 1, 0, null, 99L, null, snapshot);
+
+            MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
+            assertThat(event.getCalculationParameters()).isEqualTo(snapshot);
+            JsonNode json = new ObjectMapper().valueToTree(event).get("calculationParameters");
+            assertThat(json.get("version").asInt()).isEqualTo(1);
+            assertThat(json.get("elmFormula").asText()).isEqualTo("F2");
+            assertThat(json.get("kFactor").decimalValue()).isEqualByComparingTo("0.95");
+            JsonNode pump = json.get("pumps").get(0);
+            assertThat(pump.get("pumpId").asLong()).isEqualTo(12L);
+            assertThat(pump.get("pumpDischargeCapacityLpm").decimalValue()).isEqualByComparingTo("500");
+            assertThat(pump.get("pumpEfficiency").decimalValue()).isEqualByComparingTo("0.7");
+            assertThat(pump.get("pumpHeadM").decimalValue()).isEqualByComparingTo("40");
+            assertThat(pump.get("motorPower").decimalValue()).isEqualByComparingTo("7.5");
+            assertThat(pump.get("motorPowerUnit").asText()).isEqualTo("HP");
+            assertThat(pump.get("motorEfficiency").decimalValue()).isEqualByComparingTo("0.85");
+            assertThat(pump.get("unitsConsumedPerHour").decimalValue()).isEqualByComparingTo("5");
+        }
+
         @Test
         void leavesTheVersionNullWhenItIsNotKnown() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
-                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null, 99L, null);
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null, 99L, null, null);
 
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getSourceUpdatedAt()).isNull();
         }
@@ -328,7 +363,7 @@ class TelemetryEventPublisherTest {
         @Test
         void fallsBackToTheReadingTimestampsDateWhenNoReadingDateIsGiven() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
-                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, null, 1, 0, null, null, null);
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, null, 1, 0, null, null, null, null);
 
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getReadingDate()).isEqualTo("2026-03-01");
         }
@@ -340,7 +375,7 @@ class TelemetryEventPublisherTest {
             // analytics derives from two of them.
             publisher.publishMeterReadingRecorded(17, 7L, 11L,
                     new BigDecimal("1247.8"), new BigDecimal("1235.55"), null,
-                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null, null, null);
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null, null, null, null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getExtractedReading()).isEqualByComparingTo("1247.8");
@@ -350,7 +385,7 @@ class TelemetryEventPublisherTest {
         @Test
         void carriesNullReadingsThrough() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, null, null, null,
-                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null, null, null);
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null, null, null, null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getExtractedReading()).isNull();
@@ -360,7 +395,7 @@ class TelemetryEventPublisherTest {
         @Test
         void leavesTheDateNullWhenNeitherIsGiven() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
-                    null, null, 1, null, 1, 0, null, null, null);
+                    null, null, 1, null, 1, 0, null, null, null, null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getReadingDate()).isNull();
@@ -377,7 +412,7 @@ class TelemetryEventPublisherTest {
         })
         void normalisesModelConfidenceToAWholePercentage(String confidence, int expected) {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN,
-                    new BigDecimal(confidence), null, null, 1, DATE, 1, 0, null, null, null);
+                    new BigDecimal(confidence), null, null, 1, DATE, 1, 0, null, null, null, null);
 
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isEqualTo(expected);
         }
@@ -385,12 +420,12 @@ class TelemetryEventPublisherTest {
         @Test
         void treatsAMissingOrNegativeConfidenceAsUnknown() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN,
-                    null, null, null, 1, DATE, 1, 0, null, null, null);
+                    null, null, null, 1, DATE, 1, 0, null, null, null, null);
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isNull();
 
             org.mockito.Mockito.reset(kafkaProducer);
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN,
-                    new BigDecimal("-1"), null, null, 1, DATE, 1, 0, null, null, null);
+                    new BigDecimal("-1"), null, null, 1, DATE, 1, 0, null, null, null, null);
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isNull();
         }
     }

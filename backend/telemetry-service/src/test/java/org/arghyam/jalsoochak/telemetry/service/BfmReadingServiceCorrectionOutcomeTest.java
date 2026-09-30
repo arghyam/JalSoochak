@@ -82,6 +82,9 @@ class BfmReadingServiceCorrectionOutcomeTest {
     private static final BigDecimal IMPLAUSIBLE = new BigDecimal("1100");
 
     @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository repo;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
@@ -117,6 +120,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
                 null,
                 new SubmittedValueCapture(),
+                calculationParametersSnapshotter,
                 null);
     }
 

@@ -74,6 +74,9 @@ class BfmReadingServiceLocationMismatchTest {
     private static final BigDecimal LNG = new BigDecimal("91.7362");
 
     @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository repo;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
@@ -128,6 +131,7 @@ class BfmReadingServiceLocationMismatchTest {
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
                 null,
                 new SubmittedValueCapture(),
+                calculationParametersSnapshotter,
                 locationAffinityService);
     }
 
@@ -284,6 +288,7 @@ class BfmReadingServiceLocationMismatchTest {
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
                 null,
                 new SubmittedValueCapture(),
+                calculationParametersSnapshotter,
                 null);
 
         CreateReadingResponse response = withoutCheck.createReading(

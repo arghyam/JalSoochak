@@ -21,7 +21,8 @@ import java.time.LocalDateTime;
  * <p>The event is built from the row as it stands in {@code flow_reading_table}, read back by id, so
  * analytics receives exactly what telemetry holds, whichever path wrote it. It carries the row's id
  * and {@code updated_at}, so analytics updates the submission's one fact row instead of adding
- * another, and ignores an older version that arrives late.
+ * another, and ignores an older version that arrives late. An ELM or PDU reading also carries a fresh
+ * snapshot of what its water quantity is calculated from.
  *
  * <p>SUPPLY-PLAUSIBILITY: a row that is still quarantined is not published, as on the submission
  * path. Telemetry keeps it out of every baseline, so publishing it would put a reading in analytics
@@ -34,6 +35,7 @@ public class ReadingRepublisher {
 
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final TelemetryEventPublisher telemetryEventPublisher;
+    private final CalculationParametersSnapshotter calculationParametersSnapshotter;
 
     /**
      * @param tenantId the tenant for the published event; analytics drops the attendance and
@@ -74,7 +76,11 @@ public class ReadingRepublisher {
                 reading.correlationId(),
                 reading.id(),
                 // Read in the same statement as the values above, so the version always matches them.
-                reading.updatedAt()
+                reading.updatedAt(),
+                // Taken now rather than kept from the first publish: a corrected reading is calculated
+                // with the pump data current at the time of the correction.
+                calculationParametersSnapshotter.snapshot(
+                        schemaName, tenantId, reading.schemeId(), ReadingChannel.fromChannelValue(reading.channel()))
         );
     }
 

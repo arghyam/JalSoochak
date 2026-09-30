@@ -45,4 +45,6 @@ public class MeterReadingEvent {
      * clock.
      */
     private String sourceUpdatedAt;
+    /** What an ELM or PDU reading's water quantity is calculated from; null for every other channel. */
+    private CalculationParameters calculationParameters;
 }

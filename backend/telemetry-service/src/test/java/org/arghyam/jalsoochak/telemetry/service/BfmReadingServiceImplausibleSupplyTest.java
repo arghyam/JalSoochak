@@ -68,6 +68,9 @@ class BfmReadingServiceImplausibleSupplyTest {
     private static final LocalDateTime BASELINE_AT = LocalDateTime.of(2026, 9, 7, 9, 0);
 
     @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository repo;
     @Mock
     private MeterReadingExtractor defaultOcrExtractor;
@@ -126,6 +129,7 @@ class BfmReadingServiceImplausibleSupplyTest {
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
+                calculationParametersSnapshotter,
                 null);
     }
 
@@ -182,7 +186,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             // publishMeterReadingRecorded is the single event that writes fact_meter_reading,
             // fact_operator_attendance and fact_water_quantity. Withholding it is the whole point.
             verify(telemetryEventPublisher, never()).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -345,7 +349,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             submit(SupplyPlausibilityProperties.Mode.AUDIT, "1100", true);
 
             verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
                     any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull(), any(), any());
@@ -377,7 +381,7 @@ class BfmReadingServiceImplausibleSupplyTest {
 
             assertThat(response.isSuccess()).isTrue();
             verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test

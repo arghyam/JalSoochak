@@ -900,7 +900,7 @@ class ReadingIngestControllerUnitTest {
 
     @Test
     void updateReadingAnswersAnUnsupportedUnitWithItsOwnCode() {
-        BfmReadingService rejecting = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null) {
+        BfmReadingService rejecting = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null, null) {
             @Override
             public CreateReadingResponse updateConfirmedReading(String correlationId,
                                                                 String phoneNumber,
@@ -1004,7 +1004,7 @@ class ReadingIngestControllerUnitTest {
 
     @Test
     void updateReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
-        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null) {
+        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null, null) {
             @Override
             public CreateReadingResponse updateConfirmedReading(String correlationId,
                                                                 String phoneNumber,
@@ -1042,7 +1042,7 @@ class ReadingIngestControllerUnitTest {
      */
     @Test
     void updateReadingReturnsBadRequestWhenCorrectionIsRejected() {
-        BfmReadingService rejecting = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null) {
+        BfmReadingService rejecting = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null, null) {
             @Override
             public CreateReadingResponse updateConfirmedReading(String correlationId,
                                                                 String phoneNumber,
@@ -1108,7 +1108,7 @@ class ReadingIngestControllerUnitTest {
 
     @Test
     void resetLatestReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
-        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null) {
+        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null, null) {
             @Override
             public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber, Integer tenantId) {
                 throw new IllegalStateException("boom");
@@ -1229,7 +1229,7 @@ class ReadingIngestControllerUnitTest {
         }
 
         private StubBfmReadingService(boolean throwError, ResponseStatusException failure) {
-            super(null, null, null, null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null, null, null, null);
             this.throwError = throwError;
             this.failure = failure;
         }

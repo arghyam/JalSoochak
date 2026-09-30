@@ -50,6 +50,9 @@ class BfmReadingServiceCorrectionChannelTest {
     private static final LocalDate READING_DATE = LocalDate.of(2026, 6, 22);
 
     @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository repo;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
@@ -82,6 +85,7 @@ class BfmReadingServiceCorrectionChannelTest {
                 supplyPlausibilityGuard,
                 null,
                 new SubmittedValueCapture(),
+                calculationParametersSnapshotter,
                 null);
         lenient().when(repo.findSchemaNameByTenantId(TENANT_ID)).thenReturn(Optional.of(SCHEMA));
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));

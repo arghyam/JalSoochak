@@ -61,6 +61,9 @@ class BfmReadingServiceReadingUnitTest {
     private static final String IMAGE_URL = "https://img.example.com/meter.jpg";
 
     @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository repo;
     @Mock
     private MeterReadingExtractor defaultOcrExtractor;
@@ -99,6 +102,7 @@ class BfmReadingServiceReadingUnitTest {
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
+                calculationParametersSnapshotter,
                 null);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
@@ -259,7 +263,7 @@ class BfmReadingServiceReadingUnitTest {
 
     private void verifyPublished(String value) {
         verify(telemetryEventPublisher).publishMeterReadingRecorded(any(), any(), any(), any(),
-                argThat(sameValue(value)), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                argThat(sameValue(value)), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     private void verifyNothingStoredOrPublished() {

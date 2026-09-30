@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.event;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.dto.event.AnomalyEvent;
+import org.arghyam.jalsoochak.telemetry.dto.event.CalculationParameters;
 import org.arghyam.jalsoochak.telemetry.dto.event.EscalationEvent;
 import org.arghyam.jalsoochak.telemetry.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.telemetry.dto.event.SubmissionRejectedEvent;
@@ -186,7 +187,8 @@ public class TelemetryEventPublisher {
                                             Integer readingType,
                                             String correlationId,
                                             Long sourceReadingId,
-                                            LocalDateTime sourceUpdatedAt) {
+                                            LocalDateTime sourceUpdatedAt,
+                                            CalculationParameters calculationParameters) {
         LocalDate effectiveDate = readingDate != null ? readingDate : (readingAt != null ? readingAt.toLocalDate() : null);
         MeterReadingEvent event = MeterReadingEvent.builder()
                 .eventType(EVENT_METER_READING_RECORDED)
@@ -207,6 +209,7 @@ public class TelemetryEventPublisher {
                 .correlationId(correlationId)
                 .sourceReadingId(sourceReadingId)
                 .sourceUpdatedAt(sourceUpdatedAt != null ? sourceUpdatedAt.toString() : null)
+                .calculationParameters(calculationParameters)
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);

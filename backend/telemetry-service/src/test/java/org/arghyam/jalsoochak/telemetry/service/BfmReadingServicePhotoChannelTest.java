@@ -60,6 +60,9 @@ class BfmReadingServicePhotoChannelTest {
     private static final String IMAGE_URL = "https://img.example.com/meter.jpg";
 
     @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository repo;
     @Mock
     private MeterReadingExtractor bfmOcrExtractor;
@@ -99,6 +102,7 @@ class BfmReadingServicePhotoChannelTest {
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(bfmOcrExtractor)),
                 new SubmittedValueCapture(),
+                calculationParametersSnapshotter,
                 null);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));

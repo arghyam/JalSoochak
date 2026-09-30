@@ -64,6 +64,7 @@ public class BfmReadingService {
     private final SupplyPlausibilityGuard supplyPlausibilityGuard;
     private final ImageReadingCapture imageReadingCapture;
     private final SubmittedValueCapture submittedValueCapture;
+    private final CalculationParametersSnapshotter calculationParametersSnapshotter;
     // LOCATION-AFFINITY: the scheme-boundary check. Nullable so a unit test that does not exercise it
     // may pass null, and the check is then simply not run rather than costing the reading.
     private final LocationAffinityService locationAffinityService;
@@ -623,7 +624,8 @@ public class BfmReadingService {
                 // The version the write above gave the row. The markers written after it move
                 // updated_at on without changing anything published here, and a later republish
                 // reads the newer value, so analytics still keeps the latest.
-                storedReading.updatedAt()
+                storedReading.updatedAt(),
+                calculationParametersSnapshotter.snapshot(schemaName, tenantId, request.getSchemeId(), resolvedChannel)
         );
 
         // Surface the resolved value to the operator: the "please confirm" message text and the response

@@ -59,6 +59,9 @@ class BfmReadingServiceAssertedReadingTest {
     private static final String CONTACT = "919999999999";
 
     @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository repo;
     @Mock
     private MeterReadingExtractor defaultOcrExtractor;
@@ -97,6 +100,7 @@ class BfmReadingServiceAssertedReadingTest {
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
+                calculationParametersSnapshotter,
                 null);
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
@@ -188,7 +192,7 @@ class BfmReadingServiceAssertedReadingTest {
         // count every API submission as an operator overriding the AI.
         verify(telemetryEventPublisher).publishMeterReadingRecorded(eq(TENANT_ID), eq(SCHEME_ID),
                 eq(OPERATOR_ID), isNull(), eq(new BigDecimal("150")), isNull(), isNull(),
-                any(LocalDateTime.class), anyInt(), any(LocalDate.class), eq(1), eq(0), any(), any(), any());
+                any(LocalDateTime.class), anyInt(), any(LocalDate.class), eq(1), eq(0), any(), any(), any(), any());
     }
 
     @Test

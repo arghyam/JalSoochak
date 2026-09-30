@@ -72,7 +72,9 @@ CREATE TABLE tenant_as.scheme_master_table (
     planned_fhtc     INTEGER  NOT NULL DEFAULT 0,
     house_hold_count INTEGER  NOT NULL DEFAULT 0,
     latitude         DOUBLE PRECISION,
-    longitude        DOUBLE PRECISION
+    longitude        DOUBLE PRECISION,
+    -- V54, an input to the ELM and PDU formulas.
+    k_factor         FLOAT
 );
 
 CREATE TABLE tenant_as.flow_reading_table (
@@ -172,4 +174,21 @@ CREATE TABLE tenant_zz.anomaly_table (
     detail     TEXT,
     status     INTEGER   NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- ── ELM and PDU calculation inputs (V53) ─────────────────────────────────────
+-- The pumps a scheme's ELM and PDU readings are converted to litres with.
+
+CREATE TABLE tenant_as.asset_pump_registry_table (
+    id                       SERIAL      PRIMARY KEY,
+    scheme_id                INTEGER     NOT NULL,
+    status                   INTEGER     NOT NULL,
+    pump_discharge_capacity  FLOAT,
+    pump_efficiency          FLOAT,
+    pump_head                FLOAT,
+    motor_power              FLOAT,
+    motor_power_unit         VARCHAR(20),
+    motor_efficiency         FLOAT,
+    units_consumed_per_hour  FLOAT,
+    deleted_at               TIMESTAMP
 );

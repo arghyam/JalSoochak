@@ -46,6 +46,9 @@ import static org.mockito.Mockito.when;
 class BfmReadingServicePlaceholderRowTest {
 
     @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
@@ -106,6 +109,7 @@ class BfmReadingServicePlaceholderRowTest {
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
+                calculationParametersSnapshotter,
                 null);
     }
 

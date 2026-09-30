@@ -61,6 +61,9 @@ class BfmReadingServiceRolloverTest {
     private static final String IMAGE_URL = "https://img.example.com/a.jpg";
 
     @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository repo;
     @Mock
     private MeterReadingExtractor defaultOcrExtractor;
@@ -101,6 +104,7 @@ class BfmReadingServiceRolloverTest {
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
+                calculationParametersSnapshotter,
                 null);
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
     }
