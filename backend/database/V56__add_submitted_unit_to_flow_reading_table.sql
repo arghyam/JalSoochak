@@ -3,6 +3,8 @@
 -- ------------------------------------------------------------
 --   flow_reading_table
 --     + submitted_unit  VARCHAR(16)  -- NULL on rows written before this
+--     + column comments on extracted_reading, confirmed_reading and
+--       submitted_unit, since the table holds readings in several units
 --
 -- confirmed_reading is always stored in the channel's standard unit (m3
 -- for BFM, kW.h for ELM, min for PDU). submitted_unit records the UCUM
@@ -34,11 +36,21 @@ BEGIN
                 'ALTER TABLE %1$I.flow_reading_table
                      ADD COLUMN IF NOT EXISTS submitted_unit VARCHAR(16)',
                 tenant_schema);
+            EXECUTE format('COMMENT ON COLUMN %I.flow_reading_table.extracted_reading IS %L', tenant_schema,
+                'What OCR read off the meter photo, in the channel''s standard unit. 0 when no photo was read.');
+            EXECUTE format('COMMENT ON COLUMN %I.flow_reading_table.confirmed_reading IS %L', tenant_schema,
+                'The reading in the channel''s standard unit, whatever unit it was sent in (see submitted_unit). '
+                || 'BFM: m3, cumulative meter index. ELM: kW.h, cumulative meter index. '
+                || 'PDU: min, pump run time of this submission.');
+            EXECUTE format('COMMENT ON COLUMN %I.flow_reading_table.submitted_unit IS %L', tenant_schema,
+                'UCUM code of the unit the reading was sent in: m3, kL or L (BFM), kW.h (ELM), min or h (PDU). '
+                || 'confirmed_reading holds the value converted to the channel''s standard unit. '
+                || 'NULL on rows from before V56, rows with no reading, and IOT and MAN rows.');
         END IF;
     END LOOP;
 END $$;
 
--- ── Part B: Ensure new tenant schemas include the same column ───────────────
+-- ── Part B: Ensure new tenant schemas include the same column and comments ──
 -- Wrapper pattern (as used by V42/V51/V53/V54): preserve the current
 -- implementation once under a versioned name, then wrap it to add the column.
 -- The captured base therefore already includes the V54 wrapper and V55's
@@ -73,13 +85,23 @@ BEGIN
     -- Execute the existing provisioning logic first.
     PERFORM common_schema.create_tenant_schema_v56_base(schema_name);
 
-    -- Submitted unit for new tenant schemas.
+    -- Submitted unit and column comments for new tenant schemas.
     -- Guard with to_regclass so a partially-provisioned schema is skipped instead of aborting.
     IF to_regclass(format('%I.flow_reading_table', schema_name)) IS NOT NULL THEN
         EXECUTE format(
             'ALTER TABLE %1$I.flow_reading_table
                  ADD COLUMN IF NOT EXISTS submitted_unit VARCHAR(16)',
             schema_name);
+        EXECUTE format('COMMENT ON COLUMN %I.flow_reading_table.extracted_reading IS %L', schema_name,
+            'What OCR read off the meter photo, in the channel''s standard unit. 0 when no photo was read.');
+        EXECUTE format('COMMENT ON COLUMN %I.flow_reading_table.confirmed_reading IS %L', schema_name,
+            'The reading in the channel''s standard unit, whatever unit it was sent in (see submitted_unit). '
+            || 'BFM: m3, cumulative meter index. ELM: kW.h, cumulative meter index. '
+            || 'PDU: min, pump run time of this submission.');
+        EXECUTE format('COMMENT ON COLUMN %I.flow_reading_table.submitted_unit IS %L', schema_name,
+            'UCUM code of the unit the reading was sent in: m3, kL or L (BFM), kW.h (ELM), min or h (PDU). '
+            || 'confirmed_reading holds the value converted to the channel''s standard unit. '
+            || 'NULL on rows from before V56, rows with no reading, and IOT and MAN rows.');
     END IF;
 END;
 $func$;
