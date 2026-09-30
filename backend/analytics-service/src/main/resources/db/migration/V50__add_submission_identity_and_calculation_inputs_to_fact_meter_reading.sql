@@ -8,7 +8,7 @@
 --
 -- A re-published submission (a correction) updates its own row instead of adding one, and only
 -- when its version is at least the stored one; see FactMeterReadingRepositoryCustomImpl.upsert.
--- correlation_id cannot be that key: the Glific flows share it across rows (V48).
+-- correlation_id cannot be that key: the WhatsApp flows share it across rows (V48).
 --
 -- All three are nullable. Rows written before this migration, and events from a telemetry-service
 -- that does not send them yet, have no source id and are inserted as before. NULLs never conflict

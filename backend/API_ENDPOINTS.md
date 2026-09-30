@@ -282,6 +282,37 @@ An unsupported value returns `400` with `errorCode: CHANNEL_NOT_SUPPORTED`. `PUT
 `PATCH /schemes/{id}/yesterday-final-reading` do not take it — a correction keeps the channel
 recorded when the reading was first submitted.
 
+### Partner ingestion — the optional `reading_unit` parameter
+
+`POST /api/v1/telemetry/readings`, `POST /api/v1/telemetry/readings/formats/{format}` and
+`PUT /api/v1/telemetry/readings` accept an optional `reading_unit` (`PUT` also accepts `readingUnit`):
+the unit `confirmed_reading` is given in. The value is converted to the channel's standard unit before
+it is stored. Omitted or blank, `confirmed_reading` is taken to be in the standard unit, which is what
+every caller sent before the field existed.
+
+| Channel | Accepted `reading_unit` | Standard unit |
+|---------|-------------------------|---------------|
+| BFM | `m3`, `kL`, `L` | `m3` |
+| ELM | `kW.h` | `kW.h` |
+| PDU | `min`, `h` | `min` |
+| IOT, MAN | none | none |
+
+Only these spellings are accepted. Case and surrounding whitespace are ignored, but other spellings
+such as `kWh` are rejected rather than guessed at. The channel is the one the reading is recorded
+under: on `POST`, the declared `channel` or else the operator's stored preference; on `PUT`, the
+channel of the reading being corrected. `PATCH /schemes/{id}/yesterday-final-reading` does not take a
+unit; its value is always in `m3`.
+
+Both errors below return `400`:
+
+- `READING_UNIT_NOT_SUPPORTED` — `reading_unit` is not one of the channel's units (any value, for IOT
+  and MAN), or a photo sent without `confirmed_reading` names a unit other than the channel's standard
+  one: OCR reads a meter in its standard unit.
+- `IMAGE_NOT_SUPPORTED_FOR_CHANNEL` — `POST` only. A photo (`reading_url`) sent without
+  `confirmed_reading`, on a channel that can't read photos: PDU, IOT and MAN, and ELM while no OCR
+  provider reads electric meters. A photo sent with `confirmed_reading` is accepted on every channel;
+  the photo is kept and not read.
+
 | Method | Endpoint                                          | Description |
 |--------|---------------------------------------------------|-------------|
 | POST | `/api/v1/telemetry/readings/whatsapp`             | Receive the chatbot webhook payload for image-based meter readings |
