@@ -53,6 +53,23 @@ class SubmittedValueCaptureTest {
         assertThat(reading.submittedUnit()).isEqualTo(expectedUnit);
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "BFM, 12,    m³,    12,    m3",
+            "BFM, 1500,  litre, 1.5,   L",
+            "BFM, 1500,  liter, 1.5,   L",
+            "ELM, 310.2, kWh,   310.2, kW.h",
+            "PDU, 1.5,   hr,    90,    h"
+    })
+    @DisplayName("a unit's other spelling is converted and recorded under its UCUM code")
+    void otherSpellingIsRecordedAsTheUcumCode(ReadingChannel channel, String value, String spelling,
+                                              String expected, String expectedCode) {
+        CapturedReading reading = captured(capture.capture(input(channel, value, spelling, true)));
+
+        assertThat(reading.value()).isEqualByComparingTo(expected);
+        assertThat(reading.submittedUnitCode()).isEqualTo(expectedCode);
+    }
+
     @Test
     @DisplayName("a unit of another channel is rejected, without echoing the value sent")
     void unitOfAnotherChannelIsRejected() {

@@ -2,12 +2,14 @@ package org.arghyam.jalsoochak.telemetry.channel;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
  * A unit a reading can be submitted in, named by its UCUM code and tied to the one channel it
- * measures.
+ * measures. A unit may also accept common non-UCUM spellings, such as {@code kWh} or {@code litre};
+ * only {@link #code()} is ever stored.
  *
  * <p>{@code flow_reading_table.confirmed_reading} always holds the channel's
  * {@linkplain ReadingChannel#standardUnit() standard unit}, because queries do arithmetic on that
@@ -15,21 +17,23 @@ import java.util.stream.Collectors;
  * value arrived in.
  */
 public enum ReadingUnit {
-    CUBIC_METRE("m3", ReadingChannel.BFM, BigDecimal.ONE),
+    CUBIC_METRE("m3", ReadingChannel.BFM, BigDecimal.ONE, "m³"),
     KILOLITRE("kL", ReadingChannel.BFM, BigDecimal.ONE),
-    LITRE("L", ReadingChannel.BFM, new BigDecimal("0.001")),
-    KILOWATT_HOUR("kW.h", ReadingChannel.ELM, BigDecimal.ONE),
+    LITRE("L", ReadingChannel.BFM, new BigDecimal("0.001"), "litre", "liter"),
+    KILOWATT_HOUR("kW.h", ReadingChannel.ELM, BigDecimal.ONE, "kWh"),
     MINUTE("min", ReadingChannel.PDU, BigDecimal.ONE),
-    HOUR("h", ReadingChannel.PDU, new BigDecimal("60"));
+    HOUR("h", ReadingChannel.PDU, new BigDecimal("60"), "hr");
 
     private final String code;
     private final ReadingChannel channel;
     private final BigDecimal factorToStandardUnit;
+    private final List<String> otherSpellings;
 
-    ReadingUnit(String code, ReadingChannel channel, BigDecimal factorToStandardUnit) {
+    ReadingUnit(String code, ReadingChannel channel, BigDecimal factorToStandardUnit, String... otherSpellings) {
         this.code = code;
         this.channel = channel;
         this.factorToStandardUnit = factorToStandardUnit;
+        this.otherSpellings = List.of(otherSpellings);
     }
 
     /** The UCUM spelling, which is what gets stored. */
@@ -60,8 +64,8 @@ public enum ReadingUnit {
 
     /**
      * The unit {@code code} names, when it is one of {@code channel}'s units. Matching is trimmed and
-     * case-insensitive; {@link #code()} is still what gets stored. Empty for null, blank, an unknown
-     * code, or a unit of another channel.
+     * case-insensitive, and also accepts a unit's other spellings; {@link #code()} is still what gets
+     * stored. Empty for null, blank, an unknown code, or a unit of another channel.
      */
     public static Optional<ReadingUnit> parseFor(ReadingChannel channel, String code) {
         if (!isDeclared(code)) {
@@ -69,8 +73,12 @@ public enum ReadingUnit {
         }
         String normalized = code.trim();
         return Arrays.stream(values())
-                .filter(unit -> unit.channel == channel && unit.code.equalsIgnoreCase(normalized))
+                .filter(unit -> unit.channel == channel && unit.isSpelled(normalized))
                 .findFirst();
+    }
+
+    private boolean isSpelled(String spelling) {
+        return code.equalsIgnoreCase(spelling) || otherSpellings.stream().anyMatch(spelling::equalsIgnoreCase);
     }
 
     /**

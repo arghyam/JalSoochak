@@ -290,18 +290,19 @@ the unit `confirmed_reading` is given in. The value is converted to the channel'
 it is stored. Omitted or blank, `confirmed_reading` is taken to be in the standard unit, which is what
 every caller sent before the field existed.
 
-| Channel | Accepted `reading_unit` | Standard unit |
-|---------|-------------------------|---------------|
-| BFM | `m3`, `kL`, `L` | `m3` |
-| ELM | `kW.h` | `kW.h` |
-| PDU | `min`, `h` | `min` |
-| IOT, MAN | none | none |
+| Channel | Accepted `reading_unit` | Also accepted | Standard unit |
+|---------|-------------------------|---------------|---------------|
+| BFM | `m3`, `kL`, `L` | `m³` for `m3`; `litre`, `liter` for `L` | `m3` |
+| ELM | `kW.h` | `kWh` | `kW.h` |
+| PDU | `min`, `h` | `hr` for `h` | `min` |
+| IOT, MAN | none | none | none |
 
-Only these spellings are accepted. Case and surrounding whitespace are ignored, but other spellings
-such as `kWh` are rejected rather than guessed at. The channel is the one the reading is recorded
-under: on `POST`, the declared `channel` or else the operator's stored preference; on `PUT`, the
-channel of the reading being corrected. `PATCH /schemes/{id}/yesterday-final-reading` does not take a
-unit; its value is always in `m3`.
+Only these spellings are accepted. An alternative spelling is stored as the unit it stands for, so
+`kWh` is stored as `kW.h`. Case and surrounding whitespace are ignored, but other spellings, such as
+plurals like `litres` or `hrs`, are rejected rather than guessed at. The channel is the one the reading
+is recorded under: on `POST`, the declared `channel` or else the operator's
+stored preference; on `PUT`, the channel of the reading being corrected.
+`PATCH /schemes/{id}/yesterday-final-reading` does not take a unit; its value is always in `m3`.
 
 Both errors below return `400`:
 

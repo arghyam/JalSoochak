@@ -35,7 +35,33 @@ class ReadingUnitTest {
 
     @ParameterizedTest
     @CsvSource({
+            "BFM, m³,         CUBIC_METRE",
+            "BFM, M³,         CUBIC_METRE",
+            "BFM, litre,      LITRE",
+            "BFM, LITRE,      LITRE",
+            "BFM, liter,      LITRE",
+            "BFM, Liter,      LITRE",
+            "ELM, kWh,        KILOWATT_HOUR",
+            "ELM, KWH,        KILOWATT_HOUR",
+            "ELM, kwh,        KILOWATT_HOUR",
+            "PDU, hr,         HOUR",
+            "PDU, HR,         HOUR",
+            "PDU, '  hr  ',   HOUR"
+    })
+    void parseFor_acceptsAUnitsOtherSpellingsTrimmedAndInAnyCase(ReadingChannel channel, String spelling,
+                                                                 ReadingUnit expected) {
+        assertThat(ReadingUnit.parseFor(channel, spelling)).contains(expected);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
             "BFM, kW.h",
+            "BFM, kWh",
+            "BFM, hr",
+            "ELM, m³",
+            "ELM, litre",
+            "PDU, kWh",
+            "PDU, liter",
             "BFM, min",
             "ELM, m3",
             "ELM, h",
@@ -52,6 +78,8 @@ class ReadingUnitTest {
     void parseFor_rejectsUnknownNullAndBlankCodes() {
         assertThat(ReadingUnit.parseFor(ReadingChannel.BFM, "gallon")).isEmpty();
         assertThat(ReadingUnit.parseFor(ReadingChannel.BFM, "m^3")).isEmpty();
+        assertThat(ReadingUnit.parseFor(ReadingChannel.BFM, "litres")).isEmpty();
+        assertThat(ReadingUnit.parseFor(ReadingChannel.PDU, "hrs")).isEmpty();
         assertThat(ReadingUnit.parseFor(ReadingChannel.BFM, null)).isEmpty();
         assertThat(ReadingUnit.parseFor(ReadingChannel.BFM, "   ")).isEmpty();
     }
