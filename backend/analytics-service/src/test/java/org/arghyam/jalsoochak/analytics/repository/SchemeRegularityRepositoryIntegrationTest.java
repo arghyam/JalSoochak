@@ -615,7 +615,7 @@ class SchemeRegularityRepositoryIntegrationTest {
     @Test
     void getPeriodicWaterQuantityByLgdId_weekScale_returnsExpectedRowsAndAverages() {
         List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> rows =
-                repository.getPeriodicWaterQuantityByLgdId(100, D1, D10, PeriodScale.WEEK);
+                repository.getPeriodicWaterQuantityByLgdId(1, 100, D1, D10, PeriodScale.WEEK);
 
         assertThat(rows).hasSize(2);
 
@@ -642,11 +642,48 @@ class SchemeRegularityRepositoryIntegrationTest {
     @Test
     void getPeriodicWaterQuantityByDepartment_monthScale_returnsSingleMonthMetric() {
         List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> rows =
-                repository.getPeriodicWaterQuantityByDepartment(200, D1, D10, PeriodScale.MONTH);
+                repository.getPeriodicWaterQuantityByDepartment(1, 200, D1, D10, PeriodScale.MONTH);
 
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
         // Unified water figure: only scheme 1 D2 (200, SUBMITTED) qualifies across the month => avg 200.
+        assertThat(rows.get(0).averageWaterQuantity()).isEqualByComparingTo("200.0000");
+        assertThat(rows.get(0).householdCount()).isEqualTo(30);
+    }
+
+    @Test
+    void getPeriodicWaterQuantityByDepartment_isolatesTenants() {
+        // Department and scheme ids are unique only within a tenant. Tenant 2 gets a scheme under the
+        // same department id (200) and a water row reusing tenant 1's scheme id 1; neither may reach
+        // tenant 1's figures.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_tenant_table
+                (tenant_id, state_code, title, country_code, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+                """, 2, "up", "Uttar Pradesh", "IN", 1);
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 3, 2, "Tenant 2 scheme", 3001, 4001, 0.0, 0.0,
+                100, 100, 101, null, null, null, null,
+                201, 200, 201, null, null, null, null,
+                1, 500, 500, 500);
+        for (Object[] row : List.of(new Object[]{3, 900, D2}, new Object[]{1, 1000, D3})) {
+            jdbcTemplate.update("""
+                    INSERT INTO analytics_schema.fact_water_quantity_table
+                    (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                    VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                    """, 2, row[0], 11, row[1], row[2], SubmissionStatus.SUBMITTED.getCode(), null, null);
+        }
+
+        List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> rows =
+                repository.getPeriodicWaterQuantityByDepartment(1, 200, D1, D10, PeriodScale.MONTH);
+
+        assertThat(rows).hasSize(1);
         assertThat(rows.get(0).averageWaterQuantity()).isEqualByComparingTo("200.0000");
         assertThat(rows.get(0).householdCount()).isEqualTo(30);
     }

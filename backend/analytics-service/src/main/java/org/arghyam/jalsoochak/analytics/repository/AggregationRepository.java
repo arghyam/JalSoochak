@@ -45,8 +45,8 @@ import java.util.stream.Collectors;
  *
  * <p><b>Scheme status:</b> {@code dim_scheme_table} holds one row per mapping, and the
  * dimension writer rewrites only the row it finds last, so a fanned-out scheme's new
- * status sits on that row alone. Status (daily snapshot and region breakdowns) is read
- * from that latest-written row ({@link SchemeRegularityRepository#canonicalSchemeRowOrder}),
+ * status sits on that row alone. Status (daily snapshot, region breakdowns and the
+ * work-status filter itself) is read from that latest-written row ({@link SchemeRegularityRepository#canonicalSchemeRowOrder}),
  * household counts from the row with the most FHTCs
  * ({@link WaterSqlFragments#schemeAttributeRowOrder}), as dev's dashboard queries do.</p>
  */
@@ -295,11 +295,12 @@ public class AggregationRepository {
         requireAllowedColumn(levelColumn);
         long daysInRange = java.time.temporal.ChronoUnit.DAYS.between(periodStart, periodEnd) + 1;
         // Filter in force for this bucket (as of period_end), per scope; none for ALL. Rendered
-        // against the dim_scheme_table alias "ds" used by every scheme-scope subquery below.
+        // against "cs", the scheme's latest-written row, so a fanned-out scheme is judged by its
+        // current status rather than whichever mapping row a subquery happens to read.
         String asOf = dateLiteral(periodEnd);
         String schemeFilter = switch (workStatusScope) {
-            case SCOPE_NATIONAL -> workStatusFilter.andNationalHistoryPredicate("ds", asOf);
-            case SCOPE_TENANT -> workStatusFilter.andHistoryPredicate("ds", asOf);
+            case SCOPE_NATIONAL -> workStatusFilter.andNationalHistoryPredicate("cs", asOf);
+            case SCOPE_TENANT -> workStatusFilter.andHistoryPredicate("cs", asOf);
             case SCOPE_ALL -> "";
             default -> throw new IllegalArgumentException("Unknown work_status_scope: " + workStatusScope);
         };
@@ -316,7 +317,9 @@ public class AggregationRepository {
                 .map(column -> column + " = EXCLUDED." + column)
                 .collect(Collectors.joining(",\n                    "));
 
-        // cs = one status per scheme, from the row the dimension writer last touched.
+        // cs = one status per scheme, from the row the dimension writer last touched; the
+        //      work-status filter is applied to it, never to the individual mapping rows.
+        // m  = region membership at this level for schemes passing the filter, from every mapping row.
         // s  = scheme set per region (from dim_scheme — authoritative, includes schemes with no
         //      activity). dim_scheme_table holds one row per parent mapping, so schemes are
         //      de-duplicated per region (DISTINCT ON, household counts from the row with the most
@@ -336,6 +339,7 @@ public class AggregationRepository {
                 m AS (
                     SELECT DISTINCT %1$s AS region_id, ds.tenant_id, ds.scheme_id
                     FROM analytics_schema.dim_scheme_table ds
+                    JOIN cs ON cs.tenant_id = ds.tenant_id AND cs.scheme_id = ds.scheme_id
                     WHERE %1$s IS NOT NULL%2$s
                 )
                 INSERT INTO analytics_schema.fact_region_metrics_table (
@@ -376,6 +380,7 @@ public class AggregationRepository {
                                %1$s AS region_id, ds.tenant_id, ds.scheme_id,
                                ds.house_hold_count, ds.fhtc_count, ds.planned_fhtc
                         FROM analytics_schema.dim_scheme_table ds
+                        JOIN cs ON cs.tenant_id = ds.tenant_id AND cs.scheme_id = ds.scheme_id
                         WHERE %1$s IS NOT NULL%2$s
                         ORDER BY %1$s, ds.tenant_id, ds.scheme_id, %4$s
                     ) dedup

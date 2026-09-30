@@ -7291,23 +7291,23 @@ public class SchemeRegularityRepository {
     }
 
     public List<PeriodicWaterQuantityMetrics> getPeriodicWaterQuantityByLgdId(
-            Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
-        Integer lgdLevel = getLgdLevel(lgdId);
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
         if (lgdLevel == null) {
             throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
-        return getPeriodicWaterQuantityMetrics(schemeLgdColumn, lgdId, startDate, endDate, scale);
+        return getPeriodicWaterQuantityMetrics(tenantId, schemeLgdColumn, lgdId, startDate, endDate, scale);
     }
 
     public List<PeriodicWaterQuantityMetrics> getPeriodicWaterQuantityByDepartment(
-            Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
-        Integer departmentLevel = getDepartmentLevel(departmentId);
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
         if (departmentLevel == null) {
             throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
-        return getPeriodicWaterQuantityMetrics(schemeDepartmentColumn, departmentId, startDate, endDate, scale);
+        return getPeriodicWaterQuantityMetrics(tenantId, schemeDepartmentColumn, departmentId, startDate, endDate, scale);
     }
 
     public List<PeriodicOutageReasonSchemeCountRow> getPeriodicOutageReasonSchemeCountByLgdId(
@@ -7509,6 +7509,7 @@ public class SchemeRegularityRepository {
     }
 
     private List<PeriodicWaterQuantityMetrics> getPeriodicWaterQuantityMetrics(
+            Integer tenantId,
             String schemeLocationColumn,
             Object locationId,
             LocalDate startDate,
@@ -7521,12 +7522,13 @@ public class SchemeRegularityRepository {
                 ),
                 schemes_in_scope AS (
                     SELECT DISTINCT ON (s.scheme_id)
+                        s.tenant_id,
                         s.scheme_id,
                         COALESCE(s.house_hold_count, 0)::bigint AS house_hold_count,
                         COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count,
                         COALESCE(s.planned_fhtc, 0)::bigint AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?{{WS}}
+                    WHERE s.tenant_id = ? AND s.%1$s = ?{{WS}}
                     ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 periods AS (
@@ -7548,8 +7550,8 @@ public class SchemeRegularityRepository {
                     FROM params,
                          {{LWQ}} f
                     JOIN schemes_in_scope s
-                        ON s.scheme_id = f.scheme_id
-                    WHERE f.date BETWEEN ? AND ?
+                        ON s.tenant_id = f.tenant_id AND s.scheme_id = f.scheme_id
+                    WHERE f.tenant_id = ? AND f.date BETWEEN ? AND ?
                     GROUP BY %5$s
                 ),
                 household_total AS (
@@ -7590,9 +7592,11 @@ public class SchemeRegularityRepository {
                         rs.getLong("fhtc_count"),
                         rs.getLong("planned_fhtc")),
                 startDate,
+                tenantId,
                 locationId,
                 startDate,
                 endDate,
+                tenantId,
                 startDate,
                 endDate);
     }

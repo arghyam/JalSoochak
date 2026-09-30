@@ -1082,9 +1082,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         if (readFromAggregates) {
             Optional<List<AggregateReadRepository.NationalRegionRow>> agg =
                     aggregateReadRepository.getNationalRegionMetrics(2, startDate, endDate);
-            if (agg.isPresent()) {
-                NationalDashboardLevel2MetricsResponse aggResponse =
-                        buildNationalLevel2FromAggregate(agg.get(), startDate, endDate, daysInRange);
+            Optional<List<AggregateReadRepository.NationalRegionRow>> regularityAgg =
+                    agg.flatMap(rows -> nationalRegularityWindowRows(2, rows, startDate, endDate));
+            if (agg.isPresent() && regularityAgg.isPresent()) {
+                NationalDashboardLevel2MetricsResponse aggResponse = buildNationalLevel2FromAggregate(
+                        agg.get(), regularityAgg.get(), startDate, endDate, daysInRange);
                 writeToCache(cacheKey, aggResponse);
                 return aggResponse;
             }
@@ -1201,20 +1203,49 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":v5";
     }
 
+    /**
+     * National region rows for the regularity window. A multi-day request uses the literal window,
+     * so its rows are returned as is; a single-day request widens to the trailing lookback like the
+     * legacy path, and those rows are read separately — empty when the lookback is not fully
+     * aggregated, so the caller falls back to legacy rather than judge regularity on one day.
+     */
+    private Optional<List<AggregateReadRepository.NationalRegionRow>> nationalRegularityWindowRows(
+            int regionLevel, List<AggregateReadRepository.NationalRegionRow> literalRows,
+            LocalDate startDate, LocalDate endDate) {
+        LocalDate regularityStartDate = expandSingleDayWindowStart(startDate, endDate);
+        if (regularityStartDate.equals(startDate)) {
+            return Optional.of(literalRows);
+        }
+        return aggregateReadRepository.getNationalRegionMetrics(regionLevel, regularityStartDate, endDate);
+    }
+
+    /** Supply days per (tenant, region) over the regularity window. */
+    private static Map<List<Integer>, Long> supplyDaysByRegion(List<AggregateReadRepository.NationalRegionRow> rows) {
+        return rows.stream().collect(Collectors.toMap(
+                r -> List.of(r.tenantId(), r.regionId()),
+                AggregateReadRepository.NationalRegionRow::totalSupplyDays,
+                (a, b) -> a));
+    }
+
     /** Build the national district (level-2) metrics from pre-aggregated region rows. */
     private NationalDashboardLevel2MetricsResponse buildNationalLevel2FromAggregate(
             List<AggregateReadRepository.NationalRegionRow> rows,
+            List<AggregateReadRepository.NationalRegionRow> regularityRows,
             LocalDate startDate, LocalDate endDate, int daysInRange) {
         // Regularity matches the legacy fallback: a scheme is "regular" when it supplied water on at
         // least the national threshold's share of the window's days (threshold uniform across the
         // national dashboard), classified with the national work-status filter. Summing the per-day
         // regular_scheme_count would over-count, so it is derived per region from the base grain.
+        // A single-day request judges regularity over the widened lookback, as the legacy path does.
+        LocalDate regularityStartDate = expandSingleDayWindowStart(startDate, endDate);
+        int regularityDays = (int) ChronoUnit.DAYS.between(regularityStartDate, endDate) + 1;
         int regularityThresholdDays = RegularityThresholdFilter.thresholdDays(
-                daysInRange, schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent());
+                regularityDays, schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent());
+        Map<List<Integer>, Long> regularitySupplyDays = supplyDaysByRegion(regularityRows);
         List<NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow> districts = rows.stream()
                 .map(r -> {
                     int regularSchemeCount = (int) aggregateReadRepository.getNationalRegularSchemeCount(
-                            r.tenantId(), "LGD", r.regionId(), startDate, endDate, regularityThresholdDays);
+                            r.tenantId(), "LGD", r.regionId(), regularityStartDate, endDate, regularityThresholdDays);
                     return NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow.builder()
                         .tenantId(r.tenantId())
                         .lgdId(r.regionId())
@@ -1230,7 +1261,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .avgWaterSupplyPerScheme(r.schemeCount() > 0
                                 ? aggregateRatio(r.totalWaterSuppliedLiters(), r.schemeCount()) : BigDecimal.ZERO)
                         .supplyDaysInEfficientRange(r.supplyDaysInEfficientRange())
-                        .totalSupplyDays((int) r.totalSupplyDays())
+                        .totalSupplyDays(regularitySupplyDays
+                                .getOrDefault(List.of(r.tenantId(), r.regionId()), 0L).intValue())
                         .regularSchemeCount(regularSchemeCount)
                         .averageRegularity(RegularityThresholdFilter.regularityRate(
                                 regularSchemeCount, r.schemeCount()))
@@ -1255,6 +1287,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     /** Build the national (state level-1) dashboard from pre-aggregated region rows. */
     private NationalDashboardResponse buildNationalDashboardFromAggregate(
             List<AggregateReadRepository.NationalRegionRow> rows,
+            List<AggregateReadRepository.NationalRegionRow> regularityRows,
             LocalDate startDate, LocalDate endDate, int daysInRange) {
         List<NationalDashboardResponse.StateQuantityPerformance> quantity = rows.stream()
                 .map(r -> NationalDashboardResponse.StateQuantityPerformance.builder()
@@ -1277,13 +1310,17 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         // Regularity matches the legacy fallback (regular schemes ÷ scheme count, threshold-based)
         // rather than a supply-day fraction. Threshold is uniform (national percent); the regular
         // count is derived per region from the base grain with the national work-status filter,
-        // since the per-day regular_scheme_count is not additive across the window.
+        // since the per-day regular_scheme_count is not additive across the window. A single-day
+        // request judges regularity over the widened lookback, as the legacy path does.
+        LocalDate regularityStartDate = expandSingleDayWindowStart(startDate, endDate);
+        int regularityDays = (int) ChronoUnit.DAYS.between(regularityStartDate, endDate) + 1;
         int regularityThresholdDays = RegularityThresholdFilter.thresholdDays(
-                daysInRange, schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent());
+                regularityDays, schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent());
+        Map<List<Integer>, Long> regularitySupplyDays = supplyDaysByRegion(regularityRows);
         List<NationalDashboardResponse.StateRegularity> regularity = rows.stream()
                 .map(r -> {
                     int regularSchemeCount = (int) aggregateReadRepository.getNationalRegularSchemeCount(
-                            r.tenantId(), "LGD", r.regionId(), startDate, endDate, regularityThresholdDays);
+                            r.tenantId(), "LGD", r.regionId(), regularityStartDate, endDate, regularityThresholdDays);
                     return NationalDashboardResponse.StateRegularity.builder()
                         .tenantId(r.tenantId())
                         .lgdId(r.regionId())
@@ -1291,7 +1328,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .stateCode(r.stateCode())
                         .stateTitle(r.stateTitle())
                         .schemeCount(r.schemeCount())
-                        .totalSupplyDays((int) r.totalSupplyDays())
+                        .totalSupplyDays(regularitySupplyDays
+                                .getOrDefault(List.of(r.tenantId(), r.regionId()), 0L).intValue())
                         .regularSchemeCount(regularSchemeCount)
                         .averageRegularity(RegularityThresholdFilter.regularityRate(
                                 regularSchemeCount, r.schemeCount()))
@@ -1333,9 +1371,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         if (readFromAggregates) {
             Optional<List<AggregateReadRepository.NationalRegionRow>> agg =
                     aggregateReadRepository.getNationalRegionMetrics(1, startDate, endDate);
-            if (agg.isPresent()) {
-                NationalDashboardResponse aggResponse =
-                        buildNationalDashboardFromAggregate(agg.get(), startDate, endDate, daysInRange);
+            Optional<List<AggregateReadRepository.NationalRegionRow>> regularityAgg =
+                    agg.flatMap(rows -> nationalRegularityWindowRows(1, rows, startDate, endDate));
+            if (agg.isPresent() && regularityAgg.isPresent()) {
+                NationalDashboardResponse aggResponse = buildNationalDashboardFromAggregate(
+                        agg.get(), regularityAgg.get(), startDate, endDate, daysInRange);
                 writeToCache(cacheKey, aggResponse);
                 return aggResponse;
             }
@@ -1855,7 +1895,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> metrics =
                 aggregatePeriodicWaterQuantityOrNull(tenantId, "LGD", lgdId, startDate, endDate, scale);
         if (metrics == null) {
-            metrics = schemeRegularityRepository.getPeriodicWaterQuantityByLgdId(lgdId, startDate, endDate, scale);
+            metrics = schemeRegularityRepository.getPeriodicWaterQuantityByLgdId(tenantId, lgdId, startDate, endDate, scale);
         }
 
         PeriodicWaterQuantityResponse response =
@@ -1875,7 +1915,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> metrics =
                 aggregatePeriodicWaterQuantityOrNull(tenantId, "DEPT", departmentId, startDate, endDate, scale);
         if (metrics == null) {
-            metrics = schemeRegularityRepository.getPeriodicWaterQuantityByDepartment(departmentId, startDate, endDate, scale);
+            metrics = schemeRegularityRepository.getPeriodicWaterQuantityByDepartment(tenantId, departmentId, startDate, endDate, scale);
         }
 
         return buildPeriodicWaterQuantityResponse(null, departmentId, startDate, endDate, scale, metrics);
@@ -1883,8 +1923,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     /**
      * Periodic water-quantity buckets from pre-rolled aggregates (DAY/WEEK/MONTH), or
-     * {@code null} to fall back to legacy. averageWaterQuantity = total water supplied /
-     * water-quantity row count for the bucket (matches the legacy per-row average).
+     * {@code null} to fall back to legacy — including when any bucket in the range has not been
+     * aggregated. averageWaterQuantity = total water supplied / water-quantity row count for the
+     * bucket (matches the legacy per-row average).
      */
     private List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> aggregatePeriodicWaterQuantityOrNull(
             Integer tenantId, String hierarchy, Integer regionId,
@@ -1895,7 +1936,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         // DAY/WEEK/MONTH are read directly; QUARTER/YEAR are re-bucketed from stored MONTH rows.
         List<AggregateReadRepository.PeriodicRegionRow> rows =
                 aggregateReadRepository.getPeriodicRegionMetrics(tenantId, hierarchy, regionId, scale.name(), startDate, endDate);
-        if (rows.isEmpty()) {
+        if (rows.isEmpty() || !coversEveryBucket(tenantId, hierarchy, regionId, startDate, endDate, scale, rows)) {
             return null;
         }
         return rows.stream()
@@ -1911,6 +1952,54 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                             r.totalHouseholdCount(), r.totalAchievedFhtc(), r.totalPlannedFhtc());
                 })
                 .toList();
+    }
+
+    /**
+     * True when {@code rows} hold every bucket the legacy query returns for [start, end]. A bucket
+     * that was never aggregated is simply absent, so serving the rest would drop that period.
+     * QUARTER/YEAR are re-bucketed from MONTH rows, so for those every month in the range must be
+     * stored, or a quarter would be under-summed.
+     */
+    private boolean coversEveryBucket(Integer tenantId, String hierarchy, Integer regionId,
+                                      LocalDate startDate, LocalDate endDate, PeriodScale scale,
+                                      List<AggregateReadRepository.PeriodicRegionRow> rows) {
+        PeriodScale bucketScale = scale;
+        List<AggregateReadRepository.PeriodicRegionRow> bucketRows = rows;
+        if (scale == PeriodScale.QUARTER || scale == PeriodScale.YEAR) {
+            bucketScale = PeriodScale.MONTH;
+            bucketRows = aggregateReadRepository.getPeriodicRegionMetrics(
+                    tenantId, hierarchy, regionId, PeriodScale.MONTH.name(), startDate, endDate);
+        }
+        java.util.Set<LocalDate> stored = bucketRows.stream()
+                .map(AggregateReadRepository.PeriodicRegionRow::periodStart)
+                .collect(Collectors.toSet());
+        for (LocalDate bucket = firstBucketStart(bucketScale, startDate);
+             !bucket.isAfter(endDate);
+             bucket = nextBucketStart(bucketScale, bucket)) {
+            if (!stored.contains(bucket)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Start of the stored DAY/WEEK/MONTH bucket containing {@code date}; weeks start on Sunday. */
+    private static LocalDate firstBucketStart(PeriodScale scale, LocalDate date) {
+        return switch (scale) {
+            case DAY -> date;
+            case WEEK -> date.minusDays(date.getDayOfWeek().getValue() % 7);
+            case MONTH -> date.withDayOfMonth(1);
+            default -> throw new IllegalArgumentException("Not a stored bucket scale: " + scale);
+        };
+    }
+
+    private static LocalDate nextBucketStart(PeriodScale scale, LocalDate bucketStart) {
+        return switch (scale) {
+            case DAY -> bucketStart.plusDays(1);
+            case WEEK -> bucketStart.plusWeeks(1);
+            case MONTH -> bucketStart.plusMonths(1);
+            default -> throw new IllegalArgumentException("Not a stored bucket scale: " + scale);
+        };
     }
 
     private static BigDecimal aggregateRatio(long numerator, long denominator) {

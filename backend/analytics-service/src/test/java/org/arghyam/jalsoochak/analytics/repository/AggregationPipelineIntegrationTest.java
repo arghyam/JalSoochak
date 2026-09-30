@@ -457,6 +457,34 @@ class AggregationPipelineIntegrationTest {
                 new int[]{1, 1, 0, 0});     // scheme2 now Non-Operative, scheme1 Operative
     }
 
+    @Test
+    void regionRollup_filterJudgesSchemeByItsLatestStatus_notAStaleMappingRow() {
+        // Tenant filter {1 Ongoing, 4 Handed Over}. Scheme 2's original row still says Ongoing, but its
+        // latest-written row says Completed, so it is outside the filter and must not count in TENANT
+        // rows (it would otherwise appear as an excluded "completed" scheme). ALL still keeps it.
+        insertFilterHistory(1, LocalDate.of(2020, 1, 1), null, List.of(1, 4));
+        insertScheme(2, 2, 11, 2, 0, 5, "NOW() + INTERVAL '1 hour'");
+
+        aggregationRepository.upsertSchemeDaily(D1, D1);
+        aggregationRepository.upsertRegionMetrics(PeriodScale.DAY, D1, D1, true);
+
+        Map<String, Object> tenant = jdbcTemplate.queryForMap("""
+                SELECT scheme_count, total_supply_days, total_water_supplied_liters
+                FROM analytics_schema.fact_region_metrics_table
+                WHERE period_scale = 'DAY' AND work_status_scope = 'TENANT'
+                  AND tenant_id = 1 AND hierarchy = 'LGD'
+                  AND region_level = 1 AND region_id = 1 AND period_start = ?
+                """, D1);
+        assertThat(tenant.get("scheme_count")).isEqualTo(1);
+        assertThat(tenant.get("total_supply_days")).isEqualTo(1);
+        assertThat(((Number) tenant.get("total_water_supplied_liters")).longValue()).isEqualTo(10L);
+        assertStatusBreakdown(PeriodScale.DAY, D1, "TENANT", "LGD", 1, 1,
+                new int[]{0, 0, 0, 1, 0}, new int[]{0, 1, 0, 0});
+
+        assertStatusBreakdown(PeriodScale.DAY, D1, "ALL", "LGD", 1, 1,
+                new int[]{0, 1, 0, 1, 0}, new int[]{1, 1, 0, 0});
+    }
+
     /**
      * @param work      ongoing, completed, not_started, handed_over, unknown
      * @param operating non_operative, operative, partially_operative, unknown
