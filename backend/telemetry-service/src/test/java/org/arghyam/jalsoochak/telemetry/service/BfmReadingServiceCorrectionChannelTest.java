@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,8 +37,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * A State-IT correction ({@code PUT /readings}, and the reset) follows the submission rules of the
- * corrected row's channel: the declared unit is checked and converted, a PDU run can't be longer than
- * a day, and the unit the value arrived in is written with it.
+ * corrected row's channel: the declared unit is checked and converted, a PDU run, or its day's runs
+ * together, can't be longer than a day, and the unit the value arrived in is written with it.
  */
 @ExtendWith(MockitoExtension.class)
 class BfmReadingServiceCorrectionChannelTest {
@@ -48,6 +49,9 @@ class BfmReadingServiceCorrectionChannelTest {
     private static final long OPERATOR_ID = 1L;
     private static final String CONTACT = "919999999999";
     private static final LocalDate READING_DATE = LocalDate.of(2026, 6, 22);
+
+    @Mock
+    private PduDayLimit pduDayLimit;
 
     @Mock
     private CalculationParametersSnapshotter calculationParametersSnapshotter;
@@ -85,6 +89,7 @@ class BfmReadingServiceCorrectionChannelTest {
                 supplyPlausibilityGuard,
                 null,
                 new SubmittedValueCapture(),
+                pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
         lenient().when(repo.findSchemaNameByTenantId(TENANT_ID)).thenReturn(Optional.of(SCHEMA));
@@ -173,6 +178,22 @@ class BfmReadingServiceCorrectionChannelTest {
         assertThat(response.isSuccess()).isFalse();
         assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);
         assertThat(response.getMessage()).isEqualTo(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE);
+        verifyNothingWritten();
+    }
+
+    @Test
+    @DisplayName("a PDU correction that takes its day past 1,440 minutes is refused, and nothing is written")
+    void pduCorrectionTakingItsDayPastTheLimitIsRefused() {
+        correcting("PDU", "90");
+        // In minutes, on the row's own day, with the row's old minutes left out.
+        when(pduDayLimit.wouldExceed(SCHEMA, 10L, READING_DATE, new BigDecimal("120"), READING_ID)).thenReturn(true);
+
+        CreateReadingResponse response = correct("2", "h");
+
+        assertThat(response.isSuccess()).isFalse();
+        assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);
+        assertThat(response.getMessage()).isEqualTo(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE);
+        assertThat(response.getCorrelationId()).isEqualTo("corr-1");
         verifyNothingWritten();
     }
 

@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryPendingMeterChangeRe
 import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.BeforeEach;
@@ -86,6 +87,9 @@ class MeterReadingConversationServiceManualReadingTest {
 
     @Spy
     private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture();
+
+    @Mock
+    private PduDayLimit pduDayLimit;
 
     @InjectMocks
     private MeterReadingConversationService service;
@@ -890,6 +894,43 @@ class MeterReadingConversationServiceManualReadingTest {
                 any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
                 any(), any(), any());
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(anyString(), any());
+        verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
+    }
+
+    @Test
+    void manualReadingOfAPduRunTakingItsDayPastTheLimitIsRejectedWithoutWritingAnything() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("hi");
+        when(localizationService.normalizeLanguageKey("hi")).thenReturn("hindi");
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L, "pdu-1", 1L, BigDecimal.ZERO, new BigDecimal("300"))));
+        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.PDU);
+        // The value is written over today's row, so that row's old minutes don't count.
+        when(pduDayLimit.wouldExceed("tenant_test", 10L, ReadingTime.today(), new BigDecimal("600"), 99L))
+                .thenReturn(true);
+        when(localizationService.localizeMessage(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE, "hindi"))
+                .thenReturn("localised");
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("600")
+                .build());
+
+        assertEquals(false, resp.isSuccess());
+        assertEquals("REJECTED", resp.getQualityStatus());
+        assertEquals("localised", resp.getMessage());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(telemetryTenantRepository, never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
+                any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
+                any(), any(), any());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
 

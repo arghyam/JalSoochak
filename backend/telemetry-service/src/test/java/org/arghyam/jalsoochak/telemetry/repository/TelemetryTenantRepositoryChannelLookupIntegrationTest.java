@@ -20,8 +20,9 @@ import java.util.Base64;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The earlier-reading lookups against a real PostgreSQL instance. A reading is only ever compared with
- * readings on its own channel, and a row with no channel is a legacy BFM row.
+ * The lookups by channel against a real PostgreSQL instance. A reading is only ever compared with
+ * readings on its own channel, a row with no channel is a legacy BFM row, and a PDU day's minutes add
+ * up the scheme's PDU runs that day.
  */
 @Testcontainers
 class TelemetryTenantRepositoryChannelLookupIntegrationTest {
@@ -121,5 +122,40 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
         assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, SCHEME, ReadingChannel.ELM, null, 18))
                 .extracting(DailyConfirmedReading::day)
                 .containsExactly(today.minusDays(2));
+    }
+
+    private long insertRun(String minutes, LocalDate day, long scheme, String channel) {
+        return jdbcTemplate.queryForObject("INSERT INTO " + SCHEMA + ".flow_reading_table "
+                        + "(scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
+                        + " correlation_id, channel, created_by) "
+                        + "VALUES (?, ?, ?, 0, ?, 'corr-1', ?, ?) RETURNING id",
+                Long.class, scheme, day.atTime(6, 0), day, new BigDecimal(minutes), channel, OPERATOR);
+    }
+
+    @Test
+    void theDaysPduMinutesAddUpTheSchemesPduRunsThatDayOnly() {
+        insertRun("300", today, SCHEME, "PDU");
+        insertRun("200.5", today, SCHEME, "PDU");
+        insertRun("900", today.minusDays(1), SCHEME, "PDU");
+        insertRun("900", today, 2L, "PDU");
+        insertRun("900", today, SCHEME, "ELM");
+        insertRun("900", today, SCHEME, null);
+        long deleted = insertRun("900", today, SCHEME, "PDU");
+        jdbcTemplate.update("UPDATE " + SCHEMA + ".flow_reading_table SET deleted_at = NOW() WHERE id = ?", deleted);
+
+        assertThat(repository.sumPduMinutesForDay(SCHEMA, SCHEME, today, null)).isEqualByComparingTo("500.5");
+    }
+
+    @Test
+    void theDaysPduMinutesLeaveOutTheExcludedRow() {
+        insertRun("300", today, SCHEME, "PDU");
+        long corrected = insertRun("200", today, SCHEME, "PDU");
+
+        assertThat(repository.sumPduMinutesForDay(SCHEMA, SCHEME, today, corrected)).isEqualByComparingTo("300");
+    }
+
+    @Test
+    void aDayWithNoPduRunsHasNoMinutes() {
+        assertThat(repository.sumPduMinutesForDay(SCHEMA, SCHEME, today, null)).isEqualByComparingTo("0");
     }
 }

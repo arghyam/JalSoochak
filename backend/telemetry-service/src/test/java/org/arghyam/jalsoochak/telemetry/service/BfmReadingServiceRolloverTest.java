@@ -20,6 +20,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,6 +60,9 @@ class BfmReadingServiceRolloverTest {
 
     private static final String SCHEMA = "tenant_test";
     private static final String IMAGE_URL = "https://img.example.com/a.jpg";
+
+    @Mock
+    private PduDayLimit pduDayLimit;
 
     @Mock
     private CalculationParametersSnapshotter calculationParametersSnapshotter;
@@ -104,6 +108,7 @@ class BfmReadingServiceRolloverTest {
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
+                pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);

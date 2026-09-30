@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +45,9 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class BfmReadingServicePlaceholderRowTest {
+
+    @Mock
+    private PduDayLimit pduDayLimit;
 
     @Mock
     private CalculationParametersSnapshotter calculationParametersSnapshotter;
@@ -109,6 +113,7 @@ class BfmReadingServicePlaceholderRowTest {
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
+                pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
     }

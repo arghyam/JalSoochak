@@ -26,6 +26,7 @@ import org.arghyam.jalsoochak.telemetry.service.capture.CaptureInput;
 import org.arghyam.jalsoochak.telemetry.service.capture.CaptureOutcome;
 import org.arghyam.jalsoochak.telemetry.service.capture.CapturedReading;
 import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.ReadingCapture;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService;
@@ -64,6 +65,7 @@ public class BfmReadingService {
     private final SupplyPlausibilityGuard supplyPlausibilityGuard;
     private final ImageReadingCapture imageReadingCapture;
     private final SubmittedValueCapture submittedValueCapture;
+    private final PduDayLimit pduDayLimit;
     private final CalculationParametersSnapshotter calculationParametersSnapshotter;
     // LOCATION-AFFINITY: the scheme-boundary check. Nullable so a unit test that does not exercise it
     // may pass null, and the check is then simply not run rather than costing the reading.
@@ -140,6 +142,13 @@ public class BfmReadingService {
                 request.getReadingUnit(),
                 request.isExternallyAsserted(),
                 ocrRetryMode));
+        LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(ReadingTime.now());
+        // A new run: whichever row it lands on, a placeholder or a new one, holds no minutes yet.
+        if (resolvedChannel == ReadingChannel.PDU
+                && outcome instanceof CaptureOutcome.Captured(CapturedReading run)
+                && pduDayLimit.wouldExceed(schemaName, request.getSchemeId(), readingAt.toLocalDate(), run.value(), null)) {
+            outcome = PduDayLimit.EXCEEDED;
+        }
         CapturedReading captured;
         switch (outcome) {
             case CaptureOutcome.Captured(CapturedReading reading) -> captured = reading;
@@ -183,7 +192,6 @@ public class BfmReadingService {
                 .map(OcrReadingResult::getCorrelationId)
                 .filter(value -> !value.isBlank())
                 .orElse(null);
-        LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(ReadingTime.now());
 
         // READING-PROVENANCE: extracted_reading records what the OCR provider read off the meter photo. The
         // image capture runs only when the caller supplied no value, so on an API-asserted submission
@@ -861,7 +869,7 @@ public class BfmReadingService {
 
     /**
      * The body both correction routes share once they have resolved the row to correct: apply the
-     * submission rules of the row's channel (unit, PDU limit) and the supply-plausibility rule, then
+     * submission rules of the row's channel (unit, PDU limits) and the supply-plausibility rule, then
      * either write the value or refuse it.
      *
      * <p>SUPPLY-PLAUSIBILITY, §6.3. <strong>A failing correction never writes
@@ -904,10 +912,16 @@ public class BfmReadingService {
         ReadingChannel channel = ReadingChannel.fromChannelValue(reading.channel());
 
         // A correction can't store what the same channel's submission would have been refused. A
-        // refused unit or PDU run writes nothing, and no anomaly: it is the request that is wrong,
-        // not the reading.
+        // refused unit, PDU run or PDU day writes nothing, and no anomaly: it is the request that is
+        // wrong, not the reading. The corrected row's old minutes don't count towards its day.
+        CaptureOutcome outcome = submittedValueCapture.captureCorrection(channel, submittedReading, readingUnit);
+        if (channel == ReadingChannel.PDU
+                && outcome instanceof CaptureOutcome.Captured(CapturedReading run)
+                && pduDayLimit.wouldExceed(schemaName, reading.schemeId(), readingDate, run.value(), reading.id())) {
+            outcome = PduDayLimit.EXCEEDED;
+        }
         CapturedReading captured;
-        switch (submittedValueCapture.captureCorrection(channel, submittedReading, readingUnit)) {
+        switch (outcome) {
             case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
             case CaptureOutcome.Rejected(TelemetryErrorCode errorCode, String rejection) -> {
                 return CreateReadingResponse.builder()

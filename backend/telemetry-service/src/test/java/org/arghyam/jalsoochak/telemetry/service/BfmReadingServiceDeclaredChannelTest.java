@@ -14,6 +14,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -55,6 +56,9 @@ class BfmReadingServiceDeclaredChannelTest {
     private static final LocalDateTime UPDATED_AT = LocalDateTime.of(2026, 6, 22, 9, 30, 1, 250_000_000);
 
     @Mock
+    private PduDayLimit pduDayLimit;
+
+    @Mock
     private CalculationParametersSnapshotter calculationParametersSnapshotter;
 
     @Mock
@@ -87,6 +91,7 @@ class BfmReadingServiceDeclaredChannelTest {
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
                 null,
                 new SubmittedValueCapture(),
+                pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);

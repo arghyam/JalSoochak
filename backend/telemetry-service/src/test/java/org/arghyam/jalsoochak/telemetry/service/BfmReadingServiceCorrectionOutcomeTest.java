@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -82,6 +83,9 @@ class BfmReadingServiceCorrectionOutcomeTest {
     private static final BigDecimal IMPLAUSIBLE = new BigDecimal("1100");
 
     @Mock
+    private PduDayLimit pduDayLimit;
+
+    @Mock
     private CalculationParametersSnapshotter calculationParametersSnapshotter;
 
     @Mock
@@ -120,6 +124,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
                 null,
                 new SubmittedValueCapture(),
+                pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
     }

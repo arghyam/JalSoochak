@@ -386,6 +386,9 @@ public class ConversationLocalizationService {
         if (normalized.contains("meter photos are not supported for your reading channel")) {
             return "आपके रीडिंग चैनल के लिए मीटर की फ़ोटो समर्थित नहीं है।";
         }
+        if (normalized.contains("total pump running time for the day can't be more than 24 hours")) {
+            return "दिन का कुल पंप चलने का समय 24 घंटे (1440 मिनट) से अधिक नहीं हो सकता।";
+        }
         if (normalized.contains("pump running time can't be more than 24 hours")) {
             return "पंप चलने का समय 24 घंटे (1440 मिनट) से अधिक नहीं हो सकता।";
         }

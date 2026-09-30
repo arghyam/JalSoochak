@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRec
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.BeforeEach;
@@ -67,6 +68,9 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
 
     @Spy
     private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture();
+
+    @Mock
+    private PduDayLimit pduDayLimit;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -147,6 +151,23 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         assertEquals(false, resp.isSuccess());
         assertEquals("REJECTED", resp.getQualityStatus());
         assertEquals(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE, resp.getMessage());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
+    }
+
+    @Test
+    void aPduCorrectionTakingItsDayPastTheLimitIsRejectedWithoutWritingAnything() {
+        targetRow("PDU", "90");
+        // On the corrected row's own day, with its old minutes left out.
+        when(pduDayLimit.wouldExceed("tenant_test", 10L, TARGET_DATE, new BigDecimal("600"), 22L)).thenReturn(true);
+        when(localizationService.localizeMessage(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE, "english"))
+                .thenReturn(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE);
+
+        CreateReadingResponse resp = update("600");
+
+        assertEquals(false, resp.isSuccess());
+        assertEquals("REJECTED", resp.getQualityStatus());
+        assertEquals(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE, resp.getMessage());
         verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }

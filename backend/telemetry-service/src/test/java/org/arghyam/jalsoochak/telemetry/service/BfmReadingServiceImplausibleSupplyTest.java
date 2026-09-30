@@ -19,6 +19,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -66,6 +67,9 @@ class BfmReadingServiceImplausibleSupplyTest {
     private static final LocalDateTime READING_AT = LocalDateTime.of(2026, 9, 8, 9, 30);
     private static final BigDecimal BASELINE = new BigDecimal("900");
     private static final LocalDateTime BASELINE_AT = LocalDateTime.of(2026, 9, 7, 9, 0);
+
+    @Mock
+    private PduDayLimit pduDayLimit;
 
     @Mock
     private CalculationParametersSnapshotter calculationParametersSnapshotter;
@@ -129,6 +133,7 @@ class BfmReadingServiceImplausibleSupplyTest {
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
+                pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
     }

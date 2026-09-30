@@ -27,6 +27,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.service.capture.CaptureInput;
 import org.arghyam.jalsoochak.telemetry.service.capture.CaptureOutcome;
 import org.arghyam.jalsoochak.telemetry.service.capture.CapturedReading;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationVerdict;
@@ -182,6 +183,7 @@ public class MeterReadingConversationService {
     private final ReadingChannelResolver readingChannelResolver;
     private final ReadingRepublisher readingRepublisher;
     private final SubmittedValueCapture submittedValueCapture;
+    private final PduDayLimit pduDayLimit;
 
     public MeterReadingConversationService(OperatorContextService operatorContextService,
                                            ConversationLocalizationService localizationService,
@@ -193,7 +195,8 @@ public class MeterReadingConversationService {
                                            LocationAffinityService locationAffinityService,
                                            ReadingChannelResolver readingChannelResolver,
                                            ReadingRepublisher readingRepublisher,
-                                           SubmittedValueCapture submittedValueCapture) {
+                                           SubmittedValueCapture submittedValueCapture,
+                                           PduDayLimit pduDayLimit) {
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
         this.tenantConfigRepository = tenantConfigRepository;
@@ -205,6 +208,7 @@ public class MeterReadingConversationService {
         this.readingChannelResolver = readingChannelResolver;
         this.readingRepublisher = readingRepublisher;
         this.submittedValueCapture = submittedValueCapture;
+        this.pduDayLimit = pduDayLimit;
     }
 
     public IntroResponse meterChangeMessage(IntroRequest request) {
@@ -1063,6 +1067,21 @@ public class MeterReadingConversationService {
         }
     }
 
+    /**
+     * The row {@link #manualReadingMessage} writes the value over, picked as it picks it: the pending
+     * meter-change row, else the operator's latest row today. Null when the value adds a row.
+     */
+    private Long rowTheManualValueReplaces(TelemetryOperatorWithSchema operatorWithSchema,
+                                           Long schemeId,
+                                           Optional<TelemetryPendingMeterChangeRecord> pendingOpt,
+                                           LocalDate today) {
+        return pendingOpt.map(TelemetryPendingMeterChangeRecord::id)
+                .or(() -> telemetryTenantRepository.findLatestFlowReadingForDate(
+                                operatorWithSchema.schemaName(), schemeId, operatorWithSchema.operator().id(), today)
+                        .map(TelemetryFlowReadingDetails::id))
+                .orElse(null);
+    }
+
     public CreateReadingResponse manualReadingMessage(ManualReadingRequest request) {
         try {
             if (request.getContactId() == null || request.getContactId().isBlank()) {
@@ -1125,8 +1144,8 @@ public class MeterReadingConversationService {
 
             // The same rules as any other submitted value. WhatsApp has no unit field, so the value is
             // in the channel's standard unit.
-            CapturedReading captured;
-            switch (submittedValueCapture.capture(new CaptureInput(
+            LocalDate today = ReadingTime.today();
+            CaptureOutcome outcome = submittedValueCapture.capture(new CaptureInput(
                     operatorWithSchema.schemaName(),
                     tenantId,
                     operatorWithSchema.operator().id(),
@@ -1136,7 +1155,15 @@ public class MeterReadingConversationService {
                     manualReadingValue,
                     null,
                     false,
-                    OcrRetryMode.NONE))) {
+                    OcrRetryMode.NONE));
+            if (resolvedChannel == ReadingChannel.PDU
+                    && outcome instanceof CaptureOutcome.Captured(CapturedReading run)
+                    && pduDayLimit.wouldExceed(operatorWithSchema.schemaName(), schemeId, today, run.value(),
+                            rowTheManualValueReplaces(operatorWithSchema, schemeId, pendingOpt, today))) {
+                outcome = PduDayLimit.EXCEEDED;
+            }
+            CapturedReading captured;
+            switch (outcome) {
                 case CaptureOutcome.Captured(CapturedReading reading) -> captured = reading;
                 case CaptureOutcome.Rejected rejected -> {
                     return CreateReadingResponse.builder()
@@ -1156,7 +1183,6 @@ public class MeterReadingConversationService {
             // - If isManualReading=false, compare against the most recent confirmed reading strictly before today.
             // - If the meter is replaced, load latest snapshot for anomaly/audit context only.
             // - A PDU reading is one run's duration rather than a running total, so it has none.
-            LocalDate today = ReadingTime.today();
             boolean compareWithLatest = request.getIsManualReading() == null || Boolean.TRUE.equals(request.getIsManualReading());
             Optional<TelemetryConfirmedReadingSnapshot> previousSnapshotOpt;
             if (resolvedChannel == ReadingChannel.PDU) {
@@ -1786,9 +1812,17 @@ public class MeterReadingConversationService {
 
             // The corrected value follows the rules of the target row's channel, as a submission on it
             // would. WhatsApp has no unit field, so the value is in that channel's standard unit.
+            // The row's old minutes don't count towards its day.
             ReadingChannel channel = ReadingChannel.fromChannelValue(targetDayRecord.channel());
+            CaptureOutcome outcome = submittedValueCapture.captureCorrection(channel, readingValue, null);
+            if (channel == ReadingChannel.PDU
+                    && outcome instanceof CaptureOutcome.Captured(CapturedReading run)
+                    && pduDayLimit.wouldExceed(operatorWithSchema.schemaName(), schemeId,
+                            targetDayRecord.readingDate(), run.value(), targetDayRecord.id())) {
+                outcome = PduDayLimit.EXCEEDED;
+            }
             CapturedReading captured;
-            switch (submittedValueCapture.captureCorrection(channel, readingValue, null)) {
+            switch (outcome) {
                 case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
                 case CaptureOutcome.Rejected rejected -> {
                     return CreateReadingResponse.builder()

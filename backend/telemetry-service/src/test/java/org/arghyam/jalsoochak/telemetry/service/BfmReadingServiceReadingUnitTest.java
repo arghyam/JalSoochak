@@ -15,6 +15,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
@@ -61,6 +62,9 @@ class BfmReadingServiceReadingUnitTest {
     private static final String IMAGE_URL = "https://img.example.com/meter.jpg";
 
     @Mock
+    private PduDayLimit pduDayLimit;
+
+    @Mock
     private CalculationParametersSnapshotter calculationParametersSnapshotter;
 
     @Mock
@@ -102,6 +106,7 @@ class BfmReadingServiceReadingUnitTest {
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
                 new SubmittedValueCapture(),
+                pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
@@ -162,6 +167,32 @@ class BfmReadingServiceReadingUnitTest {
         assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);
         assertThat(response.getMessage()).isEqualTo(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE);
         verifyNothingStoredOrPublished();
+    }
+
+    @Test
+    @DisplayName("a PDU run that takes its day past 1,440 minutes is refused, and nothing is stored or published")
+    void pduRunTakingItsDayPastTheLimitIsRefused() {
+        CreateReadingRequest request = assertedValue(ReadingChannel.PDU, "2", "h");
+        request.setReadingTime(LocalDateTime.of(2026, 9, 30, 18, 0));
+        // Checked in minutes, against the day the run is recorded for, and a new run replaces no row.
+        when(pduDayLimit.wouldExceed(eq(SCHEMA), eq(SCHEME_ID), eq(LocalDate.of(2026, 9, 30)),
+                argThat(sameValue("120")), eq(null))).thenReturn(true);
+
+        CreateReadingResponse response = service.createReading(request, SCHEMA, operator, CONTACT, false);
+
+        assertThat(response.isSuccess()).isFalse();
+        assertThat(response.getQualityStatus()).isEqualTo("REJECTED");
+        assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);
+        assertThat(response.getMessage()).isEqualTo(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE);
+        verifyNothingStoredOrPublished();
+    }
+
+    @Test
+    @DisplayName("the day's limit is not looked up for a reading on another channel")
+    void dayLimitIsNotCheckedOffPdu() {
+        service.createReading(assertedValue(ReadingChannel.BFM, "5", "m3"), SCHEMA, operator, CONTACT, false);
+
+        verifyNoInteractions(pduDayLimit);
     }
 
     @Test

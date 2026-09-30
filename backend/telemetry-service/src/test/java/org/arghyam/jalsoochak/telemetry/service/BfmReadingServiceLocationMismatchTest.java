@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService
 import org.arghyam.jalsoochak.telemetry.service.location.LocationVerdict;
 import org.arghyam.jalsoochak.telemetry.service.location.ReadingSubmission;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -72,6 +73,9 @@ class BfmReadingServiceLocationMismatchTest {
 
     private static final BigDecimal LAT = new BigDecimal("26.1553");
     private static final BigDecimal LNG = new BigDecimal("91.7362");
+
+    @Mock
+    private PduDayLimit pduDayLimit;
 
     @Mock
     private CalculationParametersSnapshotter calculationParametersSnapshotter;
@@ -131,6 +135,7 @@ class BfmReadingServiceLocationMismatchTest {
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
                 null,
                 new SubmittedValueCapture(),
+                pduDayLimit,
                 calculationParametersSnapshotter,
                 locationAffinityService);
     }
@@ -288,6 +293,7 @@ class BfmReadingServiceLocationMismatchTest {
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
                 null,
                 new SubmittedValueCapture(),
+                pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
 

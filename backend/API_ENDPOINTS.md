@@ -314,6 +314,17 @@ Both errors below return `400`:
   provider reads electric meters. A photo sent with `confirmed_reading` is accepted on every channel;
   the photo is kept and not read.
 
+### Partner ingestion — PDU limits
+
+A PDU reading is how long the pumps ran, and a day has 1,440 minutes. On `POST /readings`,
+`POST /readings/formats/{format}` and `PUT /readings`, and on WhatsApp, a PDU value is refused when:
+
+- it is longer than 1,440 minutes on its own, or
+- the scheme's PDU readings on that day would add up to more than 1,440 minutes with it. A `PUT`
+  replaces the corrected reading's old value, so only the scheme's other readings that day count.
+
+Both return `400` with `errorCode: ABNORMAL_READING`, and nothing is stored.
+
 | Method | Endpoint                                          | Description |
 |--------|---------------------------------------------------|-------------|
 | POST | `/api/v1/telemetry/readings/whatsapp`             | Receive the chatbot webhook payload for image-based meter readings |

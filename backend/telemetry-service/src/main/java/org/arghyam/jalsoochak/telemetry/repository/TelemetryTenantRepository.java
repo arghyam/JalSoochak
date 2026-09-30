@@ -1945,6 +1945,33 @@ public class TelemetryTenantRepository {
     }
 
     /**
+     * The minutes of a scheme's PDU runs on {@code readingDate}, in total, 0 when there are none.
+     *
+     * @param excludeReadingId a row left out of the total, such as the one a correction replaces;
+     *                         null for none
+     */
+    public BigDecimal sumPduMinutesForDay(String schemaName,
+                                          Long schemeId,
+                                          LocalDate readingDate,
+                                          Long excludeReadingId) {
+        validateSchemaName(schemaName);
+        StringBuilder sql = new StringBuilder(String.format("""
+                SELECT COALESCE(SUM(confirmed_reading), 0)
+                FROM %s.flow_reading_table
+                WHERE scheme_id = ?
+                  AND reading_date = ?
+                  AND channel = ?
+                  AND deleted_at IS NULL
+                """, schemaName));
+        List<Object> params = new ArrayList<>(List.of(schemeId, readingDate, ReadingChannel.PDU.name()));
+        if (excludeReadingId != null) {
+            sql.append(" AND id <> ?");
+            params.add(excludeReadingId);
+        }
+        return jdbcTemplate.queryForObject(sql.toString(), BigDecimal.class, params.toArray());
+    }
+
+    /**
      * "Completed" means a value was recorded, which is {@code confirmed_reading > 0} and nothing
      * else — that alone excludes every placeholder, location, meter-change and issue-report row,
      * all of which carry 0. Do not re-add {@code extracted_reading > 0}: it filters nothing extra
