@@ -54,7 +54,6 @@ class MapDisplayConfigValidationTest {
     @Mock private AppProperties appProperties;
     @Mock private TenantDefaultsProperties tenantDefaults;
     @Mock private ApplicationEventPublisher eventPublisher;
-    @Mock private TenantSchedulerManager schedulerManager;
     @Mock private ObjectStorageService objectStorageService;
     @Mock private SystemManagementService systemManagementService;
     @Mock private ApiKeyService apiKeyService;
@@ -70,7 +69,7 @@ class MapDisplayConfigValidationTest {
     void setUp() {
         service = new TenantManagementServiceImpl(
                 tenantCommonRepository, tenantSchemaRepository, objectMapper,
-                appProperties, tenantDefaults, eventPublisher, schedulerManager,
+                appProperties, tenantDefaults, eventPublisher,
                 objectStorageService, systemManagementService, apiKeyService);
 
         // Provide a valid authenticated context so resolveCurrentUserId() doesn't throw

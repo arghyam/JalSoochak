@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.tenant.config;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,6 +13,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
@@ -28,14 +30,20 @@ public class SecurityConfig {
     private final SecurityExceptionHandler securityExceptionHandler;
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            @Value("${INTERNAL_JOB_SECRET:}") String internalJobSecret,
+            @Value("${internal.jobs.path-prefix:/internal/}") String internalJobPathPrefix) throws Exception {
         boolean isProd = environment.acceptsProfiles(Profiles.of("prod"));
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .addFilterBefore(new InternalJobSecurityFilter(internalJobSecret, internalJobPathPrefix),
+                        BearerTokenAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers("/error", "/actuator/health/**", "/actuator/info").permitAll();
+                    auth.requestMatchers("/internal/**").permitAll();
                     auth.requestMatchers(HttpMethod.GET,
                             "/api/v1/tenants",
                             "/api/v1/tenants/*/config/public",
