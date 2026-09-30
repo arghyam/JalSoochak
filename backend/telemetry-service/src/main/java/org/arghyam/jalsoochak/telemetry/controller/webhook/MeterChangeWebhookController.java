@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.controller.webhook;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import org.arghyam.jalsoochak.telemetry.config.OpenApiConfig;
 import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
@@ -21,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @WebhookRoute
+@SecurityRequirement(name = OpenApiConfig.WEBHOOK_TOKEN_SCHEME)
 @RequestMapping("/api/v1/telemetry")
 public class MeterChangeWebhookController {
     private static final Logger log = LoggerFactory.getLogger(MeterChangeWebhookController.class);
@@ -61,7 +64,9 @@ public class MeterChangeWebhookController {
         } catch (Exception e) {
             log.error("Error fetching meter change reasons: {}", e.getMessage(), e);
             log.debug("Error fetching meter change reasons for contactId {}: {}", request.getContactId(), e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            // 200, not 500: the chatbot routes a non-2xx to its "server is down" branch, which is
+            // the wrong thing to tell an operator whose tenant simply has no reasons configured.
+            return ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_JSON)
                     .body("{\"success\":false,\"message\":\"Meter change reasons could not be fetched.\"}");
         }

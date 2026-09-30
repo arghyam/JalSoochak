@@ -40,7 +40,7 @@ public class FactIngestionRepository {
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     /**
-     * {@code ON CONFLICT} names the V50 partial unique index by its columns and predicate. A NULL
+     * {@code ON CONFLICT} names the V56 partial unique index by its columns and predicate. A NULL
      * {@code source_reading_id} never conflicts, so legacy events always insert.
      *
      * <p>The version guard lets a stored row with no version be overwritten, and never lets an event

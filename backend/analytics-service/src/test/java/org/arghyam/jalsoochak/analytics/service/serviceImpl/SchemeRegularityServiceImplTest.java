@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2MetricsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
@@ -23,10 +24,12 @@ import org.arghyam.jalsoochak.analytics.dto.response.SubmissionStatusSummaryResp
 import org.arghyam.jalsoochak.analytics.dto.response.UserSubmissionStatusResponse;
 import org.arghyam.jalsoochak.analytics.entity.DimUser;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
+import org.arghyam.jalsoochak.analytics.repository.AggregateReadRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -50,6 +53,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -61,6 +65,8 @@ class SchemeRegularityServiceImplTest {
 
     @Mock
     private SchemeRegularityRepository schemeRegularityRepository;
+    @Mock
+    private AggregateReadRepository aggregateReadRepository;
     @Mock
     private DimTenantRepository dimTenantRepository;
     @Mock
@@ -78,6 +84,11 @@ class SchemeRegularityServiceImplTest {
     private static final LocalDate START = LocalDate.of(2026, 1, 1);
     private static final LocalDate END = LocalDate.of(2026, 1, 3);
     private static final UUID USER_UUID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+
+    @BeforeEach
+    void initCacheTtl() {
+        // @Value isn't applied under @InjectMocks; set the cache TTL the prod default uses.
+    }
 
     @Test
     void getAverageSchemeRegularity_invalidLgd_throwsBadRequest() {
@@ -214,6 +225,243 @@ class SchemeRegularityServiceImplTest {
     }
 
     @Test
+    void getAverageSchemeRegularity_readFromAggregates_usesAggregateAndSkipsLegacyRepo() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(aggregateReadRepository.getRegionMetrics(1, "LGD", 101, START, END))
+                .thenReturn(Optional.of(new AggregateReadRepository.RegionPeriodMetrics(
+                        4, 6L, 6L, 0L, 0L, 0L, 0L, 0L)));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+        // daysInRange=3, 90% => thresholdDays=3; the aggregate classifies 2 of 4 schemes regular.
+        when(aggregateReadRepository.getRegularSchemeCount(1, "LGD", 101, START, END, 3)).thenReturn(2L);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        AverageSchemeRegularityResponse response = service.getAverageSchemeRegularity(1, 101, START, END);
+
+        assertThat(response.getSchemeCount()).isEqualTo(4);
+        assertThat(response.getTotalSupplyDays()).isEqualTo(6);
+        assertThat(response.getRegularSchemeCount()).isEqualTo(2);
+        // regularity = regularSchemeCount / schemeCount = 2 / 4 = 0.5
+        assertThat(response.getAverageRegularity()).isEqualByComparingTo("0.5000");
+        verify(schemeRegularityRepository, never()).getSchemeRegularityMetrics(any(), any(), any(), any());
+    }
+
+    @Test
+    void getAverageSchemeRegularity_readFromAggregates_butNoRows_fallsBackToLegacyRepo() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(aggregateReadRepository.getRegionMetrics(1, "LGD", 101, START, END)).thenReturn(Optional.empty());
+        when(schemeRegularityRepository.getSchemeRegularityMetrics(1, 101, START, END))
+                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 3, 1));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        AverageSchemeRegularityResponse response = service.getAverageSchemeRegularity(1, 101, START, END);
+
+        assertThat(response.getSchemeCount()).isEqualTo(2);
+        // regularity = regularSchemeCount / schemeCount = 1 / 2 = 0.5
+        assertThat(response.getAverageRegularity()).isEqualByComparingTo("0.5000");
+        verify(schemeRegularityRepository, times(1)).getSchemeRegularityMetrics(1, 101, START, END);
+    }
+
+    @Test
+    void getReadingSubmissionRateByLgd_readFromAggregates_usesSubmissionDays() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(schemeRegularityRepository.getLgdLevelForTenant(1, 101)).thenReturn(2);
+        when(aggregateReadRepository.getRegionMetrics(1, "LGD", 101, START, END))
+                .thenReturn(Optional.of(new AggregateReadRepository.RegionPeriodMetrics(
+                        4, 3L, 9L, 0L, 0L, 0L, 0L, 0L))); // supply=3, submission=9
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        ReadingSubmissionRateResponse response = service.getReadingSubmissionRateByLgd(1, 101, START, END);
+
+        // submission days (9), not supply days: 9 / (4*3) = 0.75
+        assertThat(response.getTotalSubmissionDays()).isEqualTo(9);
+        assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.7500");
+        verify(schemeRegularityRepository, never()).getReadingSubmissionRateMetricsByLgd(any(), any(), any(), any());
+    }
+
+    @Test
+    void getAverageSchemeRegularityByDepartment_readFromAggregates_usesDeptHierarchy() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(aggregateReadRepository.getRegionMetrics(1, "DEPT", 201, START, END))
+                .thenReturn(Optional.of(new AggregateReadRepository.RegionPeriodMetrics(
+                        2, 3L, 4L, 0L, 0L, 0L, 0L, 0L)));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+        // daysInRange=3, 90% => thresholdDays=3; the aggregate classifies 1 of 2 schemes regular.
+        when(aggregateReadRepository.getRegularSchemeCount(1, "DEPT", 201, START, END, 3)).thenReturn(1L);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        AverageSchemeRegularityResponse response = service.getAverageSchemeRegularityByDepartment(1, 201, START, END);
+
+        assertThat(response.getSchemeCount()).isEqualTo(2);
+        assertThat(response.getTotalSupplyDays()).isEqualTo(3);
+        assertThat(response.getRegularSchemeCount()).isEqualTo(1);
+        // regularity = regularSchemeCount / schemeCount = 1 / 2 = 0.5
+        assertThat(response.getAverageRegularity()).isEqualByComparingTo("0.5000");
+        verify(schemeRegularityRepository, never()).getSchemeRegularityMetricsByDepartment(any(), any(), any(), any());
+    }
+
+    @Test
+    void getReadingSubmissionRateByDepartment_readFromAggregates_usesSubmissionDays() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(schemeRegularityRepository.getDepartmentLevelForTenant(1, 201)).thenReturn(2);
+        when(aggregateReadRepository.getRegionMetrics(1, "DEPT", 201, START, END))
+                .thenReturn(Optional.of(new AggregateReadRepository.RegionPeriodMetrics(
+                        2, 1L, 6L, 0L, 0L, 0L, 0L, 0L)));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        ReadingSubmissionRateResponse response = service.getReadingSubmissionRateByDepartment(1, 201, START, END);
+
+        assertThat(response.getTotalSubmissionDays()).isEqualTo(6);
+        assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("1.0000");
+        verify(schemeRegularityRepository, never()).getReadingSubmissionRateMetricsByDepartment(any(), any(), any(), any());
+    }
+
+    @Test
+    void getSubmissionStatusSummaryByLgd_readFromAggregates_usesCompliantAndAnomalousCounts() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(aggregateReadRepository.getRegionMetrics(1, "LGD", 101, START, END))
+                .thenReturn(Optional.of(new AggregateReadRepository.RegionPeriodMetrics(
+                        5, 0L, 0L, 0L, 0L, 0L, 7L, 3L))); // compliant=7, anomalous=3
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        SubmissionStatusSummaryResponse response = service.getSubmissionStatusSummaryByLgd(1, 101, START, END);
+
+        assertThat(response.getSchemeCount()).isEqualTo(5);
+        assertThat(response.getCompliantSubmissionCount()).isEqualTo(7);
+        assertThat(response.getAnomalousSubmissionCount()).isEqualTo(3);
+        verify(schemeRegularityRepository, never()).getSubmissionStatusCountByLgd(any(), any(), any(), any());
+    }
+
+    @Test
+    void getOutageReasonSchemeCountByLgd_readFromAggregates_parentMapFromAggregate() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(schemeRegularityRepository.getLgdLevelForTenant(1, 101)).thenReturn(2);
+        when(aggregateReadRepository.getReasonDistribution(1, "LGD", 101, true, START, END))
+                .thenReturn(Optional.of(Map.of("no_electricity", 3, "draught", 1)));
+        when(schemeRegularityRepository.getChildRegionsByLgd(1, 101)).thenReturn(List.of());
+        when(schemeRegularityRepository.getChildOutageReasonSchemeCountByLgd(1, 101, START, END)).thenReturn(List.of());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        OutageReasonSchemeCountResponse response = service.getOutageReasonSchemeCountByLgd(1, 101, START, END);
+
+        assertThat(response.getOutageReasonSchemeCount())
+                .containsEntry("no_electricity", 3)
+                .containsEntry("draught", 1);
+        verify(schemeRegularityRepository, never())
+                .getOutageReasonSchemeCountByLgd(any(), any(), any(), any());
+    }
+
+    @Test
+    void getPeriodicWaterQuantityByLgdId_readFromAggregates_buildsAveragesFromPreRolledRows() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        // water 300 over 3 supply days => avg 100.0000; households 30, achieved fhtc 20.
+        when(aggregateReadRepository.getPeriodicRegionMetrics(1, "LGD", 101, "WEEK", START, END))
+                .thenReturn(List.of(new AggregateReadRepository.PeriodicRegionRow(
+                        LocalDate.of(2025, 12, 28), LocalDate.of(2026, 1, 3),
+                        2, 3L, 300L, 30L, 20L, 25L)));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        PeriodicWaterQuantityResponse response =
+                service.getPeriodicWaterQuantityByLgdId(1, 101, START, END, PeriodScale.WEEK);
+
+        assertThat(response.getMetrics()).hasSize(1);
+        var m = response.getMetrics().get(0);
+        assertThat(m.getAverageWaterQuantity()).isEqualByComparingTo("100.0000");
+        assertThat(m.getHouseholdCount()).isEqualTo(30L);
+        assertThat(m.getAchievedFhtcCount()).isEqualTo(20L);
+        verify(schemeRegularityRepository, never())
+                .getPeriodicWaterQuantityByLgdId(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void getPeriodicWaterQuantityByLgdId_readFromAggregates_missingDayBucket_fallsBackToLegacy() throws Exception {
+        // Jan 1-3 at DAY scale needs three buckets; Jan 2 was never aggregated. Serving the two
+        // present rows would silently drop a period, so the legacy query answers instead.
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(aggregateReadRepository.getPeriodicRegionMetrics(1, "LGD", 101, "DAY", START, END))
+                .thenReturn(List.of(
+                        new AggregateReadRepository.PeriodicRegionRow(START, START, 2, 1L, 100L, 30L, 20L, 25L),
+                        new AggregateReadRepository.PeriodicRegionRow(END, END, 2, 1L, 100L, 30L, 20L, 25L)));
+        when(schemeRegularityRepository.getPeriodicWaterQuantityByLgdId(1, 101, START, END, PeriodScale.DAY))
+                .thenReturn(List.of());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        service.getPeriodicWaterQuantityByLgdId(1, 101, START, END, PeriodScale.DAY);
+
+        verify(schemeRegularityRepository).getPeriodicWaterQuantityByLgdId(1, 101, START, END, PeriodScale.DAY);
+    }
+
+    @Test
+    void getPeriodicWaterQuantityByDepartment_readFromAggregates_quarterMissingMonth_fallsBackToLegacy() {
+        // Q1 re-buckets Jan-Mar MONTH rows; February is missing, so the quarter would be under-summed.
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        LocalDate qStart = LocalDate.of(2026, 1, 1);
+        LocalDate qEnd = LocalDate.of(2026, 3, 31);
+        when(aggregateReadRepository.getPeriodicRegionMetrics(1, "DEPT", 201, "QUARTER", qStart, qEnd))
+                .thenReturn(List.of(new AggregateReadRepository.PeriodicRegionRow(
+                        qStart, qEnd, 2, 2L, 200L, 30L, 20L, 25L)));
+        when(aggregateReadRepository.getPeriodicRegionMetrics(1, "DEPT", 201, "MONTH", qStart, qEnd))
+                .thenReturn(List.of(
+                        new AggregateReadRepository.PeriodicRegionRow(
+                                qStart, LocalDate.of(2026, 1, 31), 2, 1L, 100L, 30L, 20L, 25L),
+                        new AggregateReadRepository.PeriodicRegionRow(
+                                LocalDate.of(2026, 3, 1), qEnd, 2, 1L, 100L, 30L, 20L, 25L)));
+        when(schemeRegularityRepository.getPeriodicWaterQuantityByDepartment(1, 201, qStart, qEnd, PeriodScale.QUARTER))
+                .thenReturn(List.of());
+
+        service.getPeriodicWaterQuantityByDepartment(1, 201, qStart, qEnd, PeriodScale.QUARTER);
+
+        verify(schemeRegularityRepository).getPeriodicWaterQuantityByDepartment(1, 201, qStart, qEnd, PeriodScale.QUARTER);
+    }
+
+    @Test
+    void getPeriodicWaterQuantityByDepartment_readFromAggregates_quarterWithEveryMonth_usesAggregate() {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        LocalDate qStart = LocalDate.of(2026, 1, 1);
+        LocalDate qEnd = LocalDate.of(2026, 3, 31);
+        when(aggregateReadRepository.getPeriodicRegionMetrics(1, "DEPT", 201, "QUARTER", qStart, qEnd))
+                .thenReturn(List.of(new AggregateReadRepository.PeriodicRegionRow(
+                        qStart, qEnd, 2, 3L, 300L, 30L, 20L, 25L)));
+        when(aggregateReadRepository.getPeriodicRegionMetrics(1, "DEPT", 201, "MONTH", qStart, qEnd))
+                .thenReturn(List.of(
+                        new AggregateReadRepository.PeriodicRegionRow(
+                                qStart, LocalDate.of(2026, 1, 31), 2, 1L, 100L, 30L, 20L, 25L),
+                        new AggregateReadRepository.PeriodicRegionRow(
+                                LocalDate.of(2026, 2, 1), LocalDate.of(2026, 2, 28), 2, 1L, 100L, 30L, 20L, 25L),
+                        new AggregateReadRepository.PeriodicRegionRow(
+                                LocalDate.of(2026, 3, 1), qEnd, 2, 1L, 100L, 30L, 20L, 25L)));
+
+        PeriodicWaterQuantityResponse response =
+                service.getPeriodicWaterQuantityByDepartment(1, 201, qStart, qEnd, PeriodScale.QUARTER);
+
+        assertThat(response.getMetrics()).hasSize(1);
+        assertThat(response.getMetrics().getFirst().getAverageWaterQuantity()).isEqualByComparingTo("100.0000");
+        verify(schemeRegularityRepository, never())
+                .getPeriodicWaterQuantityByDepartment(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void getAverageSchemeRegularity_singleDayRequest_expandsToTrailingWindow() throws Exception {
         // A share-of-days KPI over one day is meaningless, so start == end widens to a trailing window.
         ReflectionTestUtils.setField(service, "regularitySingleDayLookbackDays", 30);
@@ -318,7 +566,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getPeriodicWaterQuantityByLgdId_capsPeriodEndDateAtRequestedEndDate() {
         LocalDate requestedEnd = LocalDate.of(2026, 1, 10);
-        when(schemeRegularityRepository.getPeriodicWaterQuantityByLgdId(101, START, requestedEnd, PeriodScale.WEEK))
+        when(schemeRegularityRepository.getPeriodicWaterQuantityByLgdId(1, 101, START, requestedEnd, PeriodScale.WEEK))
                 .thenReturn(List.of(
                         new SchemeRegularityRepository.PeriodicWaterQuantityMetrics(
                                 LocalDate.of(2026, 1, 6),
@@ -331,7 +579,7 @@ class SchemeRegularityServiceImplTest {
                 ));
 
         PeriodicWaterQuantityResponse response =
-                service.getPeriodicWaterQuantityByLgdId(101, START, requestedEnd, PeriodScale.WEEK);
+                service.getPeriodicWaterQuantityByLgdId(1, 101, START, requestedEnd, PeriodScale.WEEK);
 
         assertThat(response.getScale()).isEqualTo("week");
         assertThat(response.getPeriodCount()).isEqualTo(1);
@@ -800,7 +1048,7 @@ class SchemeRegularityServiceImplTest {
 
     @Test
     void getPeriodicWaterQuantityByDepartment_withNullScale_throws() {
-        assertThatThrownBy(() -> service.getPeriodicWaterQuantityByDepartment(201, START, END, null))
+        assertThatThrownBy(() -> service.getPeriodicWaterQuantityByDepartment(1, 201, START, END, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("scale is required");
     }
@@ -1041,14 +1289,14 @@ class SchemeRegularityServiceImplTest {
 
     @Test
     void getPeriodicWaterQuantityByDepartment_validMapsMetrics() {
-        when(schemeRegularityRepository.getPeriodicWaterQuantityByDepartment(201, START, END, PeriodScale.DAY))
+        when(schemeRegularityRepository.getPeriodicWaterQuantityByDepartment(1, 201, START, END, PeriodScale.DAY))
                 .thenReturn(List.of(
                         new SchemeRegularityRepository.PeriodicWaterQuantityMetrics(
                                 START, START, "2026-01-01", new BigDecimal("22.1250"), 44L, 40L, 50L)
                 ));
 
         PeriodicWaterQuantityResponse response =
-                service.getPeriodicWaterQuantityByDepartment(201, START, END, PeriodScale.DAY);
+                service.getPeriodicWaterQuantityByDepartment(1, 201, START, END, PeriodScale.DAY);
 
         assertThat(response.getDepartmentId()).isEqualTo(201);
         assertThat(response.getPeriodCount()).isEqualTo(1);
@@ -1553,6 +1801,152 @@ class SchemeRegularityServiceImplTest {
         verify(schemeRegularityRepository).getStateWiseRegularityMetrics(expandedStart, singleDay);
         verify(schemeRegularityRepository).getAverageWaterSupplyPerNation(singleDay, singleDay);
         verify(schemeRegularityRepository).getStateWiseReadingSubmissionMetrics(singleDay, singleDay);
+    }
+
+    @Test
+    void refreshNationalDashboard_readFromAggregates_usesThresholdBasedRegularity() throws Exception {
+        // From-aggregate path must match the fallback KPI: regularSchemeCount / schemeCount (threshold-based,
+        // national work-status filter), NOT a supply-day fraction. Values are chosen so the two disagree:
+        // threshold-based = 3/5 = 0.6000, whereas totalSupplyDays/(schemeCount*days) = 12/(5*3) = 0.8000.
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+
+        when(aggregateReadRepository.getNationalRegionMetrics(1, START, END))
+                .thenReturn(Optional.of(List.of(
+                        new AggregateReadRepository.NationalRegionRow(
+                                1, 100, "mp", "Madhya Pradesh", 1, "Madhya Pradesh",
+                                5, 12L, 10L, 64000L, 7L, 120L, 110L, 140L)
+                )));
+        when(schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent())
+                .thenReturn(new BigDecimal("90"));
+        // daysInRange = 3, threshold 90% -> thresholdDays = max(1, round(2.7)) = 3.
+        when(aggregateReadRepository.getNationalRegularSchemeCount(1, "LGD", 100, START, END, 3))
+                .thenReturn(3L);
+        when(schemeRegularityRepository.getOverallOutageReasonSchemeCount(START, END))
+                .thenReturn(List.of());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        NationalDashboardResponse response = service.refreshNationalDashboard(START, END);
+
+        assertThat(response.getStateWiseRegularity()).hasSize(1);
+        NationalDashboardResponse.StateRegularity reg = response.getStateWiseRegularity().getFirst();
+        assertThat(reg.getRegularSchemeCount()).isEqualTo(3);
+        assertThat(reg.getAverageRegularity()).isEqualByComparingTo("0.6000");
+    }
+
+    @Test
+    void refreshNationalDashboard_readFromAggregates_singleDay_widensOnlyTheRegularityWindow() throws Exception {
+        // Legacy parity: a one-day request widens regularity to the trailing lookback (30 days here),
+        // while quantity and submission stay on the literal day.
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        ReflectionTestUtils.setField(service, "regularitySingleDayLookbackDays", 30);
+        mockRedisValueOps();
+        LocalDate lookbackStart = END.minusDays(29);
+        when(aggregateReadRepository.getNationalRegionMetrics(1, END, END))
+                .thenReturn(Optional.of(List.of(new AggregateReadRepository.NationalRegionRow(
+                        1, 100, "mp", "Madhya Pradesh", 1, "Madhya Pradesh",
+                        5, 4L, 3L, 5000L, 2L, 120L, 110L, 140L))));
+        when(aggregateReadRepository.getNationalRegionMetrics(1, lookbackStart, END))
+                .thenReturn(Optional.of(List.of(new AggregateReadRepository.NationalRegionRow(
+                        1, 100, "mp", "Madhya Pradesh", 1, "Madhya Pradesh",
+                        5, 120L, 90L, 150000L, 60L, 120L, 110L, 140L))));
+        when(schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent())
+                .thenReturn(new BigDecimal("90"));
+        // 90% of the 30-day window -> 27 days.
+        when(aggregateReadRepository.getNationalRegularSchemeCount(1, "LGD", 100, lookbackStart, END, 27))
+                .thenReturn(3L);
+        when(schemeRegularityRepository.getOverallOutageReasonSchemeCount(END, END)).thenReturn(List.of());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        NationalDashboardResponse response = service.refreshNationalDashboard(END, END);
+
+        NationalDashboardResponse.StateRegularity reg = response.getStateWiseRegularity().getFirst();
+        assertThat(reg.getTotalSupplyDays()).isEqualTo(120);
+        assertThat(reg.getRegularSchemeCount()).isEqualTo(3);
+        assertThat(reg.getAverageRegularity()).isEqualByComparingTo("0.6000");
+        // Submission stays on the literal day: 3 / (5 schemes x 1 day).
+        assertThat(response.getStateWiseReadingSubmissionRate().getFirst().getReadingSubmissionRate())
+                .isEqualByComparingTo("0.6000");
+        verify(schemeRegularityRepository, never()).getStateWiseRegularityMetrics(any(), any());
+    }
+
+    @Test
+    void refreshNationalDashboard_readFromAggregates_singleDay_lookbackNotAggregated_fallsBackToLegacy() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        ReflectionTestUtils.setField(service, "regularitySingleDayLookbackDays", 30);
+        mockRedisValueOps();
+        LocalDate lookbackStart = END.minusDays(29);
+        when(aggregateReadRepository.getNationalRegionMetrics(1, END, END))
+                .thenReturn(Optional.of(List.of(new AggregateReadRepository.NationalRegionRow(
+                        1, 100, "mp", "Madhya Pradesh", 1, "Madhya Pradesh",
+                        5, 4L, 3L, 5000L, 2L, 120L, 110L, 140L))));
+        when(aggregateReadRepository.getNationalRegionMetrics(1, lookbackStart, END)).thenReturn(Optional.empty());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        service.refreshNationalDashboard(END, END);
+
+        verify(schemeRegularityRepository).getStateWiseRegularityMetrics(lookbackStart, END);
+    }
+
+    @Test
+    void getNationalDashboardLevel2MetricsForApi_readFromAggregates_singleDay_widensOnlyTheRegularityWindow() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        ReflectionTestUtils.setField(service, "regularitySingleDayLookbackDays", 30);
+        mockRedisValueOps();
+        LocalDate lookbackStart = END.minusDays(29);
+        when(aggregateReadRepository.getNationalRegionMetrics(2, END, END))
+                .thenReturn(Optional.of(List.of(new AggregateReadRepository.NationalRegionRow(
+                        1, 101, "mp", "Madhya Pradesh", 1, "District-1",
+                        5, 4L, 3L, 5000L, 2L, 120L, 110L, 140L))));
+        when(aggregateReadRepository.getNationalRegionMetrics(2, lookbackStart, END))
+                .thenReturn(Optional.of(List.of(new AggregateReadRepository.NationalRegionRow(
+                        1, 101, "mp", "Madhya Pradesh", 1, "District-1",
+                        5, 120L, 90L, 150000L, 60L, 120L, 110L, 140L))));
+        when(schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent())
+                .thenReturn(new BigDecimal("90"));
+        when(aggregateReadRepository.getNationalRegularSchemeCount(1, "LGD", 101, lookbackStart, END, 27))
+                .thenReturn(3L);
+        when(schemeRegularityRepository.getOverallOutageReasonSchemeCount(END, END)).thenReturn(List.of());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        NationalDashboardLevel2MetricsResponse response =
+                service.getNationalDashboardLevel2MetricsForApi(END, END);
+
+        NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow district = response.getDistricts().getFirst();
+        assertThat(district.getTotalSupplyDays()).isEqualTo(120);
+        assertThat(district.getRegularSchemeCount()).isEqualTo(3);
+        assertThat(district.getAverageRegularity()).isEqualByComparingTo("0.6000");
+        assertThat(district.getReadingSubmissionRate()).isEqualByComparingTo("0.6000");
+    }
+
+    @Test
+    void getNationalDashboardLevel2MetricsForApi_readFromAggregates_usesThresholdBasedRegularity() throws Exception {
+        // Same threshold-based regularity guarantee for the level-2 (district) from-aggregate path:
+        // 3/5 = 0.6000, not the supply-day fraction 12/(5*3) = 0.8000.
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+
+        when(aggregateReadRepository.getNationalRegionMetrics(2, START, END))
+                .thenReturn(Optional.of(List.of(
+                        new AggregateReadRepository.NationalRegionRow(
+                                1, 101, "mp", "Madhya Pradesh", 1, "District-1",
+                                5, 12L, 10L, 64000L, 7L, 120L, 110L, 140L)
+                )));
+        when(schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent())
+                .thenReturn(new BigDecimal("90"));
+        when(aggregateReadRepository.getNationalRegularSchemeCount(1, "LGD", 101, START, END, 3))
+                .thenReturn(3L);
+        when(schemeRegularityRepository.getOverallOutageReasonSchemeCount(START, END))
+                .thenReturn(List.of());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        NationalDashboardLevel2MetricsResponse response =
+                service.getNationalDashboardLevel2MetricsForApi(START, END);
+
+        assertThat(response.getDistricts()).hasSize(1);
+        NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow district = response.getDistricts().getFirst();
+        assertThat(district.getRegularSchemeCount()).isEqualTo(3);
+        assertThat(district.getAverageRegularity()).isEqualByComparingTo("0.6000");
     }
 
     @Test

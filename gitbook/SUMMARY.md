@@ -17,3 +17,8 @@
 
 * [Installation Guide](installation-guide.md)
 * [Create a New Tenant (State/UT)](create-new-tenant.md)
+
+## User Manuals
+
+* [State System Admin](user-manual-state-system-admin.md)
+* [Sub Divisional Officers & Section Officers](user-manual-sdo-so.md)

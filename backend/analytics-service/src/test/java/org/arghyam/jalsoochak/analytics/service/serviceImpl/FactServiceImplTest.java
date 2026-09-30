@@ -303,7 +303,7 @@ class FactServiceImplTest {
 
     @Test
     void ingestMeterReading_fromAnOlderTelemetryIsStoredWithoutASubmissionIdentity() {
-        // No sourceReadingId: the upsert inserts a new row, exactly as every event did before V50.
+        // No sourceReadingId: the upsert inserts a new row, exactly as every event did before V56.
         MeterReadingEvent event = readingEvent("40", "2026-01-02");
         storedAsNewRow();
 

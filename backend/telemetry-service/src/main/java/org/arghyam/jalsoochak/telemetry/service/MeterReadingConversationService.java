@@ -248,7 +248,7 @@ public class MeterReadingConversationService {
                     .message(message.toString())
                     .build();
         } catch (Exception e) {
-            log.error("Error building meter change reasons for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error building meter change reasons", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message("Meter change reasons could not be prepared.")
@@ -303,7 +303,7 @@ public class MeterReadingConversationService {
                     .correlationId(correlationId)
                     .build();
         } catch (Exception e) {
-            log.error("Error preparing take meter reading prompt for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error preparing take meter reading prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message("Take meter reading prompt could not be prepared.")
@@ -365,7 +365,7 @@ public class MeterReadingConversationService {
                     .message(message.toString())
                     .build();
         } catch (Exception e) {
-            log.error("Error preparing issue report prompt for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error preparing issue report prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message("Issue report prompt could not be prepared.")
@@ -579,7 +579,7 @@ public class MeterReadingConversationService {
                     .notOthers("OTHERS".equalsIgnoreCase(selectedKey))
                     .build();
         } catch (Exception e) {
-            log.error("Error saving meter change reason for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error saving meter change reason", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message("Meter change reason could not be saved.")
@@ -749,7 +749,7 @@ public class MeterReadingConversationService {
                     .selected(responseSelectedKey)
                     .build();
         } catch (Exception e) {
-            log.error("Error saving issue report for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error saving issue report", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
@@ -783,7 +783,7 @@ public class MeterReadingConversationService {
                     .message(message)
                     .build();
         } catch (Exception e) {
-            log.error("Error preparing others prompt for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error preparing others prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message("Others prompt could not be prepared.")
@@ -823,7 +823,7 @@ public class MeterReadingConversationService {
                     .message(message.toString())
                     .build();
         } catch (Exception e) {
-            log.error("Error preparing telemetry issue report prompt for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error preparing telemetry issue report prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message("Issue report prompt could not be prepared.")
@@ -952,7 +952,7 @@ public class MeterReadingConversationService {
                     .notOthers("OTHERS".equalsIgnoreCase(selectedKey) || "others".equalsIgnoreCase(selectedKey))
                     .build();
         } catch (Exception e) {
-            log.error("Error saving telemetry issue report for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error saving telemetry issue report", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
@@ -1051,7 +1051,7 @@ public class MeterReadingConversationService {
                     .selected("others")
                     .build();
         } catch (Exception e) {
-            log.error("Error saving others issue report for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error saving others issue report", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
@@ -1579,7 +1579,7 @@ public class MeterReadingConversationService {
             }
             return response;
         } catch (Exception e) {
-            log.error("Error processing manual reading for contactId {}: {}", maskPhone(request.getContactId()), e.getMessage(), e);
+            logFailure("Error processing manual reading", request.getContactId(), e);
             String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Manual reading could not be saved.", languageKey);
             return CreateReadingResponse.builder()
@@ -1624,8 +1624,13 @@ public class MeterReadingConversationService {
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, operatorWithSchema.operator().tenantId())
             );
 
+            // The scheme selected earlier in this conversation, as the image and manual-reading paths
+            // resolve it. The first mapped scheme is only a fallback: checking it for an operator
+            // with several schemes measured the boundary of a scheme they were not submitting for.
             Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorId)
+                    .findLatestPendingSchemeSelectionForDate(operatorWithSchema.schemaName(), operatorId, ReadingTime.today())
+                    .map(TelemetrySchemeSelectionRecord::schemeId)
+                    .or(() -> telemetryTenantRepository.findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorId))
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
             String correlationId = null;
@@ -1691,7 +1696,7 @@ public class MeterReadingConversationService {
                     .build();
         } catch (Exception e) {
             String safeContactId = request != null ? request.resolveContactId() : null;
-            log.error("Error processing location for contactId {}: {}", safeContactId, e.getMessage(), e);
+            logFailure("Error processing location", safeContactId, e);
             String languageKey = localizationService.resolveLanguageKeyForContact(safeContactId);
             String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Location could not be saved.", languageKey);
             return CreateReadingResponse.builder()
@@ -1832,7 +1837,7 @@ public class MeterReadingConversationService {
                     .meterReading(correctedReading)
                     .build();
         } catch (Exception e) {
-            log.error("Error updating previous day reading for contactId {}: {}", maskPhone(request.getContactId()), e.getMessage(), e);
+            logFailure("Error updating previous day reading", request.getContactId(), e);
             String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(
                     e,
@@ -1919,17 +1924,6 @@ public class MeterReadingConversationService {
             return "";
         }
         return value.stripTrailingZeros().toPlainString();
-    }
-
-    private static String maskPhone(String phoneNumber) {
-        if (phoneNumber == null || phoneNumber.isBlank()) {
-            return "n/a";
-        }
-        String digits = phoneNumber.replaceAll("\\D", "");
-        if (digits.length() <= 4) {
-            return "****";
-        }
-        return "****" + digits.substring(digits.length() - 4);
     }
 
     private record WaterSupplyThreshold(double undersupplyThresholdPercent, double oversupplyThresholdPercent) {
@@ -2157,5 +2151,28 @@ public class MeterReadingConversationService {
             }
         }
         return count;
+    }
+
+    /**
+     * Logs a failed chatbot answer. {@link IllegalStateException} is what this service throws for an
+     * expected outcome — an operator's invalid input, a missing mapping or config — so it is a WARN
+     * without a stack trace; anything else is unexpected and keeps its ERROR and stack trace. Either
+     * way the phone is masked: phone numbers are PII and appear raw only at DEBUG.
+     */
+    private static void logFailure(String what, String contactId, Exception e) {
+        if (e instanceof IllegalStateException) {
+            log.warn("{} for contact {}: {}", what, maskPhone(contactId), e.getMessage());
+        } else {
+            log.error("{} for contact {}: {}", what, maskPhone(contactId), e.getMessage(), e);
+        }
+        log.debug("{} for contactId {}", what, contactId);
+    }
+
+    private static String maskPhone(String phone) {
+        if (phone == null || phone.isBlank()) {
+            return "n/a";
+        }
+        String digits = phone.replaceAll("\\D", "");
+        return digits.length() <= 4 ? "****" : "****" + digits.substring(digits.length() - 4);
     }
 }

@@ -224,13 +224,14 @@ public class AnalyticsWaterQuantityController {
             }
     )
     public ResponseEntity<ApiResponse<PeriodicWaterQuantityResponse>> getPeriodicWaterQuantity(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @Parameter(
                     description = """
                             Time aggregation scale.
                             - day: per-day buckets
-                            - week: rolling 7-day buckets anchored to start_date (not ISO-week aligned)
+                            - week: calendar weeks running Sunday -> Saturday
                             - month/quarter/year: calendar-aligned buckets (month=Jan/Feb..., quarter=Jan-Mar/Apr-Jun..., year=Jan 1-Dec 31)
                             """,
                     required = true,
@@ -248,8 +249,8 @@ public class AnalyticsWaterQuantityController {
 
             PeriodScale periodScale = PeriodScale.fromValue(scale);
             PeriodicWaterQuantityResponse data = (lgdId != null)
-                    ? schemeRegularityService.getPeriodicWaterQuantityByLgdId(lgdId, startDate, endDate, periodScale)
-                    : schemeRegularityService.getPeriodicWaterQuantityByDepartment(departmentId, startDate, endDate, periodScale);
+                    ? schemeRegularityService.getPeriodicWaterQuantityByLgdId(tenantId, lgdId, startDate, endDate, periodScale)
+                    : schemeRegularityService.getPeriodicWaterQuantityByDepartment(tenantId, departmentId, startDate, endDate, periodScale);
 
             return ResponseEntity.ok(ApiResponse.<PeriodicWaterQuantityResponse>builder()
                     .success(true)

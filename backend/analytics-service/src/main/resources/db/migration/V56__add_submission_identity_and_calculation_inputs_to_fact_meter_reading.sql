@@ -1,5 +1,5 @@
 -- ============================================================
--- V50 - One fact row per submission, and the inputs to recalculate it
+-- V56 - One fact row per submission, and the inputs to recalculate it
 -- ------------------------------------------------------------
 -- fact_meter_reading_table
 --   + source_reading_id       BIGINT     -- the tenant's flow_reading_table.id

@@ -119,4 +119,52 @@ public final class DashboardWorkStatusFilter {
         return " AND (" + effectiveSet + " IS NULL OR "
                 + schemeAlias + ".work_status = ANY(" + effectiveSet + "))";
     }
+
+    // ------------------------------------------------------------------
+    // History-based (as-of-date) variants for the pre-aggregation pipeline
+    // ------------------------------------------------------------------
+
+    /**
+     * Tenant-scoped predicate resolved against the SCD-2 filter history
+     * ({@code dim_tenant_work_status_filter_table}) as of {@code asOfDateSql}: the filter row in
+     * force on that date wins, so pre-aggregated buckets are built with the filter that applied
+     * to the period being aggregated, not today's. Tiers: own tenant → national (tenant 0) →
+     * env default, each read from the history row covering the date (half-open intervals).
+     *
+     * @param schemeAlias the alias used for {@code dim_scheme_table} in the query (e.g. {@code "ds"})
+     * @param asOfDateSql a SQL date expression for the as-of date — either a {@code DATE '...'}
+     *                    literal built from a typed {@link java.time.LocalDate} or a plain column /
+     *                    {@code CURRENT_DATE} reference; never user-supplied text
+     */
+    public String andHistoryPredicate(String schemeAlias, String asOfDateSql) {
+        String effectiveSet = "COALESCE("
+                + "NULLIF((" + historyTierSelect(schemeAlias + ".tenant_id", asOfDateSql) + "), '{}'::int[]), "
+                + nationalHistoryCoalesceArgs(asOfDateSql) + ")";
+        return renderPredicate(schemeAlias, effectiveSet);
+    }
+
+    /**
+     * National-scoped variant of {@link #andHistoryPredicate(String, String)}: no own-tenant tier —
+     * the national (tenant 0) history row as of the date, then the env default, applied uniformly.
+     */
+    public String andNationalHistoryPredicate(String schemeAlias, String asOfDateSql) {
+        String effectiveSet = "COALESCE(" + nationalHistoryCoalesceArgs(asOfDateSql) + ")";
+        return renderPredicate(schemeAlias, effectiveSet);
+    }
+
+    /** The national-history → env-default tail shared by both history predicates. */
+    private String nationalHistoryCoalesceArgs(String asOfDateSql) {
+        return "NULLIF((" + historyTierSelect(String.valueOf(NATIONAL_TENANT_ID), asOfDateSql) + "), '{}'::int[]), "
+                + envArrayLiteral;
+    }
+
+    /** Scalar sub-select for one history tier: the filter set in force on the as-of date. */
+    private static String historyTierSelect(String tenantIdSql, String asOfDateSql) {
+        return "SELECT wsf.included_work_statuses"
+                + " FROM analytics_schema.dim_tenant_work_status_filter_table wsf"
+                + " WHERE wsf.tenant_id = " + tenantIdSql
+                + " AND wsf.effective_from <= " + asOfDateSql
+                + " AND (wsf.effective_to IS NULL OR wsf.effective_to > " + asOfDateSql + ")"
+                + " ORDER BY wsf.effective_from DESC LIMIT 1";
+    }
 }

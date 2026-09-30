@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Pins the one-row-per-submission upsert against the V50 partial unique index, and the per-scheme
+ * Pins the one-row-per-submission upsert against the V56 partial unique index, and the per-scheme
  * advisory lock. {@code @DataJpaTest} rather than {@code @JdbcTest} so the snapshot can be read back
  * through the JPA entity, which is how the recalculation reads it.
  */

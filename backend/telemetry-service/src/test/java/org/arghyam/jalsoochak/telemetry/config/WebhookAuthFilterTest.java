@@ -147,7 +147,7 @@ class WebhookAuthFilterTest {
         }
 
         @Test
-        @DisplayName("challenges every one of the 26 protected routes")
+        @DisplayName("challenges every one of the 27 protected routes")
         void challengesEveryProtectedRoute() throws Exception {
             WebhookAuthFilter filter = filter("ENFORCE");
 

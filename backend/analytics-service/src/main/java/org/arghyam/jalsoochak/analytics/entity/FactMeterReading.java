@@ -83,15 +83,15 @@ public class FactMeterReading {
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
-    /** V50: the tenant's {@code flow_reading_table.id}; null on rows from older events. */
+    /** V56: the tenant's {@code flow_reading_table.id}; null on rows from older events. */
     @Column(name = "source_reading_id")
     private Long sourceReadingId;
 
-    /** V50: the source row's {@code updated_at}, the version this row holds. */
+    /** V56: the source row's {@code updated_at}, the version this row holds. */
     @Column(name = "source_updated_at")
     private LocalDateTime sourceUpdatedAt;
 
-    /** V50: telemetry's pump and formula snapshot for ELM and PDU; null for BFM. */
+    /** V56: telemetry's pump and formula snapshot for ELM and PDU; null for BFM. */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "calculation_parameters")
     private CalculationParameters calculationParameters;
