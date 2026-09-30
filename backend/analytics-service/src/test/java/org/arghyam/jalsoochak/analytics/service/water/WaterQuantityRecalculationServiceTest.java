@@ -97,6 +97,19 @@ class WaterQuantityRecalculationServiceTest {
         }
     }
 
+    /** Stands in for the ELM calculator on a tenant with no formula: no ELM amount can be calculated. */
+    private static final class UnconfiguredElmCalculator implements WaterQuantityCalculator {
+        @Override
+        public ReadingChannel channel() {
+            return ReadingChannel.ELM;
+        }
+
+        @Override
+        public WaterQuantityOutcome calculate(WaterQuantityContext context) {
+            return WaterQuantityOutcome.notDerivable(Reason.MISSING_FORMULA);
+        }
+    }
+
     @BeforeEach
     void setUp() {
         service = serviceWith(new StubPduCalculator());
@@ -384,6 +397,99 @@ class WaterQuantityRecalculationServiceTest {
         verify(waterQuantityRepository).deleteReadingDerivedDay(TENANT, SCHEME, D2);
         assertThat(meterRegistry.counter("water_quantity.not_derivable",
                 "channel", "3", "reason", "NO_ACTIVE_PUMP").count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void aDayWithNoStartingPointPrefersAnotherChannelWhoseTotalCanBeCalculated() {
+        // The PDU run is later than the BFM reading, but its total can't be calculated and BFM's can.
+        WaterQuantityRecalculationService elmService = serviceWith(new StubPduCalculator(), new StubElmCalculator());
+        FactMeterReading firstElm = reading(ReadingChannel.ELM, "40", OPERATOR_B, D2);
+        FactMeterReading runWithNoPump = reading(ReadingChannel.PDU, "30", OPERATOR_B, D2, null);
+        FactMeterReading bfm = reading(ReadingChannel.BFM, "150", OPERATOR_A, D2);
+        latestOn(D2, firstElm);
+        noStartingPoint(D2, ReadingChannel.ELM);
+        readingsOn(D2, firstElm, runWithNoPump, bfm);
+        dayReadings(D2, runWithNoPump);
+        startingPoint(D2, ReadingChannel.BFM, "100");
+        noDayRow(D2);
+
+        elmService.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement().satisfies(row -> {
+            assertThat(row.getWaterQuantity()).isEqualTo(50_000L);
+            assertThat(row.getUserId()).isEqualTo(OPERATOR_A);
+        });
+    }
+
+    // ---- a day whose own total can't be calculated ------------------------------------------
+
+    @Test
+    void aDayWhoseOwnTotalCannotBeCalculatedTakesAnotherChannelsTotal() {
+        // The scheme reads both meters every day. D2's ELM reading is later and has a starting point,
+        // but the tenant has no ELM formula: the flow meter's total stands, credited to its reading.
+        WaterQuantityRecalculationService elmService =
+                serviceWith(new StubPduCalculator(), new UnconfiguredElmCalculator());
+        FactMeterReading elm = reading(ReadingChannel.ELM, "45", OPERATOR_B, D2);
+        FactMeterReading bfm = reading(ReadingChannel.BFM, "150", OPERATOR_A, D2);
+        latestOn(D2, elm);
+        startingPoint(D2, ReadingChannel.ELM, "40");
+        readingsOn(D2, elm, bfm);
+        startingPoint(D2, ReadingChannel.BFM, "100");
+        noDayRow(D2);
+
+        elmService.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement().satisfies(row -> {
+            assertThat(row.getWaterQuantity()).isEqualTo(50_000L);
+            assertThat(row.getUserId()).isEqualTo(OPERATOR_A);
+        });
+        verify(waterQuantityRepository, never()).deleteReadingDerivedDay(any(), any(), any());
+        assertThat(meterRegistry.counter("water_quantity.channel_fallback",
+                "channel", "2", "reason", "MISSING_FORMULA").count()).isEqualTo(1.0);
+        assertThat(meterRegistry.find("water_quantity.not_derivable").counter()).isNull();
+    }
+
+    @Test
+    void aPeriodAmountDayThatCannotBeCalculatedTakesAnotherChannelsTotal() {
+        FactMeterReading runWithNoPump = reading(ReadingChannel.PDU, "30", OPERATOR_B, D2, null);
+        FactMeterReading bfm = reading(ReadingChannel.BFM, "150", OPERATOR_A, D2);
+        latestOn(D2, runWithNoPump);
+        dayReadings(D2, runWithNoPump);
+        readingsOn(D2, runWithNoPump, bfm);
+        startingPoint(D2, ReadingChannel.BFM, "100");
+        noDayRow(D2);
+
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement().satisfies(row -> {
+            assertThat(row.getWaterQuantity()).isEqualTo(50_000L);
+            assertThat(row.getUserId()).isEqualTo(OPERATOR_A);
+        });
+        assertThat(meterRegistry.counter("water_quantity.channel_fallback",
+                "channel", "3", "reason", "NO_ACTIVE_PUMP").count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void withNoOtherChannelToCalculateTheDayHasNoTotalForItsOwnReason() {
+        // BFM has no starting point, so no total of its own, and the PDU run's can't be calculated.
+        WaterQuantityRecalculationService elmService =
+                serviceWith(new StubPduCalculator(), new UnconfiguredElmCalculator());
+        FactMeterReading elm = reading(ReadingChannel.ELM, "45", OPERATOR_B, D2);
+        FactMeterReading runWithNoPump = reading(ReadingChannel.PDU, "30", OPERATOR_B, D2, null);
+        FactMeterReading firstBfm = reading(ReadingChannel.BFM, "150", OPERATOR_A, D2);
+        latestOn(D2, elm);
+        startingPoint(D2, ReadingChannel.ELM, "40");
+        readingsOn(D2, elm, runWithNoPump, firstBfm);
+        dayReadings(D2, runWithNoPump);
+        noStartingPoint(D2, ReadingChannel.BFM);
+
+        elmService.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        verify(waterQuantityRepository, never()).save(any());
+        verify(waterQuantityRepository).deleteReadingDerivedDay(TENANT, SCHEME, D2);
+        assertThat(meterRegistry.counter("water_quantity.not_derivable",
+                "channel", "2", "reason", "MISSING_FORMULA").count()).isEqualTo(1.0);
+        assertThat(meterRegistry.find("water_quantity.channel_fallback").counter()).isNull();
     }
 
     @Test

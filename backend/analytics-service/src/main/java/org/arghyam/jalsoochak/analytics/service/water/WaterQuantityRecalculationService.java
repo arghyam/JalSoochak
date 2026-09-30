@@ -38,8 +38,9 @@ import java.util.Optional;
  *
  * <p>A day's channel is the channel of its latest reading (legacy {@code NULL} is BFM). The
  * channel's {@link ReadingKind} decides the day's amount; its {@link WaterQuantityCalculator} turns
- * that into litres. A meter-index day with no starting point is worked out from another channel's
- * reading that day instead, when one gives the day a total (see {@link #deriveMeterIndexDay}).
+ * that into litres. The day is worked out from another channel's reading that day instead when its
+ * own channel gives it no total, or one that can't be calculated while another channel's can (see
+ * {@link #otherChannelTotal}): a total that can be calculated is never replaced by one that can't.
  *
  * <p>Callers must hold {@link org.arghyam.jalsoochak.analytics.repository.FactIngestionRepository#lockScheme}
  * for the scheme, in the same transaction; recalculating therefore requires one.
@@ -155,7 +156,7 @@ public class WaterQuantityRecalculationService {
         return switch (kind.get()) {
             case METER_INDEX -> deriveMeterIndexDay(latest, channel, calculator.get());
             case PERIOD_AMOUNT -> derivePeriodAmountDay(latest, channel, calculator.get())
-                    .map(outcome -> new DayResult(latest, outcome));
+                    .map(outcome -> preferCalculable(new DayResult(latest, outcome), channel));
         };
     }
 
@@ -178,12 +179,38 @@ public class WaterQuantityRecalculationService {
         }
         Optional<FactMeterReading> start = startingPoint(latest, channel);
         if (start.isPresent()) {
-            return Optional.of(new DayResult(latest,
-                    calculator.calculate(context(latest, channel, increase(latest, start.get())))));
+            return Optional.of(preferCalculable(new DayResult(latest,
+                    calculator.calculate(context(latest, channel, increase(latest, start.get())))), channel));
         }
         return otherChannelTotal(latest, channel)
                 .or(() -> Optional.of(new DayResult(latest,
                         calculator.calculate(context(latest, channel, BigDecimal.ZERO)))));
+    }
+
+    /**
+     * The day's own result, unless it can't be calculated and another channel's reading that day gives
+     * the day a total that can. A scheme reading two meters then keeps its measured total when the
+     * later reading's channel isn't configured yet, whichever order the readings arrived in.
+     */
+    private DayResult preferCalculable(DayResult own, ReadingChannel channel) {
+        if (!(own.outcome() instanceof NotDerivable notDerivable)) {
+            return own;
+        }
+        return otherChannelTotal(own.basis(), channel)
+                .filter(other -> other.outcome() instanceof Derived)
+                .map(other -> {
+                    ReadingChannel otherChannel = ReadingChannel.fromCode(other.basis().getChannel());
+                    log.warn("Water quantity cannot be calculated: {} (channel={}, tenantId={}, schemeId={}, date={}); "
+                                    + "the day's total is taken from channel={}",
+                            notDerivable.reason(), channel, own.basis().getTenantId(), own.basis().getSchemeId(),
+                            own.basis().getReadingDate(), otherChannel);
+                    meterRegistry.counter("water_quantity.channel_fallback",
+                                    "channel", channelTag(channel),
+                                    "reason", notDerivable.reason().name())
+                            .increment();
+                    return other;
+                })
+                .orElse(own);
     }
 
     /** Subtracted at the readings' own precision; the calculator rounds once, on the way into litres. */
@@ -192,16 +219,27 @@ public class WaterQuantityRecalculationService {
     }
 
     /**
-     * The day's result from the latest reading on another channel that gives the day a total of its
-     * own: a meter-index reading with a starting point, or a period-amount channel's submissions. A
-     * channel with no calculator, or an unconfirmed reading, gives none. The first channel that gives
-     * one decides, even when its total can't be calculated, as the day's own channel would.
+     * The day's result from another channel's latest reading that gives the day a total of its own: a
+     * meter-index reading with a starting point, or a period-amount channel's submissions. A channel
+     * with no calculator, or an unconfirmed reading, gives none. Channels are tried latest first; the
+     * first total that can be calculated wins, and failing that, the first that can't, so the day is
+     * never given a 0 that is silently too low.
      */
     private Optional<DayResult> otherChannelTotal(FactMeterReading latest, ReadingChannel channel) {
-        return latestOnEachOtherChannel(latest, channel).stream()
-                .map(this::ownTotal)
-                .flatMap(Optional::stream)
-                .findFirst();
+        DayResult firstNotDerivable = null;
+        for (FactMeterReading reading : latestOnEachOtherChannel(latest, channel)) {
+            Optional<DayResult> total = ownTotal(reading);
+            if (total.isEmpty()) {
+                continue;
+            }
+            if (total.get().outcome() instanceof Derived) {
+                return total;
+            }
+            if (firstNotDerivable == null) {
+                firstNotDerivable = total.get();
+            }
+        }
+        return Optional.ofNullable(firstNotDerivable);
     }
 
     /** Each other channel's latest reading on the day, latest first. */

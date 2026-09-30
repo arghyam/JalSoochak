@@ -22,9 +22,15 @@ import java.util.Set;
 /**
  * Turns a snapshot's active pumps into one value for each parameter a formula needs.
  *
- * <p>A scheme rarely has more than one active pump; when it does, each parameter is averaged over
- * the pumps that have a value for it. Each pump's own value is checked before averaging, so one
- * pump out of range is caught even when the average would look fine.
+ * <p>A scheme rarely has more than one active pump; when it does, the pumps run together, and each
+ * parameter is averaged over the pumps that have a value for it. Each pump's own value is checked
+ * before averaging, so one pump out of range is caught even when the average would look fine.
+ *
+ * <p>Averages suit running together. F1 and F2 divide the pumps' total discharge rate by their total
+ * consumption or power, and the ratio of two averages is the ratio of those totals, with a pump
+ * missing a value counted at the others' average. PDU needs the total rate, so it multiplies the
+ * average by the number of pumps, counting a missing value the same way. F3 is exact only for pumps
+ * with the same efficiencies and head, since the meter's kWh can't be split between them.
  */
 @Component
 @RequiredArgsConstructor

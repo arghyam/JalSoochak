@@ -47,10 +47,19 @@ class PduWaterQuantityCalculatorTest {
     }
 
     @Test
-    void theDischargeRateIsAveragedOverThePumps() {
+    void thePumpsRunTogether_soTheirDischargeRatesAddUp() {
+        // 90 min x (500 + 300) LPM
         Pump second = pump(13).dischargeCapacityLpm("300").build();
 
-        assertThat(calculate("90", snapshot(null, PUMP, second))).isEqualTo(WaterQuantityOutcome.derived(36_000L));
+        assertThat(calculate("90", snapshot(null, PUMP, second))).isEqualTo(WaterQuantityOutcome.derived(72_000L));
+    }
+
+    @Test
+    void aPumpWithNoDischargeRateCountsAtTheOtherPumpsAverage() {
+        // 90 min x (500 + 500) LPM
+        Pump noRate = pump(13).pumpHeadM("40").build();
+
+        assertThat(calculate("90", snapshot(null, PUMP, noRate))).isEqualTo(WaterQuantityOutcome.derived(90_000L));
     }
 
     @Test

@@ -188,6 +188,21 @@ class MeterReadingIngestionIntegrationTest {
     }
 
     @Test
+    void dualMeterDay_keepsTheFlowMetersTotalWhenTheLaterElmReadingCannotBeCalculated() throws Exception {
+        String noFormula = elmSnapshot("null", "0.9");
+        ingest(1, BFM, "2026-03-01T08:00", "100.0", OPERATOR, null);
+        ingest(2, ELM, "2026-03-01T09:00", "500.0", OTHER_OPERATOR, noFormula);
+        // Arrives before D2's flow meter reading, which must not matter.
+        ingest(4, ELM, "2026-03-02T09:00", "510.0", OTHER_OPERATOR, noFormula);
+        ingest(3, BFM, "2026-03-02T08:00", "110.0", OPERATOR, null);
+
+        // D2's latest reading is ELM, measured from D1's, but the tenant has no ELM formula.
+        FactWaterQuantity d2 = day(D2).orElseThrow();
+        assertThat(d2.getWaterQuantity()).isEqualTo(10_000L);
+        assertThat(d2.getUserId()).isEqualTo(OPERATOR);
+    }
+
+    @Test
     void aDayThatCannotBeCalculated_hasNoTotalAndIsCountedWithItsReason() throws Exception {
         String noFormula = elmSnapshot("null", "0.9");
         ingest(1, ELM, "2026-03-01T08:00", "100.0", OPERATOR, noFormula);
