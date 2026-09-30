@@ -85,17 +85,21 @@ class CalculationParametersSnapshotterTest {
                         new BigDecimal("5")))));
     }
 
-    /** PDU has one formula, so the tenant's ELM choice is neither read nor sent. */
+    /**
+     * A PDU run's litres are its minutes times the discharge rate, so the tenant's ELM formula and the
+     * k_factor are neither read nor sent.
+     */
     @Test
-    void aPduSnapshotHasNoFormula() {
-        schemeHas(new BigDecimal("0.9"), List.of(PUMP));
+    void aPduSnapshotCarriesOnlyTheActivePumps() {
+        when(schemeCalculationInputRepository.findActivePumps(SCHEMA, SCHEME_ID)).thenReturn(List.of(PUMP));
 
         CalculationParameters snapshot = snapshot(ReadingChannel.PDU);
 
         assertThat(snapshot.elmFormula()).isNull();
-        assertThat(snapshot.kFactor()).isEqualByComparingTo("0.9");
+        assertThat(snapshot.kFactor()).isNull();
         assertThat(snapshot.pumps()).hasSize(1);
         verify(tenantConfigRepository, never()).findConfigValue(any(), anyString());
+        verify(schemeCalculationInputRepository, never()).findKFactor(any(), any());
     }
 
     @Test

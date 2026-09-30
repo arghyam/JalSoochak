@@ -17,7 +17,8 @@ import java.util.List;
  * @param version    contract version, {@link #VERSION}
  * @param elmFormula the tenant's ELM formula code ({@code F1}/{@code F2}/{@code F3}); null when the
  *                   tenant has not set a readable one, and for PDU
- * @param kFactor    {@code scheme_master_table.k_factor}; null means 1
+ * @param kFactor    {@code scheme_master_table.k_factor}, which corrects the ELM formulas; null means
+ *                   1. Always null for PDU, whose formula doesn't use it
  * @param pumps      the scheme's active pumps
  */
 public record CalculationParameters(

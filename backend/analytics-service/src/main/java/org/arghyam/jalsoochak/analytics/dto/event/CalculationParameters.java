@@ -20,7 +20,8 @@ import java.util.List;
  * @param version       contract version, currently 1
  * @param elmFormula    the tenant's ELM formula code ({@code F1}/{@code F2}/{@code F3}); null when
  *                      the tenant has not set one, and for PDU
- * @param kFactor       the scheme's correction factor; null means 1
+ * @param kFactor       the scheme's correction factor for the ELM formulas; null means 1. Null for
+ *                      PDU, whose formula doesn't use it
  * @param pumps         the scheme's active pumps
  */
 @JsonIgnoreProperties(ignoreUnknown = true)

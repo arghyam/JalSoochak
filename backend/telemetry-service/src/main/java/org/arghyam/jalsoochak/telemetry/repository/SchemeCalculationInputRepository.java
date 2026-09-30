@@ -11,8 +11,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * A scheme's inputs to the ELM and PDU water-quantity formulas: its {@code k_factor} and its active
- * pumps' ratings, from the tenant schema.
+ * A scheme's inputs to the ELM and PDU water-quantity formulas, from the tenant schema: its active
+ * pumps' ratings and, for ELM, its {@code k_factor}.
  */
 @Repository
 @RequiredArgsConstructor

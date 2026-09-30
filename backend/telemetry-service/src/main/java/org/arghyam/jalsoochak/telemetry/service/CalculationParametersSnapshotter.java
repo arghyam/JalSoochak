@@ -18,7 +18,7 @@ import java.util.Set;
 
 /**
  * Takes the {@link CalculationParameters} snapshot an ELM or PDU reading is published with: the
- * tenant's ELM formula, the scheme's {@code k_factor} and its active pumps.
+ * scheme's active pumps and, for ELM only, the tenant's ELM formula and the scheme's {@code k_factor}.
  *
  * <p>A snapshot is taken every time a reading is published, so a corrected reading is calculated with
  * the pump data current at the time of the correction.
@@ -49,10 +49,13 @@ public class CalculationParametersSnapshotter {
                 .stream()
                 .map(CalculationParametersSnapshotter::toPump)
                 .toList();
+        // A PDU run's litres are its minutes times the discharge rate: the tenant's ELM formula and
+        // the k_factor that corrects it play no part, so neither is read or sent.
+        boolean elm = channel == ReadingChannel.ELM;
         return new CalculationParameters(
                 CalculationParameters.VERSION,
-                channel == ReadingChannel.ELM ? elmFormula(tenantId) : null,
-                schemeCalculationInputRepository.findKFactor(schemaName, schemeId).orElse(null),
+                elm ? elmFormula(tenantId) : null,
+                elm ? schemeCalculationInputRepository.findKFactor(schemaName, schemeId).orElse(null) : null,
                 pumps);
     }
 
