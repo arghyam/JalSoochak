@@ -13,7 +13,6 @@ import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
-import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.arghyam.jalsoochak.analytics.repository.AnomalyRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimDateRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactOperatorAttendanceRepository;
@@ -316,7 +315,7 @@ class FactServiceImplTest {
         assertThat(captor.getValue().getSourceUpdatedAt()).isNull();
         assertThat(captor.getValue().getCalculationParameters()).isNull();
         verify(waterQuantityRecalculationService)
-                .recalculateAfterReading(1, 11, LocalDate.of(2026, 1, 2), ReadingChannel.BFM);
+                .recalculateAfterReading(1, 11, LocalDate.of(2026, 1, 2));
     }
 
     @Test
@@ -345,7 +344,7 @@ class FactServiceImplTest {
         InOrder order = inOrder(factIngestionRepository, waterQuantityRecalculationService);
         order.verify(factIngestionRepository).lockScheme(1, 11);
         order.verify(factIngestionRepository).upsertMeterReading(any());
-        order.verify(waterQuantityRecalculationService).recalculateAfterReading(any(), any(), any(), any());
+        order.verify(waterQuantityRecalculationService).recalculateAfterReading(any(), any(), any());
     }
 
     @Test
@@ -359,21 +358,9 @@ class FactServiceImplTest {
         service.ingestMeterReading(event);
 
         assertThat(meterRegistry.counter("meter_reading.stale_event").count()).isEqualTo(1.0);
-        verify(waterQuantityRecalculationService, never()).recalculateAfterReading(any(), any(), any(), any());
+        verify(waterQuantityRecalculationService, never()).recalculateAfterReading(any(), any(), any());
         verify(factOperatorAttendanceRepository, never()).save(any());
         verify(dimDateRepository, never()).findByFullDate(any());
-    }
-
-    @Test
-    void ingestMeterReading_recalculatesKeyedToTheWrittenReadingsChannel() {
-        MeterReadingEvent event = readingEvent("40", "2026-01-02");
-        event.setChannel(ReadingChannel.ELM.getCode());
-        storedAsNewRow();
-
-        service.ingestMeterReading(event);
-
-        verify(waterQuantityRecalculationService)
-                .recalculateAfterReading(1, 11, LocalDate.of(2026, 1, 2), ReadingChannel.ELM);
     }
 
     @Test

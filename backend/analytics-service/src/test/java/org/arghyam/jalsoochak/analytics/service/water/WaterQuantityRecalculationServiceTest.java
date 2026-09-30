@@ -19,6 +19,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -83,16 +84,32 @@ class WaterQuantityRecalculationServiceTest {
         }
     }
 
+    /** Stands in for the ELM calculator phase 5 adds: 1,000 L per kWh. */
+    private static final class StubElmCalculator implements WaterQuantityCalculator {
+        @Override
+        public ReadingChannel channel() {
+            return ReadingChannel.ELM;
+        }
+
+        @Override
+        public WaterQuantityOutcome calculate(WaterQuantityContext context) {
+            return WaterQuantityOutcome.derived(context.amount().multiply(BigDecimal.valueOf(1000)).longValueExact());
+        }
+    }
+
     @BeforeEach
     void setUp() {
         service = serviceWith(new StubPduCalculator());
     }
 
-    private WaterQuantityRecalculationService serviceWith(WaterQuantityCalculator pduCalculator) {
+    /** A service with the BFM calculator and {@code others}. */
+    private WaterQuantityRecalculationService serviceWith(WaterQuantityCalculator... others) {
+        List<WaterQuantityCalculator> calculators = new ArrayList<>(List.of(others));
+        calculators.add(new BfmWaterQuantityCalculator());
         return new WaterQuantityRecalculationService(
                 meterReadingRepository,
                 waterQuantityRepository,
-                new WaterQuantityCalculatorRegistry(List.of(new BfmWaterQuantityCalculator(), pduCalculator)),
+                new WaterQuantityCalculatorRegistry(calculators),
                 new WaterQuantityRangeReporter(meterRegistry, 100_000L),
                 meterRegistry);
     }
@@ -105,7 +122,7 @@ class WaterQuantityRecalculationServiceTest {
         startingPoint(D2, ReadingChannel.BFM, "100");
         noDayRow(D2);
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         assertThat(savedRows()).singleElement()
                 .extracting(FactWaterQuantity::getWaterQuantity).isEqualTo(50_000L);
@@ -117,7 +134,7 @@ class WaterQuantityRecalculationServiceTest {
         startingPoint(D2, ReadingChannel.BFM, "100");
         noDayRow(D2);
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         assertThat(savedRows()).singleElement()
                 .extracting(FactWaterQuantity::getWaterQuantity).isEqualTo(0L);
@@ -128,7 +145,7 @@ class WaterQuantityRecalculationServiceTest {
         latestOn(D2, reading(ReadingChannel.BFM, "1250000", OPERATOR_A, D2));
         noDayRow(D2);
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         assertThat(savedRows()).singleElement()
                 .extracting(FactWaterQuantity::getWaterQuantity).isEqualTo(0L);
@@ -141,9 +158,37 @@ class WaterQuantityRecalculationServiceTest {
         latestOn(D2, reading(ReadingChannel.BFM, "150", OPERATOR_A, D2));
         noDayRow(D2);
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         verify(meterReadingRepository).findLatestBefore(TENANT, SCHEME, D2, ReadingChannel.BFM);
+    }
+
+    @Test
+    void meterIndex_aStartingPointWithNoOtherChannelReadingInBetweenIsUsed() {
+        latestOn(D3, reading(ReadingChannel.BFM, "180", OPERATOR_A, D3));
+        startingPoint(D3, ReadingChannel.BFM, "100", D1);
+        anotherChannelReadBetween(D1, D3, ReadingChannel.BFM, false);
+        noDayRow(D3);
+
+        service.recalculateAfterReading(TENANT, SCHEME, D3);
+
+        assertThat(savedRows()).singleElement()
+                .extracting(FactWaterQuantity::getWaterQuantity).isEqualTo(80_000L);
+    }
+
+    @Test
+    void meterIndex_aStartingPointAcrossAnotherChannelsReadingIsNotUsed() {
+        // D2 was counted on another channel. Measuring D3 from D1 would count D2's water again, so D3
+        // has no starting point, like a scheme's first reading.
+        latestOn(D3, reading(ReadingChannel.BFM, "180", OPERATOR_A, D3));
+        startingPoint(D3, ReadingChannel.BFM, "100", D1);
+        anotherChannelReadBetween(D1, D3, ReadingChannel.BFM, true);
+        noDayRow(D3);
+
+        service.recalculateAfterReading(TENANT, SCHEME, D3);
+
+        assertThat(savedRows()).singleElement()
+                .extracting(FactWaterQuantity::getWaterQuantity).isEqualTo(0L);
     }
 
     @Test
@@ -152,7 +197,7 @@ class WaterQuantityRecalculationServiceTest {
         startingPoint(D2, ReadingChannel.BFM, "100");
         noDayRow(D2);
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         assertThat(savedRows()).singleElement()
                 .extracting(FactWaterQuantity::getWaterQuantity).isEqualTo(50_000L);
@@ -162,7 +207,7 @@ class WaterQuantityRecalculationServiceTest {
     void meterIndex_unconfirmedLatestReadingLeavesTheDayAlone() {
         latestOn(D2, reading(ReadingChannel.BFM, null, OPERATOR_A, D2));
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         verify(waterQuantityRepository, never()).save(any());
         verify(waterQuantityRepository, never()).deleteReadingDerivedDay(any(), any(), any());
@@ -170,7 +215,7 @@ class WaterQuantityRecalculationServiceTest {
 
     @Test
     void aDayWithNoStoredReadingIsLeftAlone() {
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         verify(waterQuantityRepository, never()).save(any());
     }
@@ -180,7 +225,7 @@ class WaterQuantityRecalculationServiceTest {
         latestOn(D2, reading(ReadingChannel.BFM, "1e16", OPERATOR_A, D2));
         startingPoint(D2, ReadingChannel.BFM, "100");
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         verify(waterQuantityRepository, never()).save(any());
         verify(waterQuantityRepository, never()).deleteReadingDerivedDay(any(), any(), any());
@@ -193,7 +238,7 @@ class WaterQuantityRecalculationServiceTest {
         startingPoint(D2, ReadingChannel.BFM, "1");
         noDayRow(D2);
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         assertThat(savedRows()).singleElement()
                 .extracting(FactWaterQuantity::getWaterQuantity).isEqualTo(4_999_999_000L);
@@ -209,7 +254,7 @@ class WaterQuantityRecalculationServiceTest {
         when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(TENANT, SCHEME, D2))
                 .thenReturn(Optional.of(existing));
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         FactWaterQuantity saved = savedRows().get(0);
         assertThat(saved).isSameAs(existing);
@@ -235,7 +280,7 @@ class WaterQuantityRecalculationServiceTest {
         when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(TENANT, SCHEME, D3))
                 .thenReturn(Optional.of(dayRow(D3, 20_000L, OPERATOR_B, 0)));
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         List<FactWaterQuantity> saved = savedRows();
         assertThat(saved).hasSize(2);
@@ -253,12 +298,12 @@ class WaterQuantityRecalculationServiceTest {
         latestOn(D2, legacy);
         noDayRow(D2);
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         assertThat(savedRows().get(0).getSubmissionStatus()).isEqualTo(1);
     }
 
-    // ---- the METER_INDEX follow-up ----------------------------------------------------------
+    // ---- the follow-up ----------------------------------------------------------------------
 
     @Test
     void theFollowUpDoesNotWriteOrMoveUpdatedAtWhenNothingChanged() {
@@ -273,7 +318,7 @@ class WaterQuantityRecalculationServiceTest {
         when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(TENANT, SCHEME, D3))
                 .thenReturn(Optional.of(untouched));
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         assertThat(savedRows()).singleElement().extracting(FactWaterQuantity::getDate).isEqualTo(D2);
         assertThat(untouched.getUpdatedAt()).isEqualTo(lastSubmission);
@@ -292,7 +337,7 @@ class WaterQuantityRecalculationServiceTest {
         when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(TENANT, SCHEME, D3))
                 .thenReturn(Optional.of(withReason));
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         assertThat(savedRows()).hasSize(2);
         assertThat(withReason.getNonSubmissionReason()).isNull();
@@ -308,7 +353,7 @@ class WaterQuantityRecalculationServiceTest {
         startingPoint(D3, ReadingChannel.BFM, "150");
         noDayRow(D3);
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         assertThat(savedRows()).singleElement().satisfies(row -> {
             assertThat(row.getDate()).isEqualTo(D3);
@@ -317,27 +362,78 @@ class WaterQuantityRecalculationServiceTest {
     }
 
     @Test
-    void thereIsNoFollowUpAfterAPeriodAmountReading() {
-        latestOn(D2, reading(ReadingChannel.PDU, "30", OPERATOR_A, D2, PUMP_SNAPSHOT));
-        dayReadings(D2, reading(ReadingChannel.PDU, "30", OPERATOR_A, D2, PUMP_SNAPSHOT));
+    void theFollowUpRecalculatesTheNextDayOnAnotherMeterIndexChannel() {
+        // D3's ELM amount was measured from D1's ELM reading. The BFM reading now written for D2 sits
+        // between them, so D3 loses its starting point and its old total.
+        WaterQuantityRecalculationService elmService = serviceWith(new StubPduCalculator(), new StubElmCalculator());
+        latestOn(D2, reading(ReadingChannel.BFM, "150", OPERATOR_A, D2));
+        noStartingPoint(D2, ReadingChannel.BFM);
         noDayRow(D2);
+        noNextReadingDate(D2, ReadingChannel.BFM);
+        nextReadingDate(D2, ReadingChannel.ELM, D3);
+        latestOn(D3, reading(ReadingChannel.ELM, "45", OPERATOR_B, D3));
+        startingPoint(D3, ReadingChannel.ELM, "40", D1);
+        anotherChannelReadBetween(D1, D3, ReadingChannel.ELM, true);
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(TENANT, SCHEME, D3))
+                .thenReturn(Optional.of(dayRow(D3, 5_000L, OPERATOR_B, 1)));
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.PDU);
+        elmService.recalculateAfterReading(TENANT, SCHEME, D2);
 
-        verify(meterReadingRepository, never()).findNextReadingDate(any(), any(), any(), anyInt());
+        assertThat(savedRows()).hasSize(2).last().satisfies(row -> {
+            assertThat(row.getDate()).isEqualTo(D3);
+            assertThat(row.getWaterQuantity()).isZero();
+        });
     }
 
     @Test
-    void theFollowUpGoesOneDateOnly() {
+    void aPeriodAmountReadingIsFollowedUpOnTheMeterIndexChannels() {
+        // A PDU run on D2 now sits between D3's BFM reading and its D1 starting point.
+        latestOn(D2, reading(ReadingChannel.PDU, "30", OPERATOR_A, D2, PUMP_SNAPSHOT));
+        dayReadings(D2, reading(ReadingChannel.PDU, "30", OPERATOR_A, D2, PUMP_SNAPSHOT));
+        noDayRow(D2);
+        nextReadingDate(D2, ReadingChannel.BFM, D3);
+        latestOn(D3, reading(ReadingChannel.BFM, "180", OPERATOR_B, D3));
+        startingPoint(D3, ReadingChannel.BFM, "100", D1);
+        anotherChannelReadBetween(D1, D3, ReadingChannel.BFM, true);
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(TENANT, SCHEME, D3))
+                .thenReturn(Optional.of(dayRow(D3, 80_000L, OPERATOR_B, 1)));
+
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).hasSize(2).last().satisfies(row -> {
+            assertThat(row.getDate()).isEqualTo(D3);
+            assertThat(row.getWaterQuantity()).isZero();
+        });
+    }
+
+    @Test
+    void theFollowUpGoesOneDatePerMeterIndexChannel() {
         latestOn(D2, reading(ReadingChannel.BFM, "150", OPERATOR_A, D2));
         noDayRow(D2);
         nextReadingDate(D2, ReadingChannel.BFM, D3);
         latestOn(D3, reading(ReadingChannel.BFM, "180", OPERATOR_B, D3));
         noDayRow(D3);
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.BFM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
-        verify(meterReadingRepository, times(1)).findNextReadingDate(any(), any(), any(), anyInt());
+        verify(meterReadingRepository).findNextReadingDate(TENANT, SCHEME, D2, ReadingChannel.BFM.getCode());
+        verify(meterReadingRepository).findNextReadingDate(TENANT, SCHEME, D2, ReadingChannel.ELM.getCode());
+        verify(meterReadingRepository, times(2)).findNextReadingDate(any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void aDateNextOnTwoChannelsIsRecalculatedOnce() {
+        latestOn(D2, reading(ReadingChannel.BFM, "150", OPERATOR_A, D2));
+        noDayRow(D2);
+        nextReadingDate(D2, ReadingChannel.BFM, D3);
+        nextReadingDate(D2, ReadingChannel.ELM, D3);
+        latestOn(D3, reading(ReadingChannel.BFM, "180", OPERATOR_B, D3));
+        noDayRow(D3);
+
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        verify(meterReadingRepository, times(1))
+                .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(TENANT, SCHEME, D3);
     }
 
     // ---- a channel with no calculator (Q14) -------------------------------------------------
@@ -346,7 +442,7 @@ class WaterQuantityRecalculationServiceTest {
     void aDayWhoseChannelHasNoCalculatorKeepsItsRowAndIsCounted() {
         latestOn(D2, reading(ReadingChannel.ELM, "40", OPERATOR_A, D2));
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.ELM);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         verify(waterQuantityRepository, never()).findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
                 any(), any(), any());
@@ -360,7 +456,7 @@ class WaterQuantityRecalculationServiceTest {
     void aChannelWithNoKindIsTreatedAsHavingNoCalculator() {
         latestOn(D2, reading(ReadingChannel.IOT, "40", OPERATOR_A, D2));
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.IOT);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         verify(waterQuantityRepository, never()).save(any());
         assertThat(meterRegistry.counter("water_quantity.calculator.missing", "channel", "4").count()).isEqualTo(1.0);
@@ -377,7 +473,7 @@ class WaterQuantityRecalculationServiceTest {
                 reading(ReadingChannel.PDU, "15", OPERATOR_B, D2, PUMP_SNAPSHOT));
         noDayRow(D2);
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.PDU);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         assertThat(savedRows()).singleElement().satisfies(row -> {
             assertThat(row.getWaterQuantity()).isEqualTo(13_500L);
@@ -393,7 +489,7 @@ class WaterQuantityRecalculationServiceTest {
                 reading(ReadingChannel.PDU, "30", OPERATOR_A, D2, null),
                 reading(ReadingChannel.PDU, "15", OPERATOR_A, D2, PUMP_SNAPSHOT));
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.PDU);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         verify(waterQuantityRepository, never()).save(any());
         verify(waterQuantityRepository).deleteReadingDerivedDay(TENANT, SCHEME, D2);
@@ -405,7 +501,7 @@ class WaterQuantityRecalculationServiceTest {
         dayReadings(D2, reading(ReadingChannel.PDU, "30", OPERATOR_A, D2, null));
         when(waterQuantityRepository.deleteReadingDerivedDay(TENANT, SCHEME, D2)).thenReturn(1);
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.PDU);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         assertThat(meterRegistry.counter("water_quantity.not_derivable",
                 "channel", "3", "reason", "NO_ACTIVE_PUMP").count()).isEqualTo(1.0);
@@ -420,7 +516,7 @@ class WaterQuantityRecalculationServiceTest {
         dayReadings(D2, reading(ReadingChannel.PDU, "30", OPERATOR_A, D2, null));
         when(waterQuantityRepository.deleteReadingDerivedDay(TENANT, SCHEME, D2)).thenReturn(0);
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.PDU);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         assertThat(meterRegistry.counter("water_quantity.not_derivable",
                 "channel", "3", "reason", "NO_ACTIVE_PUMP").count()).isEqualTo(1.0);
@@ -434,7 +530,7 @@ class WaterQuantityRecalculationServiceTest {
                 reading(ReadingChannel.PDU, null, OPERATOR_A, D2, PUMP_SNAPSHOT),
                 reading(ReadingChannel.PDU, "15", OPERATOR_A, D2, PUMP_SNAPSHOT));
 
-        service.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.PDU);
+        service.recalculateAfterReading(TENANT, SCHEME, D2);
 
         verify(waterQuantityRepository, never()).save(any());
         verify(waterQuantityRepository, never()).deleteReadingDerivedDay(any(), any(), any());
@@ -448,7 +544,7 @@ class WaterQuantityRecalculationServiceTest {
                 reading(ReadingChannel.PDU, "1", OPERATOR_A, D2, PUMP_SNAPSHOT),
                 reading(ReadingChannel.PDU, "1", OPERATOR_A, D2, PUMP_SNAPSHOT));
 
-        hugeService.recalculateAfterReading(TENANT, SCHEME, D2, ReadingChannel.PDU);
+        hugeService.recalculateAfterReading(TENANT, SCHEME, D2);
 
         verify(waterQuantityRepository, never()).save(any());
         assertThat(meterRegistry.counter("water_quantity.unstorable", "source", "reading").count()).isEqualTo(1.0);
@@ -478,13 +574,36 @@ class WaterQuantityRecalculationServiceTest {
     }
 
     private void startingPoint(LocalDate date, ReadingChannel channel, String confirmedReading) {
+        startingPoint(date, channel, confirmedReading, date.minusDays(1));
+    }
+
+    private void startingPoint(LocalDate date, ReadingChannel channel, String confirmedReading, LocalDate readOn) {
         when(meterReadingRepository.findLatestBefore(TENANT, SCHEME, date, channel))
-                .thenReturn(Optional.of(reading(channel, confirmedReading, OPERATOR_A, date.minusDays(1))));
+                .thenReturn(Optional.of(reading(channel, confirmedReading, OPERATOR_A, readOn)));
+    }
+
+    /**
+     * Stubbed rather than left to the mock's default, when a later lookup of the same method is
+     * stubbed: strict stubs refuse a call whose arguments match only a stubbing not yet used.
+     */
+    private void noStartingPoint(LocalDate date, ReadingChannel channel) {
+        when(meterReadingRepository.findLatestBefore(TENANT, SCHEME, date, channel)).thenReturn(Optional.empty());
+    }
+
+    private void anotherChannelReadBetween(LocalDate after, LocalDate before, ReadingChannel channel, boolean read) {
+        when(meterReadingRepository.existsOnAnotherChannelBetween(TENANT, SCHEME, after, before, channel.getCode()))
+                .thenReturn(read);
     }
 
     private void nextReadingDate(LocalDate after, ReadingChannel channel, LocalDate next) {
         when(meterReadingRepository.findNextReadingDate(TENANT, SCHEME, after, channel.getCode()))
                 .thenReturn(Optional.of(next));
+    }
+
+    /** Stubbed for the same reason as {@link #noStartingPoint}. */
+    private void noNextReadingDate(LocalDate after, ReadingChannel channel) {
+        when(meterReadingRepository.findNextReadingDate(TENANT, SCHEME, after, channel.getCode()))
+                .thenReturn(Optional.empty());
     }
 
     private void dayReadings(LocalDate date, FactMeterReading... readings) {

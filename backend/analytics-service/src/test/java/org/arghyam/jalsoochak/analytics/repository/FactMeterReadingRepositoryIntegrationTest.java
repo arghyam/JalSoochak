@@ -219,6 +219,23 @@ class FactMeterReadingRepositoryIntegrationTest {
     }
 
     @Test
+    void existsOnAnotherChannelBetween_looksOnlyStrictlyBetweenTheDatesAndOnlyAtOtherChannels() {
+        insertReading(SCHEME, D1, "40", "2026-01-01T17:00:00", ELM);
+        insertReading(SCHEME, D2, "100", "2026-01-02T08:00:00", null);
+        insertReading(SCHEME, D3, "30", "2026-01-03T08:00:00", PDU);
+        insertReading(SCHEME, D4, "45", "2026-01-04T08:00:00", ELM);
+        insertReading(OTHER_SCHEME, D2, "20", "2026-01-02T08:00:00", PDU);
+
+        // D3's PDU run is another channel to both meter-index channels.
+        assertThat(repository.existsOnAnotherChannelBetween(TENANT, SCHEME, D2, D4, BFM)).isTrue();
+        assertThat(repository.existsOnAnotherChannelBetween(TENANT, SCHEME, D2, D4, ELM)).isTrue();
+        // Between D1 and D3 there is only D2's legacy NULL, which is BFM. The ELM and PDU readings on
+        // D1 and D3 themselves don't count, and neither does OTHER_SCHEME's run on D2.
+        assertThat(repository.existsOnAnotherChannelBetween(TENANT, SCHEME, D1, D3, BFM)).isFalse();
+        assertThat(repository.existsOnAnotherChannelBetween(TENANT, SCHEME, D1, D3, ELM)).isTrue();
+    }
+
+    @Test
     void findDayReadings_returnsTheDaysSubmissionsOnTheChannelOldestFirst() {
         insertReading(SCHEME, D2, "30", "2026-01-02T17:00:00", PDU);
         insertReading(SCHEME, D2, "90", "2026-01-02T06:00:00", PDU);

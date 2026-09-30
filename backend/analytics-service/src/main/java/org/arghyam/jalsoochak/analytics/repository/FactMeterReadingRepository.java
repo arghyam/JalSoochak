@@ -44,7 +44,8 @@ public interface FactMeterReadingRepository extends JpaRepository<FactMeterReadi
 
     /**
      * The latest reading on {@code channel} strictly <em>before</em> {@code readingDate} — the
-     * starting point a meter-index channel's daily amount is measured from.
+     * starting point a meter-index channel's daily amount is measured from, unless
+     * {@link #existsOnAnotherChannelBetween} finds another channel's reading between the two dates.
      *
      * <p>Same rule telemetry-service's own correction paths already apply, so both services derive
      * the same volume from the same readings. Three details carry weight:
@@ -87,6 +88,27 @@ public interface FactMeterReadingRepository extends JpaRepository<FactMeterReadi
                 .stream()
                 .findFirst();
     }
+
+    /**
+     * Whether the scheme has a reading on a channel other than {@code channel} dated strictly between
+     * {@code after} and {@code before}. When it does, a meter-index reading on {@code after} cannot be
+     * the starting point for {@code before}: the dates in between were counted on the other channel.
+     */
+    @Query("""
+            SELECT CASE WHEN COUNT(r) > 0 THEN TRUE ELSE FALSE END FROM FactMeterReading r
+            WHERE r.tenantId = :tenantId
+              AND r.schemeId = :schemeId
+              AND r.readingDate > :after
+              AND r.readingDate < :before
+              AND COALESCE(r.channel, 1) <> :channel
+            """)
+    boolean existsOnAnotherChannelBetween(
+            @Param("tenantId") Integer tenantId,
+            @Param("schemeId") Integer schemeId,
+            @Param("after") LocalDate after,
+            @Param("before") LocalDate before,
+            @Param("channel") int channel
+    );
 
     /**
      * The first date after {@code readingDate} with a reading on {@code channel}: the one day whose

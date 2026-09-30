@@ -50,8 +50,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>The fixture is the set of cases the two defects turned on — a scheme's first-ever reading, a gap
  * in submissions, two readings on one day, a zero reading, and a meter that went backwards — plus
- * the channel rules: legacy NULL is BFM, a day belongs to its latest reading's channel, and only
- * BFM readings are a BFM day's starting point.
+ * the channel rules: legacy NULL is BFM, a day belongs to its latest reading's channel, only BFM
+ * readings are a BFM day's starting point, and not one from before another channel's reading.
  */
 @DataJpaTest
 @Testcontainers
@@ -300,19 +300,20 @@ class WaterQuantityBackfillParityIntegrationTest {
     }
 
     @Test
-    void anElmReadingBetweenBfmDaysIsNeverTheStartingPoint() {
+    void aBfmDayAcrossAnotherChannelsReadingHasNoStartingPoint() {
+        // D2 was read on ELM only, so it is counted on ELM. Measuring D3 from D1, (160 - 100) * 1000,
+        // would count D2's water a second time; measuring it from D2's kWh would mix units.
         insertReading(CHANNEL_SCHEME, D1, "100", "2026-01-01T08:00:00", BFM);
         insertReading(CHANNEL_SCHEME, D2, "40", "2026-01-02T08:00:00", ELM);
         insertReading(CHANNEL_SCHEME, D3, "160", "2026-01-03T08:00:00", BFM);
         seedLegacyQuantityRow(CHANNEL_SCHEME, D2, 0L);
-        seedLegacyQuantityRow(CHANNEL_SCHEME, D3, 0L);
+        seedLegacyQuantityRow(CHANNEL_SCHEME, D3, 60_000L);
 
         Map<Long, Long> recomputed = runRecompute();
 
         assertThat(recomputed.get(idOf(CHANNEL_SCHEME, D2))).isNull();
         assertThat(liveValueFor(idOf(CHANNEL_SCHEME, D2))).isNull();
-        // (160 - 100) * 1000, not (160 - 40) * 1000.
-        assertThat(recomputed.get(idOf(CHANNEL_SCHEME, D3))).isEqualTo(60_000L)
+        assertThat(recomputed.get(idOf(CHANNEL_SCHEME, D3))).isZero()
                 .isEqualTo(liveValueFor(idOf(CHANNEL_SCHEME, D3)));
     }
 
@@ -331,6 +332,28 @@ class WaterQuantityBackfillParityIntegrationTest {
         assertThat(storedQuantity(CHANNEL_SCHEME, D2)).isEqualTo(30_000L);
         assertThat(storedQuantity(CHANNEL_SCHEME, D3)).isEqualTo(30_000L);
         for (LocalDate date : List.of(D1, D2, D3)) {
+            assertThat(recomputed.get(idOf(CHANNEL_SCHEME, date)))
+                    .as("recompute of %s", date)
+                    .isEqualTo(storedQuantity(CHANNEL_SCHEME, date));
+        }
+    }
+
+    @Test
+    void anotherChannelsReadingArrivingLastEndsOnWhatTheRecomputeDerives() {
+        // D3 is first measured from D1. The ELM reading for D2 arrives last, and the follow-up on the
+        // BFM channel is what takes D3's starting point away. ELM has no calculator here, so D2 itself
+        // gets no row.
+        arrive(D1, "100", "2026-01-01T08:00:00");
+        arrive(D3, "160", "2026-01-03T08:00:00");
+        waterQuantityRepository.flush();
+        assertThat(storedQuantity(CHANNEL_SCHEME, D3)).isEqualTo(60_000L);
+        arrive(D2, "40", "2026-01-02T08:00:00", ELM);
+        waterQuantityRepository.flush();
+
+        Map<Long, Long> recomputed = runRecompute();
+
+        assertThat(storedQuantity(CHANNEL_SCHEME, D3)).isZero();
+        for (LocalDate date : List.of(D1, D3)) {
             assertThat(recomputed.get(idOf(CHANNEL_SCHEME, date)))
                     .as("recompute of %s", date)
                     .isEqualTo(storedQuantity(CHANNEL_SCHEME, date));
@@ -392,10 +415,14 @@ class WaterQuantityBackfillParityIntegrationTest {
         }
     }
 
-    /** One reading arriving: stored, then recalculated exactly as ingestion does. */
+    /** One BFM reading arriving: stored, then recalculated exactly as ingestion does. */
     private void arrive(LocalDate readingDate, String confirmedReading, String readingAt) {
-        insertReading(CHANNEL_SCHEME, readingDate, confirmedReading, readingAt, BFM);
-        recalculation.recalculateAfterReading(TENANT, CHANNEL_SCHEME, readingDate, ReadingChannel.BFM);
+        arrive(readingDate, confirmedReading, readingAt, BFM);
+    }
+
+    private void arrive(LocalDate readingDate, String confirmedReading, String readingAt, Integer channel) {
+        insertReading(CHANNEL_SCHEME, readingDate, confirmedReading, readingAt, channel);
+        recalculation.recalculateAfterReading(TENANT, CHANNEL_SCHEME, readingDate);
     }
 
     private Long storedQuantity(int schemeId, LocalDate date) {

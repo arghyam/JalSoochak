@@ -8,7 +8,6 @@ import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterQuantityEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SubmissionRejectedEvent;
-import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
 import org.arghyam.jalsoochak.analytics.entity.Anomaly;
 import org.arghyam.jalsoochak.analytics.entity.DimDate;
@@ -327,8 +326,7 @@ public class FactServiceImpl implements FactService {
                     event.getTenantId(), event.getSchemeId(), readingDate);
             return;
         }
-        waterQuantityRecalculationService.recalculateAfterReading(
-                event.getTenantId(), event.getSchemeId(), readingDate, ReadingChannel.fromCode(event.getChannel()));
+        waterQuantityRecalculationService.recalculateAfterReading(event.getTenantId(), event.getSchemeId(), readingDate);
     }
 
     /**

@@ -15,6 +15,9 @@
 --   previous = the latest BFM reading strictly BEFORE    -- FactMeterReadingRepository.findLatestBefore
 --              it with confirmed_reading > 0, ordered by
 --              reading_date DESC, reading_at DESC, id DESC
+--              -- unless another channel has a reading     -- existsOnAnotherChannelBetween
+--              dated strictly between the two, in which
+--              case there is no previous
 --   quantity = ROUND(GREATEST(0, current - previous)     -- the METER_INDEX amount + BfmWaterQuantityCalculator
 --                    * 1000)                                + WaterVolumeUnits
 --
@@ -34,6 +37,8 @@
 --                              declines too rather than aborting the run on the ::bigint cast.
 --   no previous reading     -> 0, NOT the whole meter index. A cumulative index needs a baseline to be
 --                              a volume; without one there is no derivable supply for the day.
+--   another channel read    -> 0, as for no previous reading. The dates in between were counted on the
+--   the scheme in between      other channel, so measuring across them would count their water twice.
 --
 -- Takes no parameters and covers the whole table: callers wrap it in a CTE and apply their own window
 -- so that this text stays runnable as-is from psql and from a test.
@@ -86,6 +91,20 @@ LEFT JOIN LATERAL (
       AND r.confirmed_reading > 0
     ORDER BY r.reading_date DESC, r.reading_at DESC, r.id DESC
     LIMIT 1
+) candidate ON TRUE
+-- The candidate is the previous reading only when no other channel read the scheme on a date strictly
+-- between the two. Otherwise prev is all NULL, exactly as when there is no candidate at all.
+LEFT JOIN LATERAL (
+    SELECT candidate.confirmed_reading, candidate.reading_date
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM analytics_schema.fact_meter_reading_table o
+        WHERE o.tenant_id = fwq.tenant_id
+          AND o.scheme_id = fwq.scheme_id
+          AND o.reading_date > candidate.reading_date
+          AND o.reading_date < fwq.date
+          AND COALESCE(o.channel, 1) <> 1
+    )
 ) prev ON TRUE
 -- The litre value, named once so the CASE above can both range-check it and return it without
 -- restating the arithmetic. NULL whenever either side is missing; the CASE decides what that means.

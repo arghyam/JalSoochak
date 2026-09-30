@@ -60,7 +60,8 @@ in the order below, so the codes are mutually exclusive:
       value is non-zero (or NULL)
   B1  first-ever reading for the scheme                apply 0
   B2  earlier readings exist, none usable as a         apply 0
-      baseline (all <= 0 or NULL)
+      baseline (all <= 0 or NULL, or another
+      channel read the scheme after the latest)
   C3  current < previous — meter rollover or           apply 0  LOSSY: the day's real supply
       replacement, clamped by GREATEST(0, ...)                  cannot be recovered
   C4  recomputes above the implausible threshold       SKIP  — a bad reading, not a bad
