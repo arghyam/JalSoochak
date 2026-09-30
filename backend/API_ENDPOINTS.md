@@ -267,7 +267,8 @@ The tables below list every endpoint that changed across all services. If your f
 > `TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT` is the kill switch, `OFF` is for local development.
 >
 > Note this is a **different credential** from the `X-Api-Key` used by the partner ingestion
-> endpoints (`/readings`, `/readings/formats/{format}`, `/schemes/{id}/yesterday-final-reading`),
+> endpoints (`/readings`, `/readings/formats/{format}`, `/readings/republish`,
+> `/schemes/{id}/yesterday-final-reading`),
 > which share the same `/api/v1/telemetry` prefix.
 
 ### Partner ingestion — the optional `channel` parameter
@@ -324,6 +325,43 @@ A PDU reading is how long the pumps ran, and a day has 1,440 minutes. On `POST /
   replaces the corrected reading's old value, so only the scheme's other readings that day count.
 
 Both return `400` with `errorCode: ABNORMAL_READING`, and nothing is stored.
+
+### Partner ingestion — republishing ELM and PDU readings
+
+`POST /api/v1/telemetry/readings/republish` sends a tenant's stored ELM and PDU readings to analytics
+again, so their water quantities are recalculated from the formula and pump data configured now. Use
+it after setting up a tenant's ELM formula or a scheme's pumps or `k_factor`: readings stored before
+that have no water quantity, and saving the configuration doesn't recalculate them. It takes the
+tenant's `X-Api-Key`, like `/readings/reset-latest`, and covers only that tenant.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `fromDate`, `toDate` | yes | Reading dates (`yyyy-MM-dd`), both included, at most 31 days |
+| `stateSchemeId`, `centreSchemeId` | no | One scheme, found as on `POST /readings`: the state id first, then the centre id. Left out, every scheme |
+| `channel` | no | `ELM` or `PDU`, case-insensitive. Left out, both |
+
+`from_date`, `to_date`, `state_scheme_id` and `centre_scheme_id` are accepted too. A scheme created
+automatically for an unknown scheme id can't be named; leave the scheme out to include it.
+
+```json
+{"success": true, "data": {"republishedCount": 42, "withheldCount": 1}}
+```
+
+`republishedCount` is the number of readings queued for analytics. They're sent asynchronously, so
+the dashboards update shortly after the response. `withheldCount` is the number of quarantined
+readings, which aren't sent, as on every other path. Readings go oldest first, and sending the same
+range again is safe: analytics updates the reading it already holds instead of adding another.
+
+Failures return `success: false` with a code in `data.errorCode`:
+
+- `400 VALIDATION_FAILED`: a date is missing, `toDate` is before `fromDate`, or the range is longer
+  than 31 days.
+- `400 MALFORMED_REQUEST`: the body isn't JSON, or a date isn't `yyyy-MM-dd`.
+- `400 CHANNEL_NOT_SUPPORTED`: a channel other than ELM or PDU. BFM readings can't be republished:
+  their water quantity doesn't depend on configuration, and older ones would be counted twice.
+- `401 INVALID_API_KEY`
+- `404 SCHEME_NOT_FOUND`: the scheme id matches none of the tenant's schemes.
+- `500 PROCESSING_FAILED`: safe to retry.
 
 | Method | Endpoint                                          | Description |
 |--------|---------------------------------------------------|-------------|

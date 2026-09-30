@@ -75,7 +75,7 @@ class TelemetryApiKeyAuthFilterTest {
     @Test
     void canonicalReadingsRoutesAreProtected() throws Exception {
         for (String path : new String[]{"/api/v1/telemetry/readings", "/api/v1/telemetry/readings/",
-                "/api/v1/telemetry/readings/formats/assam"}) {
+                "/api/v1/telemetry/readings/formats/assam", "/api/v1/telemetry/readings/republish"}) {
             MockFilterChain chain = new MockFilterChain();
             MockHttpServletResponse response = new MockHttpServletResponse();
 

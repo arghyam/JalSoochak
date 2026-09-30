@@ -18,7 +18,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -78,7 +80,7 @@ class ReadingRepublisherTest {
         when(calculationParametersSnapshotter.snapshot(SCHEMA, TENANT_ID, 10L, ReadingChannel.ELM))
                 .thenReturn(SNAPSHOT);
 
-        readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
+        assertTrue(readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID));
 
         verify(telemetryEventPublisher).publishMeterReadingRecorded(
                 TENANT_ID,
@@ -152,7 +154,7 @@ class ReadingRepublisherTest {
                 .thenReturn(Optional.of(row(BigDecimal.ZERO, READING_DATE, "BFM",
                         QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY)));
 
-        readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
+        assertFalse(readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID));
 
         verifyNoInteractions(telemetryEventPublisher, calculationParametersSnapshotter);
     }

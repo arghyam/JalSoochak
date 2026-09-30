@@ -15,6 +15,7 @@ import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -1915,6 +1916,39 @@ public class TelemetryTenantRepository {
         List<TelemetryLatestFlowReadingRecord> rows = jdbcTemplate.query(
                 sql, (rs, n) -> mapLatestFlowReadingRecord(rs), readingId);
         return rows.stream().findFirst();
+    }
+
+    /**
+     * The ids of the readings stored on {@code channels} between two dates, both inclusive, oldest
+     * first. Only rows that hold a reading carry a channel: placeholder, location, meter-change and
+     * issue-report rows are inserted with none, so none of them is returned.
+     *
+     * @param schemeId narrows the result to one scheme; {@code null} returns every scheme's rows
+     */
+    public List<Long> findFlowReadingIdsForRepublish(String schemaName,
+                                                     LocalDate fromDate,
+                                                     LocalDate toDate,
+                                                     Long schemeId,
+                                                     Collection<ReadingChannel> channels) {
+        validateSchemaName(schemaName);
+        if (channels.isEmpty()) {
+            return List.of();
+        }
+        StringBuilder sql = new StringBuilder(String.format("""
+                SELECT id
+                FROM %s.flow_reading_table
+                WHERE reading_date BETWEEN ? AND ?
+                  AND channel IN (%s)
+                  AND deleted_at IS NULL
+                """, schemaName, String.join(", ", Collections.nCopies(channels.size(), "?"))));
+        List<Object> params = new ArrayList<>(List.of(fromDate, toDate));
+        channels.forEach(channel -> params.add(channel.name()));
+        if (schemeId != null) {
+            sql.append(" AND scheme_id = ?");
+            params.add(schemeId);
+        }
+        sql.append(String.format(" ORDER BY reading_date, %s, id", resolveFlowReadingTimeColumn(schemaName)));
+        return jdbcTemplate.query(sql.toString(), (rs, n) -> toLong(rs.getObject("id")), params.toArray());
     }
 
     public Optional<TelemetryFlowReadingDetails> findLatestFlowReadingForDate(String schemaName,

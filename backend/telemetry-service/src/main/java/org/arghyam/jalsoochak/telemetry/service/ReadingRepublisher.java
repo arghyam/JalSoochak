@@ -40,10 +40,11 @@ public class ReadingRepublisher {
     /**
      * @param tenantId the tenant for the published event; analytics drops the attendance and
      *                 water-quantity facts of an event without one
+     * @return {@code false} when the row is withheld because it is still quarantined
      * @throws IllegalStateException when the row cannot be read back, which means it was deleted
      *                               between the caller's write and this read
      */
-    public void republish(String schemaName, Integer tenantId, Long readingId) {
+    public boolean republish(String schemaName, Integer tenantId, Long readingId) {
         TelemetryLatestFlowReadingRecord reading = telemetryTenantRepository
                 .findFlowReadingById(schemaName, readingId)
                 .orElseThrow(() -> new IllegalStateException(
@@ -53,7 +54,7 @@ public class ReadingRepublisher {
         if (quarantineReason != null && quarantineReason != QuarantineReason.NONE) {
             log.info("reading_republish_withheld reason=\"quarantined\" readingId={} schemeId={} quarantineReason={}",
                     readingId, reading.schemeId(), quarantineReason);
-            return;
+            return false;
         }
 
         LocalDateTime readingAt = reading.readingAt() != null ? reading.readingAt() : ReadingTime.now();
@@ -82,6 +83,7 @@ public class ReadingRepublisher {
                 calculationParametersSnapshotter.snapshot(
                         schemaName, tenantId, reading.schemeId(), ReadingChannel.fromChannelValue(reading.channel()))
         );
+        return true;
     }
 
     /**
