@@ -63,6 +63,7 @@ public class DimensionServiceImpl implements DimensionService {
     private final DimTenantWaterNormRepository dimTenantWaterNormRepository;
     private final DimTenantWorkStatusFilterRepository dimTenantWorkStatusFilterRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final org.arghyam.jalsoochak.analytics.repository.SchemeDimensionReplaceRepository schemeDimensionReplaceRepository;
 
     /**
      * Dates the norm and work-status filter history rows. Those dates decide which rule applies to
@@ -200,6 +201,28 @@ public class DimensionServiceImpl implements DimensionService {
 
         dimSchemeRepository.save(scheme);
         log.info("Upserted dim_scheme_table [id={}]", event.getSchemeId());
+    }
+
+    /**
+     * Unlike {@link #upsertScheme}, which rewrites one row, this writes the whole set: stale location
+     * rows go, and every remaining row carries the same attributes. Skipped (not retried) for a tenant
+     * analytics has not heard of yet — the next full sync sends the scheme again.
+     */
+    @Override
+    @Transactional
+    public void replaceSchemeDimension(org.arghyam.jalsoochak.analytics.dto.event.SchemeDimensionReplacedEvent event) {
+        if (event.getTenantId() == null || event.getSchemeId() == null) {
+            log.warn("Ignoring SCHEME_DIMENSION_REPLACED without tenantId/schemeId");
+            return;
+        }
+        if (!dimTenantRepository.existsById(event.getTenantId())) {
+            log.warn("Skipping SCHEME_DIMENSION_REPLACED for scheme {}: tenant {} is not in dim_tenant_table yet",
+                    event.getSchemeId(), event.getTenantId());
+            return;
+        }
+        int removed = schemeDimensionReplaceRepository.replace(event);
+        log.info("Replaced dim_scheme_table rows for scheme {} (tenant {}): {} row(s), {} stale removed",
+                event.getSchemeId(), event.getTenantId(), event.getRows() == null ? 0 : event.getRows().size(), removed);
     }
 
     @Override

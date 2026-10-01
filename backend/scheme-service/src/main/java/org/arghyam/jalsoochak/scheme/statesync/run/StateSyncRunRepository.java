@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * {@code common_schema.state_sync_run_table} / {@code state_sync_issue_table} (V60).
+ * {@code common_schema.state_sync_run_table} / {@code state_sync_issue_table} (V61).
  *
  * <p><b>The run row is the cross-pod lock.</b> {@link #claim} inserts a RUNNING row, and the partial
  * unique index {@code uq_state_sync_run_one_running_per_tenant} lets exactly one such row exist per

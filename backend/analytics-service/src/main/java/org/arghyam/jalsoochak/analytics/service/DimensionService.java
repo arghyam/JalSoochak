@@ -22,6 +22,9 @@ public interface DimensionService {
 
     void upsertScheme(SchemeEvent event);
 
+    /** Makes a scheme's dim_scheme rows exactly the location set the event carries; see SCHEME_DIMENSION_REPLACED. */
+    void replaceSchemeDimension(org.arghyam.jalsoochak.analytics.dto.event.SchemeDimensionReplacedEvent event);
+
     void upsertLgdLocation(LgdLocationEvent event);
 
     void upsertDepartmentLocation(DepartmentLocationEvent event);

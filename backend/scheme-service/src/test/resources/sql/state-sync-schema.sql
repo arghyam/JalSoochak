@@ -1,4 +1,4 @@
--- Generated with pg_dump from a database migrated through V60 (backend/database) plus
+-- Generated with pg_dump from a database migrated through V61 (backend/database) plus
 -- common_schema.create_tenant_schema('tenant_as'). The state sync writes these tables, so its
 -- integration tests run against their real shape. Regenerate rather than hand-edit; triggers are
 -- dropped (their functions live outside these tables).
@@ -100,6 +100,40 @@ CREATE SEQUENCE common_schema.user_type_master_table_id_seq
 
 ALTER SEQUENCE common_schema.user_type_master_table_id_seq OWNED BY common_schema.user_type_master_table.id;
 
+CREATE TABLE tenant_as.anomaly_table (
+    id integer NOT NULL,
+    uuid character varying(36) DEFAULT (gen_random_uuid())::text NOT NULL,
+    user_id integer NOT NULL,
+    scheme_id integer NOT NULL,
+    type integer NOT NULL,
+    reason text,
+    ai_reading numeric,
+    ai_confidence_percentage numeric,
+    overridden_reading numeric,
+    retries integer DEFAULT 0,
+    previous_reading numeric,
+    previous_reading_date timestamp without time zone,
+    consecutive_days_overridden integer DEFAULT 0,
+    remarks text,
+    resolved_by integer,
+    resolved_at timestamp without time zone,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    status integer NOT NULL,
+    deleted_at timestamp without time zone,
+    deleted_by integer,
+    flow_reading_id integer
+);
+
+CREATE SEQUENCE tenant_as.anomaly_table_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE tenant_as.anomaly_table_id_seq OWNED BY tenant_as.anomaly_table.id;
+
 CREATE TABLE tenant_as.department_location_master_table (
     id integer NOT NULL,
     uuid character varying(36) DEFAULT (gen_random_uuid())::text NOT NULL,
@@ -139,7 +173,6 @@ CREATE TABLE tenant_as.flow_reading_table (
     quality_flag character varying(20) DEFAULT 'provisional'::character varying NOT NULL,
     status character varying(20) DEFAULT 'active'::character varying NOT NULL,
     payload_json jsonb,
-    channel character varying(50),
     reported_via character varying(50),
     duration integer,
     image_url text DEFAULT ''::text,
@@ -292,7 +325,6 @@ CREATE TABLE tenant_as.scheme_master_table (
     house_hold_count integer DEFAULT 0 NOT NULL,
     latitude double precision,
     longitude double precision,
-    channel integer,
     work_status integer NOT NULL,
     operating_status integer NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
@@ -390,6 +422,8 @@ ALTER TABLE ONLY common_schema.tenant_master_table ALTER COLUMN id SET DEFAULT n
 
 ALTER TABLE ONLY common_schema.user_type_master_table ALTER COLUMN id SET DEFAULT nextval('common_schema.user_type_master_table_id_seq'::regclass);
 
+ALTER TABLE ONLY tenant_as.anomaly_table ALTER COLUMN id SET DEFAULT nextval('tenant_as.anomaly_table_id_seq'::regclass);
+
 ALTER TABLE ONLY tenant_as.department_location_master_table ALTER COLUMN id SET DEFAULT nextval('tenant_as.department_location_master_table_id_seq'::regclass);
 
 ALTER TABLE ONLY tenant_as.flow_reading_table ALTER COLUMN id SET DEFAULT nextval('tenant_as.flow_reading_table_id_seq'::regclass);
@@ -434,6 +468,12 @@ ALTER TABLE ONLY common_schema.user_type_master_table
 
 ALTER TABLE ONLY common_schema.user_type_master_table
     ADD CONSTRAINT user_type_master_table_uuid_key UNIQUE (uuid);
+
+ALTER TABLE ONLY tenant_as.anomaly_table
+    ADD CONSTRAINT anomaly_table_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY tenant_as.anomaly_table
+    ADD CONSTRAINT anomaly_table_uuid_key UNIQUE (uuid);
 
 ALTER TABLE ONLY tenant_as.department_location_master_table
     ADD CONSTRAINT department_location_master_table_pkey PRIMARY KEY (id);
@@ -502,11 +542,19 @@ CREATE INDEX idx_tenant_master_status ON common_schema.tenant_master_table USING
 
 CREATE UNIQUE INDEX uq_state_sync_run_one_running_per_tenant ON common_schema.state_sync_run_table USING btree (tenant_id) WHERE ((status)::text = 'RUNNING'::text);
 
+CREATE INDEX idx_tenant_as_anom_flow_reading ON tenant_as.anomaly_table USING btree (flow_reading_id) WHERE (flow_reading_id IS NOT NULL);
+
+CREATE INDEX idx_tenant_as_anom_scheme ON tenant_as.anomaly_table USING btree (scheme_id);
+
+CREATE INDEX idx_tenant_as_anom_status ON tenant_as.anomaly_table USING btree (status);
+
+CREATE INDEX idx_tenant_as_anom_type ON tenant_as.anomaly_table USING btree (type);
+
+CREATE INDEX idx_tenant_as_anom_user ON tenant_as.anomaly_table USING btree (user_id);
+
 CREATE INDEX idx_tenant_as_dept_parent ON tenant_as.department_location_master_table USING btree (parent_id);
 
 CREATE INDEX idx_tenant_as_dept_status ON tenant_as.department_location_master_table USING btree (status);
-
-CREATE INDEX idx_tenant_as_flow_channel ON tenant_as.flow_reading_table USING btree (channel);
 
 CREATE INDEX idx_tenant_as_flow_corr ON tenant_as.flow_reading_table USING btree (correlation_id);
 
@@ -533,8 +581,6 @@ CREATE INDEX idx_tenant_as_lgd_status ON tenant_as.lgd_location_master_table USI
 CREATE INDEX idx_tenant_as_scheme_auto_prov ON tenant_as.scheme_master_table USING btree (is_auto_provisioned) WHERE is_auto_provisioned;
 
 CREATE INDEX idx_tenant_as_scheme_centre_id ON tenant_as.scheme_master_table USING btree (centre_scheme_id);
-
-CREATE INDEX idx_tenant_as_scheme_channel ON tenant_as.scheme_master_table USING btree (channel);
 
 CREATE INDEX idx_tenant_as_scheme_id_mismatch ON tenant_as.scheme_master_table USING btree (id_mismatch_last_seen_at) WHERE ((submitted_state_scheme_id_mismatch IS NOT NULL) OR (submitted_centre_scheme_id_mismatch IS NOT NULL));
 
@@ -582,7 +628,6 @@ CREATE UNIQUE INDEX uq_tenant_as_scheme_state_scheme_code ON tenant_as.scheme_ma
 
 CREATE UNIQUE INDEX uq_tenant_as_user_state_user_id ON tenant_as.user_table USING btree (state_user_id) WHERE ((state_user_id IS NOT NULL) AND (deleted_at IS NULL));
 
-
 ALTER TABLE ONLY common_schema.state_sync_issue_table
     ADD CONSTRAINT state_sync_issue_table_run_id_fkey FOREIGN KEY (run_id) REFERENCES common_schema.state_sync_run_table(id);
 
@@ -591,6 +636,18 @@ ALTER TABLE ONLY common_schema.state_sync_issue_table
 
 ALTER TABLE ONLY common_schema.state_sync_run_table
     ADD CONSTRAINT state_sync_run_table_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES common_schema.tenant_master_table(id);
+
+ALTER TABLE ONLY tenant_as.anomaly_table
+    ADD CONSTRAINT fk_anomaly_flow_reading FOREIGN KEY (flow_reading_id) REFERENCES tenant_as.flow_reading_table(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY tenant_as.anomaly_table
+    ADD CONSTRAINT fk_anomaly_resolved_by FOREIGN KEY (resolved_by) REFERENCES tenant_as.user_table(id);
+
+ALTER TABLE ONLY tenant_as.anomaly_table
+    ADD CONSTRAINT fk_anomaly_scheme FOREIGN KEY (scheme_id) REFERENCES tenant_as.scheme_master_table(id);
+
+ALTER TABLE ONLY tenant_as.anomaly_table
+    ADD CONSTRAINT fk_anomaly_user FOREIGN KEY (user_id) REFERENCES tenant_as.user_table(id);
 
 ALTER TABLE ONLY tenant_as.department_location_master_table
     ADD CONSTRAINT fk_dept_location_config FOREIGN KEY (department_location_config_id) REFERENCES tenant_as.location_config_master_table(id);

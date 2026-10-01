@@ -69,7 +69,8 @@ public class SchemeReconciler {
     private final Map<String, Integer> idByCode = new HashMap<>();
     private final Map<String, Set<Integer>> idsByCentre = new HashMap<>();
     private final Map<String, Set<Integer>> idsByState = new HashMap<>();
-    private final Map<String, Integer> placeholderByCentre = new HashMap<>();
+    /** IMIS id → live placeholders carrying it (one per submitted id pair, so possibly several). */
+    private final Map<String, List<Integer>> placeholdersByCentre = new HashMap<>();
     private final Set<Integer> claimedThisRun = new HashSet<>();
 
     private final Map<String, Integer> lgdIdsByCode;
@@ -81,6 +82,7 @@ public class SchemeReconciler {
     private final Map<Integer, List<LocationMappingRow>> deptMappingsByScheme = new HashMap<>();
 
     private final Set<Integer> touchedSchemes = new LinkedHashSet<>();
+    private final List<Reassignment> reassignments = new ArrayList<>();
 
     public SchemeReconciler(StateSyncTenantRepository repository, StateSyncProperties properties, String schema,
                             int actor, UserDirectory users, UserSchemeMappings userMappings) {
@@ -94,7 +96,7 @@ public class SchemeReconciler {
         for (SchemeRow row : repository.liveSchemes(schema)) {
             if (row.autoProvisioned()) {
                 if (!blank(row.centreSchemeId())) {
-                    placeholderByCentre.put(row.centreSchemeId(), row.id());
+                    placeholdersByCentre.computeIfAbsent(row.centreSchemeId(), k -> new ArrayList<>()).add(row.id());
                 }
                 continue;
             }
@@ -183,11 +185,6 @@ public class SchemeReconciler {
                     row.latitude(), row.longitude(), false));
             touchedSchemes.add(schemeId);
             report.count("schemes.inserted");
-            Integer placeholder = placeholderByCentre.get(up.centreSchemeId());
-            if (placeholder != null) {
-                report.issue("SCHEME", up.code(), "PLACEHOLDER_SUPERSEDED",
-                        Map.of("schemeId", schemeId, "placeholderSchemeId", placeholder));
-            }
         } else {
             SchemeRow old = resolution.scheme;
             schemeId = old.id();
@@ -215,6 +212,7 @@ public class SchemeReconciler {
             }
         }
         claimedThisRun.add(schemeId);
+        supersedePlaceholder(schemeId, up, report);
 
         reconcileVillages(schemeId, up, isNew, report);
         reconcileSubdivisions(schemeId, up, report);
@@ -470,6 +468,47 @@ public class SchemeReconciler {
             }
             userMappings.retire(userId, schemeId, report);
         }
+    }
+
+    // ── lenient-ingestion placeholders ──────────────────────────────────────
+
+    /** A placeholder whose readings now belong to a real scheme. */
+    public record Reassignment(int fromSchemeId, int toSchemeId) {
+    }
+
+    /**
+     * LENIENT-INGEST follow-up. A placeholder carrying this scheme's IMIS id holds readings telemetry
+     * could not attribute when they arrived; telemetry would attribute them to this scheme now. With
+     * {@code move-placeholder-readings} on, its readings and anomalies are re-pointed here, the
+     * placeholder is soft-deleted, and the move is announced to analytics after commit. Off, it is only
+     * reported. An issue is raised either way, as an audit trail.
+     */
+    private void supersedePlaceholder(int schemeId, UpstreamScheme up, SyncReport report) {
+        List<Integer> placeholders = blank(up.centreSchemeId()) ? null : placeholdersByCentre.remove(up.centreSchemeId());
+        if (placeholders == null) {
+            return;
+        }
+        for (Integer placeholder : placeholders) {
+            if (!properties.isMovePlaceholderReadings()) {
+                report.issue("SCHEME", up.code(), "PLACEHOLDER_SUPERSEDED",
+                        Map.of("schemeId", schemeId, "placeholderSchemeId", placeholder, "moved", false));
+                continue;
+            }
+            StateSyncTenantRepository.MovedActivity moved = repository.moveSchemeActivity(schema, placeholder, schemeId, actor);
+            repository.retirePlaceholderScheme(schema, placeholder, actor);
+            reassignments.add(new Reassignment(placeholder, schemeId));
+            touchedSchemes.add(schemeId);
+            report.add("placeholders.readings_moved", moved.readings());
+            report.add("placeholders.anomalies_moved", moved.anomalies());
+            report.count("placeholders.retired");
+            report.issue("SCHEME", up.code(), "PLACEHOLDER_SUPERSEDED", Map.of("schemeId", schemeId,
+                    "placeholderSchemeId", placeholder, "moved", true, "readings", moved.readings(),
+                    "anomalies", moved.anomalies()));
+        }
+    }
+
+    public List<Reassignment> reassignments() {
+        return List.copyOf(reassignments);
     }
 
     // ── archive / absence ───────────────────────────────────────────────────

@@ -268,18 +268,81 @@ class SchemeReconcilerIntegrationTest extends StateSyncIntegrationTestBase {
         assertThat(users.updatedIds()).containsExactly(blocked.orElseThrow().id());
     }
 
+    private int placeholder(String stateId, String centreId) {
+        return jdbc.queryForObject("INSERT INTO tenant_as.scheme_master_table (state_scheme_id, centre_scheme_id, "
+                + "scheme_name, work_status, operating_status, is_auto_provisioned) VALUES (?, ?, "
+                + "'Auto-provisioned scheme', 0, 0, TRUE) RETURNING id", Integer.class, stateId, centreId);
+    }
+
+    private void anomaly(int schemeId) {
+        jdbc.update("INSERT INTO tenant_as.anomaly_table (user_id, scheme_id, type, status) VALUES (?, ?, 1, 1)", actor, schemeId);
+    }
+
+    private int rowsOf(String table, int schemeId) {
+        return count("SELECT COUNT(*) FROM tenant_as." + table + " WHERE scheme_id = ?", schemeId);
+    }
+
     @Test
-    void anAutoProvisionedPlaceholderIsNeverMatchedButIsFlagged() {
-        int placeholder = jdbc.queryForObject("INSERT INTO tenant_as.scheme_master_table (state_scheme_id, centre_scheme_id, "
-                + "scheme_name, work_status, operating_status, is_auto_provisioned) VALUES ('34123', '8165607', "
-                + "'Auto-provisioned scheme', 0, 0, TRUE) RETURNING id", Integer.class);
+    void aPlaceholdersReadingsMoveToTheRealSchemeAndThePlaceholderIsRetired() {
+        int placeholder = placeholder("", "8165607");
+        reading(placeholder, LocalDateTime.of(2026, 7, 10, 8, 0));
+        reading(placeholder, LocalDateTime.of(2026, 8, 2, 8, 0));
+        anomaly(placeholder);
 
-        SyncReport report = sync(chapatoli(List.of(), List.of()));
+        SchemeReconciler reconciler = reconciler();
+        SyncReport report = new SyncReport();
+        reconciler.reconcile(List.of(chapatoli(List.of(), List.of())), report);
 
-        assertThat(schemeId("SCH-000008")).isNotEqualTo(placeholder);
+        int real = schemeId("SCH-000008");
+        assertThat(real).isNotEqualTo(placeholder);
+        assertThat(rowsOf("flow_reading_table", real)).isEqualTo(2);
+        assertThat(rowsOf("anomaly_table", real)).isEqualTo(1);
+        assertThat(rowsOf("flow_reading_table", placeholder)).isZero();
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NOT NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, placeholder)).isTrue();
+        assertThat(reconciler.reassignments()).containsExactly(new SchemeReconciler.Reassignment(placeholder, real));
+        assertThat(report.counts()).containsEntry("placeholders.readings_moved", 2).containsEntry("placeholders.retired", 1);
         assertThat(report.issues()).singleElement().satisfies(i -> {
             assertThat(i.category()).isEqualTo("PLACEHOLDER_SUPERSEDED");
-            assertThat(i.detail()).containsEntry("placeholderSchemeId", placeholder);
+            assertThat(i.detail()).containsEntry("placeholderSchemeId", placeholder).containsEntry("moved", true);
+        });
+    }
+
+    @Test
+    void anExistingRealSchemeAlsoAbsorbsAPlaceholderWithItsImisId() {
+        int real = scheme("34123", "8165607", "Chapatoli", "SCH-000008");
+        int first = placeholder("34123", "8165607");
+        int second = placeholder("", "8165607");
+        reading(first, LocalDateTime.of(2026, 7, 10, 8, 0));
+        reading(second, LocalDateTime.of(2026, 7, 11, 8, 0));
+
+        SchemeReconciler reconciler = reconciler();
+        reconciler.reconcile(List.of(chapatoli(List.of(), List.of())), new SyncReport());
+
+        assertThat(rowsOf("flow_reading_table", real)).isEqualTo(2);
+        assertThat(reconciler.reassignments()).extracting(SchemeReconciler.Reassignment::fromSchemeId)
+                .containsExactlyInAnyOrder(first, second);
+        // A second run finds nothing left to move.
+        SchemeReconciler again = reconciler();
+        again.reconcile(List.of(chapatoli(List.of(), List.of())), new SyncReport());
+        assertThat(again.reassignments()).isEmpty();
+    }
+
+    @Test
+    void withTheMoveSwitchedOffAPlaceholderIsOnlyReported() {
+        properties.setMovePlaceholderReadings(false);
+        int placeholder = placeholder("", "8165607");
+        reading(placeholder, LocalDateTime.of(2026, 7, 10, 8, 0));
+
+        SchemeReconciler reconciler = reconciler();
+        SyncReport report = new SyncReport();
+        reconciler.reconcile(List.of(chapatoli(List.of(), List.of())), report);
+
+        assertThat(rowsOf("flow_reading_table", placeholder)).isEqualTo(1);
+        assertThat(reconciler.reassignments()).isEmpty();
+        assertThat(report.issues()).singleElement().satisfies(i -> {
+            assertThat(i.category()).isEqualTo("PLACEHOLDER_SUPERSEDED");
+            assertThat(i.detail()).containsEntry("moved", false);
         });
     }
 

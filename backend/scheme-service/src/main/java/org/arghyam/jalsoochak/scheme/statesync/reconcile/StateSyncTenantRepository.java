@@ -204,6 +204,50 @@ public class StateSyncTenantRepository {
                 String.class, limit);
     }
 
+    /** What {@link #moveSchemeActivity} re-pointed. */
+    public record MovedActivity(int readings, int anomalies) {
+    }
+
+    /**
+     * LENIENT-INGEST follow-up: re-points everything telemetry recorded against a placeholder scheme to
+     * the real one. Readings and anomalies are the only rows a placeholder collects — telemetry never
+     * maps users, locations or pumps to it. {@code updated_at} moves on each reading, so the row's
+     * version is newer than the one analytics holds and a later republish is applied.
+     */
+    public MovedActivity moveSchemeActivity(String schema, int fromSchemeId, int toSchemeId, int actor) {
+        int readings = jdbc.update("UPDATE " + s(schema) + ".flow_reading_table SET scheme_id = ?, updated_by = ?, "
+                + "updated_at = NOW() WHERE scheme_id = ?", toSchemeId, actor, fromSchemeId);
+        int anomalies = jdbc.update("UPDATE " + s(schema) + ".anomaly_table SET scheme_id = ? "
+                + "WHERE scheme_id = ?", toSchemeId, fromSchemeId);
+        return new MovedActivity(readings, anomalies);
+    }
+
+    /** Soft-deletes an auto-provisioned placeholder; a real scheme is never touched by this. */
+    public void retirePlaceholderScheme(String schema, int schemeId, int actor) {
+        jdbc.update("UPDATE " + s(schema) + ".scheme_master_table SET deleted_at = NOW(), deleted_by = ?, updated_by = ?, "
+                + "updated_at = NOW() WHERE id = ? AND is_auto_provisioned AND deleted_at IS NULL", actor, actor, schemeId);
+    }
+
+    /** Attributes analytics repeats on every dim_scheme row, for the given schemes. */
+    public List<SchemeDimensionAttributes> schemeDimensionAttributes(String schema, List<Integer> schemeIds) {
+        if (schemeIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.query("SELECT id, scheme_name, state_scheme_id, centre_scheme_id, latitude, longitude, operating_status, "
+                        + "work_status, fhtc_count, planned_fhtc, house_hold_count FROM " + s(schema) + ".scheme_master_table "
+                        + "WHERE deleted_at IS NULL AND id = ANY (?)",
+                (rs, n) -> new SchemeDimensionAttributes(rs.getInt("id"), rs.getString("scheme_name"),
+                        rs.getString("state_scheme_id"), rs.getString("centre_scheme_id"), nullableDouble(rs, "latitude"),
+                        nullableDouble(rs, "longitude"), rs.getInt("operating_status"), rs.getInt("work_status"),
+                        rs.getInt("fhtc_count"), rs.getInt("planned_fhtc"), rs.getInt("house_hold_count")),
+                (Object) schemeIds.toArray(new Integer[0]));
+    }
+
+    public record SchemeDimensionAttributes(int schemeId, String name, String stateSchemeId, String centreSchemeId,
+                                            Double latitude, Double longitude, int operatingStatus, int workStatus,
+                                            int fhtcCount, int plannedFhtc, int houseHoldCount) {
+    }
+
     public boolean hasReadingSince(String schema, int schemeId, int days) {
         Boolean found = jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM " + s(schema) + ".flow_reading_table "
                         + "WHERE scheme_id = ? AND deleted_at IS NULL "

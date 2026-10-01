@@ -29,8 +29,9 @@ Every run:
    `STATE_SYNC_STALE_RUN_AFTER` (default 2 h). A delta that fires during the nightly full run skips.
 2. **Fetches everything** before touching the database.
 3. **Reconciles in one transaction.** In `DRY_RUN` that transaction is rolled back.
-4. **Publishes analytics events** after commit, in `APPLY` mode only: `SCHEME_UPDATED`,
-   `DEPARTMENT_LOCATION_UPDATED`, `USER_CREATED`/`USER_UPDATED`, `USER_SCHEME_MAPPINGS_REPLACED`.
+4. **Publishes analytics events** after commit, in `APPLY` mode only: `SCHEME_DIMENSION_REPLACED`,
+   `SCHEME_READINGS_REASSIGNED`, `DEPARTMENT_LOCATION_UPDATED`, `USER_CREATED`/`USER_UPDATED`,
+   `USER_SCHEME_MAPPINGS_REPLACED` (see §2a).
 5. **Finishes the run row** with its counts, and writes its issues to
    `common_schema.state_sync_issue_table`. This happens in both modes.
 
@@ -53,8 +54,22 @@ Safety rules:
   (`STATE_SYNC_RETIRE_ON_EMPTY_LIST=false`).
 - A list containing anything we could not resolve (an unmatched village, or an officer whose phone
   is invalid) retires nothing on that side.
-- A lenient-ingestion placeholder is never matched as a real scheme. When the real scheme arrives,
-  `PLACEHOLDER_SUPERSEDED` names the placeholder.
+- A lenient-ingestion placeholder is never matched as a real scheme. When a real scheme carrying the
+  placeholder's IMIS id is written or matched, the placeholder's readings move to it (§2a).
+
+## 2a. Analytics
+
+| Event (`scheme-service-topic`) | Analytics does |
+| --- | --- |
+| `SCHEME_DIMENSION_REPLACED` | Replaces the scheme's whole `dim_scheme_table` set: one row per village × sub-division it is mapped to, each with its ancestor ids at levels 1–6. Rows for locations it left are deleted, and every remaining row carries the same name, ids, statuses and FHTC counts. This ends the per-row drift the old single-row `SCHEME_UPDATED` left behind. An event with no rows only realigns the attributes. |
+| `SCHEME_READINGS_REASSIGNED {from, to}` | In one transaction holding both schemes' ingestion locks: moves the meter-reading facts (including pre-V56 rows with no `source_reading_id`, which a republish would have duplicated), plus attendance, anomaly and escalation facts. It then works out water quantity again for each affected day (removed from the placeholder, recalculated on the real scheme) and drops the placeholder's daily aggregates and dim rows. After commit it re-aggregates the affected dates in the background, in 31-day `backfillWindow` chunks. |
+
+**Moving placeholder readings** (`STATE_SYNC_MOVE_PLACEHOLDER_READINGS`, default on). In the tenant DB:
+`flow_reading_table` and `anomaly_table` rows are re-pointed to the real scheme (each reading's
+`updated_at` moves), and the placeholder is soft-deleted. Every case still raises
+`PLACEHOLDER_SUPERSEDED` with the counts, as an audit trail. Each reading keeps its `ingestion_source`
+bits, so it stays visible as having arrived for an unknown scheme. With the flag off, the case is only
+reported.
 
 ## 3. Configuration
 
@@ -71,6 +86,7 @@ Safety rules:
 | `STATE_SYNC_ARCHIVE_SPARE_READING_DAYS` | `90` | |
 | `STATE_SYNC_RETIRE_ON_EMPTY_LIST` | `false` | Flip once Assam confirms that empty means "none" |
 | `STATE_SYNC_PLACEHOLDER_LOOKUPS_PER_RUN` / `_RETRY_AFTER` | `25` / `PT24H` | Placeholder lookups per delta, and the cool-down for ids upstream does not know |
+| `STATE_SYNC_MOVE_PLACEHOLDER_READINGS` | `true` | Move a superseded placeholder's readings to the real scheme (§2a) |
 | `JJM_BRAIN_BASE_URL` / `JJM_BRAIN_API_KEY` | `https://jjmbrain.in/api/v1` / — | |
 | `JJM_BRAIN_MIN_REQUEST_INTERVAL` / `JJM_BRAIN_MAX_ATTEMPTS` | `PT0.5S` / `4` | Throttle and retry. 429 and 5xx back off exponentially and honour `Retry-After`. |
 
@@ -79,7 +95,7 @@ fails rather than store plaintext.
 
 ## 4. Roll-out
 
-1. Deploy with the flag off (V60 runs, nothing else changes).
+1. Deploy with the flag off (V61 runs, nothing else changes).
 2. Set `STATE_SYNC_ENABLED=true` with `STATE_SYNC_MODE=DRY_RUN` and the Assam tenant and actor. Trigger
    `POST …/runs?kind=FULL`, then read `GET …/runs` and `GET …/issues`.
 3. Work through the issue categories, especially `LGD_UNMATCHED`, `AMBIGUOUS_*`, `CONFLICT_*` and
@@ -90,8 +106,9 @@ fails rather than store plaintext.
 
 | Item | Why |
 | --- | --- |
-| Moving readings off a superseded placeholder scheme | Needs an agreed rule for re-pointing analytics facts. `PLACEHOLDER_SUPERSEDED` issues list every case. |
-| Full scheme × village fan-out in `dim_scheme` | `SCHEME_UPDATED` carries one parent location, as the existing upload path does. A "rebuild dims for scheme N" event is the follow-up. |
+| The scheme upload path using `SCHEME_DIMENSION_REPLACED` | The CSV upload in `SchemeServiceImpl` still sends the single-row `SCHEME_UPDATED`. Switching it over is a separate change. |
+| Re-aggregation surviving a pod restart | The background re-aggregation after a reassignment is in memory. If the pod dies mid-queue, the WARN names the range, and `ANALYTICS_AGG_BACKFILL_*` re-runs it. Only matters with `ANALYTICS_READ_FROM_AGGREGATES` on. |
+| `fact_submission_activity_hourly_table` | Not keyed by scheme, so a reassignment does not change it |
 | Creating LGD nodes | Needs the national `lgd_code` from upstream (question 11). |
 | Reviving archived schemes or unblocked users | Needs question 3 answered. |
 | Language / email for users | Not in the API (question 13). |

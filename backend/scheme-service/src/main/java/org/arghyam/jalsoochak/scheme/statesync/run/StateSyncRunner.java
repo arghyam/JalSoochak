@@ -322,7 +322,7 @@ public class StateSyncRunner {
             throw new IllegalStateException("PII_ENCRYPTION_KEY / PII_HMAC_KEY are not configured; users cannot be written");
         }
         if (!needsUsers && kind != RunKind.FULL) {
-            return new PendingEvents(List.of(), List.of(), departmentEvents);
+            return new PendingEvents(List.of(), List.of(), departmentEvents, List.of());
         }
 
         UserDirectory users = new UserDirectory(tenantRepository, pii, schema, tenantId, ctx.actor());
@@ -344,7 +344,7 @@ public class StateSyncRunner {
             schemes.reportAbsent(listed, new HashSet<>(fetched.archived()), report);
         }
         return new PendingEvents(List.copyOf(schemes.touchedSchemes()), userEvents(tenantId, users, mappings),
-                departmentEvents);
+                departmentEvents, schemes.reassignments());
     }
 
     private static List<Map<String, Object>> userEvents(int tenantId, UserDirectory users, UserSchemeMappings mappings) {

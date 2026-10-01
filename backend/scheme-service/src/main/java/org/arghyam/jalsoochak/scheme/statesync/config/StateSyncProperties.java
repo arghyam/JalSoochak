@@ -72,6 +72,13 @@ public class StateSyncProperties {
     /** A placeholder the upstream does not know either is not asked about again for this long. */
     private Duration placeholderRetryAfter = Duration.ofHours(24);
 
+    /**
+     * When a real scheme supersedes a lenient-ingestion placeholder, move the placeholder's readings and
+     * anomalies onto it (tenant DB and, through SCHEME_READINGS_REASSIGNED, analytics) and soft-delete
+     * the placeholder. Off: the case is only reported as PLACEHOLDER_SUPERSEDED.
+     */
+    private boolean movePlaceholderReadings = true;
+
     private Jjm jjm = new Jjm();
 
     @Getter

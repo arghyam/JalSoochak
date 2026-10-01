@@ -2,7 +2,6 @@ package org.arghyam.jalsoochak.scheme.statesync.run;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.scheme.kafka.KafkaProducer;
-import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository;
 import org.arghyam.jalsoochak.scheme.statesync.StateSyncIntegrationTestBase;
 import org.arghyam.jalsoochak.scheme.statesync.config.StateSyncProperties.Mode;
 import org.arghyam.jalsoochak.scheme.statesync.model.UpstreamNode;
@@ -54,7 +53,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         StaticListableBeanFactory beans = new StaticListableBeanFactory(Map.of("source", source));
         runner = new StateSyncRunner(properties, beans.getBeanProvider(StateMasterDataSource.class), runRepository,
                 tenantRepository, new HierarchyReconciler(tenantRepository), pii,
-                new StateSyncEventPublisher(kafka, new SchemeDbRepository(jdbc)),
+                new StateSyncEventPublisher(kafka, tenantRepository),
                 new DataSourceTransactionManager(dataSource));
 
         int district = lgd("Dibrugarh", 2, stateLgd, null);
@@ -117,7 +116,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
         verify(kafka, atLeastOnce()).publishJson(eq("scheme-service-topic"), events.capture());
         assertThat(events.getAllValues()).extracting(e -> String.valueOf(((Map<?, ?>) e).get("eventType")))
-                .contains("SCHEME_UPDATED", "DEPARTMENT_LOCATION_UPDATED");
+                .contains("SCHEME_DIMENSION_REPLACED", "DEPARTMENT_LOCATION_UPDATED");
         verify(kafka, atLeastOnce()).publishJson(eq("user-service-topic"), events.capture());
         assertThat(events.getAllValues()).extracting(e -> String.valueOf(((Map<?, ?>) e).get("eventType")))
                 .contains("USER_CREATED", "USER_SCHEME_MAPPINGS_REPLACED");
@@ -135,6 +134,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void aDeltaResolvesALenientIngestionPlaceholderByItsImisId() {
         properties.setMode(Mode.APPLY);
         int placeholder = jdbc.queryForObject("INSERT INTO tenant_as.scheme_master_table (state_scheme_id, centre_scheme_id, "
@@ -142,10 +142,20 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
                 + "'Auto-provisioned scheme (centre:8165607)', 0, 0, TRUE) RETURNING id", Integer.class);
         jdbc.update("INSERT INTO tenant_as.scheme_master_table (state_scheme_id, centre_scheme_id, scheme_name, "
                 + "work_status, operating_status, is_auto_provisioned) VALUES ('', '777', 'Auto-provisioned scheme', 0, 0, TRUE)");
+        reading(placeholder, LocalDateTime.of(2026, 7, 10, 8, 0));
         // Nothing changed upstream since the watermark: only the placeholder look-up can find the scheme.
         source.deltaReturnsNothing = true;
 
         RunResult first = runner.runNow(RunKind.DELTA, null, "SCHEDULER").orElseThrow();
+
+        int real = jdbc.queryForObject("SELECT id FROM tenant_as.scheme_master_table WHERE state_scheme_code = 'SCH-000008'",
+                Integer.class);
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.flow_reading_table WHERE scheme_id = ?", real)).isEqualTo(1);
+        ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
+        verify(kafka, atLeastOnce()).publishJson(eq("scheme-service-topic"), events.capture());
+        assertThat(events.getAllValues()).anySatisfy(e -> assertThat((Map<String, Object>) e)
+                .containsEntry("eventType", "SCHEME_READINGS_REASSIGNED")
+                .containsEntry("fromSchemeId", placeholder).containsEntry("toSchemeId", real));
 
         assertThat(first.counts()).containsEntry("placeholders.looked_up", 2).containsEntry("placeholders.found_upstream", 1)
                 .containsEntry("placeholders.unknown_upstream", 1).containsEntry("schemes.inserted", 1);

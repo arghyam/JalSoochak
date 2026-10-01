@@ -195,7 +195,7 @@ Phone numbers are PII — log them only at `DEBUG` level. Never include raw phon
 schema. Off unless `STATE_SYNC_ENABLED=true`; `STATE_SYNC_MODE=DRY_RUN` (default) rolls every write back
 and only records counts + issues. Crons (`STATE_SYNC_DELTA_CRON` hourly, `STATE_SYNC_FULL_CRON` nightly,
 IST) fire on every replica; the RUNNING row in `common_schema.state_sync_run_table` (partial unique
-index, V60) is the cross-pod lock, so exactly one runs. Upstream sits behind the `StateMasterDataSource`
+index, V61) is the cross-pod lock, so exactly one runs. Upstream sits behind the `StateMasterDataSource`
 port (adapter `JjmBrainClient`). LGD nodes are matched, never created (no national `lgd_code` upstream);
 department nodes are created/re-parented. Plan and open questions: `docs/jjm-brain-sync-plan.md`.
 

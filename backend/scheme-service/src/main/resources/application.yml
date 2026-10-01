@@ -95,6 +95,7 @@ state-sync:
   retire-on-empty-list: ${STATE_SYNC_RETIRE_ON_EMPTY_LIST:false}
   placeholder-lookups-per-run: ${STATE_SYNC_PLACEHOLDER_LOOKUPS_PER_RUN:25}
   placeholder-retry-after: ${STATE_SYNC_PLACEHOLDER_RETRY_AFTER:PT24H}
+  move-placeholder-readings: ${STATE_SYNC_MOVE_PLACEHOLDER_READINGS:true}
   jjm:
     base-url: ${JJM_BRAIN_BASE_URL:https://jjmbrain.in/api/v1}
     api-key: ${JJM_BRAIN_API_KEY:}
