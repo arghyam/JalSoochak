@@ -16,7 +16,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.mockito.InOrder;
 
+import java.net.ConnectException;
+import java.net.URI;
 import java.time.LocalDate;
+import java.util.concurrent.TimeoutException;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -86,22 +93,11 @@ class WhatsAppChannelTest {
     // ──────────────────────────── sendNudgeViaFlow ─────────────────────────────
 
     @Test
-    void sendNudgeViaFlow_returnsTrueAndStartsFlow_onSuccess() {
-        boolean result = whatsAppChannel.sendNudgeViaFlow(42L, "Ramesh", "02 March 2026");
+    void sendNudgeViaFlow_returnsSentAndStartsFlow_onSuccess() {
+        NudgeSendOutcome result = whatsAppChannel.sendNudgeViaFlow(42L, "Ramesh", "02 March 2026");
 
-        assertThat(result).isTrue();
+        assertThat(result).isEqualTo(NudgeSendOutcome.SENT);
         verify(whatsAppSender).startNudgeFlow(42L, "Ramesh", "02 March 2026");
-        verify(whatsAppSender, never()).optIn(anyString());
-    }
-
-    @Test
-    void sendNudgeViaFlow_returnsFalse_whenStartNudgeFlowThrows() {
-        doThrow(new RuntimeException("Flow error"))
-                .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
-
-        boolean result = whatsAppChannel.sendNudgeViaFlow(42L, "Ramesh", "02 March 2026");
-
-        assertThat(result).isFalse();
         verify(whatsAppSender, never()).optIn(anyString());
     }
 
@@ -110,6 +106,74 @@ class WhatsAppChannelTest {
         whatsAppChannel.sendNudgeViaFlow(77L, "Suresh", "03 March 2026");
 
         verify(whatsAppSender).startNudgeFlow(eq(77L), eq("Suresh"), eq("03 March 2026"));
+    }
+
+    @Test
+    void sendNudgeViaFlow_returnsNotSent_whenProviderWasNeverReached() {
+        doThrow(new WebClientRequestException(new ConnectException("Connection refused"),
+                HttpMethod.POST, URI.create("https://glific.example/api"), new HttpHeaders()))
+                .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
+
+        assertThat(whatsAppChannel.sendNudgeViaFlow(42L, "Ramesh", "02 March 2026"))
+                .isEqualTo(NudgeSendOutcome.NOT_SENT);
+    }
+
+    @Test
+    void sendNudgeViaFlow_returnsNotSent_whenContactIdWasRefusedBeforeSending() {
+        doThrow(new IllegalArgumentException("startNudgeFlow requires a resolved provider contact id but got 0"))
+                .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
+
+        assertThat(whatsAppChannel.sendNudgeViaFlow(0L, "Ramesh", "02 March 2026"))
+                .isEqualTo(NudgeSendOutcome.NOT_SENT);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {429, 502, 503})
+    void sendNudgeViaFlow_returnsNotSent_whenProviderRejectedTheRequestUnprocessed(int status) {
+        doThrow(new RuntimeException("provider HTTP error: " + status,
+                WebClientResponseException.create(status, "x", new HttpHeaders(), new byte[0], null)))
+                .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
+
+        assertThat(whatsAppChannel.sendNudgeViaFlow(42L, "Ramesh", "02 March 2026"))
+                .isEqualTo(NudgeSendOutcome.NOT_SENT);
+    }
+
+    @Test
+    void sendNudgeViaFlow_returnsUnknown_whenTheResponseTimedOut() {
+        // Reactor's block(Duration) wraps a TimeoutException; the provider may already have started the flow.
+        doThrow(new RuntimeException(new TimeoutException("Timeout on blocking read for 30000000000 NANOSECONDS")))
+                .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
+
+        assertThat(whatsAppChannel.sendNudgeViaFlow(42L, "Ramesh", "02 March 2026"))
+                .isEqualTo(NudgeSendOutcome.UNKNOWN);
+    }
+
+    @Test
+    void sendNudgeViaFlow_returnsUnknown_whenReactorReportsTheTimeoutAsIllegalState() {
+        doThrow(new IllegalStateException("Timeout on blocking read for 30000000000 NANOSECONDS"))
+                .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
+
+        assertThat(whatsAppChannel.sendNudgeViaFlow(42L, "Ramesh", "02 March 2026"))
+                .isEqualTo(NudgeSendOutcome.UNKNOWN);
+    }
+
+    @Test
+    void sendNudgeViaFlow_returnsUnknown_whenProviderAnsweredWithAnError() {
+        doThrow(new RuntimeException("provider flow start returned success=false for contactId=42"))
+                .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
+
+        assertThat(whatsAppChannel.sendNudgeViaFlow(42L, "Ramesh", "02 March 2026"))
+                .isEqualTo(NudgeSendOutcome.UNKNOWN);
+    }
+
+    @Test
+    void sendNudgeViaFlow_returnsUnknown_onServerErrorThatMayHaveBeenProcessed() {
+        doThrow(new RuntimeException("provider HTTP error: 500",
+                WebClientResponseException.create(500, "x", new HttpHeaders(), new byte[0], null)))
+                .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
+
+        assertThat(whatsAppChannel.sendNudgeViaFlow(42L, "Ramesh", "02 March 2026"))
+                .isEqualTo(NudgeSendOutcome.UNKNOWN);
     }
 
     // ────────────────────────────── sendDocument ───────────────────────────────
