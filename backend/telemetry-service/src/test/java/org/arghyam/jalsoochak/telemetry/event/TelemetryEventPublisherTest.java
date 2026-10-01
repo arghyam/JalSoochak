@@ -428,6 +428,31 @@ class TelemetryEventPublisherTest {
                     new BigDecimal("-1"), null, null, 1, DATE, 1, 0, null, null, null, null);
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isNull();
         }
+
+        @Test
+        void publishesAPrebuiltEventAsItIs() {
+            MeterReadingEvent event = TelemetryEventPublisher.meterReadingRecordedEvent(17, 7L, 11L,
+                    BigDecimal.TEN, BigDecimal.TEN, null, null, LocalDateTime.of(2026, 3, 1, 6, 30), 2, DATE,
+                    1, 0, null, 99L, null, null);
+
+            publisher.publishMeterReadingRecorded(event);
+
+            assertThat(publishedTo(TOPIC, MeterReadingEvent.class)).isSameAs(event);
+        }
+
+        /** A run of publishes waits for each acknowledgement instead of queuing on the shared executor. */
+        @Test
+        void waitsForTheAcknowledgementAndReportsIt() {
+            MeterReadingEvent event = TelemetryEventPublisher.meterReadingRecordedEvent(17, 7L, 11L,
+                    BigDecimal.TEN, BigDecimal.TEN, null, null, LocalDateTime.of(2026, 3, 1, 6, 30), 2, DATE,
+                    1, 0, null, 99L, null, null);
+            when(kafkaProducer.publishJsonAndAwait(TOPIC, event, TelemetryEventPublisher.ACKNOWLEDGEMENT_TIMEOUT))
+                    .thenReturn(true, false);
+
+            assertThat(publisher.publishMeterReadingRecordedAndAwait(event)).isTrue();
+            assertThat(publisher.publishMeterReadingRecordedAndAwait(event)).isFalse();
+            verify(kafkaProducer, never()).publishJson(anyString(), any());
+        }
     }
 
     @Nested

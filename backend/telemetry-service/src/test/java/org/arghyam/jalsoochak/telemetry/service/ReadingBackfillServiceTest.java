@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.service.ReadingRepublisher.Result;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
@@ -49,23 +50,45 @@ class ReadingBackfillServiceTest {
         when(telemetryTenantRepository.findSchemaNameByTenantId(TENANT_ID)).thenReturn(Optional.of(SCHEMA));
     }
 
+    /**
+     * Each reading waits for Kafka's acknowledgement on this thread, so a long run cannot fill the
+     * executor live submissions publish through.
+     */
     @Test
     void republishesEveryReadingInOrderAndCountsTheWithheldOnes() {
         tenantSchema();
         when(telemetryTenantRepository.findFlowReadingIdsForRepublish(SCHEMA, FROM, TO, null, ELM_AND_PDU))
                 .thenReturn(List.of(5L, 3L, 9L));
-        when(readingRepublisher.republish(SCHEMA, TENANT_ID, 5L)).thenReturn(true);
-        when(readingRepublisher.republish(SCHEMA, TENANT_ID, 3L)).thenReturn(false);
-        when(readingRepublisher.republish(SCHEMA, TENANT_ID, 9L)).thenReturn(true);
+        when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 5L)).thenReturn(Result.PUBLISHED);
+        when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 3L)).thenReturn(Result.WITHHELD);
+        when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 9L)).thenReturn(Result.PUBLISHED);
 
         ReadingBackfillService.Outcome outcome =
                 readingBackfillService.republish(TENANT_ID, FROM, TO, null, null, null);
 
-        assertEquals(new ReadingBackfillService.Outcome(2, 1), outcome);
+        assertEquals(new ReadingBackfillService.Outcome(2, 1, 0), outcome);
         InOrder order = inOrder(readingRepublisher);
-        order.verify(readingRepublisher).republish(SCHEMA, TENANT_ID, 5L);
-        order.verify(readingRepublisher).republish(SCHEMA, TENANT_ID, 3L);
-        order.verify(readingRepublisher).republish(SCHEMA, TENANT_ID, 9L);
+        order.verify(readingRepublisher).republishAndAwait(SCHEMA, TENANT_ID, 5L);
+        order.verify(readingRepublisher).republishAndAwait(SCHEMA, TENANT_ID, 3L);
+        order.verify(readingRepublisher).republishAndAwait(SCHEMA, TENANT_ID, 9L);
+        verify(readingRepublisher, never()).republish(any(), any(), any());
+    }
+
+    /** Every later reading would wait out the same timeout, so the run stops and says what is left. */
+    @Test
+    void stopsAtTheFirstReadingKafkaDoesNotAcknowledge() {
+        tenantSchema();
+        when(telemetryTenantRepository.findFlowReadingIdsForRepublish(SCHEMA, FROM, TO, null, ELM_AND_PDU))
+                .thenReturn(List.of(5L, 3L, 9L, 4L));
+        when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 5L)).thenReturn(Result.PUBLISHED);
+        when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 3L)).thenReturn(Result.WITHHELD);
+        when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 9L)).thenReturn(Result.NOT_ACKNOWLEDGED);
+
+        ReadingBackfillService.Outcome outcome =
+                readingBackfillService.republish(TENANT_ID, FROM, TO, null, null, null);
+
+        assertEquals(new ReadingBackfillService.Outcome(1, 1, 2), outcome);
+        verify(readingRepublisher, never()).republishAndAwait(SCHEMA, TENANT_ID, 4L);
     }
 
     @Test
@@ -74,7 +97,7 @@ class ReadingBackfillServiceTest {
         when(telemetryTenantRepository.findFlowReadingIdsForRepublish(SCHEMA, FROM, TO, null, ELM_AND_PDU))
                 .thenReturn(List.of());
 
-        assertEquals(new ReadingBackfillService.Outcome(0, 0),
+        assertEquals(new ReadingBackfillService.Outcome(0, 0, 0),
                 readingBackfillService.republish(TENANT_ID, FROM, TO, " ", "", null));
 
         verify(telemetryTenantRepository, never()).findSchemeIdByStateSchemeId(any(), any());

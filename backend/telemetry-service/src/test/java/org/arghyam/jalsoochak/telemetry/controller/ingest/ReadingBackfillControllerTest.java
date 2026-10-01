@@ -70,7 +70,7 @@ class ReadingBackfillControllerTest {
     void republishesAndReturnsTheCounts() throws Exception {
         authenticated();
         when(readingBackfillService.republish(TENANT_ID, FROM, TO, "S-1", null, ReadingChannel.PDU))
-                .thenReturn(new ReadingBackfillService.Outcome(3, 1));
+                .thenReturn(new ReadingBackfillService.Outcome(3, 1, 0));
 
         perform("""
                 {"fromDate": "2026-09-01", "toDate": "2026-09-30", "stateSchemeId": "S-1", "channel": "pdu"}
@@ -79,6 +79,7 @@ class ReadingBackfillControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.republishedCount").value(3))
                 .andExpect(jsonPath("$.data.withheldCount").value(1))
+                .andExpect(jsonPath("$.data.notSentCount").doesNotExist())
                 .andExpect(jsonPath("$.data.errorCode").doesNotExist());
     }
 
@@ -87,7 +88,7 @@ class ReadingBackfillControllerTest {
     void acceptsSnakeCaseFieldsAndDefaultsToEveryChannel() throws Exception {
         authenticated();
         when(readingBackfillService.republish(TENANT_ID, FROM, TO, null, "C-9", null))
-                .thenReturn(new ReadingBackfillService.Outcome(0, 0));
+                .thenReturn(new ReadingBackfillService.Outcome(0, 0, 0));
 
         perform("""
                 {"from_date": "2026-09-01", "to_date": "2026-09-30", "centre_scheme_id": "C-9"}
@@ -99,7 +100,7 @@ class ReadingBackfillControllerTest {
     @Test
     void usesTheTenantTheFilterAuthenticated() throws Exception {
         when(readingBackfillService.republish(TENANT_ID, FROM, TO, null, null, null))
-                .thenReturn(new ReadingBackfillService.Outcome(1, 0));
+                .thenReturn(new ReadingBackfillService.Outcome(1, 0, 0));
 
         mockMvc.perform(request("""
                         {"fromDate": "2026-09-01", "toDate": "2026-09-30"}
@@ -142,7 +143,7 @@ class ReadingBackfillControllerTest {
     void acceptsARangeOfThirtyOneDays() throws Exception {
         authenticated();
         when(readingBackfillService.republish(TENANT_ID, FROM, LocalDate.of(2026, 10, 1), null, null, null))
-                .thenReturn(new ReadingBackfillService.Outcome(0, 0));
+                .thenReturn(new ReadingBackfillService.Outcome(0, 0, 0));
 
         perform("""
                 {"fromDate": "2026-09-01", "toDate": "2026-10-01"}
@@ -206,6 +207,25 @@ class ReadingBackfillControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.errorCode").value("SCHEME_NOT_FOUND"));
+    }
+
+    /** The counts say how far the run got, so the caller knows to send the same range again. */
+    @Test
+    void answersARunThatStoppedPartWayWithItsCounts() throws Exception {
+        authenticated();
+        when(readingBackfillService.republish(TENANT_ID, FROM, TO, null, null, null))
+                .thenReturn(new ReadingBackfillService.Outcome(4, 1, 7));
+
+        perform("""
+                {"fromDate": "2026-09-01", "toDate": "2026-09-30"}
+                """)
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data.republishedCount").value(4))
+                .andExpect(jsonPath("$.data.withheldCount").value(1))
+                .andExpect(jsonPath("$.data.notSentCount").value(7))
+                .andExpect(jsonPath("$.data.errorCode").value("PROCESSING_FAILED"))
+                .andExpect(jsonPath("$.data.message").value(ReadingBackfillController.NOT_SENT_MESSAGE));
     }
 
     @Test

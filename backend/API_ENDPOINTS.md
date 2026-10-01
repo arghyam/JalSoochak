@@ -347,10 +347,11 @@ automatically for an unknown scheme id can't be named; leave the scheme out to i
 {"success": true, "data": {"republishedCount": 42, "withheldCount": 1}}
 ```
 
-`republishedCount` is the number of readings queued for analytics. They're sent asynchronously, so
-the dashboards update shortly after the response. `withheldCount` is the number of quarantined
-readings, which aren't sent, as on every other path. Readings go oldest first, and sending the same
-range again is safe: analytics updates the reading it already holds instead of adding another.
+`republishedCount` is the number of readings sent to analytics. Each is sent before the response,
+and Kafka acknowledges it before the next one goes; the dashboards update once analytics has
+processed them. `withheldCount` is the number of quarantined readings, which aren't sent, as on
+every other path. Readings go oldest first, and sending the same range again is safe: analytics
+updates the reading it already holds instead of adding another.
 
 Failures return `success: false` with a code in `data.errorCode`:
 
@@ -361,6 +362,9 @@ Failures return `success: false` with a code in `data.errorCode`:
   their water quantity doesn't depend on configuration, and older ones would be counted twice.
 - `401 INVALID_API_KEY`
 - `404 SCHEME_NOT_FOUND`: the scheme id matches none of the tenant's schemes.
+- `503 PROCESSING_FAILED`: Kafka stopped acknowledging readings part-way, so the run stopped.
+  `republishedCount` and `withheldCount` count the readings before it stopped, and `notSentCount`
+  the ones not sent. Send the same range again.
 - `500 PROCESSING_FAILED`: safe to retry.
 
 | Method | Endpoint                                          | Description |

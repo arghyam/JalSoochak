@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 /**
  * Publishes {@code METER_READING_RECORDED} for a reading that is already stored, after a path has
@@ -37,14 +39,48 @@ public class ReadingRepublisher {
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final CalculationParametersSnapshotter calculationParametersSnapshotter;
 
+    /** What {@link #republishAndAwait} did with a reading. */
+    public enum Result {
+        /** Kafka acknowledged the event. */
+        PUBLISHED,
+        /** Not sent, because the row is still quarantined. */
+        WITHHELD,
+        /** Kafka did not acknowledge the event: the send failed or timed out, so it may or may not arrive. */
+        NOT_ACKNOWLEDGED
+    }
+
     /**
+     * Queues the event on the publisher's executor and returns at once.
+     *
      * @param tenantId the tenant for the published event; analytics drops the attendance and
      *                 water-quantity facts of an event without one
-     * @return {@code false} when the row is withheld because it is still quarantined
      * @throws IllegalStateException when the row cannot be read back, which means it was deleted
      *                               between the caller's write and this read
      */
-    public boolean republish(String schemaName, Integer tenantId, Long readingId) {
+    public void republish(String schemaName, Integer tenantId, Long readingId) {
+        publishableEvent(schemaName, tenantId, readingId)
+                .ifPresent(telemetryEventPublisher::publishMeterReadingRecorded);
+    }
+
+    /**
+     * Publishes on the calling thread and waits for Kafka to acknowledge the event, for a caller that
+     * republishes many readings in a row. See
+     * {@link TelemetryEventPublisher#publishMeterReadingRecordedAndAwait}.
+     *
+     * @throws IllegalStateException when the row cannot be read back
+     */
+    public Result republishAndAwait(String schemaName, Integer tenantId, Long readingId) {
+        Optional<MeterReadingEvent> event = publishableEvent(schemaName, tenantId, readingId);
+        if (event.isEmpty()) {
+            return Result.WITHHELD;
+        }
+        return telemetryEventPublisher.publishMeterReadingRecordedAndAwait(event.get())
+                ? Result.PUBLISHED
+                : Result.NOT_ACKNOWLEDGED;
+    }
+
+    /** The event for the stored row, or empty when the row is withheld because it is still quarantined. */
+    private Optional<MeterReadingEvent> publishableEvent(String schemaName, Integer tenantId, Long readingId) {
         TelemetryLatestFlowReadingRecord reading = telemetryTenantRepository
                 .findFlowReadingById(schemaName, readingId)
                 .orElseThrow(() -> new IllegalStateException(
@@ -54,12 +90,12 @@ public class ReadingRepublisher {
         if (quarantineReason != null && quarantineReason != QuarantineReason.NONE) {
             log.info("reading_republish_withheld reason=\"quarantined\" readingId={} schemeId={} quarantineReason={}",
                     readingId, reading.schemeId(), quarantineReason);
-            return false;
+            return Optional.empty();
         }
 
         LocalDateTime readingAt = reading.readingAt() != null ? reading.readingAt() : ReadingTime.now();
         LocalDate readingDate = reading.readingDate() != null ? reading.readingDate() : readingAt.toLocalDate();
-        telemetryEventPublisher.publishMeterReadingRecorded(
+        return Optional.of(TelemetryEventPublisher.meterReadingRecordedEvent(
                 tenantId,
                 reading.schemeId(),
                 reading.createdBy(),
@@ -82,8 +118,7 @@ public class ReadingRepublisher {
                 // with the pump data current at the time of the correction.
                 calculationParametersSnapshotter.snapshot(
                         schemaName, tenantId, reading.schemeId(), ReadingChannel.fromChannelValue(reading.channel()))
-        );
-        return true;
+        ));
     }
 
     /**

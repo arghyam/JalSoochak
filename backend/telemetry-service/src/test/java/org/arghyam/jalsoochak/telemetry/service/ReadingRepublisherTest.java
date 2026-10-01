@@ -2,12 +2,15 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.event.CalculationParameters;
+import org.arghyam.jalsoochak.telemetry.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -18,12 +21,12 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -68,6 +71,17 @@ class ReadingRepublisherTest {
                 readingDate, READING_AT, channel, quarantineReason, UPDATED_AT);
     }
 
+    /** The event handed to the executor-backed publisher. */
+    private MeterReadingEvent published() {
+        ArgumentCaptor<MeterReadingEvent> event = ArgumentCaptor.forClass(MeterReadingEvent.class);
+        verify(telemetryEventPublisher).publishMeterReadingRecorded(event.capture());
+        return event.getValue();
+    }
+
+    private void storedRow(TelemetryLatestFlowReadingRecord row) {
+        when(telemetryTenantRepository.findFlowReadingById(SCHEMA, READING_ID)).thenReturn(Optional.of(row));
+    }
+
     /**
      * The row's id and updated_at identify the submission and its version, so analytics updates
      * the one fact row it already holds for this reading instead of adding a second. The snapshot is
@@ -75,30 +89,29 @@ class ReadingRepublisherTest {
      */
     @Test
     void publishesTheStoredRow() {
-        when(telemetryTenantRepository.findFlowReadingById(SCHEMA, READING_ID))
-                .thenReturn(Optional.of(row(new BigDecimal("100"), READING_DATE, "ELM")));
+        storedRow(row(new BigDecimal("100"), READING_DATE, "ELM"));
         when(calculationParametersSnapshotter.snapshot(SCHEMA, TENANT_ID, 10L, ReadingChannel.ELM))
                 .thenReturn(SNAPSHOT);
 
-        assertTrue(readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID));
+        readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
 
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                TENANT_ID,
-                10L,
-                1L,
-                new BigDecimal("100"),
-                new BigDecimal("123"),
-                null,
-                "http://example.com/img.jpg",
-                READING_AT,
-                ReadingChannel.ELM.getCode(),
-                READING_DATE,
-                1,
-                0,
-                "corr-1",
-                READING_ID,
-                UPDATED_AT,
-                SNAPSHOT);
+        MeterReadingEvent event = published();
+        assertEquals(TENANT_ID, event.getTenantId());
+        assertEquals(10, event.getSchemeId());
+        assertEquals(1, event.getUserId());
+        assertEquals(new BigDecimal("100"), event.getExtractedReading());
+        assertEquals(new BigDecimal("123"), event.getConfirmedReading());
+        assertNull(event.getConfidence());
+        assertEquals("http://example.com/img.jpg", event.getImageUrl());
+        assertEquals(READING_AT.toString(), event.getReadingAt());
+        assertEquals(ReadingChannel.ELM.getCode(), event.getChannel());
+        assertEquals(READING_DATE.toString(), event.getReadingDate());
+        assertEquals(1, event.getSubmissionStatus());
+        assertEquals(0, event.getReadingType());
+        assertEquals("corr-1", event.getCorrelationId());
+        assertEquals(READING_ID, event.getSourceReadingId());
+        assertEquals("2026-06-23T08:15:02.345678", event.getSourceUpdatedAt());
+        assertSame(SNAPSHOT, event.getCalculationParameters());
     }
 
     /**
@@ -109,39 +122,35 @@ class ReadingRepublisherTest {
      */
     @Test
     void publishesNoExtractedReadingForTheZeroSentinel() {
-        when(telemetryTenantRepository.findFlowReadingById(SCHEMA, READING_ID))
-                .thenReturn(Optional.of(row(BigDecimal.ZERO, READING_DATE, "BFM")));
+        storedRow(row(BigDecimal.ZERO, READING_DATE, "BFM"));
 
         readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
 
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                eq(TENANT_ID), eq(10L), eq(1L), isNull(), eq(new BigDecimal("123")), isNull(), any(),
-                any(), any(), any(), eq(1), eq(0), any(), any(), any(), any());
+        MeterReadingEvent event = published();
+        assertNull(event.getExtractedReading());
+        assertEquals(new BigDecimal("123"), event.getConfirmedReading());
     }
 
     /** Analytics reads a missing channel as BFM, so a legacy row must not be given one. */
     @Test
     void publishesNoChannelForALegacyRowWithoutOne() {
-        when(telemetryTenantRepository.findFlowReadingById(SCHEMA, READING_ID))
-                .thenReturn(Optional.of(row(BigDecimal.ZERO, READING_DATE, null)));
+        storedRow(row(BigDecimal.ZERO, READING_DATE, null));
 
         readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
 
         verify(calculationParametersSnapshotter).snapshot(SCHEMA, TENANT_ID, 10L, ReadingChannel.BFM);
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                any(), any(), any(), any(), any(), any(), any(), any(), isNull(), any(), any(), any(), any(), any(), any(), any());
+        assertNull(published().getChannel());
     }
 
     @Test
     void takesTheReadingDateFromReadingAtWhenTheRowHasNone() {
-        when(telemetryTenantRepository.findFlowReadingById(SCHEMA, READING_ID))
-                .thenReturn(Optional.of(row(BigDecimal.ZERO, null, "BFM")));
+        storedRow(row(BigDecimal.ZERO, null, "BFM"));
 
         readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
 
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                any(), any(), any(), any(), any(), any(), any(), eq(READING_AT), any(),
-                eq(READING_AT.toLocalDate()), any(), any(), any(), any(), any(), any());
+        MeterReadingEvent event = published();
+        assertEquals(READING_AT.toString(), event.getReadingAt());
+        assertEquals(READING_AT.toLocalDate().toString(), event.getReadingDate());
     }
 
     /**
@@ -150,11 +159,9 @@ class ReadingRepublisherTest {
      */
     @Test
     void withholdsARowThatIsStillQuarantined() {
-        when(telemetryTenantRepository.findFlowReadingById(SCHEMA, READING_ID))
-                .thenReturn(Optional.of(row(BigDecimal.ZERO, READING_DATE, "BFM",
-                        QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY)));
+        storedRow(row(BigDecimal.ZERO, READING_DATE, "BFM", QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY));
 
-        assertFalse(readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID));
+        readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
 
         verifyNoInteractions(telemetryEventPublisher, calculationParametersSnapshotter);
     }
@@ -162,13 +169,11 @@ class ReadingRepublisherTest {
     /** A pre-V40 schema has no quarantine column, so its rows read back with no marker at all. */
     @Test
     void publishesARowFromASchemaWithoutQuarantine() {
-        when(telemetryTenantRepository.findFlowReadingById(SCHEMA, READING_ID))
-                .thenReturn(Optional.of(row(BigDecimal.ZERO, READING_DATE, "BFM", null)));
+        storedRow(row(BigDecimal.ZERO, READING_DATE, "BFM", null));
 
         readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
 
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(telemetryEventPublisher).publishMeterReadingRecorded(any(MeterReadingEvent.class));
     }
 
     @Test
@@ -179,5 +184,46 @@ class ReadingRepublisherTest {
                 () -> readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID));
 
         verifyNoInteractions(telemetryEventPublisher);
+    }
+
+    @Nested
+    class AwaitingTheAcknowledgement {
+
+        /** The same event as the queued path, published on the calling thread instead. */
+        @Test
+        void reportsAReadingKafkaAcknowledged() {
+            storedRow(row(new BigDecimal("100"), READING_DATE, "PDU"));
+            when(calculationParametersSnapshotter.snapshot(SCHEMA, TENANT_ID, 10L, ReadingChannel.PDU))
+                    .thenReturn(SNAPSHOT);
+            ArgumentCaptor<MeterReadingEvent> event = ArgumentCaptor.forClass(MeterReadingEvent.class);
+            when(telemetryEventPublisher.publishMeterReadingRecordedAndAwait(event.capture())).thenReturn(true);
+
+            assertEquals(ReadingRepublisher.Result.PUBLISHED,
+                    readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, READING_ID));
+
+            assertEquals(READING_ID, event.getValue().getSourceReadingId());
+            assertEquals(ReadingChannel.PDU.getCode(), event.getValue().getChannel());
+            assertSame(SNAPSHOT, event.getValue().getCalculationParameters());
+            verify(telemetryEventPublisher, never()).publishMeterReadingRecorded(any(MeterReadingEvent.class));
+        }
+
+        @Test
+        void reportsAReadingKafkaDidNotAcknowledge() {
+            storedRow(row(BigDecimal.ZERO, READING_DATE, "PDU"));
+            when(telemetryEventPublisher.publishMeterReadingRecordedAndAwait(any())).thenReturn(false);
+
+            assertEquals(ReadingRepublisher.Result.NOT_ACKNOWLEDGED,
+                    readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, READING_ID));
+        }
+
+        @Test
+        void withholdsARowThatIsStillQuarantined() {
+            storedRow(row(BigDecimal.ZERO, READING_DATE, "PDU", QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY));
+
+            assertEquals(ReadingRepublisher.Result.WITHHELD,
+                    readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, READING_ID));
+
+            verifyNoInteractions(telemetryEventPublisher, calculationParametersSnapshotter);
+        }
     }
 }

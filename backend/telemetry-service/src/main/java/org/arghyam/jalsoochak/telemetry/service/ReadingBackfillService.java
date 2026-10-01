@@ -26,6 +26,13 @@ import java.util.Set;
  *
  * <p>Safe to repeat: analytics updates the one fact row it holds for each reading, and applies an
  * event that carries the version it already has.
+ *
+ * <p>Each reading is published on the calling thread and waits for Kafka to acknowledge it, rather
+ * than being queued on the shared {@code kafkaPublisherExecutor} like a live submission's event. A run
+ * can cover thousands of readings, and once that executor's bounded queue is full it rejects live
+ * submissions' events too. The run stops at the first reading Kafka does not acknowledge, since every
+ * later one would wait out the same timeout, and reports how many were not sent. Readings go oldest
+ * first, so the caller can send the same range again.
  */
 @Slf4j
 @Service
@@ -40,7 +47,13 @@ public class ReadingBackfillService {
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final ReadingRepublisher readingRepublisher;
 
-    public record Outcome(int republishedCount, int withheldCount) {
+    /**
+     * @param republishedCount readings Kafka acknowledged
+     * @param withheldCount    readings not sent because they are still quarantined
+     * @param notSentCount     readings not sent because Kafka stopped acknowledging them: the first it
+     *                         did not acknowledge and every one after it; 0 when the run finished
+     */
+    public record Outcome(int republishedCount, int withheldCount, int notSentCount) {
     }
 
     /**
@@ -68,15 +81,28 @@ public class ReadingBackfillService {
         List<Long> readingIds = telemetryTenantRepository.findFlowReadingIdsForRepublish(
                 schemaName, fromDate, toDate, schemeId, channels);
         int republished = 0;
+        int withheld = 0;
         for (Long readingId : readingIds) {
-            if (readingRepublisher.republish(schemaName, tenantId, readingId)) {
+            ReadingRepublisher.Result result = readingRepublisher.republishAndAwait(schemaName, tenantId, readingId);
+            if (result == ReadingRepublisher.Result.NOT_ACKNOWLEDGED) {
+                break;
+            }
+            if (result == ReadingRepublisher.Result.PUBLISHED) {
                 republished++;
+            } else {
+                withheld++;
             }
         }
-        int withheld = readingIds.size() - republished;
-        log.info("reading_backfill tenantId={} fromDate={} toDate={} schemeId={} channels={} republished={} withheld={}",
-                tenantId, fromDate, toDate, schemeId, channels, republished, withheld);
-        return new Outcome(republished, withheld);
+        int notSent = readingIds.size() - republished - withheld;
+        if (notSent > 0) {
+            log.warn("reading_backfill_stopped reason=\"not acknowledged\" tenantId={} fromDate={} toDate={} schemeId={} "
+                            + "channels={} republished={} withheld={} notSent={}",
+                    tenantId, fromDate, toDate, schemeId, channels, republished, withheld, notSent);
+        } else {
+            log.info("reading_backfill tenantId={} fromDate={} toDate={} schemeId={} channels={} republished={} withheld={}",
+                    tenantId, fromDate, toDate, schemeId, channels, republished, withheld);
+        }
+        return new Outcome(republished, withheld, notSent);
     }
 
     /** {@code null} when no scheme id was given, meaning every scheme. */

@@ -9,22 +9,33 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 public record RepublishReadingsResponse(boolean success, Data data) {
 
     /**
-     * @param republishedCount readings handed to the event publisher, which sends them to Kafka
-     *                         asynchronously
+     * @param republishedCount readings Kafka acknowledged
      * @param withheldCount    readings not sent because they are still quarantined
+     * @param notSentCount     readings not sent because Kafka stopped acknowledging them part-way
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Data(Integer republishedCount,
                        Integer withheldCount,
+                       Integer notSentCount,
                        TelemetryErrorCode errorCode,
                        String message) {
     }
 
     public static RepublishReadingsResponse republished(int republishedCount, int withheldCount) {
-        return new RepublishReadingsResponse(true, new Data(republishedCount, withheldCount, null, null));
+        return new RepublishReadingsResponse(true, new Data(republishedCount, withheldCount, null, null, null));
+    }
+
+    /** A run that stopped part-way, with what was and was not sent before it stopped. */
+    public static RepublishReadingsResponse stopped(int republishedCount,
+                                                    int withheldCount,
+                                                    int notSentCount,
+                                                    TelemetryErrorCode errorCode,
+                                                    String message) {
+        return new RepublishReadingsResponse(false,
+                new Data(republishedCount, withheldCount, notSentCount, errorCode, message));
     }
 
     public static RepublishReadingsResponse rejected(TelemetryErrorCode errorCode, String message) {
-        return new RepublishReadingsResponse(false, new Data(null, null, errorCode, message));
+        return new RepublishReadingsResponse(false, new Data(null, null, null, errorCode, message));
     }
 }

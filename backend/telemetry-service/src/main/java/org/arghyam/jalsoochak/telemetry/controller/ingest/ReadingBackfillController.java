@@ -44,6 +44,8 @@ public class ReadingBackfillController {
 
     private static final Logger log = LoggerFactory.getLogger(ReadingBackfillController.class);
     private static final String API = "/api/v1/telemetry/readings/republish";
+    static final String NOT_SENT_MESSAGE =
+            "Analytics stopped accepting readings part-way, so the rest were not sent. Send the same range again.";
 
     private final ReadingBackfillService readingBackfillService;
     private final TelemetryApiKeyService telemetryApiKeyService;
@@ -90,6 +92,11 @@ public class ReadingBackfillController {
                     request.getStateSchemeId(),
                     request.getCentreSchemeId(),
                     channel.orElse(null));
+            if (outcome.notSentCount() > 0) {
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(RepublishReadingsResponse.stopped(
+                        outcome.republishedCount(), outcome.withheldCount(), outcome.notSentCount(),
+                        TelemetryErrorCode.PROCESSING_FAILED, NOT_SENT_MESSAGE));
+            }
             return ResponseEntity.ok(RepublishReadingsResponse.republished(
                     outcome.republishedCount(), outcome.withheldCount()));
         } catch (ResponseStatusException e) {
