@@ -1133,8 +1133,8 @@ V56's column comments (`3570acb2`, `a3af46f1`) were edited in place, since V56 h
 
 ### Phase 6: WhatsApp ELM and PDU (follow-up, outline only)
 
-- `/selected/channel` returns a channel code and an `isPdu` flag. Stop writing a list position into
-  `scheme_master_table.channel` (`ConversationSelectionService`, line 281).
+- `/selected/channel` returns a channel code and an `isPdu` flag. It already stores the channel's
+  code, not a list position, in `scheme_master_table.channel_id` (`bff3929d`).
 - The PDU flow asks for the minutes only, with no photo step.
 - A PDU submission adds a new row instead of overwriting the day's row, keeping the 1,440-minute
   limits. Today a WhatsApp manual value from a PDU operator overwrites their latest row that day.
