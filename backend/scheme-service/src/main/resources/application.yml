@@ -78,7 +78,7 @@ storage:
   presigned-base-url: ${STORAGE_PRESIGNED_BASE_URL:} # public origin for download links; blank = the URL as signed
   presigned-ttl-seconds: ${STORAGE_PRESIGNED_TTL_SECONDS:3600}
 
-# State master-data sync (Assam: JJM Brain). Off unless STATE_SYNC_ENABLED=true; with it off no
+# State master-data sync (JJM Brain). Off unless STATE_SYNC_ENABLED=true; with it off no
 # schedule is registered and the upstream is never called. Start in DRY_RUN: runs record counts and
 # issues (GET /api/v1/scheme/state-sync/issues) but roll back every write.
 state-sync:

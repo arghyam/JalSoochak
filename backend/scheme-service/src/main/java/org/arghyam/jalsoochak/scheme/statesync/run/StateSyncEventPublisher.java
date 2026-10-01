@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.scheme.kafka.SchemeDimensionEvents;
 import org.arghyam.jalsoochak.scheme.statesync.reconcile.SchemeReconciler.Reassignment;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,9 +46,20 @@ public class StateSyncEventPublisher {
         this.schemeDimensionEvents = schemeDimensionEvents;
     }
 
-    /** @return how many events failed to publish (the next full run sends every scheme again) */
-    public int publish(String schema, int tenantId, PendingEvents events) {
+    /**
+     * What did not reach Kafka. A failed {@code SCHEME_DIMENSION_REPLACED} is repaired by
+     * {@code POST /api/v1/scheme/schemes/dimensions/republish}. A failed department or user event is
+     * only counted; it goes out again when that node or user next changes. A failed
+     * {@code SCHEME_READINGS_REASSIGNED} cannot come back on its own (the placeholder is already
+     * retired), so it is returned by itself for the run to record with both scheme ids.
+     */
+    public record Outcome(int failures, List<Reassignment> failedReassignments) {
+    }
+
+    /** Sends everything in order; never throws for a single failed send. */
+    public Outcome publish(String schema, int tenantId, PendingEvents events) {
         int failures = 0;
+        List<Reassignment> failedReassignments = new ArrayList<>();
         for (Map<String, Object> event : events.departmentEvents()) {
             failures += send(SCHEME_TOPIC, event);
         }
@@ -63,12 +75,16 @@ public class StateSyncEventPublisher {
             event.put("tenantId", tenantId);
             event.put("fromSchemeId", move.fromSchemeId());
             event.put("toSchemeId", move.toSchemeId());
-            failures += send(SCHEME_TOPIC, event);
+            int failed = send(SCHEME_TOPIC, event);
+            failures += failed;
+            if (failed > 0) {
+                failedReassignments.add(move);
+            }
         }
         if (failures > 0) {
             log.warn("[state-sync] {} analytics event(s) failed to publish for tenant {}", failures, tenantId);
         }
-        return failures;
+        return new Outcome(failures, List.copyOf(failedReassignments));
     }
 
     private int send(String topic, Map<String, Object> event) {

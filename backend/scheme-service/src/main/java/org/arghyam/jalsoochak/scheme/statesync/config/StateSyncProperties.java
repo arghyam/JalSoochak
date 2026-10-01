@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import java.time.Duration;
 
 /**
- * Settings for the state master-data sync (Assam: JJM Brain).
+ * Settings for the state master-data sync.
  *
  * <p>{@link #enabled} is the master switch. While it is false no schedule is registered, the admin
  * endpoints refuse to start a run, and nothing calls the upstream API — the feature is inert.
@@ -86,6 +86,11 @@ public class StateSyncProperties {
     public static class Jjm {
         private String baseUrl = "https://jjmbrain.in/api/v1";
         private String apiKey;
+        /**
+         * Allows a plain-HTTP {@link #baseUrl}. Off by default, because the API key travels in a request
+         * header; only a local stub server (tests) turns it on.
+         */
+        private boolean allowInsecureBaseUrl = false;
         /** Minimum gap between two requests — a polite ceiling until the state publishes a rate limit. */
         private Duration minRequestInterval = Duration.ofMillis(500);
         private Duration connectTimeout = Duration.ofSeconds(10);

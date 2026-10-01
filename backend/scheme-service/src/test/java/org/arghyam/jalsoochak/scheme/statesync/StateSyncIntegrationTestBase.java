@@ -20,7 +20,7 @@ import java.util.List;
 /**
  * Real PostgreSQL with the tables the state sync writes, in their production shape
  * ({@code sql/state-sync-schema.sql} is pg_dumped from a database migrated through V61). Each test
- * starts from an Assam tenant with both location trees configured, the four user types, a state LGD
+ * starts from one tenant ({@code tenant_as}) with both location trees configured, the four user types, a state LGD
  * node and a state department node, and one actor user.
  */
 @Testcontainers

@@ -32,6 +32,12 @@ public class SchemeDimensionReplacedEvent {
     private Integer fhtcCount;
     private Integer plannedFhtc;
     private Integer houseHoldCount;
+    /**
+     * {@code true} when {@code rows} is the scheme's complete, current location set, so an empty list
+     * means "no locations": its stale rows are deleted. Absent or {@code false}: an empty list means
+     * "locations not sent", and only the attributes are realigned.
+     */
+    private Boolean locationsKnown;
     private List<Row> rows;
 
     /**

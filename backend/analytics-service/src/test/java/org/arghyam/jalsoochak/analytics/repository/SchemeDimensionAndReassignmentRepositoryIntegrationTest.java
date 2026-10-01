@@ -144,6 +144,18 @@ class SchemeDimensionAndReassignmentRepositoryIntegrationTest {
         assertThat(dimRows()).hasSize(2).extracting(r -> r.get("scheme_name")).containsOnly("RENAMED");
     }
 
+    @Test
+    void aKnownEmptyLocationSetRemovesEveryRowOfTheScheme() {
+        replaceRepository.replace(scheme("CHAPATOLI", row(501, 61), row(502, 61)));
+        SchemeDimensionReplacedEvent noLocations = scheme("CHAPATOLI");
+        noLocations.setLocationsKnown(true);
+
+        int removed = replaceRepository.replace(noLocations);
+
+        assertThat(removed).isEqualTo(2);
+        assertThat(dimRows()).isEmpty();
+    }
+
     // ── reassignment ────────────────────────────────────────────────────────
 
     private void reading(int schemeId, LocalDate date, Long sourceReadingId) {

@@ -26,8 +26,9 @@ import java.util.regex.Pattern;
  * ancestor id at levels 1–6 of both trees ({@code null} where a tree has no node at that level), read
  * with one recursive query per tree for the schemes asked about only.
  *
- * <p>A scheme with no LGD mapping is sent with no rows; analytics then only realigns its attributes on
- * whatever rows it already holds.
+ * <p>{@code locationsKnown} is always {@code true}: the rows were read from the tenant DB, so an empty
+ * list means the scheme has no live LGD mapping and analytics drops the location rows it still holds
+ * for it. An event without the flag (none is sent today) only realigns attributes.
  */
 @Component
 public class SchemeDimensionEvents {
@@ -93,6 +94,7 @@ public class SchemeDimensionEvents {
                 event.put("fhtcCount", a.fhtcCount());
                 event.put("plannedFhtc", a.plannedFhtc());
                 event.put("houseHoldCount", a.houseHoldCount());
+                event.put("locationsKnown", true);
                 event.put("rows", rows);
                 events.add(event);
             }

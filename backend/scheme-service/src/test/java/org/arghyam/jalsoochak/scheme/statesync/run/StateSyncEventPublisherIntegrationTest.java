@@ -117,9 +117,22 @@ class StateSyncEventPublisherIntegrationTest extends StateSyncIntegrationTestBas
         List<Map<String, Object>> events = builder.build(SCHEMA, TENANT_ID, List.of(bare, deleted));
 
         assertThat(events).singleElement().satisfies(e -> {
-            assertThat(e).containsEntry("schemeId", bare).containsEntry("stateSchemeId", 0).containsEntry("centreSchemeId", 0);
+            assertThat(e).containsEntry("schemeId", bare).containsEntry("stateSchemeId", 0).containsEntry("centreSchemeId", 0)
+                    .containsEntry("locationsKnown", true);
             assertThat((List<?>) e.get("rows")).isEmpty();
         });
+    }
+
+    @Test
+    void returnsTheReassignmentsKafkaDidNotAccept() {
+        when(kafka.publishJson(eq("scheme-service-topic"),
+                argThat(e -> "SCHEME_READINGS_REASSIGNED".equals(((Map<?, ?>) e).get("eventType"))))).thenReturn(false);
+
+        StateSyncEventPublisher.Outcome outcome = publisher.publish(SCHEMA, TENANT_ID, new PendingEvents(List.of(), List.of(),
+                List.of(), List.of(new Reassignment(99, 10), new Reassignment(98, 11))));
+
+        assertThat(outcome.failures()).isEqualTo(2);
+        assertThat(outcome.failedReassignments()).containsExactly(new Reassignment(99, 10), new Reassignment(98, 11));
     }
 
     @Test

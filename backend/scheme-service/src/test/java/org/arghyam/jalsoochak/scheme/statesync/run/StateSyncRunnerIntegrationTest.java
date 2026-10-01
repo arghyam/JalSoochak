@@ -168,6 +168,67 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
     }
 
     @Test
+    void aRunThatLosesItsLockRollsBackInsteadOfCommitting() {
+        properties.setMode(Mode.APPLY);
+        // Another pod takes the run over while this one is still fetching.
+        source.onVillages = () -> jdbc.update(
+                "UPDATE common_schema.state_sync_run_table SET status = 'ABANDONED' WHERE status = 'RUNNING'");
+
+        RunResult result = runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+
+        assertThat(result.succeeded()).isFalse();
+        assertThat(result.error()).contains("lost its lock");
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.scheme_master_table")).isZero();
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.department_location_master_table")).isEqualTo(1);
+        assertThat(runRepository.listRuns(TENANT_ID, 1)).singleElement()
+                .satisfies(r -> assertThat(r.status()).isEqualTo("ABANDONED"));
+        verify(kafka, never()).publishJson(anyString(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void theHeartbeatKeepsTickingDuringALongPhase() {
+        properties.setMode(Mode.DRY_RUN);
+        properties.setStaleRunAfter(Duration.ofSeconds(4)); // heartbeat every second
+        java.util.List<java.sql.Timestamp> seen = new java.util.ArrayList<>();
+        source.onVillages = () -> {
+            seen.add(jdbc.queryForObject("SELECT heartbeat_at FROM common_schema.state_sync_run_table "
+                    + "WHERE status = 'RUNNING'", java.sql.Timestamp.class));
+            try {
+                Thread.sleep(2500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            seen.add(jdbc.queryForObject("SELECT heartbeat_at FROM common_schema.state_sync_run_table "
+                    + "WHERE status = 'RUNNING'", java.sql.Timestamp.class));
+        };
+
+        assertThat(runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow().succeeded()).isTrue();
+
+        assertThat(seen.get(1)).isAfter(seen.get(0));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aReassignmentEventKafkaRejectsIsRecordedForReplay() {
+        properties.setMode(Mode.APPLY);
+        int placeholder = jdbc.queryForObject("INSERT INTO tenant_as.scheme_master_table (state_scheme_id, centre_scheme_id, "
+                + "scheme_name, work_status, operating_status, is_auto_provisioned) VALUES ('', '8165607', "
+                + "'Auto-provisioned scheme', 0, 0, TRUE) RETURNING id", Integer.class);
+        reading(placeholder, LocalDateTime.of(2026, 7, 10, 8, 0));
+        when(kafka.publishJson(eq("scheme-service-topic"), org.mockito.ArgumentMatchers.argThat(
+                e -> "SCHEME_READINGS_REASSIGNED".equals(((Map<String, Object>) e).get("eventType"))))).thenReturn(false);
+
+        RunResult result = runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+
+        int real = jdbc.queryForObject("SELECT id FROM tenant_as.scheme_master_table WHERE state_scheme_code = 'SCH-000008'",
+                Integer.class);
+        assertThat(result.issues()).filteredOn(i -> i.category().equals("REASSIGNMENT_EVENT_FAILED")).singleElement()
+                .satisfies(i -> assertThat(i.detail()).containsEntry("fromSchemeId", placeholder).containsEntry("toSchemeId", real));
+        assertThat(runRepository.listIssues(TENANT_ID, result.runId(), "REASSIGNMENT_EVENT_FAILED", 10, 0)).hasSize(1);
+        assertThat(result.counts()).containsEntry("events.failed", 1);
+    }
+
+    @Test
     void anUpstreamFailureFailsTheRunAndWritesNothing() {
         properties.setMode(Mode.APPLY);
         source.failVillages = true;
@@ -235,6 +296,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         final List<UpstreamScheme> schemes = new ArrayList<>();
         boolean failVillages;
         boolean deltaReturnsNothing;
+        Runnable onVillages = () -> { };
         int calls;
         LocalDateTime lastUpdatedSince;
         String lastCentreLookup;
@@ -250,6 +312,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         @Override
         public List<UpstreamNode> villages() {
             calls++;
+            onVillages.run();
             if (failVillages) {
                 throw new StateMasterDataException("village-master: upstream down");
             }

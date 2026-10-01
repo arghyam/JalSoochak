@@ -189,7 +189,7 @@ must be public and anonymously readable either way.
 Phone numbers are PII — log them only at `DEBUG` level. Never include raw phone numbers in
 `INFO`/`WARN`/`ERROR` log statements.
 
-## State master-data sync (JJM Brain, Assam)
+## State master-data sync (JJM Brain)
 
 `scheme-service` package `statesync` pulls the state's master data and reconciles it into the tenant
 schema. Off unless `STATE_SYNC_ENABLED=true`; `STATE_SYNC_MODE=DRY_RUN` (default) rolls every write back

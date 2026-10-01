@@ -61,7 +61,7 @@ Safety rules:
 
 | Event (`scheme-service-topic`) | Analytics does |
 | --- | --- |
-| `SCHEME_DIMENSION_REPLACED` | Replaces the scheme's whole `dim_scheme_table` set: one row per village × sub-division it is mapped to, each with its ancestor ids at levels 1–6. Rows for locations it left are deleted, and every remaining row carries the same name, ids, statuses and FHTC counts. This ends the per-row drift the old single-row `SCHEME_UPDATED` left behind. An event with no rows only realigns the attributes. |
+| `SCHEME_DIMENSION_REPLACED` | Replaces the scheme's whole `dim_scheme_table` set: one row per village × sub-division it is mapped to, each with its ancestor ids at levels 1–6. Rows for locations it left are deleted, and every remaining row carries the same name, ids, statuses and FHTC counts. This ends the per-row drift the old single-row `SCHEME_UPDATED` left behind. An event with no rows and `locationsKnown: true` (what scheme-service always sends) deletes the scheme's rows, because it has no location left; an event without the flag only realigns the attributes. |
 | `SCHEME_READINGS_REASSIGNED {from, to}` | In one transaction holding both schemes' ingestion locks: moves the meter-reading facts (including pre-V56 rows with no `source_reading_id`, which a republish would have duplicated), plus attendance, anomaly and escalation facts. It then works out water quantity again for each affected day (removed from the placeholder, recalculated on the real scheme) and drops the placeholder's daily aggregates and dim rows. After commit it re-aggregates the affected dates in the background, in 31-day `backfillWindow` chunks. |
 
 Every other path that changes a scheme sends the same event too: the scheme and mapping CSV uploads

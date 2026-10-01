@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Port to a state's master-data system. The only adapter today is {@code JjmBrainClient} (Assam);
+ * Port to a state's master-data system. The only adapter today is {@code JjmBrainClient};
  * the reconcilers depend on this interface alone, so another state's system plugs in here.
  *
  * <p>Every list method returns the complete list, having paged through the upstream itself.

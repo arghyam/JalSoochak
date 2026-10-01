@@ -54,9 +54,10 @@ public class SchemeDimensionReplaceRepository {
 
     /**
      * Makes the scheme's rows exactly {@code event.rows}: rows for locations it no longer has are
-     * deleted, the rest are upserted with the event's attributes. With no rows in the event the
-     * location set is left alone and only the attributes are written onto every existing row — a
-     * scheme is never left with no row at all.
+     * deleted, the rest are upserted with the event's attributes. With no rows, it depends on
+     * {@code locationsKnown}: {@code true} means the scheme has no location left, so every row it holds
+     * is deleted; otherwise the location set is left alone and only the attributes are written onto the
+     * existing rows.
      *
      * @return rows deleted
      */
@@ -64,6 +65,10 @@ public class SchemeDimensionReplaceRepository {
     public int replace(SchemeDimensionReplacedEvent e) {
         List<SchemeDimensionReplacedEvent.Row> rows = e.getRows() == null ? List.of() : e.getRows();
         if (rows.isEmpty()) {
+            if (Boolean.TRUE.equals(e.getLocationsKnown())) {
+                return jdbcTemplate.update("DELETE FROM analytics_schema.dim_scheme_table WHERE tenant_id = ? AND scheme_id = ?",
+                        e.getTenantId(), e.getSchemeId());
+            }
             syncAttributes(e);
             return 0;
         }

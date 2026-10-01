@@ -35,12 +35,13 @@ import java.util.Set;
 import java.util.function.Function;
 
 /**
- * {@link StateMasterDataSource} over the JJM Brain Arghyam integration API (Assam), v1.
+ * {@link StateMasterDataSource} over the JJM Brain Arghyam integration API, v1.
  *
  * <p>Defensive by design, because the published samples disagree with each other:
  * <ul>
  *   <li><b>Paging</b> walks {@code ?page=N} and stops on an empty page, a short page or
- *       {@code meta.last_page}. It never follows {@code links.next}: two endpoints document links
+ *       {@code meta.last_page}. "Short" is measured against {@code meta.per_page}, or the first page's
+ *       size where the upstream omits it. It never follows {@code links.next}: two endpoints document links
  *       pointing at {@code http://127.0.0.1:8000}, and two return them empty. {@code meta.total} is
  *       not trusted as a stop condition (a sample reports {@code total: 1} beside two rows).</li>
  *   <li><b>De-duplication</b> by code, since offset paging over live data can repeat a row.</li>
@@ -56,7 +57,6 @@ import java.util.function.Function;
 public class JjmBrainClient implements StateMasterDataSource {
 
     private static final String PREFIX = "/arghyam/";
-    private static final int DEFAULT_PAGE_SIZE = 100;
     private static final DateTimeFormatter UPSTREAM_DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
@@ -87,6 +87,7 @@ public class JjmBrainClient implements StateMasterDataSource {
         if (settings.getApiKey() == null || settings.getApiKey().isBlank()) {
             throw new IllegalStateException("state-sync.jjm.api-key (JJM_BRAIN_API_KEY) is required when state sync is enabled");
         }
+        requireHttps(settings);
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout((int) settings.getConnectTimeout().toMillis());
         requestFactory.setReadTimeout((int) settings.getReadTimeout().toMillis());
@@ -99,6 +100,23 @@ public class JjmBrainClient implements StateMasterDataSource {
         this.objectMapper = objectMapper;
         this.settings = settings;
         this.sleeper = sleeper;
+    }
+
+    /** The API key is sent on every request, so it only goes over HTTPS unless a test stub opts out. */
+    private static void requireHttps(StateSyncProperties.Jjm settings) {
+        String scheme;
+        try {
+            scheme = settings.getBaseUrl() == null ? null : URI.create(settings.getBaseUrl().trim()).getScheme();
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("state-sync.jjm.base-url (JJM_BRAIN_BASE_URL) is not a valid URL", e);
+        }
+        if ("https".equalsIgnoreCase(scheme)) {
+            return;
+        }
+        if ("http".equalsIgnoreCase(scheme) && settings.isAllowInsecureBaseUrl()) {
+            return;
+        }
+        throw new IllegalStateException("state-sync.jjm.base-url (JJM_BRAIN_BASE_URL) must use https");
     }
 
     // ── Masters ─────────────────────────────────────────────────────────────
@@ -192,6 +210,9 @@ public class JjmBrainClient implements StateMasterDataSource {
                                       Function<JsonNode, T> mapper, Function<T, String> codeOf) {
         Map<String, T> byCode = new LinkedHashMap<>();
         int duplicates = 0;
+        // The page size the "short page means last page" test compares against: meta.per_page when the
+        // upstream sends it, otherwise the size of the first page (several endpoints omit it).
+        Integer pageSize = null;
         for (int page = 1; ; page++) {
             if (page > settings.getMaxPages()) {
                 throw new StateMasterDataException(endpoint + ": still returning rows after "
@@ -214,9 +235,13 @@ public class JjmBrainClient implements StateMasterDataSource {
                 }
             }
             JsonNode meta = data.path("meta");
-            int perPage = meta.path("per_page").asInt(DEFAULT_PAGE_SIZE);
+            if (meta.hasNonNull("per_page") && meta.get("per_page").asInt() > 0) {
+                pageSize = meta.get("per_page").asInt();
+            } else if (pageSize == null && !rows.isEmpty()) {
+                pageSize = rows.size();
+            }
             Integer lastPage = meta.hasNonNull("last_page") ? meta.get("last_page").asInt() : null;
-            if (rows.isEmpty() || rows.size() < perPage || (lastPage != null && page >= lastPage)) {
+            if (rows.isEmpty() || rows.size() < pageSize || (lastPage != null && page >= lastPage)) {
                 break;
             }
         }

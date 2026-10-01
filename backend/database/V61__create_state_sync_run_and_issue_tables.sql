@@ -1,7 +1,7 @@
 -- ============================================================
 -- Migration: V61 - State master-data sync bookkeeping
 -- ------------------------------------------------------------
--- scheme-service pulls a state's master data (Assam: JJM Brain) on a schedule
+-- scheme-service pulls a state's master data on a schedule
 -- and reconciles it into the tenant schema. Two tables back that job:
 --
 --   state_sync_run_table    one row per run. Doubles as the cross-pod lock:

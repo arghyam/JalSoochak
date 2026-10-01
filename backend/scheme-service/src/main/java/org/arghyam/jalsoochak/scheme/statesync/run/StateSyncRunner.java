@@ -20,7 +20,6 @@ import org.arghyam.jalsoochak.scheme.statesync.run.StateSyncRunRepository.Tenant
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.net.InetAddress;
@@ -36,6 +35,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -50,8 +51,10 @@ import java.util.function.Supplier;
  *   <li><b>publish</b> analytics events, after commit and only in {@code APPLY};</li>
  *   <li><b>finish</b> the run row with its counts and persist its issues — in both modes.</li>
  * </ol>
- * The heartbeat is written in its own transaction so other pods see it while the data transaction is
- * still open.
+ * A heartbeat thread refreshes the run row for the whole run — fetch, placeholder look-ups and
+ * reconcile — outside the data transaction, so other pods see it while that transaction is open. Just
+ * before committing, the data transaction re-reads its run row under a lock and rolls back if another
+ * pod has taken the run over.
  */
 @Service
 @Slf4j
@@ -83,7 +86,6 @@ public class StateSyncRunner {
     private final PiiEncryptionService pii;
     private final StateSyncEventPublisher eventPublisher;
     private final TransactionTemplate dataTransaction;
-    private final TransactionTemplate ownTransaction;
     /** IMIS id → when to ask again, for placeholders the upstream did not know. Per pod; a restart just asks again. */
     private final Map<String, Instant> placeholderCooldown = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
@@ -104,8 +106,6 @@ public class StateSyncRunner {
         this.pii = pii;
         this.eventPublisher = eventPublisher;
         this.dataTransaction = new TransactionTemplate(transactionManager);
-        this.ownTransaction = new TransactionTemplate(transactionManager);
-        this.ownTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /** Scheduled entry point: runs on the caller's thread; a held lock means another pod has it — skip. */
@@ -177,21 +177,33 @@ public class StateSyncRunner {
         boolean dryRun = properties.getMode() == StateSyncProperties.Mode.DRY_RUN;
         log.info("[state-sync] run {} {} started (mode={}, tenant={})", runId, kind, properties.getMode(),
                 ctx.tenant().stateCode());
+        ScheduledExecutorService heartbeat = startHeartbeat(runId);
         try {
             Fetched fetched = fetch(ctx, runId, kind, schemeRef, report);
             PendingEvents events = dataTransaction.execute(status -> {
                 PendingEvents pending = reconcile(ctx, kind, fetched, report);
+                if (!runRepository.stillRunning(runId)) {
+                    throw new IllegalStateException("run " + runId + " lost its lock to another pod; rolled back");
+                }
                 if (dryRun) {
                     status.setRollbackOnly();
                 }
                 return pending;
             });
             if (!dryRun && events != null) {
-                report.add("events.failed", eventPublisher.publish(ctx.tenant().schemaName(), ctx.tenant().id(), events));
+                StateSyncEventPublisher.Outcome published =
+                        eventPublisher.publish(ctx.tenant().schemaName(), ctx.tenant().id(), events);
+                report.add("events.failed", published.failures());
+                for (SchemeReconciler.Reassignment move : published.failedReassignments()) {
+                    report.issue("SCHEME", null, "REASSIGNMENT_EVENT_FAILED",
+                            Map.of("fromSchemeId", move.fromSchemeId(), "toSchemeId", move.toSchemeId()));
+                }
             }
         } catch (RuntimeException e) {
             error = e.getClass().getSimpleName() + ": " + e.getMessage();
             log.error("[state-sync] run {} {} failed: {}", runId, kind, error, e);
+        } finally {
+            heartbeat.shutdownNow();
         }
         boolean succeeded = error == null;
         try {
@@ -296,12 +308,31 @@ public class StateSyncRunner {
     private <T> List<T> step(long runId, String name, Supplier<List<T>> call, SyncReport report) {
         List<T> rows = call.get();
         report.add("fetched." + name, rows.size());
-        heartbeat(runId);
         return rows;
     }
 
-    private void heartbeat(long runId) {
-        ownTransaction.executeWithoutResult(s -> runRepository.heartbeat(runId));
+    /**
+     * Refreshes the run row every quarter of {@code stale-run-after} (at most every minute) until the run
+     * ends. Plain auto-committed updates on their own thread, so they are visible while the data
+     * transaction is still open.
+     */
+    private ScheduledExecutorService startHeartbeat(long runId) {
+        ScheduledExecutorService beat = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "state-sync-heartbeat");
+            t.setDaemon(true);
+            return t;
+        });
+        long periodMs = Math.max(1000L, Math.min(properties.getStaleRunAfter().toMillis() / 4, 60_000L));
+        beat.scheduleAtFixedRate(() -> {
+            try {
+                if (!runRepository.heartbeat(runId)) {
+                    log.warn("[state-sync] run {} is no longer RUNNING; it will roll back before committing", runId);
+                }
+            } catch (RuntimeException e) {
+                log.warn("[state-sync] run {} heartbeat failed: {}", runId, e.getMessage());
+            }
+        }, periodMs, periodMs, TimeUnit.MILLISECONDS);
+        return beat;
     }
 
     // ── reconcile ───────────────────────────────────────────────────────────

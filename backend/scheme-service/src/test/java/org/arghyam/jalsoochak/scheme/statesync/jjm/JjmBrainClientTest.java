@@ -48,6 +48,7 @@ class JjmBrainClientTest {
         StateSyncProperties.Jjm settings = new StateSyncProperties.Jjm();
         settings.setBaseUrl(wireMock.baseUrl() + "/api/v1");
         settings.setApiKey(API_KEY);
+        settings.setAllowInsecureBaseUrl(true); // WireMock serves plain HTTP
         settings.setMinRequestInterval(Duration.ZERO);
         settings.setInitialBackoff(Duration.ofSeconds(2));
         settings.setMaxAttempts(3);
@@ -65,6 +66,46 @@ class JjmBrainClientTest {
         assertThatThrownBy(() -> new JjmBrainClient(settings, new ObjectMapper()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("JJM_BRAIN_API_KEY");
+    }
+
+    @Test
+    void refusesAPlainHttpBaseUrlUnlessExplicitlyAllowed() {
+        StateSyncProperties.Jjm settings = new StateSyncProperties.Jjm();
+        settings.setApiKey(API_KEY);
+        settings.setBaseUrl("http://jjmbrain.example/api/v1");
+
+        assertThatThrownBy(() -> new JjmBrainClient(settings, new ObjectMapper()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("must use https");
+
+        settings.setBaseUrl("ftp://jjmbrain.example/api/v1");
+        settings.setAllowInsecureBaseUrl(true);
+        assertThatThrownBy(() -> new JjmBrainClient(settings, new ObjectMapper()))
+                .hasMessageContaining("must use https");
+    }
+
+    @Test
+    void acceptsTheDefaultHttpsBaseUrl() {
+        StateSyncProperties.Jjm settings = new StateSyncProperties.Jjm();
+        settings.setApiKey(API_KEY);
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> new JjmBrainClient(settings, new ObjectMapper()))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void withoutPerPageItMeasuresShortPagesAgainstTheFirstPage() {
+        // 3 + 3 + 1 rows and no meta.per_page: a fixed default of 100 would stop after page 1.
+        stub("/api/v1/arghyam/village-master", 1, "{\"status\":200,\"data\":{\"data\":[%s,%s,%s],\"meta\":{}}}"
+                .formatted(village("VIL-1"), village("VIL-2"), village("VIL-3")));
+        stub("/api/v1/arghyam/village-master", 2, "{\"status\":200,\"data\":{\"data\":[%s,%s,%s],\"meta\":{}}}"
+                .formatted(village("VIL-4"), village("VIL-5"), village("VIL-6")));
+        stub("/api/v1/arghyam/village-master", 3, "{\"status\":200,\"data\":{\"data\":[%s],\"meta\":{}}}"
+                .formatted(village("VIL-7")));
+
+        assertThat(client.villages()).hasSize(7);
+        wireMock.verify(0, getRequestedFor(urlPathEqualTo("/api/v1/arghyam/village-master"))
+                .withQueryParam("page", equalTo("4")));
     }
 
     @Test

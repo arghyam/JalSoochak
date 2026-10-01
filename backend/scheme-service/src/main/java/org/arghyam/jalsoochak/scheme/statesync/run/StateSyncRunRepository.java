@@ -89,11 +89,23 @@ public class StateSyncRunRepository {
         return ids.stream().findFirst();
     }
 
-    public void heartbeat(long runId) {
-        jdbcTemplate.update("""
+    /** @return {@code false} when the run is no longer RUNNING (finished, or taken over by another pod) */
+    public boolean heartbeat(long runId) {
+        return jdbcTemplate.update("""
                 UPDATE common_schema.state_sync_run_table SET heartbeat_at = NOW()
                 WHERE id = ? AND status = 'RUNNING'
-                """, runId);
+                """, runId) > 0;
+    }
+
+    /**
+     * Whether this run still holds the lock. Called inside the run's data transaction just before it
+     * commits: {@code FOR UPDATE} holds the run row until then, so another pod's takeover — an UPDATE of
+     * this row — waits for the commit and then sees a fresh heartbeat instead of interleaving with it.
+     */
+    public boolean stillRunning(long runId) {
+        return jdbcTemplate.query(
+                "SELECT status FROM common_schema.state_sync_run_table WHERE id = ? FOR UPDATE",
+                (rs, n) -> rs.getString(1), runId).stream().findFirst().map("RUNNING"::equals).orElse(false);
     }
 
     /** Closes the run. A run already marked ABANDONED by another pod keeps that status. */
