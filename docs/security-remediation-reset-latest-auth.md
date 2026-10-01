@@ -5,7 +5,7 @@ returning `200` with or without a key. Any caller who knew an operator's phone n
 permanently zero that operator's latest confirmed meter reading.
 
 **Status:** fixed in `telemetry-service`. Callers that do not yet send a key are listed in §5 — the
-Glific flow is one of them, and is owned by a separate change.
+WhatsApp chatbot flow is one of them, and is owned by a separate change.
 
 ---
 
@@ -48,9 +48,10 @@ A fail-closed servlet filter, deny-by-default over the server-to-server prefixes
 
 - **Protected:** `/api/v1/telemetry/readings` and everything below it; every sub-path of
   `/api/v1/telemetry/schemes/`.
-- **Exempt:** an explicit allowlist — `POST /readings/glific` and `POST /schemes` — the two Glific
-  webhook routes that fall inside those prefixes. They remain unauthenticated (see §4) and are now
-  listed where a reviewer can see them, instead of being exempt by omission.
+- **Exempt:** an explicit allowlist — `POST /readings/whatsapp`, its deprecated alias
+  `POST /readings/glific`, and `POST /schemes` — the chatbot webhook routes that fall inside those
+  prefixes. They remain unauthenticated (see §4) and are now listed where a reviewer can see them,
+  instead of being exempt by omission.
 
 Consequences worth stating plainly: a new `/readings/**` endpoint is authenticated the moment it is
 mapped, and making one public takes a deliberate edit to a named allowlist. The filter normalises the
@@ -97,7 +98,7 @@ project's PII rule.
 
 | Test | Covers |
 |------|--------|
-| `TelemetryApiKeyAuthFilterTest` (10) | Missing/unknown key → 401 and the handler is never invoked; a not-yet-existing `/readings/**` route is protected by default; Glific routes stay reachable; encoded/dot-segment/double-slash paths still match; the rejection body never echoes the submitted key |
+| `TelemetryApiKeyAuthFilterTest` (10) | Missing/unknown key → 401 and the handler is never invoked; a not-yet-existing `/readings/**` route is protected by default; chatbot webhook routes stay reachable; encoded/dot-segment/double-slash paths still match; the rejection body never echoes the submitted key |
 | `BfmReadingServiceResetLatestTenantScopeTest` (8) | Cross-tenant reset refused with no write and no event published; refusal indistinguishable from an unknown contact; missing tenant → 401; the destroyed value is returned |
 | `SingleTenantTelemetryControllerUnitTest` (updated) | No key / invalid key → 401 **and the reset does not run**; valid key scopes to its tenant; the filter-resolved tenant is trusted without a second lookup; audit line contains the destroyed value and no raw phone |
 
@@ -109,9 +110,10 @@ without a Docker daemon — environmental, unrelated.)
 
 ## 4. Not fixed here — still open
 
-- **The 26 Glific webhook routes are unauthenticated at the application layer**, including
-  `POST /readings/glific` and `POST /manual-reading`, which write readings. Their only protection is
-  network placement. This is a larger change (it needs a webhook authentication scheme and a
+- **The chatbot webhook routes are unauthenticated at the application layer**, including
+  `POST /readings/whatsapp` (and its deprecated alias `POST /readings/glific`) and
+  `POST /manual-reading`, which write readings. Their only protection is network placement. This is
+  a larger change (it needs a webhook authentication scheme and a
   coordinated bot rollout) and is already recorded in
   `security-audit-non-dashboard-apis.md` §1.
 - **No rate limiting** on the reading routes. The audit log makes a mass reset detectable; it does
@@ -123,7 +125,7 @@ without a Docker daemon — environmental, unrelated.)
 ## 5. Client impact — who must now send a key
 
 No new *kind* of credential: every affected route uses the same per-tenant `X-Api-Key` header the
-Assam integration already sends. `X-Tenant-Code` is no longer consulted on these routes.
+State-IT integration already sends. `X-Tenant-Code` is no longer consulted on these routes.
 
 | Endpoint | Before | After |
 |----------|--------|-------|
@@ -135,10 +137,10 @@ Assam integration already sends. `X-Tenant-Code` is no longer consulted on these
 Callers already sending a valid key on the `/readings` routes need no change. The two rows in bold
 are the behavioural break.
 
-**Glific/WhatsApp flow — owned separately.** The bot calls `reset-latest` and currently sends no
+**WhatsApp chatbot flow — owned separately.** The bot calls `reset-latest` and currently sends no
 key, so it will receive 401 until its webhook action carries one. That change is being handled by
-another developer and is deliberately **not** part of this commit; the flow exports in
-`glific-flows/` are untouched here. Coordinate the two deploys, and note that the production flow
+another developer and is deliberately **not** part of this commit; the chatbot's flow
+exports are untouched here. Coordinate the two deploys, and note that the production flow
 export is not in this repo.
 
 Verification:

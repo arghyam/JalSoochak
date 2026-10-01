@@ -1,0 +1,27 @@
+name: Vendor Neutrality Guard
+
+# No paths filter, on purpose: the service image builds are each filtered to their own service, so a
+# vendor name reintroduced in docs/, gitbook/, backend/database/ or CLAUDE.md would trigger none of
+# them, and none of them sees the whole tree.
+on:
+  push:
+    branches: ["main", "dev"]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Check for vendor- and state-specific names
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run guard
+        run: bash .github/scripts/vendor-neutrality-guard.sh

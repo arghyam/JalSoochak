@@ -60,7 +60,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
@@ -69,10 +69,10 @@ class BfmReadingServiceResetLatestTenantScopeTest {
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
-    private FlowVisionReadingsRetryService flowVisionReadingsRetryService;
+    private OcrReadingsRetryService ocrReadingsRetryService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -119,7 +119,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
     /** Same sentinel rule as the correction path: a 0 extracted_reading means "no extraction", not 0. */
     @Test
     void resettingARowWithNoExtractedValuePublishesNoExtractedReading() {
-        when(glificOperatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
+        when(operatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
                 .thenReturn(new TelemetryOperatorWithSchema(CALLER_SCHEMA, operator(CALLER_TENANT_ID)));
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
                 .thenReturn(Optional.of(new TelemetryLatestFlowReadingRecord(
@@ -140,7 +140,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
 
     @Test
     void resetsTheReadingWhenTheOperatorBelongsToTheAuthenticatedTenant() {
-        when(glificOperatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
+        when(operatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
                 .thenReturn(new TelemetryOperatorWithSchema(CALLER_SCHEMA, operator(CALLER_TENANT_ID)));
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
                 .thenReturn(Optional.of(reading()));
@@ -161,7 +161,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
      */
     @Test
     void clearsTheQuarantineMarkerAlongWithTheValueItDescribed() {
-        when(glificOperatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
+        when(operatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
                 .thenReturn(new TelemetryOperatorWithSchema(CALLER_SCHEMA, operator(CALLER_TENANT_ID)));
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
                 .thenReturn(Optional.of(new TelemetryLatestFlowReadingRecord(
@@ -180,7 +180,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
     /** Unconditional, so no branch on the row's prior state can drift back in. */
     @Test
     void clearsTheMarkerOnACleanRowToo() {
-        when(glificOperatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
+        when(operatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
                 .thenReturn(new TelemetryOperatorWithSchema(CALLER_SCHEMA, operator(CALLER_TENANT_ID)));
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
                 .thenReturn(Optional.of(reading()));
@@ -192,7 +192,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
 
     @Test
     void returnsTheDestroyedValueSoTheResetCanBeAudited() {
-        when(glificOperatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
+        when(operatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
                 .thenReturn(new TelemetryOperatorWithSchema(CALLER_SCHEMA, operator(CALLER_TENANT_ID)));
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
                 .thenReturn(Optional.of(reading()));
@@ -208,7 +208,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
     void refusesToResetAnOperatorBelongingToAnotherTenant() {
         // The phone lookup falls back to other tenants when the key's tenant has no match, so a valid
         // tenant-A key must not be able to reach a tenant-B operator's reading.
-        when(glificOperatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
+        when(operatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
                 .thenReturn(new TelemetryOperatorWithSchema(OTHER_SCHEMA, operator(OTHER_TENANT_ID)));
 
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
@@ -223,12 +223,12 @@ class BfmReadingServiceResetLatestTenantScopeTest {
     void crossTenantRefusalIsIndistinguishableFromAnUnknownContact() {
         // Distinct messages would turn the endpoint into an oracle for "does this phone exist in some
         // other tenant", so both misses answer identically.
-        when(glificOperatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
+        when(operatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
                 .thenReturn(new TelemetryOperatorWithSchema(OTHER_SCHEMA, operator(OTHER_TENANT_ID)));
         ResponseStatusException crossTenant = assertThrows(ResponseStatusException.class,
                 () -> service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID));
 
-        when(glificOperatorContextService.resolveOperatorWithSchema("918888888888", CALLER_TENANT_ID))
+        when(operatorContextService.resolveOperatorWithSchema("918888888888", CALLER_TENANT_ID))
                 .thenThrow(new IllegalStateException("No operator found for contactId 918888888888"));
         ResponseStatusException unknown = assertThrows(ResponseStatusException.class,
                 () -> service.resetLatestConfirmedReadingByPhone("918888888888", CALLER_TENANT_ID));
@@ -239,7 +239,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
 
     @Test
     void unknownContactIsNotFoundRatherThanAServerError() {
-        when(glificOperatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
+        when(operatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
                 .thenThrow(new IllegalStateException("No operator found for contactId"));
 
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
@@ -256,7 +256,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                 () -> service.resetLatestConfirmedReadingByPhone(PHONE, null));
 
         assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
-        verifyNoInteractions(glificOperatorContextService);
+        verifyNoInteractions(operatorContextService);
         verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
     }
 
@@ -266,12 +266,12 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                 () -> service.resetLatestConfirmedReadingByPhone("  ", CALLER_TENANT_ID));
 
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatusCode());
-        verifyNoInteractions(glificOperatorContextService);
+        verifyNoInteractions(operatorContextService);
     }
 
     @Test
     void missingReadingIsNotFound() {
-        when(glificOperatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
+        when(operatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
                 .thenReturn(new TelemetryOperatorWithSchema(CALLER_SCHEMA, operator(CALLER_TENANT_ID)));
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
                 .thenReturn(Optional.empty());

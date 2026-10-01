@@ -10,9 +10,9 @@ import org.springframework.validation.annotation.Validated;
  * Bound from the {@code storage.*} namespace in application.yml.
  *
  * <p>Setting {@code storage.endpoint} to a non-blank URL activates path-style
- * access and endpoint override, which is required for MinIO, Cloudflare R2,
- * DigitalOcean Spaces, and other S3-compatible providers. Leave it blank to
- * use real AWS S3 with the default regional endpoint resolution.
+ * access and endpoint override, which most non-AWS S3-compatible stores
+ * require. Leave it blank to use real AWS S3 with the default regional
+ * endpoint resolution.
  */
 @ConfigurationProperties(prefix = "storage")
 @Data
@@ -29,12 +29,12 @@ public class StorageProperties {
     private String provider = "s3";
 
     /**
-     * Custom endpoint URL. Set to MinIO/R2/etc. URL for non-AWS providers.
+     * Custom endpoint URL of a non-AWS S3-compatible store.
      * Leave blank for real AWS S3.
      */
     private String endpoint;
 
-    /** AWS region (or a dummy value like {@code us-east-1} for MinIO). */
+    /** Signing region (a placeholder like {@code us-east-1} for a store that ignores it). */
     @NotBlank
     private String region = "ap-south-1";
 

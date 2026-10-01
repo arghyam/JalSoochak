@@ -2,7 +2,7 @@ package org.arghyam.jalsoochak.telemetry.ingest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -31,7 +31,7 @@ class CanonicalReadingRequestMapperTest {
                 }
                 """;
 
-        AssamReadingRequest request = mapper.map(objectMapper.readTree(json));
+        CanonicalReadingRequest request = mapper.map(objectMapper.readTree(json));
 
         assertNotNull(request);
         assertEquals("https://example.com/meter.jpg", request.getReadingUrl());
@@ -55,7 +55,7 @@ class CanonicalReadingRequestMapperTest {
                 }
                 """;
 
-        AssamReadingRequest request = mapper.map(objectMapper.readTree(json));
+        CanonicalReadingRequest request = mapper.map(objectMapper.readTree(json));
 
         assertEquals("91XXXXXXXXXX", request.getPhoneNumber());
         assertEquals("30178236", request.getStateSchemeId());
@@ -63,7 +63,7 @@ class CanonicalReadingRequestMapperTest {
 
     @Test
     void nullNodeYieldsEmptyRequestRatherThanNull() {
-        AssamReadingRequest request = mapper.map(objectMapper.nullNode());
+        CanonicalReadingRequest request = mapper.map(objectMapper.nullNode());
         assertNotNull(request);
         assertNull(request.getPhoneNumber());
     }
@@ -78,14 +78,14 @@ class CanonicalReadingRequestMapperTest {
         // The mapper does not validate — it only translates a state's wire format. Whatever it
         // produces is checked by the controller against the canonical codes, so every format is
         // held to the same rule.
-        AssamReadingRequest request = mapper.map(objectMapper.createObjectNode().put("channel", " pdu "));
+        CanonicalReadingRequest request = mapper.map(objectMapper.createObjectNode().put("channel", " pdu "));
 
         assertEquals(" pdu ", request.getChannel());
     }
 
     @Test
     void channelIsNullWhenTheSubmissionOmitsIt() {
-        AssamReadingRequest request = mapper.map(objectMapper.createObjectNode().put("state_scheme_id", "30178236"));
+        CanonicalReadingRequest request = mapper.map(objectMapper.createObjectNode().put("state_scheme_id", "30178236"));
 
         assertNull(request.getChannel());
     }

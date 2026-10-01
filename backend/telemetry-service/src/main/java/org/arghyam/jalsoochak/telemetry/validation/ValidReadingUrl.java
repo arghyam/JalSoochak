@@ -13,7 +13,7 @@ import java.lang.annotation.Target;
  * Constrains a submitted meter-image URL to something worth handing to the OCR service.
  *
  * <p>A blank value stays valid: that is how a manual reading arrives, and it is the majority of the
- * traffic on this endpoint. {@code AssamReadingRequest#isReadingPresent} already requires either a
+ * traffic on this endpoint. {@code CanonicalReadingRequest#isReadingPresent} already requires either a
  * URL or a confirmed reading, so blankness is that rule's business, not this one's.
  */
 @Documented

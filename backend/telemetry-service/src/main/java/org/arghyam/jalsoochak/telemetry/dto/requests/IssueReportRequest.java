@@ -33,7 +33,7 @@ public class IssueReportRequest {
      * service-layer check and its localised "Issue reason is required." reply rather than becoming
      * a {@code 400}. Character validation deliberately lives in the service too, so that a genuine
      * operator typo gets a localised WhatsApp answer instead of a flow-breaking {@code 400} — see
-     * {@code GlificMeterWorkflowService.ISSUE_REASON_ALLOWED}.
+     * {@code MeterReadingConversationService.ISSUE_REASON_ALLOWED}.
      *
      * <p>Note this DTO is shared by {@code /issue-report/submit},
      * {@code /issue-report/telemetry/submit} and {@code /others/submitted}, so the cap applies to

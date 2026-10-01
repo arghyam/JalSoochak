@@ -2,8 +2,8 @@ package org.arghyam.jalsoochak.message;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.arghyam.jalsoochak.message.channel.GlificAuthService;
-import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
+import org.arghyam.jalsoochak.message.channel.provider.glific.GlificAuthService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -54,13 +54,13 @@ class OpenApiSpecGeneratorTest {
         registry.add("spring.datasource.password", postgres::getPassword);
     }
 
-    /** Suppress @PostConstruct login() which makes a live HTTP call to Glific. */
+    /** Suppress @PostConstruct login() which makes a live HTTP call to the WhatsApp provider. */
     @MockBean
     GlificAuthService glificAuthService;
 
-    /** Suppress @PostConstruct validateTemplates() to avoid needing all Glific env vars. */
+    /** Suppress @PostConstruct validateTemplates() to avoid needing all WhatsApp env vars. */
     @MockBean
-    GlificWhatsAppService glificWhatsAppService;
+    WhatsAppSender whatsAppSender;
 
     @LocalServerPort
     int port;

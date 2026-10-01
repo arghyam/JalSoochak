@@ -885,13 +885,6 @@ public final class SwaggerExamples {
             }
             """;
 
-    public static final String DATE_DIMENSION_POPULATE_SUCCESS = """
-            {
-              "success": true,
-              "data": "Date dimension populated from 2026-01-01 to 2026-01-31"
-            }
-            """;
-
     public static final String GENERIC_FAILURE = """
             {
               "success": false,

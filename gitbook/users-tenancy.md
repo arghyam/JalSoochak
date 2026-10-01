@@ -39,7 +39,7 @@ Manages all states / tenants. Actions:
 
 * Add, edit, and deactivate states (tenants)
 * Assign State System Admins
-* Edit default configuration parameters (water norms, thresholds, Glific / webhook settings)
+* Edit default configuration parameters (water norms, thresholds, WhatsApp / webhook settings)
 {% endstep %}
 
 {% step %}
@@ -48,7 +48,7 @@ Manages all states / tenants. Actions:
 Manages configuration for exactly one state. Actions:
 
 * Set default languages and water norms (e.g. 55 / 70 / 90 litres per capita per day)
-* Configure WhatsApp / Glific integration
+* Configure the WhatsApp integration
 * Set escalation thresholds and rules
 * Upload schemes, operators, and location hierarchies; monitor data-sync issues
 {% endstep %}
@@ -62,7 +62,7 @@ Dashboard-access roles within a tenant. They consume scheme/compliance views and
 {% step %}
 ### Pump Operator
 
-A field role that interacts only through the **WhatsApp (Glific) flow** — submits daily meter readings and receives nudge reminders. No web-dashboard access.
+A field role that interacts only through the **WhatsApp chatbot flow** — submits daily meter readings and receives nudge reminders. No web-dashboard access.
 {% endstep %}
 {% endstepper %}
 
@@ -85,10 +85,11 @@ The core platform is loosely coupled from state-specific choices: JalSoochak shi
 
 | Service Area | Default | Alternatives |
 |---|---|---|
-| Image Ingestion | WhatsApp with Glific | State-specific mobile app; WhatsApp via another BSP |
-| Image Processor (meter OCR) | Home-grown FlowVision AI model | State-preferred AI model |
-| Nudge / Notifications | WhatsApp with Glific | State-preferred channel / mobile app; email; SMS |
+| Image Ingestion | WhatsApp via the default provider | State-specific mobile app; WhatsApp via another BSP |
+| Image Processor (meter OCR) | Home-grown AI model | State-preferred AI model |
+| Nudge / Notifications | WhatsApp via the default provider | State-preferred channel / mobile app; email; SMS |
 | Dashboards | Packaged with JalSoochak | State-customised hosted version; custom Analytics-API implementation |
 | Deployment | Cloud-neutral on any hyperscaler (AWS / Azure / GCP) | Bare metal / on-prem |
 
+The default providers are listed under *External integrations* in [Technology Stack](technology-stack.md).
 Default values and options live in the tenant configuration store, applied at onboarding with State-Admin override. Overrides are recorded in tenant metadata and audited.

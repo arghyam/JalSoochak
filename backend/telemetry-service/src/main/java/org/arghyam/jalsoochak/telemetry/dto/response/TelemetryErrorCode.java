@@ -18,16 +18,16 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 public enum TelemetryErrorCode {
 
-    /** The FlowVision OCR call threw / failed while extracting a reading from the image. */
+    /** The OCR provider call threw / failed while extracting a reading from the image. */
     FLOW_VISION_FAILED("FLOW_VISION_FAILED"),
 
     /**
-     * Reserved for an explicit FlowVision provider "REJECTED" status. Not currently emitted — the
+     * Reserved for an explicit OCR provider "REJECTED" status. Not currently emitted — the
      * unreadable-image path uses {@link #UNREADABLE_IMAGE}. Kept for forward compatibility.
      */
     FLOW_VISION_REJECTED("FLOW_VISION_REJECTED"),
 
-    /** FlowVision responded but produced no usable meter reading (image could not be read). */
+    /** The OCR provider responded but produced no usable meter reading (image could not be read). */
     UNREADABLE_IMAGE("UNREADABLE_IMAGE"),
 
     /** The submitted image's extracted reading duplicates the previous confirmed reading. */

@@ -33,8 +33,8 @@ import java.util.Set;
  * {@code RequestMappingHandlerMapping.handleNoMatch} hands an unmatched OPTIONS to the framework's
  * built-in {@code HttpOptionsHandler}, which enumerates the mapped methods into {@code Allow} and
  * adds an empty {@code Accept-Patch}. Nothing intercepted it because this service runs without Spring
- * Security — see {@link GlificWebhookAuthFilter} for why that is deliberate — and because neither
- * hand-rolled auth filter challenges a non-POST request on the Glific webhook paths.
+ * Security — see {@link WebhookAuthFilter} for why that is deliberate — and because neither
+ * hand-rolled auth filter challenges a non-POST request on the chatbot webhook paths.
  *
  * <p><b>An allowlist, not a denylist.</b> The audit asked for OPTIONS/TRACE/TRACK to be disabled;
  * permitting only {@link #ALLOWED_METHODS} answers that and also covers {@code CONNECT} and any
@@ -57,12 +57,12 @@ import java.util.Set;
  *
  * <p><b>No CORS preflight carve-out.</b> This service publishes no {@code CorsConfigurationSource},
  * so a genuine cross-origin preflight can only ever be rejected, and no browser client calls
- * telemetry-service — Glific and the partner ingestion callers are both server-to-server. Rather
+ * telemetry-service — the chatbot and the partner ingestion callers are both server-to-server. Rather
  * than carry an unused conditional, {@code DisallowedHttpMethodFilterOrderTest} asserts that no such
  * bean exists, so adding CORS here later fails the build and forces this decision to be revisited.
  *
  * <p><b>Why a filter and not a {@code HandlerInterceptor}.</b> Same reason as
- * {@link GlificWebhookAuthFilter}: {@code preHandle} runs after handler mapping, by which point
+ * {@link WebhookAuthFilter}: {@code preHandle} runs after handler mapping, by which point
  * {@link TenantInterceptor} has applied the caller-supplied {@code X-Tenant-Code} to
  * {@link TenantContext}. A rejected request must not select a database schema.
  *
@@ -72,7 +72,7 @@ import java.util.Set;
  * {@link AllowHeaderSuppressingResponse} additionally strips {@code Allow} from the dispatcher's own
  * 405s, because {@code GET /api/v1/telemetry/schemes} otherwise still answers {@code Allow: POST} and
  * leaves the disclosure open to anyone who sends any wrong method. Nothing in this system performs
- * method discovery: Glific posts to 26 fixed URLs and partners post to fixed URLs.
+ * method discovery: the chatbot posts to 26 fixed URLs and partners post to fixed URLs.
  *
  * @see MethodGuardProperties for the {@code OFF} rollback switch
  */
@@ -82,7 +82,7 @@ public class DisallowedHttpMethodFilter extends OncePerRequestFilter {
 
     /**
      * Runs after {@link RequestCorrelationFilter} (10) so rejections carry the request id in the MDC,
-     * and ahead of {@link TelemetryApiKeyAuthFilter} (20) and {@link GlificWebhookAuthFilter} (30) so
+     * and ahead of {@link TelemetryApiKeyAuthFilter} (20) and {@link WebhookAuthFilter} (30) so
      * a disallowed method never triggers an API-key lookup against the database and never reaches
      * {@link TenantInterceptor}. Every path answers an identical 405, so answering before
      * authentication reveals nothing that authenticating first would have concealed.

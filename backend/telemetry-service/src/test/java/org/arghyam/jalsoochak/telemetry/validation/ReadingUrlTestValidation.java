@@ -15,7 +15,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Bean Validation support for tests that validate {@code AssamReadingRequest} outside a Spring
+ * Bean Validation support for tests that validate {@code CanonicalReadingRequest} outside a Spring
  * context.
  *
  * <p>{@link ReadingUrlConstraintValidator} takes its policy through the constructor — in production

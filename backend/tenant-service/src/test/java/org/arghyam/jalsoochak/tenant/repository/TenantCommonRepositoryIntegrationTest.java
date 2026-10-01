@@ -864,6 +864,80 @@ class TenantCommonRepositoryIntegrationTest {
         }
     }
 
+    // ── softDeleteConfig ─────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("softDeleteConfig")
+    class SoftDeleteConfig {
+
+        @Test
+        @DisplayName("marks the row deleted and hides it from reads")
+        void softDeleteConfig_hidesTheRow() {
+            TenantResponseDTO t = insertTenant("SD", "Soft Delete", TenantStatusEnum.ACTIVE);
+            repository.upsertConfig(t.getId(), "DOOMED_KEY", "v1", 1);
+
+            int deleted = repository.softDeleteConfig(t.getId(), "DOOMED_KEY", 1);
+
+            assertThat(deleted).isEqualTo(1);
+            assertThat(repository.findConfigByTenantAndKey(t.getId(), "DOOMED_KEY")).isEmpty();
+            assertThat(repository.findConfigsByTenantId(t.getId()))
+                    .extracting(ConfigDTO::getConfigKey).doesNotContain("DOOMED_KEY");
+        }
+
+        @Test
+        @DisplayName("keeps the row as the record of what the tenant was configured with")
+        void softDeleteConfig_keepsTheRow() {
+            TenantResponseDTO t = insertTenant("SK", "Soft Keep", TenantStatusEnum.ACTIVE);
+            repository.upsertConfig(t.getId(), "HISTORY_KEY", "v1", 1);
+
+            repository.softDeleteConfig(t.getId(), "HISTORY_KEY", 1);
+
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM common_schema.tenant_config_master_table "
+                            + "WHERE tenant_id = ? AND config_key = ? AND deleted_at IS NOT NULL AND deleted_by = ?",
+                    Integer.class, t.getId(), "HISTORY_KEY", 1);
+            assertThat(count).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("a later upsert inserts a fresh row beside the deleted one")
+        void softDeleteConfig_thenUpsertInsertsFreshRow() {
+            TenantResponseDTO t = insertTenant("SR", "Soft Revive", TenantStatusEnum.ACTIVE);
+            repository.upsertConfig(t.getId(), "REVIVE_KEY", "v1", 1);
+            repository.softDeleteConfig(t.getId(), "REVIVE_KEY", 1);
+
+            Optional<ConfigDTO> result = repository.upsertConfig(t.getId(), "REVIVE_KEY", "v2", 1);
+
+            // The partial unique index is WHERE deleted_at IS NULL, so the dead row does not block
+            // the insert — which is what makes re-enabling a channel a plain PUT.
+            assertThat(result).isPresent();
+            assertThat(result.get().getConfigValue()).isEqualTo("v2");
+            Integer live = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM common_schema.tenant_config_master_table "
+                            + "WHERE tenant_id = ? AND config_key = ? AND deleted_at IS NULL",
+                    Integer.class, t.getId(), "REVIVE_KEY");
+            assertThat(live).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("returns zero when the key was never set")
+        void softDeleteConfig_returnsZeroForUnknownKey() {
+            TenantResponseDTO t = insertTenant("SZ", "Soft Zero", TenantStatusEnum.ACTIVE);
+
+            assertThat(repository.softDeleteConfig(t.getId(), "NEVER_SET_KEY", 1)).isZero();
+        }
+
+        @Test
+        @DisplayName("deleting twice is a no-op the second time")
+        void softDeleteConfig_isIdempotent() {
+            TenantResponseDTO t = insertTenant("SI", "Soft Idempotent", TenantStatusEnum.ACTIVE);
+            repository.upsertConfig(t.getId(), "TWICE_KEY", "v1", 1);
+
+            assertThat(repository.softDeleteConfig(t.getId(), "TWICE_KEY", 1)).isEqualTo(1);
+            assertThat(repository.softDeleteConfig(t.getId(), "TWICE_KEY", 1)).isZero();
+        }
+    }
+
     // ── countOnboardedTenants ────────────────────────────────────────────────────
 
     @Nested

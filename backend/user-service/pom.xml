@@ -175,20 +175,12 @@
             <version>5.3.0</version>
         </dependency>
 
-        <!-- AWS SDK v2 S3 (provider-agnostic object storage — works with AWS S3,
-             MinIO, Cloudflare R2, DigitalOcean Spaces, etc.). Includes the
-             S3Presigner used for generating short-lived report download URLs. -->
+        <!-- AWS SDK v2 S3 (provider-agnostic object storage — works with AWS S3
+             and any other S3-compatible store). Includes the S3Presigner used for
+             generating short-lived report download URLs. -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
-        </dependency>
-
-        <!-- Testcontainers MinIO module — drives the S3-compatible code path in
-             end-to-end report tests against a real S3 API. -->
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>minio</artifactId>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 

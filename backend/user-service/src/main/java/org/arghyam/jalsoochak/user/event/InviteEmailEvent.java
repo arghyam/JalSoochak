@@ -18,4 +18,12 @@ public class InviteEmailEvent {
     /** State name — populated only when role is STATE_ADMIN. Omitted from JSON when null. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String stateName;
+
+    /**
+     * State code of the tenant the invitee belongs to (e.g. {@code "MP"}). Null for super users,
+     * who deliberately carry no tenant and are served by the system default provider.
+     * Optional and additive — omitted from JSON when null.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String tenantCode;
 }

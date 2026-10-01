@@ -15,7 +15,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Configuration for the Glific webhook shared-secret credential.
+ * Configuration for the chatbot webhook shared-secret credential.
  *
  * <p>Hashes, never plaintext, are configured — matching the precedent already set by
  * {@code tenant_master_table.api_key_hash} and {@code TelemetryApiKeyService}. That buys a
@@ -66,11 +66,11 @@ public class WebhookAuthProperties {
             throw new IllegalStateException(
                     "telemetry.webhook.auth.mode=ENFORCE requires at least one entry in "
                             + "telemetry.webhook.auth.token-hashes (set TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES). "
-                            + "Refusing to start rather than reject every Glific webhook call.");
+                            + "Refusing to start rather than reject every WhatsApp webhook call.");
         }
 
         // Count only — never the hashes themselves.
-        log.info("Glific webhook auth initialised: mode={} header={} configuredTokens={}",
+        log.info("WhatsApp webhook auth initialised: mode={} header={} configuredTokens={}",
                 resolvedMode, headerName, resolvedTokenHashes.size());
     }
 

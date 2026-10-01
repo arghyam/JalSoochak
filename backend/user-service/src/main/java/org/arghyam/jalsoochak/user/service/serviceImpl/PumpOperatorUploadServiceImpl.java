@@ -19,9 +19,9 @@ import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.UserUploadRepository;
-import org.arghyam.jalsoochak.user.service.GlificPreferredLanguageService;
 import org.arghyam.jalsoochak.user.service.PumpOperatorUploadService;
 import org.arghyam.jalsoochak.user.service.PumpOperatorUploadChunkProcessor;
+import org.arghyam.jalsoochak.user.service.WhatsAppPreferredLanguageService;
 import org.arghyam.jalsoochak.user.util.PhoneNumberUtil;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -79,7 +79,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
     private final UserTenantRepository userTenantRepository;
     private final UserUploadRepository userUploadRepository;
     private final UserCommonRepository userCommonRepository;
-    private final GlificPreferredLanguageService preferredLanguageService;
+    private final WhatsAppPreferredLanguageService preferredLanguageService;
     private final PumpOperatorUploadChunkProcessor chunkProcessor;
 
     @Override

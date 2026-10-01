@@ -43,7 +43,7 @@ class DisallowedHttpMethodFilterOrderTest {
         // reaches TenantInterceptor, which would otherwise apply an unauthenticated X-Tenant-Code.
         assertThat(DisallowedHttpMethodFilter.ORDER)
                 .isLessThan(TelemetryApiKeyAuthFilter.ORDER)
-                .isLessThan(GlificWebhookAuthFilter.ORDER);
+                .isLessThan(WebhookAuthFilter.ORDER);
     }
 
     @Test

@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
@@ -44,7 +44,7 @@ class BfmReadingServiceAnomalyDedupTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
@@ -53,7 +53,7 @@ class BfmReadingServiceAnomalyDedupTest {
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
     private ReadingChannelResolver readingChannelResolver;
@@ -64,16 +64,17 @@ class BfmReadingServiceAnomalyDedupTest {
     void setUp() {
         service = new BfmReadingService(
                 telemetryTenantRepository,
-                flowVisionService,
+                defaultOcrExtractor,
                 telemetryEventPublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
-                glificOperatorContextService,
+                operatorContextService,
                 null,
                 readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, telemetryTenantRepository, tenantConfigRepository),
+                null,
                 null,
                 null
         );
@@ -85,7 +86,7 @@ class BfmReadingServiceAnomalyDedupTest {
         when(telemetryTenantRepository.existsSchemeById("tenant_up", 100L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById("tenant_up", 11L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_up", 11L, 100L)).thenReturn(true);
-        when(flowVisionService.extractReading("https://img.example.com/a.jpg")).thenReturn(null);
+        when(defaultOcrExtractor.extractReading("https://img.example.com/a.jpg", null)).thenReturn(null);
 
         CreateReadingRequest request = CreateReadingRequest.builder()
                 .schemeId(100L)
@@ -138,8 +139,8 @@ class BfmReadingServiceAnomalyDedupTest {
         when(telemetryTenantRepository.existsSchemeById("tenant_up", 100L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById("tenant_up", 11L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_up", 11L, 100L)).thenReturn(true);
-        when(flowVisionService.extractReading("https://img.example.com/dup.jpg")).thenReturn(
-                FlowVisionResult.builder()
+        when(defaultOcrExtractor.extractReading("https://img.example.com/dup.jpg", null)).thenReturn(
+                OcrReadingResult.builder()
                         .adjustedReading(new BigDecimal("123"))
                         .qualityConfidence(new BigDecimal("0.95"))
                         .correlationId("ocr-correlation")

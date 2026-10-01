@@ -44,6 +44,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -124,6 +125,39 @@ class StaffAuthServiceImplTest {
 
             verify(otpService).requestOtp(10L, 1, OtpType.LOGIN);
             verify(eventPublisher).publishLoginOtpAfterCommit(any(SendLoginOtpEvent.class), eq(10L), eq("MP"));
+        }
+
+        @Test
+        @DisplayName("published OTP event carries the resolved tenant id and code")
+        void publishedOtpEventCarriesTenant() {
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
+            when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
+                    .thenReturn(Optional.of(ACTIVE_USER));
+            when(otpService.requestOtp(10L, 1, OtpType.LOGIN)).thenReturn("123456");
+
+            service.requestOtp(request);
+
+            ArgumentCaptor<SendLoginOtpEvent> captor = ArgumentCaptor.forClass(SendLoginOtpEvent.class);
+            verify(eventPublisher).publishLoginOtpAfterCommit(captor.capture(), eq(10L), eq("MP"));
+            assertThat(captor.getValue().getTenantId()).isEqualTo(1);
+            assertThat(captor.getValue().getTenantCode()).isEqualTo("MP");
+        }
+
+        @Test
+        @DisplayName("published OTP event carries the user's WhatsApp contact id for WhatsApp delivery")
+        void publishedOtpEventCarriesWhatsappContactId() {
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
+            when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
+                    .thenReturn(Optional.of(ACTIVE_USER));
+            when(otpService.requestOtp(10L, 1, OtpType.LOGIN)).thenReturn("123456");
+
+            service.requestOtp(request);
+
+            ArgumentCaptor<SendLoginOtpEvent> captor = ArgumentCaptor.forClass(SendLoginOtpEvent.class);
+            verify(eventPublisher).publishLoginOtpAfterCommit(captor.capture(), eq(10L), eq("MP"));
+            assertThat(captor.getValue().getWhatsappContactId()).isEqualTo(12345L);
         }
 
         @Test

@@ -11,13 +11,13 @@ import java.util.concurrent.Executor;
 @EnableAsync
 public class AsyncConfig {
 
-    @Bean(name = "glificSyncExecutor")
-    public Executor glificSyncExecutor() {
+    @Bean(name = "whatsAppSyncExecutor")
+    public Executor whatsAppSyncExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(2);
         executor.setMaxPoolSize(4);
         executor.setQueueCapacity(200);
-        executor.setThreadNamePrefix("glific-sync-");
+        executor.setThreadNamePrefix("whatsapp-sync-");
         executor.initialize();
         return executor;
     }

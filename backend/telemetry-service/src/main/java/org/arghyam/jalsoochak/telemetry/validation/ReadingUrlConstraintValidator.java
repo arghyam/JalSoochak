@@ -9,14 +9,14 @@ import org.springframework.beans.factory.annotation.Value;
 import java.util.regex.Pattern;
 
 /**
- * Vets {@code readingUrl} before it is stored and handed to FlowVision as {@code imageURL}.
+ * Vets {@code readingUrl} before it is stored and handed to the OCR provider as {@code imageURL}.
  *
- * <p>This service never fetches the URL itself — FlowVision does — so the exposure being closed here
- * is a request forgery aimed at that service, plus the plain hygiene of not persisting a value that
+ * <p>This service never fetches the URL itself — the OCR provider does — so the exposure being closed
+ * here is a request forgery aimed at that service, plus the plain hygiene of not persisting a value that
  * later renders as an image somewhere. Rejecting at the DTO keeps it a 400 on the existing readings
  * error shape rather than a failure discovered halfway through processing.
  *
- * <p>It shares the one {@link MediaUrlValidator} with the Glific media fetch: both vet a
+ * <p>It shares the one {@link MediaUrlValidator} with the WhatsApp media fetch: both vet a
  * caller-supplied meter-image URL under the same rules, so a second identically-configured policy
  * would only be somewhere for the two to drift apart. The kill switch is the exception and is
  * deliberately its own: this rule is the one with a live, high-volume integration behind it, and

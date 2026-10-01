@@ -8,7 +8,7 @@ import java.math.BigDecimal;
  *
  * <p>Reachable from real input: meter readings are unbounded {@code NUMERIC} on both sides of the
  * topic, and the submission API bounds them only from below
- * ({@code AssamReadingRequest.confirmedReading} carries {@code @DecimalMin} and no maximum), so a
+ * ({@code CanonicalReadingRequest.confirmedReading} carries {@code @DecimalMin} and no maximum), so a
  * mis-read or mis-typed reading can produce a delta whose litre value exceeds {@code long}.
  *
  * <p>It is a distinct type so the ingestion boundary can catch <em>this</em> rather than any

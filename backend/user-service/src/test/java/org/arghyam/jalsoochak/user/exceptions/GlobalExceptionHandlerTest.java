@@ -650,7 +650,7 @@ class GlobalExceptionHandlerTest {
         @Test
         @DisplayName("returns 500 with a masked, user-safe message")
         void returns500() {
-            StorageException ex = new StorageException("MinIO unreachable: endpoint=...");
+            StorageException ex = new StorageException("Storage unreachable: endpoint=...");
             ResponseEntity<ApiErrorResponseDTO> response = handler.handleStorage(ex);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);

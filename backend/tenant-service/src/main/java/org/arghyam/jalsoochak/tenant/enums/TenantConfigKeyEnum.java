@@ -3,13 +3,15 @@ package org.arghyam.jalsoochak.tenant.enums;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.DateFormatConfigDTO;
-import org.arghyam.jalsoochak.tenant.dto.internal.GlificMessagesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.EmailProviderConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.WhatsAppMessagesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.MessageBrokerConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.SmsProviderConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.StateITSystemConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TimeSettingsConfigDTO;
@@ -22,16 +24,18 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.stream.Collectors;
 
+import lombok.AccessLevel;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 
 /**
  * Exhaustive list of allowed configuration keys for tenants.
  * Each key declares its storage type and the expected DTO class for that key.
  * Implements ConfigKey sealed interface to restrict config keys to known types.
+ * <p>
+ * A renamed key keeps its old name as a legacy alias for a while (see {@link #isLegacyAlias()}), so
+ * clients still sending the old name keep working while they switch.
  */
 @Getter
-@RequiredArgsConstructor
 public enum TenantConfigKeyEnum implements ConfigKey {
 
     /**
@@ -81,15 +85,24 @@ public enum TenantConfigKeyEnum implements ConfigKey {
     LOCATION_CHECK_REQUIRED(ConfigType.GENERIC, SimpleConfigValueDTO.class, false, false, true),
 
     /**
-     * Glific WhatsApp message templates configuration.
+     * WhatsApp chatbot message templates configuration.
      * Defines all screens, prompts, options, messages, and reasons for the conversation flow.
      * Includes multilingual support (all Indian official languages).
-     * Provides a hierarchical and maintainable structure for all Glific conversation templates.
+     * Provides a hierarchical and maintainable structure for all chatbot conversation templates.
      */
-    GLIFIC_MESSAGE_TEMPLATES(ConfigType.GENERIC, GlificMessagesConfigDTO.class, false, false, false),
+    WHATSAPP_MESSAGE_TEMPLATES(ConfigType.GENERIC, WhatsAppMessagesConfigDTO.class, false, false, false),
 
     /**
-     * Glific Connection Settings.
+     * Deprecated name of {@link #WHATSAPP_MESSAGE_TEMPLATES}. It is still accepted in requests, but
+     * resolved to the canonical key before anything is read or stored, so the table only ever holds
+     * the canonical name. Responses that carry the canonical key also carry this name, with the same
+     * value.
+     */
+    @Deprecated(forRemoval = true)
+    GLIFIC_MESSAGE_TEMPLATES(WHATSAPP_MESSAGE_TEMPLATES),
+
+    /**
+     * WhatsApp provider connection settings.
      * Contains API credentials and endpoints for WhatsApp integration.
      */
     MESSAGE_BROKER_CONNECTION_SETTINGS(ConfigType.GENERIC, MessageBrokerConfigDTO.class, false, true, false),
@@ -281,7 +294,31 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * days (rounded half-up, minimum 1 day). Falls back to the national default, then the analytics env
      * default, when unset. Published to analytics via REGULARITY_THRESHOLD_UPDATED.
      */
-    REGULARITY_THRESHOLD_PERCENT(ConfigType.GENERIC, RegularityThresholdConfigDTO.class, false, false, false);
+    REGULARITY_THRESHOLD_PERCENT(ConfigType.GENERIC, RegularityThresholdConfigDTO.class, false, false, false),
+
+    /**
+     * The email account this tenant's own mail is sent through (SendGrid or SMTP), including the
+     * from address and the account's template ids. Credentials are NOT here — they live encrypted
+     * in {@code common_schema.tenant_provider_secret} and their location is derived by the server.
+     * <p>
+     * {@code managedValue = true}: written only through
+     * {@code PUT /api/v1/tenants/{tenantId}/messaging-providers}, which validates the provider's
+     * required fields and checks an SMTP host against MESSAGING_PROVIDER_ALLOWED_HOSTS. The generic
+     * config API cannot reach it, so a settings value can never skip those checks.
+     * <p>
+     * {@code mandatory = false}: a tenant with no settings uses the system default provider, which
+     * is today's behaviour, so this must not block the ONBOARDED → CONFIGURED transition.
+     */
+    EMAIL_PROVIDER_SETTINGS(ConfigType.GENERIC, EmailProviderConfigDTO.class, false, true, false),
+
+    /**
+     * The SMS account this tenant's own messages are sent through, including the sender id, the DLT
+     * registrations and the OTP text. Credentials are NOT here — see EMAIL_PROVIDER_SETTINGS.
+     * <p>
+     * A WHATSAPP_PROVIDER_SETTINGS key is deliberately absent: every tenant shares one WhatsApp provider
+     * organisation today, so there is nothing per-tenant to store.
+     */
+    SMS_PROVIDER_SETTINGS(ConfigType.GENERIC, SmsProviderConfigDTO.class, false, true, false);
 
     private final ConfigType type;
     private final Class<? extends ConfigValueDTO> dtoClass;
@@ -304,6 +341,60 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * auto-transition to trigger.
      */
     private final boolean mandatory;
+    /**
+     * The key a legacy alias stands in for; null for every canonical key. See {@link #canonical()}.
+     */
+    @Getter(AccessLevel.NONE)
+    private final TenantConfigKeyEnum aliasOf;
+
+    TenantConfigKeyEnum(ConfigType type, Class<? extends ConfigValueDTO> dtoClass, boolean isPublic,
+            boolean managedValue, boolean mandatory) {
+        this(type, dtoClass, isPublic, managedValue, mandatory, null);
+    }
+
+    /**
+     * A legacy alias has the same storage type, DTO and writability as its canonical key. It is never
+     * public or mandatory itself, because the canonical key already answers both.
+     */
+    TenantConfigKeyEnum(TenantConfigKeyEnum canonical) {
+        this(canonical.type, canonical.dtoClass, false, canonical.managedValue, false, canonical);
+    }
+
+    TenantConfigKeyEnum(ConfigType type, Class<? extends ConfigValueDTO> dtoClass, boolean isPublic,
+            boolean managedValue, boolean mandatory, TenantConfigKeyEnum aliasOf) {
+        this.type = type;
+        this.dtoClass = dtoClass;
+        this.isPublic = isPublic;
+        this.managedValue = managedValue;
+        this.mandatory = mandatory;
+        this.aliasOf = aliasOf;
+    }
+
+    /**
+     * True for the old name of a renamed key, which is kept only so that clients still using it keep
+     * working.
+     */
+    public boolean isLegacyAlias() {
+        return aliasOf != null;
+    }
+
+    /**
+     * The key this one is stored and returned under: the key itself, or, for a legacy alias, the key
+     * it stands in for.
+     */
+    public TenantConfigKeyEnum canonical() {
+        return aliasOf == null ? this : aliasOf;
+    }
+
+    /**
+     * Every key except the legacy aliases. Code that lists or counts all keys iterates this instead of
+     * {@link #values()}, so an alias is never reported as a key in its own right.
+     */
+    public static EnumSet<TenantConfigKeyEnum> canonicalValues() {
+        return Arrays.stream(values())
+                .filter(key -> !key.isLegacyAlias())
+                .collect(Collectors.toCollection(() -> EnumSet.noneOf(TenantConfigKeyEnum.class)));
+    }
 
     /**
      * Returns all config keys that are required for the ONBOARDED → CONFIGURED transition.

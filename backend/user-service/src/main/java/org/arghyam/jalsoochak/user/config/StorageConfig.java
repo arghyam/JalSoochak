@@ -29,7 +29,7 @@ public class StorageConfig {
     /**
      * S3Client bean — active when {@code storage.enabled=true}.
      * Path-style access is enabled when {@code storage.endpoint} is set
-     * (required for MinIO and most non-AWS S3-compatible providers).
+     * (required by most non-AWS S3-compatible stores).
      */
     @Bean
     @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")
@@ -52,7 +52,7 @@ public class StorageConfig {
 
     /**
      * S3Presigner bean — always signs against the internal {@code storage.endpoint}.
-     * MinIO validates the signature using the Host it receives from the reverse proxy
+     * The store validates the signature using the Host it receives from the reverse proxy
      * (configured via {@code proxy_set_header Host $proxy_host}), which matches the
      * internal host baked into the signature. The public-facing URL rewrite (origin
      * swap + path prefix) is applied post-sign in {@link S3CompatibleStorageService}.

@@ -197,7 +197,7 @@ class MediaUrlValidatorTest {
 
         @Test
         void allowsAnyPublicHostWhileTheAllowlistIsEmpty() {
-            // The default, so switching the guard on does not require knowing Glific's hosts first.
+            // The default, so switching the guard on does not require knowing the provider's hosts first.
             assertThatCode(() -> validator().validate("https://anything.example/img.jpg"))
                     .doesNotThrowAnyException();
         }

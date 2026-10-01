@@ -63,11 +63,16 @@ CREATE TABLE tenant_zz.user_scheme_mapping_table (
 -- tenant_as is on the current migration level (flow_reading_table has
 -- quarantine_reason); tenant_zz predates V40 and must keep the legacy SQL.
 
+-- LOCATION-AFFINITY: latitude/longitude are present on tenant_as (V6/V7/V30 level) and absent on
+-- tenant_zz below, so the repository's column probes are exercised both ways — the boundary check
+-- must degrade to "no location" on an unmigrated schema rather than fail the reading.
 CREATE TABLE tenant_as.scheme_master_table (
     id               SERIAL   PRIMARY KEY,
     fhtc_count       INTEGER  NOT NULL DEFAULT 0,
     planned_fhtc     INTEGER  NOT NULL DEFAULT 0,
-    house_hold_count INTEGER  NOT NULL DEFAULT 0
+    house_hold_count INTEGER  NOT NULL DEFAULT 0,
+    latitude         DOUBLE PRECISION,
+    longitude        DOUBLE PRECISION
 );
 
 CREATE TABLE tenant_as.flow_reading_table (
@@ -82,8 +87,15 @@ CREATE TABLE tenant_as.flow_reading_table (
     image_url         TEXT DEFAULT '',
     created_by        INTEGER      NOT NULL,
     created_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_by        INTEGER,
     updated_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
     quarantine_reason SMALLINT     NOT NULL DEFAULT 0,
+    latitude          DOUBLE PRECISION,
+    longitude         DOUBLE PRECISION,
+    -- V9/V11. Part of the placeholder-row predicate, so the same-day reuse that the location
+    -- boundary check depends on cannot be exercised for real without them.
+    meter_change_reason  TEXT,
+    issue_report_reason  TEXT,
     deleted_at        TIMESTAMP
 );
 

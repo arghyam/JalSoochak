@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.MessagingAllowedHostsConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetSystemConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.SystemConfigResponseDTO;
@@ -97,6 +98,14 @@ public class SystemManagementServiceImpl implements SystemManagementService {
             if (dto instanceof ChannelListConfigDTO channelDto) {
                 channelDto.setDegraded(null);
                 channelDto.setRemovedChannels(null);
+            }
+
+            if (dto instanceof MessagingAllowedHostsConfigDTO allowedHostsDto) {
+                // Enforced validation for JsonNode-bound configs (bean validation does not run on
+                // treeToValue). Checked before the upsert: a malformed pattern stored here would
+                // throw on every subsequent tenant SMTP settings write, turning one bad super-user
+                // value into a broken endpoint for every state.
+                allowedHostsDto.validatedSmtpHosts();
             }
 
             String serialized;

@@ -468,6 +468,62 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst().orElse(false);
     }
 
+    /**
+     * LOCATION-AFFINITY: the scheme's recorded position, for comparison against where a reading was
+     * submitted from.
+     *
+     * <p>Deliberately separate from {@link #schemeHasLatitudeAndLongitude}, which answers a
+     * different question for a different caller — {@code ConversationSelectionService} uses that boolean
+     * to decide whether the flow asks for a location at all, and folding the two together would
+     * couple the prompt decision to the distance check.
+     *
+     * <p>Empty means "no row"; a present record may still carry {@code null} halves, which callers
+     * must treat as "no location". A schema predating the coordinate columns degrades to nulls via
+     * {@code resolveSelectColumn} rather than throwing.
+     */
+    public Optional<TelemetryGeoPoint> findSchemeLocation(String schemaName, Long schemeId) {
+        validateSchemaName(schemaName);
+        if (schemeId == null) {
+            return Optional.empty();
+        }
+        return findGeoPoint(schemaName, "scheme_master_table", schemeId);
+    }
+
+    /**
+     * LOCATION-AFFINITY: the position a reading was submitted from, as written by
+     * {@link #updateReadingLocation}.
+     *
+     * <p>Needed because the coordinates and the reading arrive in separate requests on the WhatsApp
+     * path — {@code /location} writes them onto a placeholder row that the later image submission
+     * reuses — so by the time the reading is persisted they are only available from the row.
+     */
+    public Optional<TelemetryGeoPoint> findReadingLocation(String schemaName, Long readingId) {
+        validateSchemaName(schemaName);
+        if (readingId == null) {
+            return Optional.empty();
+        }
+        return findGeoPoint(schemaName, "flow_reading_table", readingId);
+    }
+
+    private Optional<TelemetryGeoPoint> findGeoPoint(String schemaName, String tableName, Long id) {
+        String latColumn = resolveSelectColumn(
+                schemaName, tableName, "latitude", "NULL::double precision AS latitude");
+        String lonColumn = resolveSelectColumn(
+                schemaName, tableName, "longitude", "NULL::double precision AS longitude");
+        String sql = String.format(
+                "SELECT %s, %s FROM %s.%s WHERE id = ? LIMIT 1",
+                latColumn, lonColumn, schemaName, tableName);
+
+        List<TelemetryGeoPoint> rows = jdbcTemplate.query(sql, (rs, n) -> new TelemetryGeoPoint(
+                toDouble(rs.getObject("latitude")),
+                toDouble(rs.getObject("longitude"))), id);
+        return rows.stream().findFirst();
+    }
+
+    private static Double toDouble(Object value) {
+        return value instanceof Number number ? number.doubleValue() : null;
+    }
+
     public boolean isOperatorMappedToScheme(String schemaName, Long operatorId, Long schemeId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -2237,7 +2293,7 @@ public class TelemetryTenantRepository {
     /**
      * Overwrites <em>both</em> extracted_reading and confirmed_reading with the same value. No manual
      * correction may use this: a hand-typed or officer-supplied number is not an extraction, and writing
-     * it into extracted_reading destroys the only record of what FlowVision read off the meter photo and
+     * it into extracted_reading destroys the only record of what OCR read off the meter photo and
      * files the row as a "compliant" (extracted == confirmed) submission on the dashboards. Corrections
      * go through {@link #updateConfirmedReading(String, Long, BigDecimal, Long, Integer)} with a
      * {@code SOURCE_MANUAL} provenance marker. Kept only for a caller that genuinely re-states both.
@@ -2278,7 +2334,7 @@ public class TelemetryTenantRepository {
      * ROLLOVER-RESOLVE: updates confirmed_reading and, when {@code confirmedReadingSource} is non-null,
      * folds {@code confirmed_reading_source = ?} into the <em>same</em> UPDATE — so a manual confirmation
      * is a single round-trip instead of an UPDATE followed by a separate {@link #applyConfirmedReadingSource}
-     * write (this path is on the Glific confirm hot path, hit by ~every reading). A {@code null} source
+     * write (this path is on the chatbot confirm hot path, hit by ~every reading). A {@code null} source
      * leaves the provenance column untouched (callers that do not record provenance), and a non-null source
      * is a safe no-op on pre-migration tenants where the column is absent (guarded by columnExists).
      */

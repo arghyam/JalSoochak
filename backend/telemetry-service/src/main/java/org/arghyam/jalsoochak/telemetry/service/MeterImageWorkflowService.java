@@ -1,0 +1,668 @@
+package org.arghyam.jalsoochak.telemetry.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
+import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import java.util.List;
+import java.util.Optional;
+import java.util.function.Predicate;
+
+@Service
+@Slf4j
+public class MeterImageWorkflowService {
+    private static final String OPERATOR_TOKEN = "operator";
+    private static final String SCHEME_TOKEN = "scheme";
+    private static final String NOT_FOUND_TOKEN = "not found";
+
+    private final InboundMediaService inboundMediaService;
+    private final BfmReadingService bfmReadingService;
+    private final TelemetryTenantRepository telemetryTenantRepository;
+    private final OperatorContextService operatorContextService;
+    private final ConversationLocalizationService localizationService;
+    private final TenantConfigRepository tenantConfigRepository;
+    private final UserChannelPreferenceRepository userChannelPreferenceRepository;
+    private final ObjectMapper objectMapper;
+
+    // LENIENT-INGEST: master off-switch for recording submissions with a missing scheme/operator.
+    // Set telemetry.lenient-ingestion.enabled=false to restore the original reject behaviour.
+    @Value("${telemetry.lenient-ingestion.enabled:true}")
+    private boolean lenientIngestionEnabled = true;
+
+    public MeterImageWorkflowService(InboundMediaService inboundMediaService,
+                                     BfmReadingService bfmReadingService,
+                                     TelemetryTenantRepository telemetryTenantRepository,
+                                     OperatorContextService operatorContextService,
+                                     ConversationLocalizationService localizationService,
+                                     TenantConfigRepository tenantConfigRepository,
+                                     UserChannelPreferenceRepository userChannelPreferenceRepository,
+                                     ObjectMapper objectMapper) {
+        this.inboundMediaService = inboundMediaService;
+        this.bfmReadingService = bfmReadingService;
+        this.telemetryTenantRepository = telemetryTenantRepository;
+        this.operatorContextService = operatorContextService;
+        this.localizationService = localizationService;
+        this.tenantConfigRepository = tenantConfigRepository;
+        this.userChannelPreferenceRepository = userChannelPreferenceRepository;
+        this.objectMapper = objectMapper;
+    }
+
+    public CreateReadingResponse processImage(MeterImageWebhookRequest meterImageWebhookRequest) {
+        try {
+            String contactId = meterImageWebhookRequest.getContactId();
+            String mediaId = meterImageWebhookRequest.getMediaId();
+            String mediaUrl = meterImageWebhookRequest.getMediaUrl();
+            boolean isMeterReplaced = Boolean.TRUE.equals(meterImageWebhookRequest.getIsMeterReplaced());
+
+            TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(contactId);
+            Integer tenantId = operatorWithSchema.operator().tenantId();
+            String languageKey = localizationService.normalizeLanguageKey(
+                    operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
+            );
+//            ensureSelectedChannelExists(tenantId, contactId);
+
+            Long schemeId = telemetryTenantRepository
+                    .findLatestPendingSchemeSelectionForDate(
+                            operatorWithSchema.schemaName(),
+                            operatorWithSchema.operator().id(),
+                            LocalDate.now(ReadingTime.ZONE)
+                    )
+                    .map(TelemetrySchemeSelectionRecord::schemeId)
+                    .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
+                            operatorWithSchema.schemaName(),
+                            operatorWithSchema.operator().id()
+                    ))
+                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+
+            // Fetched and stored only once the submission is known to belong to a mapped operator.
+            // Doing either earlier meant every rejected submission still made this service dial a
+            // caller-supplied URL, and still wrote an object — unreferenced by any row, under a
+            // caller-chosen key, on an anonymously readable bucket.
+            byte[] imageBytes = inboundMediaService.downloadImage(mediaId, mediaUrl);
+            log.debug("Downloaded image for contactId {} (bytes={})", contactId, imageBytes.length);
+
+            String imageStorageUrl = inboundMediaService.uploadImage(contactId, imageBytes);
+
+            CreateReadingRequest createReadingRequest = CreateReadingRequest.builder()
+                    .schemeId(schemeId)
+                    .operatorId(operatorWithSchema.operator().id())
+                    .readingUrl(imageStorageUrl)
+                    .readingValue(null)
+                    // Record the reason on the flow_reading_table for meter-replacement submissions.
+                    .meterChangeReason(isMeterReplaced ? "METER_REPLACED" : null)
+                    .readingTime(null)
+                    .build();
+
+            CreateReadingResponse response = bfmReadingService.createReading(
+                    createReadingRequest,
+                    operatorWithSchema.schemaName(),
+                    operatorWithSchema.operator(),
+                    contactId,
+                    isMeterReplaced,
+                    OcrRetryMode.RESILIENT
+            );
+            response.setMessage(localizationService.localizeMessage(response.getMessage(), languageKey));
+            return response;
+        } catch (Exception e) {
+            log.error("Unexpected error processing image for contactId {}: {}", maskPhone(meterImageWebhookRequest.getContactId()), e.getMessage(), e);
+            if (log.isDebugEnabled()) {
+                log.debug("Unexpected error processing image rawContactId={}: {}", meterImageWebhookRequest.getContactId(), e.getMessage());
+            }
+            String languageKey = localizationService.resolveLanguageKeyForContact(meterImageWebhookRequest.getContactId());
+            String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Image could not be processed.", languageKey);
+            return CreateReadingResponse.builder()
+                    .success(false)
+                    .message(descriptiveMessage)
+                    .qualityStatus("REJECTED")
+                    .errorCode(errorCodeForException(e))
+                    .correlationId(meterImageWebhookRequest.getContactId())
+                    .build();
+        }
+    }
+
+    public CreateReadingResponse processCanonicalReading(CanonicalReadingRequest request, Integer preferredTenantId) {
+        String safeContactId = request != null ? request.getPhoneNumber() : null;
+        try {
+            String contactId = safeContactId;
+            boolean phoneAbsent = contactId == null || contactId.isBlank();
+
+            // PHONE-OPTIONAL: with a phone the submitter is known, so the operator is resolved first and
+            // the scheme is preferred among the ones they are mapped to. Without a phone there is no
+            // submitter to start from, so the scheme is the anchor and the operator is inferred from it.
+            SubmissionContext context = phoneAbsent
+                    ? resolveOperatorFromScheme(request, preferredTenantId)
+                    : resolveFromSubmittedPhone(request, contactId, preferredTenantId);
+
+            TelemetryOperatorWithSchema operatorWithSchema = context.operatorWithSchema();
+            String schemaName = operatorWithSchema.schemaName();
+            TelemetryOperator operator = operatorWithSchema.operator();
+            Long operatorId = operator.id();
+            Long schemeId = context.schemeId();
+            int ingestionSource = context.ingestionSource();
+
+            String languageKey = localizationService.normalizeLanguageKey(
+                    operatorContextService.resolveOperatorLanguage(operatorWithSchema, operator.tenantId())
+            );
+
+            // SCHEME-ID-MISMATCH: the reading matched on one id (state first, then centre); when it
+            // resolved to a real scheme (not an auto-provisioned placeholder) and the request carried
+            // both ids, cross-check the other id against our master data and flag the scheme if it
+            // disagrees, so suspect ids can be reconciled with the govt dept later. Best-effort only.
+            if (!IngestionSource.has(ingestionSource, IngestionSource.UNKNOWN_SCHEME)) {
+                telemetryTenantRepository.recordSchemeIdMismatchIfAny(
+                        schemaName,
+                        schemeId,
+                        request.getStateSchemeId(),
+                        request.getCentreSchemeId());
+            }
+
+            // reading_at/reading_date are stored in IST (see ReadingTime); other columns stay UTC.
+            LocalDateTime readingTime = ReadingTime.fromClient(request.getReadingDateTime());
+
+            // LOCATION-AFFINITY: validated here, before anything is written. It used to be checked
+            // after createReading had returned, so a malformed geolocation produced a failure
+            // response for a reading that was already committed — and a caller who retried then hit
+            // same-day placeholder reuse. Rejecting first makes the failure honest and the retry clean.
+            validateGeolocation(request.getGeolocation());
+
+            boolean lenient = ingestionSource != IngestionSource.NORMAL;
+            CreateReadingRequest createReadingRequest = CreateReadingRequest.builder()
+                    .schemeId(schemeId)
+                    .operatorId(operatorId)
+                    .readingUrl(request.getReadingUrl())
+                    .readingValue(request.getConfirmedReading())
+                    // READING-PROVENANCE: records that this number came from the caller rather than from
+                    // the OCR provider. Marker only — the submission is processed exactly as before.
+                    .externallyAsserted(request.getConfirmedReading() != null)
+                    // SUPPLY-PLAUSIBILITY: opt this endpoint into the implausible-daily-supply check.
+                    // Set here and nowhere else — createReading is shared with the WhatsApp
+                    // image path, which stays byte-identical because the flag defaults to false
+                    // there. A rejection inside a live WhatsApp conversation has no correction path;
+                    // an API caller gets a 400 and can resubmit.
+                    .supplyPlausibilityChecked(true)
+                    .meterChangeReason(null)
+                    .readingTime(readingTime)
+                    .ingestionSource(lenient ? ingestionSource : null)
+                    .submittedStateSchemeId(lenient ? request.getStateSchemeId() : null)
+                    .submittedCentreSchemeId(lenient ? request.getCentreSchemeId() : null)
+                    .submittedPhoneHash(lenient ? context.submittedPhoneHash() : null)
+                    // An unsupported value never reaches here — the controller rejects it with
+                    // CHANNEL_NOT_SUPPORTED — so an empty parse means the submission simply did not
+                    // declare a channel, and the stored preference decides as before.
+                    .declaredChannel(ReadingChannel.parseStrict(request.getChannel()).orElse(null))
+                    // LOCATION-AFFINITY: GeoJSON orders coordinates [longitude, latitude] — the
+                    // opposite of how they read aloud, and the single easiest thing here to get
+                    // backwards. Pinned by MeterImageWorkflowServiceCanonicalReadingTest.
+                    .latitude(geolocationCoordinate(request.getGeolocation(), 1))
+                    .longitude(geolocationCoordinate(request.getGeolocation(), 0))
+                    .build();
+
+            if (lenient) {
+                // Canonical, greppable audit line for every leniently-recorded submission.
+                log.info("reading_lenient_recorded ingestionSource={} unknownScheme={} unknownOperator={} operatorNotMapped={} phoneAbsent={} operatorId={} schemeId={} submittedStateSchemeId={} submittedCentreSchemeId={} submittedPhone={}",
+                        ingestionSource,
+                        IngestionSource.has(ingestionSource, IngestionSource.UNKNOWN_SCHEME),
+                        IngestionSource.has(ingestionSource, IngestionSource.UNKNOWN_OPERATOR),
+                        IngestionSource.has(ingestionSource, IngestionSource.OPERATOR_NOT_MAPPED),
+                        IngestionSource.has(ingestionSource, IngestionSource.PHONE_ABSENT),
+                        operatorId,
+                        schemeId,
+                        sanitizeSchemeId(request.getStateSchemeId()),
+                        sanitizeSchemeId(request.getCentreSchemeId()),
+                        maskPhone(contactId));
+            }
+
+            // PHONE-OPTIONAL: the contact drives the reading channel lookup (BFM/ELM/PDU/…), which
+            // analytics uses to pick the per-channel water-quantity maths. When the submission carried
+            // no phone, use the credited operator's own number so the reading is processed with that
+            // operator's channel rather than silently falling back to the default one.
+            String channelContactId = phoneAbsent ? operator.phoneNumber() : contactId;
+
+            CreateReadingResponse response = bfmReadingService.createReading(
+                    createReadingRequest,
+                    schemaName,
+                    operator,
+                    channelContactId,
+                    false,
+                    OcrRetryMode.RESILIENT
+            );
+
+            response.setMessage(localizationService.localizeMessage(response.getMessage(), languageKey));
+            return response;
+        } catch (Exception e) {
+            log.error("Unexpected error processing reading for contactId {}: {}", maskPhone(safeContactId), e.getMessage(), e);
+            if (log.isDebugEnabled()) {
+                log.debug("Unexpected error processing reading rawContactId={}: {}", safeContactId, e.getMessage());
+            }
+            String languageKey = localizationService.resolveLanguageKeyForContact(safeContactId);
+            String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Reading could not be processed.", languageKey);
+            return CreateReadingResponse.builder()
+                    .success(false)
+                    .message(descriptiveMessage)
+                    .qualityStatus("REJECTED")
+                    .errorCode(errorCodeForException(e))
+                    .correlationId(safeContactId)
+                    .build();
+        }
+    }
+
+    private TelemetryErrorCode errorCodeForException(Exception e) {
+        String message = e != null ? e.getMessage() : null;
+        if (message == null || message.isBlank()) {
+            return TelemetryErrorCode.PROCESSING_FAILED;
+        }
+        String normalized = message.toLowerCase();
+        if (normalized.contains(OPERATOR_TOKEN) && normalized.contains(SCHEME_TOKEN)) {
+            return TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME;
+        }
+        if (normalized.contains(SCHEME_TOKEN) && normalized.contains(NOT_FOUND_TOKEN)) {
+            return TelemetryErrorCode.SCHEME_NOT_FOUND;
+        }
+        if (normalized.contains(OPERATOR_TOKEN) && normalized.contains(NOT_FOUND_TOKEN)) {
+            return TelemetryErrorCode.OPERATOR_NOT_FOUND;
+        }
+        return TelemetryErrorCode.PROCESSING_FAILED;
+    }
+
+    // LENIENT-INGEST: result of scheme resolution — the scheme id to record against plus the
+    // ingestion-source bits describing why it had to be resolved leniently (0 for the normal path).
+    private record SchemeResolution(Long schemeId, int ingestionSourceBits) {
+    }
+
+    // PHONE-OPTIONAL: everything a submission needs before a reading row can be written — who it is
+    // credited to, which scheme it lands on, and how both had to be resolved.
+    private record SubmissionContext(TelemetryOperatorWithSchema operatorWithSchema,
+                                     Long schemeId,
+                                     int ingestionSource,
+                                     String submittedPhoneHash) {
+    }
+
+    /**
+     * LENIENT-INGEST: resolves operator and scheme for a submission that carried a phone number. The
+     * operator comes first — falling back to the tenant's sentinel "Unknown operator" when the phone is
+     * not registered so the submission is still recorded — and the scheme is then preferred among the
+     * ones that operator is mapped to.
+     */
+    private SubmissionContext resolveFromSubmittedPhone(CanonicalReadingRequest request,
+                                                        String contactId,
+                                                        Integer preferredTenantId) {
+        Optional<TelemetryOperatorWithSchema> resolvedOperator =
+                operatorContextService.tryResolveOperatorWithSchema(contactId, preferredTenantId);
+
+        int ingestionSource = IngestionSource.NORMAL;
+        boolean operatorIsSentinel = false;
+        String submittedPhoneHash = null;
+        TelemetryOperatorWithSchema operatorWithSchema;
+
+        if (resolvedOperator.isPresent()) {
+            operatorWithSchema = resolvedOperator.get();
+        } else if (lenientIngestionEnabled) {
+            String tenantSchema = telemetryTenantRepository.findSchemaNameByTenantId(preferredTenantId)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "No operator found and tenant schema could not be resolved for lenient ingestion"));
+            operatorWithSchema = resolveSentinelOperator(tenantSchema, preferredTenantId);
+            operatorIsSentinel = true;
+            ingestionSource |= IngestionSource.UNKNOWN_OPERATOR;
+            submittedPhoneHash = telemetryTenantRepository.hashSubmittedPhone(contactId);
+            // Scheme ids / user ids are not PII; the raw phone stays at DEBUG only.
+            log.info("reading_lenient reason=\"operator_not_found\" sentinelUserId={} submittedPhone={}",
+                    operatorWithSchema.operator().id(), maskPhone(contactId));
+            if (log.isDebugEnabled()) {
+                log.debug("reading_lenient reason=\"operator_not_found\" rawContactId={}", contactId);
+            }
+        } else {
+            // Flag disabled: reproduce the original throwing behaviour (and its message).
+            operatorContextService.resolveOperatorWithSchema(contactId, preferredTenantId);
+            throw new IllegalStateException("No operator found for the provided contactId");
+        }
+
+        SchemeResolution schemeResolution = resolveSchemeLenient(
+                operatorWithSchema.schemaName(), operatorWithSchema.operator().id(), operatorIsSentinel,
+                request.getStateSchemeId(), request.getCentreSchemeId());
+
+        return new SubmissionContext(
+                operatorWithSchema,
+                schemeResolution.schemeId(),
+                ingestionSource | schemeResolution.ingestionSourceBits(),
+                submittedPhoneHash);
+    }
+
+    /**
+     * PHONE-OPTIONAL: resolves operator and scheme for a submission that carried no phone number.
+     * Without a submitter the scheme is the only anchor, so it is resolved first (ignoring operator
+     * mappings, which cannot be preferred when no operator is known yet) and the reading is credited to
+     * the first pump operator mapped to that scheme. A scheme with no mapped pump operator falls back to
+     * the tenant sentinel, exactly as an unregistered phone does. Every submission resolved here is
+     * tagged {@link IngestionSource#PHONE_ABSENT} so an inferred operator is never mistaken for the real
+     * submitter — including the case where the inferred operator is a perfectly normal, mapped user.
+     */
+    private SubmissionContext resolveOperatorFromScheme(CanonicalReadingRequest request, Integer preferredTenantId) {
+        String schemaName = telemetryTenantRepository.findSchemaNameByTenantId(preferredTenantId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No phone number was submitted and the tenant schema could not be resolved"));
+
+        SchemeResolution schemeResolution = resolveSchemeWithoutOperator(
+                schemaName, request.getStateSchemeId(), request.getCentreSchemeId());
+        int ingestionSource = IngestionSource.PHONE_ABSENT | schemeResolution.ingestionSourceBits();
+
+        Optional<TelemetryOperator> mappedOperator = telemetryTenantRepository
+                .findFirstPumpOperatorForScheme(schemaName, schemeResolution.schemeId());
+        if (mappedOperator.isPresent()) {
+            log.info("reading_phone_absent reason=\"operator_inferred_from_scheme\" operatorId={} schemeId={}",
+                    mappedOperator.get().id(), schemeResolution.schemeId());
+            return new SubmissionContext(
+                    new TelemetryOperatorWithSchema(schemaName, mappedOperator.get()),
+                    schemeResolution.schemeId(),
+                    ingestionSource,
+                    null);
+        }
+
+        if (!lenientIngestionEnabled) {
+            log.info("Reading rejected reason=\"no_operator_mapped_to_scheme\" phoneAbsent=true schemeId={} stateSchemeId={} centreSchemeId={}",
+                    schemeResolution.schemeId(),
+                    sanitizeSchemeId(request.getStateSchemeId()),
+                    sanitizeSchemeId(request.getCentreSchemeId()));
+            throw new IllegalStateException("No operator is mapped to the submitted scheme and no phone number was provided");
+        }
+
+        TelemetryOperatorWithSchema sentinel = resolveSentinelOperator(schemaName, preferredTenantId);
+        log.info("reading_phone_absent reason=\"no_operator_mapped_to_scheme\" sentinelUserId={} schemeId={}",
+                sentinel.operator().id(), schemeResolution.schemeId());
+        return new SubmissionContext(
+                sentinel,
+                schemeResolution.schemeId(),
+                ingestionSource | IngestionSource.UNKNOWN_OPERATOR,
+                null);
+    }
+
+    /** LENIENT-INGEST: the tenant's single sentinel "Unknown operator", created on first use. */
+    private TelemetryOperatorWithSchema resolveSentinelOperator(String schemaName, Integer tenantId) {
+        Long sentinelUserId = telemetryTenantRepository.getOrCreateUnknownOperatorUserId(schemaName, tenantId);
+        TelemetryOperator sentinel = telemetryTenantRepository.findOperatorById(schemaName, sentinelUserId)
+                .orElseThrow(() -> new IllegalStateException("Sentinel operator could not be resolved"));
+        return new TelemetryOperatorWithSchema(schemaName, sentinel);
+    }
+
+    /**
+     * PHONE-OPTIONAL: scheme resolution for a phone-less submission — the same state-then-centre lookup
+     * as {@link #resolveSchemeLenient} minus the operator-mapping preference, which has no meaning
+     * before an operator is known. Unknown ids auto-provision a placeholder scheme when lenient
+     * ingestion is enabled, and are rejected as before when it is disabled.
+     */
+    private SchemeResolution resolveSchemeWithoutOperator(String schemaName,
+                                                               String stateSchemeId,
+                                                               String centreSchemeId) {
+        // Any scheme the submitted ids resolve to is usable: there is no operator to prefer one by.
+        SchemeLookup lookup = lookupSubmittedScheme(schemaName, stateSchemeId, centreSchemeId, schemeId -> true);
+        if (lookup.acceptedSchemeId().isPresent()) {
+            return new SchemeResolution(lookup.acceptedSchemeId().get(), IngestionSource.NORMAL);
+        }
+
+        if (!lenientIngestionEnabled) {
+            log.info("Reading rejected reason=\"scheme_not_found\" phoneAbsent=true stateSchemeId={} centreSchemeId={}",
+                    sanitizeSchemeId(stateSchemeId),
+                    sanitizeSchemeId(centreSchemeId));
+            throw new IllegalStateException("Scheme not found for the provided state or centre scheme id");
+        }
+
+        return provisionPlaceholderScheme(schemaName, stateSchemeId, centreSchemeId, null);
+    }
+
+    // LENIENT-INGEST: outcome of the state-then-centre lookup of the submitted scheme ids.
+    // acceptedSchemeId is the scheme the submission lands on; when nothing was accepted,
+    // rejectedSchemeId carries the scheme that exists but was turned down (the operator is not mapped
+    // to it), and the two flags say which submitted id was found — both only for the rejection logs.
+    private record SchemeLookup(Optional<Long> acceptedSchemeId,
+                                Optional<Long> rejectedSchemeId,
+                                boolean stateSchemeFound,
+                                boolean centreSchemeFound) {
+    }
+
+    /**
+     * LENIENT-INGEST: the single place submitted scheme ids are turned into a scheme — state id first,
+     * centre id second — so a new scheme-id source only has to be added here. {@code acceptable} is how
+     * the caller narrows the candidates ({@code schemeId -> true} when there is no operator to prefer a
+     * mapped scheme by); the centre id is looked up only when the state id yields nothing acceptable,
+     * so the normal path still costs a single query.
+     */
+    private SchemeLookup lookupSubmittedScheme(String schemaName,
+                                               String stateSchemeId,
+                                               String centreSchemeId,
+                                               Predicate<Long> acceptable) {
+        boolean hasStateSchemeId = stateSchemeId != null && !stateSchemeId.isBlank();
+        boolean hasCentreSchemeId = centreSchemeId != null && !centreSchemeId.isBlank();
+
+        Optional<Long> stateResolvedSchemeId = hasStateSchemeId
+                ? telemetryTenantRepository.findSchemeIdByStateSchemeId(schemaName, stateSchemeId)
+                : Optional.empty();
+        if (stateResolvedSchemeId.isPresent() && acceptable.test(stateResolvedSchemeId.get())) {
+            return new SchemeLookup(stateResolvedSchemeId, Optional.empty(), true, false);
+        }
+
+        Optional<Long> centreResolvedSchemeId = hasCentreSchemeId
+                ? telemetryTenantRepository.findSchemeIdByCentreSchemeId(schemaName, centreSchemeId)
+                : Optional.empty();
+        if (centreResolvedSchemeId.isPresent() && acceptable.test(centreResolvedSchemeId.get())) {
+            return new SchemeLookup(centreResolvedSchemeId, Optional.empty(),
+                    stateResolvedSchemeId.isPresent(), true);
+        }
+
+        return new SchemeLookup(
+                Optional.empty(),
+                stateResolvedSchemeId.or(() -> centreResolvedSchemeId),
+                stateResolvedSchemeId.isPresent(),
+                centreResolvedSchemeId.isPresent());
+    }
+
+    /**
+     * LENIENT-INGEST: the single placeholder policy — a scheme id we have never seen becomes an
+     * auto-provisioned scheme so the submission is recorded instead of dropped. Shared by both
+     * resolvers; {@code operatorId} is {@code null} when the submission carried no phone number (the
+     * operator is only credited afterwards, from the scheme).
+     */
+    private SchemeResolution provisionPlaceholderScheme(String schemaName,
+                                                        String stateSchemeId,
+                                                        String centreSchemeId,
+                                                        Long operatorId) {
+        Long placeholderSchemeId = telemetryTenantRepository.getOrCreatePlaceholderScheme(
+                schemaName, stateSchemeId, centreSchemeId);
+        log.info("reading_lenient reason=\"scheme_not_found\" auto_provisioned_scheme_id={} operatorId={} phoneAbsent={} stateSchemeId={} centreSchemeId={}",
+                placeholderSchemeId,
+                operatorId,
+                operatorId == null,
+                sanitizeSchemeId(stateSchemeId),
+                sanitizeSchemeId(centreSchemeId));
+        return new SchemeResolution(placeholderSchemeId, IngestionSource.UNKNOWN_SCHEME);
+    }
+
+    /**
+     * LENIENT-INGEST: resolves the scheme for a canonical reading. Prefers a scheme the operator is
+     * actually mapped to (normal path, bits=0). When that fails and lenient ingestion is enabled it
+     * records against the existing (unmapped) scheme, or auto-provisions a placeholder scheme when the
+     * scheme id is unknown — tagging each case so it can be filtered later. When lenient ingestion is
+     * disabled it preserves the original reject behaviour.
+     */
+    private SchemeResolution resolveSchemeLenient(String schemaName,
+                                                       Long operatorId,
+                                                       boolean operatorIsSentinel,
+                                                       String stateSchemeId,
+                                                       String centreSchemeId) {
+        // Only a scheme the operator is actually mapped to counts as the normal path.
+        SchemeLookup lookup = lookupSubmittedScheme(schemaName, stateSchemeId, centreSchemeId,
+                schemeId -> telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, schemeId));
+        if (lookup.acceptedSchemeId().isPresent()) {
+            return new SchemeResolution(lookup.acceptedSchemeId().get(), IngestionSource.NORMAL);
+        }
+
+        boolean schemeExistsButNotMapped = lookup.rejectedSchemeId().isPresent();
+
+        if (!lenientIngestionEnabled) {
+            // Original behaviour: reject when nothing resolves-and-maps.
+            String rejectionReason = schemeExistsButNotMapped ? "operator_not_mapped_to_scheme" : "scheme_not_found";
+            log.info("Reading rejected reason=\"{}\" operatorId={} stateSchemeId={} stateSchemeFound={} centreSchemeId={} centreSchemeFound={}",
+                    rejectionReason,
+                    operatorId,
+                    sanitizeSchemeId(stateSchemeId),
+                    lookup.stateSchemeFound(),
+                    sanitizeSchemeId(centreSchemeId),
+                    lookup.centreSchemeFound());
+            throw new IllegalStateException("Operator is not mapped to the provided state or centre scheme");
+        }
+
+        // Scheme exists but the operator is not mapped to it -> record against the existing scheme.
+        if (schemeExistsButNotMapped) {
+            Long existingSchemeId = lookup.rejectedSchemeId().get();
+            // Only flag OPERATOR_NOT_MAPPED for a real operator; a sentinel operator is already flagged
+            // via UNKNOWN_OPERATOR and is never expected to be mapped to anything.
+            int bits = operatorIsSentinel ? IngestionSource.NORMAL : IngestionSource.OPERATOR_NOT_MAPPED;
+            log.info("reading_lenient reason=\"operator_not_mapped_to_scheme\" operatorId={} schemeId={} stateSchemeId={} stateSchemeFound={} centreSchemeId={} centreSchemeFound={}",
+                    operatorId,
+                    existingSchemeId,
+                    sanitizeSchemeId(stateSchemeId),
+                    lookup.stateSchemeFound(),
+                    sanitizeSchemeId(centreSchemeId),
+                    lookup.centreSchemeFound());
+            return new SchemeResolution(existingSchemeId, bits);
+        }
+
+        // Scheme id not in our records at all -> auto-provision a placeholder scheme.
+        return provisionPlaceholderScheme(schemaName, stateSchemeId, centreSchemeId, operatorId);
+    }
+
+    private String sanitizeSchemeId(String schemeId) {
+        if (schemeId == null || schemeId.isBlank()) {
+            return "n/a";
+        }
+        return schemeId.replace('\n', ' ').replace('\r', ' ').trim();
+    }
+
+    private String maskPhone(String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            return "n/a";
+        }
+        String digits = phoneNumber.replaceAll("\\D", "");
+        if (digits.length() <= 4) {
+            return "****";
+        }
+        return "****" + digits.substring(digits.length() - 4);
+    }
+
+    /**
+     * LOCATION-AFFINITY: one coordinate out of a validated GeoJSON {@code Point}.
+     *
+     * <p>{@code index} is the GeoJSON position, so <strong>0 is longitude and 1 is latitude</strong>.
+     * Callers pass the index rather than naming the field precisely so that the reversal is visible
+     * at the call site, where it can be checked against the builder line it feeds.
+     *
+     * <p>Returns {@code null} for an absent geolocation, which is the ordinary case: the field is
+     * optional and every WhatsApp submission omits it.
+     */
+    private BigDecimal geolocationCoordinate(CanonicalReadingRequest.Geolocation geolocation, int index) {
+        if (geolocation == null || geolocation.getCoordinates() == null
+                || geolocation.getCoordinates().size() != 2) {
+            return null;
+        }
+        return geolocation.getCoordinates().get(index);
+    }
+
+    /**
+     * Rejects a geolocation that is present but unusable.
+     *
+     * <p>Called before the reading is written. An absent geolocation is not an error — the field is
+     * optional — but a malformed one is, and failing before persistence is what keeps the caller's
+     * retry clean.
+     */
+    private void validateGeolocation(CanonicalReadingRequest.Geolocation geolocation) {
+        if (geolocation == null) {
+            return;
+        }
+        String type = geolocation.getType();
+        if (type != null && !type.isBlank() && !"Point".equalsIgnoreCase(type)) {
+            throw new IllegalStateException("geolocation.type must be Point");
+        }
+
+        List<BigDecimal> coordinates = geolocation.getCoordinates();
+        if (coordinates == null || coordinates.size() != 2) {
+            throw new IllegalStateException("geolocation.coordinates must contain [longitude, latitude]");
+        }
+
+        BigDecimal longitude = coordinates.get(0);
+        BigDecimal latitude = coordinates.get(1);
+        if (latitude == null || latitude.compareTo(BigDecimal.valueOf(-90)) < 0 || latitude.compareTo(BigDecimal.valueOf(90)) > 0) {
+            throw new IllegalStateException("geolocation latitude must be between -90 and 90");
+        }
+        if (longitude == null || longitude.compareTo(BigDecimal.valueOf(-180)) < 0 || longitude.compareTo(BigDecimal.valueOf(180)) > 0) {
+            throw new IllegalStateException("geolocation longitude must be between -180 and 180");
+        }
+    }
+
+    private void ensureSelectedChannelExists(Integer tenantId, String contactId) {
+        String message = "Selected channel is no longer available. Please make sure you have a channel selected.";
+        if (tenantId == null) {
+            throw new IllegalStateException(message);
+        }
+
+        String selectedChannel = userChannelPreferenceRepository.findChannelValue(tenantId, contactId)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .orElseThrow(() -> new IllegalStateException(message));
+
+        List<String> supportedChannels = tenantConfigRepository.findConfigValue(tenantId, "TENANT_SUPPORTED_CHANNELS")
+                .map(rawConfig -> parseSupportedChannels(tenantId, rawConfig))
+                .orElse(List.of());
+
+        boolean stillAvailable = supportedChannels.stream()
+                .map(String::trim)
+                .anyMatch(option -> option.equalsIgnoreCase(selectedChannel));
+        if (!stillAvailable) {
+            throw new IllegalStateException(message);
+        }
+    }
+
+    private List<String> parseSupportedChannels(Integer tenantId, String rawConfig) {
+        try {
+            JsonNode node = objectMapper.readTree(rawConfig);
+            JsonNode channelsNode = node.has("channels") ? node.get("channels") : node;
+            if (channelsNode == null) {
+                return List.of();
+            }
+            if (channelsNode.isArray()) {
+                java.util.ArrayList<String> values = new java.util.ArrayList<>();
+                for (JsonNode child : channelsNode) {
+                    if (child != null && child.isTextual()) {
+                        String value = child.asText().trim();
+                        if (!value.isBlank()) {
+                            values.add(value);
+                        }
+                    }
+                }
+                return values;
+            }
+            if (channelsNode.isTextual()) {
+                String value = channelsNode.asText().trim();
+                return value.isBlank() ? List.of() : List.of(value);
+            }
+        } catch (Exception e) {
+            log.warn("Invalid TENANT_SUPPORTED_CHANNELS JSON for tenantId {}: {}", tenantId, e.getMessage());
+        }
+        return List.of();
+    }
+}

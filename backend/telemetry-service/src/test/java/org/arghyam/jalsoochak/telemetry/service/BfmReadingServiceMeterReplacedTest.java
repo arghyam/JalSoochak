@@ -44,7 +44,7 @@ class BfmReadingServiceMeterReplacedTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
@@ -53,10 +53,10 @@ class BfmReadingServiceMeterReplacedTest {
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
-    private FlowVisionReadingsRetryService flowVisionReadingsRetryService;
+    private OcrReadingsRetryService ocrReadingsRetryService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();

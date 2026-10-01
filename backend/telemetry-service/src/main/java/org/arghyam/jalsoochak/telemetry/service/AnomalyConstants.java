@@ -27,6 +27,19 @@ public final class AnomalyConstants {
      */
     public static final int TYPE_IMPLAUSIBLE_WATER_SUPPLY = 10;
 
+    /**
+     * LOCATION-AFFINITY: the operator's submitted location is farther from the scheme's recorded
+     * coordinates than the {@code LOCATION_AFFINITY_THRESHOLD} metres configured at system level.
+     * <p>
+     * Unlike every other type here, this one does <em>not</em> reject the reading. On the WhatsApp
+     * path the operator was warned and chose to proceed; on the state-IT reading API there is no
+     * interactive step at all. Either way the reading is kept and this row records only where it was
+     * taken from. Anything ambiguous — no coordinates on the reading or the scheme, no threshold
+     * configured, the tenant's {@code LOCATION_CHECK_REQUIRED} not set to YES — is skipped rather
+     * than raised, so a row of this type always means a real measured overshoot.
+     */
+    public static final int TYPE_LOCATION_MISMATCH = 11;
+
     public static final int STATUS_OPEN = 1;
 
     /*
@@ -61,4 +74,14 @@ public final class AnomalyConstants {
     public static final String REASON_IMPLAUSIBLE_SUPPLY_CORRECTION_REJECTED_QUARANTINED =
             "Correction rejected: implies an implausible daily water supply. "
                     + "The reading remains quarantined.";
+
+    /**
+     * LOCATION-AFFINITY. Fixed and uninterpolated for the same reason as the supply reasons above:
+     * the measured distance and the configured threshold are deliberately absent so the column stays
+     * groupable. Both numbers go to the server log and the {@code location_affinity.mismatch} metric;
+     * the distance itself is always recomputable from {@code flow_reading_table.latitude/longitude}
+     * and {@code scheme_master_table.latitude/longitude}, which is why no column stores it.
+     */
+    public static final String REASON_LOCATION_MISMATCH =
+            "Reading submitted outside the scheme boundary.";
 }

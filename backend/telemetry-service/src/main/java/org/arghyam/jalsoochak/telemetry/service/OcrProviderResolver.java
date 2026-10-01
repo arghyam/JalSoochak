@@ -22,8 +22,8 @@ import java.util.Optional;
  * </ul>
  *
  * <p>When a tenant sets <em>none</em> of these keys, {@link #resolve(Integer)} returns {@code null},
- * meaning "use the built-in FlowVision provider exactly as before" — so untouched tenants are byte-for-byte
- * unchanged. When any key is set, unspecified fields fall back to the global {@code flowvision.*} defaults.
+ * meaning "use the built-in OCR provider exactly as before" — so untouched tenants are byte-for-byte
+ * unchanged. When any key is set, unspecified fields fall back to the global {@code ocr.*} defaults.
  */
 @Service
 @Slf4j
@@ -45,10 +45,10 @@ public class OcrProviderResolver {
     public OcrProviderResolver(
             TenantConfigRepository tenantConfigRepository,
             Environment environment,
-            @Value("${flowvision.default-provider:" + OcrProviderSettings.DEFAULT_PROVIDER_ID + "}") String defaultProviderId,
-            @Value("${flowvision.url}") String defaultEndpointUrl,
-            @Value("${flowvision.api-key:}") String defaultApiKey,
-            @Value("${flowvision.auth-header:" + OcrProviderSettings.DEFAULT_AUTH_HEADER + "}") String defaultAuthHeader) {
+            @Value("${ocr.default-provider:" + OcrProviderSettings.DEFAULT_PROVIDER_ID + "}") String defaultProviderId,
+            @Value("${ocr.url}") String defaultEndpointUrl,
+            @Value("${ocr.api-key:}") String defaultApiKey,
+            @Value("${ocr.auth-header:" + OcrProviderSettings.DEFAULT_AUTH_HEADER + "}") String defaultAuthHeader) {
         this.tenantConfigRepository = tenantConfigRepository;
         this.environment = environment;
         this.defaultProviderId = defaultProviderId;
@@ -75,7 +75,7 @@ public class OcrProviderResolver {
         }
 
         String resolvedUrl = url.orElse(defaultEndpointUrl);
-        // Only inherit the global FlowVision key when the endpoint is still the default one; a tenant that
+        // Only inherit the global OCR key when the endpoint is still the default one; a tenant that
         // points at a custom endpoint without its own ocr_api_key must NOT have the default key sent there.
         boolean endpointIsDefault = resolvedUrl.equals(defaultEndpointUrl);
         String rawApiKey = apiKey.orElseGet(() -> endpointIsDefault ? blankToNull(defaultApiKey) : null);

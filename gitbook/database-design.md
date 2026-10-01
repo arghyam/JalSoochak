@@ -27,7 +27,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 * `email (varchar)`
 * `user_type (int, OPERATOR / SECTION_OFFICER / DISTRICT_OFFICER / STATE_ADMIN)`
 * `phone_number (bytea, AES-256 encrypted)`, `phone_number_hash (varchar, HMAC lookup)`
-* `language_id (int)`, `status (int)`, `whatsapp_connection_id (bigint, Glific contact id)`
+* `language_id (int)`, `status (int)`, `whatsapp_connection_id (bigint, WhatsApp provider contact id)`
 
 **`tenant_<state>.user_token_table`** — DB-backed refresh tokens and OTPs (hashed) for revocation.
 
@@ -56,7 +56,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 
 * `id (PK)`, `uuid`, `scheme_id (FK)`
 * `reading_at (timestamp)`, `reading_date (date, daily de-duplication)`
-* `extracted_reading (bigint, FlowVision AI value)`, `confirmed_reading (bigint, operator value)`
+* `extracted_reading (bigint, OCR-extracted value)`, `confirmed_reading (bigint, operator value)`
 * `confidence (float)`, `quantity (bigint, delta vs previous reading)`
 * `channel (int, 1=WhatsApp / 2=Web / 3=IoT)`, `image_url (varchar)`
 * `reading_type (int, normal / meter-change / issue)`, `submission_status (int)`

@@ -57,7 +57,7 @@ class PumpOperatorUploadServiceImplTest {
     private UserCommonRepository userCommonRepository;
 
     @Mock
-    private GlificPreferredLanguageService preferredLanguageService;
+    private WhatsAppPreferredLanguageService preferredLanguageService;
 
     @Mock
     private UserEventPublisher userEventPublisher;

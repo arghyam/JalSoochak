@@ -1,6 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -23,24 +23,24 @@ class OcrProviderRegistryTest {
         }
 
         @Override
-        public FlowVisionResult extractReading(String imageUrl, OcrProviderSettings settings) {
+        public OcrReadingResult extractReading(String imageUrl, OcrProviderSettings settings) {
             return null;
         }
 
         @Override
-        public FlowVisionResult extractReadingOrThrow(String imageUrl, OcrProviderSettings settings) {
+        public OcrReadingResult extractReadingOrThrow(String imageUrl, OcrProviderSettings settings) {
             return null;
         }
     }
 
     @Test
     void returnsExtractorMatchingProviderId() {
-        FakeExtractor flowvision = new FakeExtractor("flowvision");
+        FakeExtractor builtIn = new FakeExtractor("flowvision");
         FakeExtractor visionX = new FakeExtractor("vision-x");
-        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(flowvision, visionX), "flowvision");
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(builtIn, visionX), "flowvision");
 
         assertSame(visionX, registry.get("vision-x"));
-        assertSame(flowvision, registry.get("flowvision"));
+        assertSame(builtIn, registry.get("flowvision"));
     }
 
     @Test
@@ -53,18 +53,18 @@ class OcrProviderRegistryTest {
 
     @Test
     void fallsBackToDefaultForUnknownProvider() {
-        FakeExtractor flowvision = new FakeExtractor("flowvision");
-        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(flowvision, new FakeExtractor("vision-x")), "flowvision");
+        FakeExtractor builtIn = new FakeExtractor("flowvision");
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(builtIn, new FakeExtractor("vision-x")), "flowvision");
 
-        assertSame(flowvision, registry.get("does-not-exist"));
+        assertSame(builtIn, registry.get("does-not-exist"));
     }
 
     @Test
     void fallsBackToDefaultForNullProvider() {
-        FakeExtractor flowvision = new FakeExtractor("flowvision");
-        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(flowvision), "flowvision");
+        FakeExtractor builtIn = new FakeExtractor("flowvision");
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(builtIn), "flowvision");
 
-        assertSame(flowvision, registry.get(null));
+        assertSame(builtIn, registry.get(null));
     }
 
     @Test
