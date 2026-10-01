@@ -406,6 +406,32 @@ Failures return `success: false` with a code in `data.errorCode`:
   the ones not sent. Send the same range again.
 - `500 PROCESSING_FAILED`: safe to retry.
 
+#### Before the first run
+
+ELM and PDU readings that reached analytics before its V56 have fact rows with no source reading id.
+Republishing one adds a second fact row instead of updating the first, so the submission counts
+twice. Once both telemetry-service and analytics-service from this release are deployed, find them:
+
+```sql
+SELECT tenant_id, channel, COUNT(*), MIN(reading_date), MAX(reading_date)
+FROM analytics_schema.fact_meter_reading_table
+WHERE channel IN (2, 3) AND source_reading_id IS NULL
+GROUP BY tenant_id, channel;
+```
+
+Channel `2` is ELM and `3` is PDU. For each tenant it returns, delete those rows, then straight away
+republish the tenant from its earliest `MIN` to its latest `MAX`, in calls of at most 31 days. Its
+dashboards miss those readings until the run finishes.
+
+```sql
+DELETE FROM analytics_schema.fact_meter_reading_table
+WHERE tenant_id = :tenantId AND channel IN (2, 3) AND source_reading_id IS NULL;
+```
+
+Only readings telemetry still holds are sent again, so a fact row whose reading has since been
+deleted doesn't come back. Don't link the old rows to their readings by `correlation_id` instead:
+the WhatsApp flows share one correlation id across several readings (analytics V48).
+
 ---
 
 ### Telemetry service — internal endpoints

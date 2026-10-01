@@ -23,8 +23,10 @@ import java.util.Set;
  * configuration does not re-send it.
  *
  * <p>ELM and PDU only: their water quantity depends on that configuration, and a BFM reading's does
- * not. A BFM reading published before submission identity (analytics V50) also has a fact row with
- * no source reading id, so republishing it would add a second fact row instead of updating the first.
+ * not. A reading published before submission identity (analytics V56) has a fact row with no source
+ * reading id, so republishing it adds a second fact row instead of updating the first. That rules out
+ * BFM readings. ELM and PDU readings have such rows too, so delete them before a tenant's first run
+ * (see "Before the first run" in {@code backend/API_ENDPOINTS.md}).
  *
  * <p>Safe to repeat: analytics updates the one fact row it holds for each reading, and applies an
  * event that carries the version it already has.
