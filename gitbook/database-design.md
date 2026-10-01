@@ -2,7 +2,7 @@
 
 ## 10. Database Design
 
-Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared `common_schema` holds cross-tenant metadata, and each state has its own `tenant_<stateCode>` schema, provisioned by the `common_schema.create_tenant_schema()` PL/pgSQL function when the tenant is created. The common-schema tables and this function are defined by the Flyway migrations in `backend/database/`, which tenant-service packages and runs on startup. The **analytics star-schema warehouse** lives in `analytics_schema`, on analytics-service's own datasource. The tables below are grouped by functional domain (column format: `name (type, notes)`).
+Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared `common_schema` holds cross-tenant metadata, and each state has its own `tenant_<stateCode>` schema, provisioned by the `common_schema.create_tenant_schema()` PL/pgSQL function when the tenant is created. The common-schema tables and this function are defined by the Flyway migrations in `backend/database/`, which tenant-service packages and runs on startup. The **analytics star-schema warehouse** lives in `analytics_schema`, on analytics-service's own datasource. The tables below are grouped by functional domain (column format: `name (type, notes)`). For how the tables relate to each other, see the [Entity-Relationship Diagrams](database-er-diagram.md).
 
 ### 10.1 Tenancy & Users
 
@@ -36,8 +36,6 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 * `language_id (int)`, `status (int)`, `whatsapp_connection_id (bigint, WhatsApp provider contact id)`
 * `state_user_id (varchar, the State IT system's id for the user)`
 
-**`tenant_<state>.user_token_table`** — hashed invite and password-reset tokens (`token_type` INVITE / RESET) for tenant users.
-
 ### 10.2 Location & Hierarchies
 
 * **`lgd_location_master_table`** — LGD nodes: State → District → Block → Panchayat → Village
@@ -59,7 +57,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 
 * **`scheme_lgd_mapping_table` / `scheme_department_mapping_table`** — scheme ↔ location links
 * **`user_scheme_mapping_table`** — operator ↔ scheme assignments
-* **`pumps_scheme_mapping_table`** — pumps installed on a scheme (model, efficiency, head, discharge rate)
+* **`asset_pump_registry_table`** — pumps installed on a scheme (pump model, efficiency, head, discharge capacity, motor ratings)
 
 ### 10.4 Readings & Submissions
 
@@ -95,9 +93,10 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 
 A star schema fed asynchronously via Kafka, with its own Flyway migrations in analytics-service (`src/main/resources/db/migration`). Every table name carries a `_table` suffix (e.g. `dim_date_table`):
 
-* **Dimensions:** `dim_date`, `dim_tenant`, `dim_user`, `dim_scheme` (carrying the scheme's `work_status` and `operating_status` as ingested from the tenant schema), `dim_lgd_location`, `dim_department_location`, `dim_user_scheme_mapping`, `dim_operator_attendance`
-* **Facts:** `fact_meter_reading`, `fact_water_quantity` (daily quantity per scheme, the basis for LPCD and norm achievement), `fact_escalation`, `fact_scheme_performance` (performance score, last supply date)
-* **Other:** `anomaly_table` (anomalies received from telemetry-service), `submission_attempt_table` (submissions rejected before any reading was stored)
+* **Dimensions:** `dim_date_table`, `dim_tenant_table` (with `dim_tenant_water_norm_table` and `dim_tenant_work_status_filter_table` keeping their history by effective date), `dim_user_table`, `dim_scheme_table` (carrying the scheme's `work_status` and `operating_status` as ingested from the tenant schema), `dim_lgd_location_table`, `dim_department_location_table`, `dim_user_scheme_mapping_table`
+* **Facts:** `fact_meter_reading_table`, `fact_water_quantity_table` (daily quantity per scheme, the basis for LPCD and norm achievement), `fact_escalation_table`, `fact_scheme_performance_table` (performance score, last supply date), `fact_operator_attendance_table`, `fact_anomaly_table` (anomalies received from telemetry-service)
+* **Pre-aggregations:** `fact_scheme_daily_table`, `fact_region_metrics_table`, `fact_submission_activity_hourly_table`, rebuilt from the facts above
+* **Other:** `submission_attempt_table` (submissions rejected before any reading was stored)
 
 {% hint style="danger" %}
 Phone numbers and names are PII: stored encrypted (AES-256) with HMAC hashes for lookup, and never written to `INFO`/`WARN`/`ERROR` logs.
