@@ -78,14 +78,29 @@ CREATE TABLE tenant_test.flow_reading_table (
     scheme_id         INTEGER NOT NULL,
     reading_date      DATE    NOT NULL,
     reading_at        TIMESTAMP NOT NULL DEFAULT NOW(),
-    extracted_reading NUMERIC   NOT NULL DEFAULT 0,
-    confirmed_reading NUMERIC   NOT NULL DEFAULT 0,
+    extracted_reading NUMERIC   DEFAULT 0,
+    confirmed_reading NUMERIC   DEFAULT 0,
     correlation_id    VARCHAR(255) NOT NULL DEFAULT 'test-corr-id',
     quantity          NUMERIC   NOT NULL DEFAULT 0,
+    meter_change_reason TEXT,
+    issue_report_reason TEXT,
     created_by        INTEGER   NOT NULL,
     updated_by        INTEGER   NOT NULL DEFAULT 0,
     created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at        TIMESTAMP NOT NULL DEFAULT NOW()
+    updated_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    deleted_at        TIMESTAMP
+);
+
+-- created_at is a plain TIMESTAMP holding UTC, as in the real tenant schemas (analytics V41).
+CREATE TABLE tenant_test.anomaly_table (
+    id         SERIAL PRIMARY KEY,
+    user_id    INTEGER,
+    scheme_id  INTEGER,
+    type       INTEGER   NOT NULL,
+    detail     TEXT      NOT NULL DEFAULT '',
+    status     INTEGER   NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMP
 );
 
 -- Mirrors tenant schema tables created by create_tenant_schema() PL/pgSQL function

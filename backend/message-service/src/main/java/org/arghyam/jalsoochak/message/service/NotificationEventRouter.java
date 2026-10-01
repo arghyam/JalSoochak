@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.message.channel.provider.TenantChannelProviders;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
+import org.arghyam.jalsoochak.message.channel.NudgeSendOutcome;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.config.StorageProperties;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
@@ -36,6 +37,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -52,8 +54,8 @@ import java.util.UUID;
  * based on the {@code eventType} field.
  *
  * <ul>
- *   <li>{@code NUDGE} — fetches the localized message from tenant config and
- *       sends it as a WhatsApp HSM to the operator.</li>
+ *   <li>{@code NUDGE} — starts the Glific nudge flow for the operator (one event per operator per
+ *       day; the flow sends the nudge template and asks which scheme when they hold several).</li>
  *   <li>{@code ESCALATION} — generates a PDF, uploads it to object storage, fetches
  *       the localized body text, and sends a document HSM to the officer.</li>
  *   <li>{@code STAFF_SYNC_COMPLETED} — onboards pump operators into the WhatsApp provider and
@@ -67,6 +69,10 @@ import java.util.UUID;
 public class NotificationEventRouter {
 
     private static final String COMMON_TOPIC = "common-topic";
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+    /** Nudge template {{2}}, e.g. "30 September 2026" — English month names whatever the JVM locale. */
+    private static final DateTimeFormatter NUDGE_DATE_FORMAT =
+            DateTimeFormatter.ofPattern("dd MMMM yyyy", Locale.ENGLISH);
 
     /**
      * Dead-letter topic for {@code SEND_WELCOME_MESSAGE} per-phone failures.
@@ -204,7 +210,7 @@ public class NotificationEventRouter {
             return;
         }
 
-        String todayDate = LocalDate.now().format(DateTimeFormatter.ofPattern("dd MMMM yyyy"));
+        String todayDate = resolveNudgeDate(root.path("nudgeDate").asText(""));
 
         long contactId;
         if (storedId > 0) {
@@ -222,12 +228,32 @@ public class NotificationEventRouter {
             }
         }
 
-        boolean sent = whatsAppChannel.sendNudgeViaFlow(contactId, operatorName, todayDate);
-        if (!sent) {
-            throw new IllegalStateException("[Router/NUDGE] WhatsApp nudge flow initiation failed");
+        NudgeSendOutcome outcome = whatsAppChannel.sendNudgeViaFlow(contactId, operatorName, todayDate);
+        switch (outcome) {
+            case SENT -> {
+                log.info("[Router/NUDGE] → FLOW INITIATED");
+                log.debug("[Router/NUDGE] phone={} → FLOW INITIATED", phone);
+            }
+            case NOT_SENT -> throw new IllegalStateException(
+                    "[Router/NUDGE] WhatsApp nudge flow was not started");
+            // Every flow start re-sends the template, so a retry here could nudge the operator twice.
+            case UNKNOWN -> log.warn("[Router/NUDGE] userId={} flow start outcome unknown, not retrying"
+                    + " to avoid a duplicate nudge", userId);
         }
-        log.info("[Router/NUDGE] → FLOW INITIATED");
-        log.debug("[Router/NUDGE] phone={} → FLOW INITIATED", phone);
+    }
+
+    /**
+     * The nudge date as shown to the operator. tenant-service sends the IST day it nudged for; the
+     * JVM clock here is UTC, so it is only the fallback, and in IST.
+     */
+    private static String resolveNudgeDate(String isoDate) {
+        LocalDate date;
+        try {
+            date = isoDate.isBlank() ? LocalDate.now(IST) : LocalDate.parse(isoDate);
+        } catch (DateTimeParseException e) {
+            date = LocalDate.now(IST);
+        }
+        return date.format(NUDGE_DATE_FORMAT);
     }
 
     private void handleStaffSyncCompleted(JsonNode root) {

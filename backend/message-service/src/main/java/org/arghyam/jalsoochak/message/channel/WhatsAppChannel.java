@@ -1,5 +1,11 @@
 package org.arghyam.jalsoochak.message.channel;
 
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.util.concurrent.TimeoutException;
 import org.arghyam.jalsoochak.message.channel.provider.ReportSendOutcome;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendException;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
@@ -20,7 +26,8 @@ import java.util.Map;
 /**
  * WhatsApp channel, sending HSM templates through the {@link WhatsAppSender} port.
  *
- * <p>Nudges use a text HSM template with {@code {{1}}} = operator name and {@code {{2}}} = today's date.</p>
+ * <p>Scheduled nudges go through {@link #sendNudgeViaFlow} (a Glific flow start). The plain nudge HSM
+ * ({@code {{1}}} = operator name, {@code {{2}}} = date) is only used by the REST notification API.</p>
  * <p>Escalations use a document HSM template with {@code {{1}}} = the PDF's public URL
  * and {@code {{2}}} = localized body text.</p>
  *
@@ -56,7 +63,8 @@ public class WhatsAppChannel implements NotificationChannel {
     }
 
     /**
-     * Sends the nudge HSM template with two variables.
+     * Sends the nudge HSM template with two variables. REST notification API only — the scheduled
+     * nudge starts the Glific flow instead ({@link #sendNudgeViaFlow}).
      *
      * @param phone        recipient WhatsApp phone number (E.164 format)
      * @param operatorName operator name for template {@code {{1}}}
@@ -83,19 +91,47 @@ public class WhatsAppChannel implements NotificationChannel {
      *
      * @param contactId    WhatsApp contact ID
      * @param operatorName operator name passed as flow variable
-     * @param date         today's date passed as flow variable
-     * @return {@code true} if the flow was successfully initiated
+     * @param date         the nudge date passed as flow variable
+     * @return whether the flow started, certainly did not, or may have — see {@link NudgeSendOutcome}
      */
-    public boolean sendNudgeViaFlow(long contactId, String operatorName, String date) {
+    public NudgeSendOutcome sendNudgeViaFlow(long contactId, String operatorName, String date) {
         try {
             whatsAppSender.startNudgeFlow(contactId, operatorName, date);
             log.info("[WHATSAPP] Nudge flow initiated");
             log.debug("[WHATSAPP] Nudge flow initiated for contactId={}", contactId);
-            return true;
+            return NudgeSendOutcome.SENT;
         } catch (Exception ex) {
-            log.error("[WHATSAPP] Failed to initiate nudge flow: {}", ex.getMessage(), ex);
-            return false;
+            NudgeSendOutcome outcome = classifyNudgeFailure(ex);
+            log.error("[WHATSAPP] Failed to initiate nudge flow ({}): {}", outcome, ex.getMessage(), ex);
+            return outcome;
         }
+    }
+
+    /**
+     * {@link NudgeSendOutcome#NOT_SENT} only when the failure proves the flow never started: the
+     * request was refused before sending, the connection never opened, or Glific answered 429/502/503.
+     * Everything else — a response timeout above all — is {@link NudgeSendOutcome#UNKNOWN}.
+     */
+    static NudgeSendOutcome classifyNudgeFailure(Throwable failure) {
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            if (t instanceof TimeoutException || t instanceof SocketTimeoutException
+                    || t.getClass().getSimpleName().equals("ReadTimeoutException")
+                    || (t instanceof IllegalStateException && String.valueOf(t.getMessage()).contains("Timeout"))) {
+                return NudgeSendOutcome.UNKNOWN;
+            }
+            // ConnectTimeoutException extends ConnectException: the connection never opened.
+            if (t instanceof ConnectException || t instanceof UnknownHostException
+                    || t instanceof IllegalArgumentException) {
+                return NudgeSendOutcome.NOT_SENT;
+            }
+            if (t instanceof WebClientResponseException wcre) {
+                int status = wcre.getStatusCode().value();
+                return status == 429 || status == 502 || status == 503
+                        ? NudgeSendOutcome.NOT_SENT : NudgeSendOutcome.UNKNOWN;
+            }
+            if (t.getCause() == t) break;
+        }
+        return NudgeSendOutcome.UNKNOWN;
     }
 
     /**

@@ -21,6 +21,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +75,9 @@ class NudgeRepositoryIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    /** The repository is always asked about the IST calendar day, like the scheduler does. */
+    private static final LocalDate TODAY = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+
     private int operatorTypeId;
     private int sectionOfficerTypeId;
     private int districtOfficerTypeId;
@@ -102,6 +106,7 @@ class NudgeRepositoryIntegrationTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.execute("DELETE FROM tenant_test.flow_reading_table");
+        jdbcTemplate.execute("DELETE FROM tenant_test.anomaly_table");
         jdbcTemplate.execute("DELETE FROM tenant_test.user_scheme_mapping_table");
         jdbcTemplate.execute("DELETE FROM tenant_test.user_table");
         jdbcTemplate.execute("DELETE FROM tenant_test.scheme_master_table");
@@ -127,11 +132,186 @@ class NudgeRepositoryIntegrationTest {
     void streamUsersWithNoUploadToday_excludesOperator_whenReadingSubmittedToday() {
         int opId = insertUser("Op Two", "912222222222", operatorTypeId);
         insertSchemeMapping(opId, schemeId, 1);
-        insertFlowReading(schemeId, opId, LocalDate.now());
+        insertConfirmedReading(schemeId, opId, TODAY);
 
         List<Map<String, Object>> result = collectNoUploadToday("tenant_test");
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_returnsOneRowPerOperator_whenOperatorHoldsSeveralPendingSchemes() {
+        int scheme2 = insertScheme("S-002");
+        int scheme3 = insertScheme("S-003");
+        int opId = insertUser("Op Multi", "916000000001", operatorTypeId);
+        insertSchemeMapping(opId, schemeId, 1);
+        insertSchemeMapping(opId, scheme2, 1);
+        insertSchemeMapping(opId, scheme3, 1);
+
+        List<Map<String, Object>> result = collectNoUploadToday("tenant_test");
+
+        assertThat(result).hasSize(1);
+        assertThat(((Number) result.get(0).get("user_id")).intValue()).isEqualTo(opId);
+        assertThat(((Number) result.get(0).get("pending_scheme_count")).intValue()).isEqualTo(3);
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_stillNudges_whenOnlySomeOfOperatorsSchemesAreDone() {
+        int scheme2 = insertScheme("S-002");
+        int opId = insertUser("Op Half", "916000000002", operatorTypeId);
+        insertSchemeMapping(opId, schemeId, 1);
+        insertSchemeMapping(opId, scheme2, 1);
+        insertConfirmedReading(schemeId, opId, TODAY);
+
+        List<Map<String, Object>> result = collectNoUploadToday("tenant_test");
+
+        assertThat(result).hasSize(1);
+        assertThat(((Number) result.get(0).get("pending_scheme_count")).intValue()).isEqualTo(1);
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_skipsEveryOperatorOnScheme_whenAnyOneOfThemSubmitted() {
+        int opA = insertUser("Op A", "916000000003", operatorTypeId);
+        int opB = insertUser("Op B", "916000000004", operatorTypeId);
+        int opC = insertUser("Op C", "916000000005", operatorTypeId);
+        insertSchemeMapping(opA, schemeId, 1);
+        insertSchemeMapping(opB, schemeId, 1);
+        insertSchemeMapping(opC, schemeId, 1);
+        insertConfirmedReading(schemeId, opA, TODAY);
+
+        List<Map<String, Object>> result = collectNoUploadToday("tenant_test");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_stillNudges_whenTodaysRowIsOnlyAPlaceholder() {
+        int opId = insertUser("Op Placeholder", "916000000006", operatorTypeId);
+        insertSchemeMapping(opId, schemeId, 1);
+        // scheme-selection / location placeholders and rejected readings all carry 0 readings and no reason
+        insertFlowReading(schemeId, opId, TODAY);
+
+        List<Map<String, Object>> result = collectNoUploadToday("tenant_test");
+
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_stillNudges_whenTodaysReadingIsSoftDeleted() {
+        int opId = insertUser("Op Deleted Reading", "916000000007", operatorTypeId);
+        insertSchemeMapping(opId, schemeId, 1);
+        jdbcTemplate.update(
+                "INSERT INTO tenant_test.flow_reading_table " +
+                "(scheme_id, reading_date, confirmed_reading, created_by, updated_by, deleted_at) " +
+                "VALUES (?, ?, 25, ?, ?, NOW())",
+                schemeId, TODAY, opId, opId);
+
+        List<Map<String, Object>> result = collectNoUploadToday("tenant_test");
+
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_treatsSchemeAsDone_whenIssueReasonRecordedToday() {
+        int opId = insertUser("Op Issue", "916000000008", operatorTypeId);
+        insertSchemeMapping(opId, schemeId, 1);
+        insertReasonRow(schemeId, opId, TODAY, "issue_report_reason", "No power supply");
+
+        assertThat(collectNoUploadToday("tenant_test")).isEmpty();
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_treatsSchemeAsDone_whenMeterChangeReasonRecordedToday() {
+        int opId = insertUser("Op Meter", "916000000009", operatorTypeId);
+        insertSchemeMapping(opId, schemeId, 1);
+        insertReasonRow(schemeId, opId, TODAY, "meter_change_reason", "Meter damaged");
+
+        assertThat(collectNoUploadToday("tenant_test")).isEmpty();
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_stillNudges_whenReasonIsBlank() {
+        int opId = insertUser("Op Blank Reason", "916000000010", operatorTypeId);
+        insertSchemeMapping(opId, schemeId, 1);
+        insertReasonRow(schemeId, opId, TODAY, "issue_report_reason", "  ");
+
+        assertThat(collectNoUploadToday("tenant_test")).hasSize(1);
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_stillNudges_whenReasonWasRecordedYesterday() {
+        int opId = insertUser("Op Old Reason", "916000000011", operatorTypeId);
+        insertSchemeMapping(opId, schemeId, 1);
+        insertReasonRow(schemeId, opId, TODAY.minusDays(1), "issue_report_reason", "No power supply");
+
+        assertThat(collectNoUploadToday("tenant_test")).hasSize(1);
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_treatsSchemeAsDone_whenNoSupplyOrNoSubmissionAnomalyRaisedToday() {
+        int scheme2 = insertScheme("S-002");
+        int opA = insertUser("Op Anomaly A", "916000000012", operatorTypeId);
+        int opB = insertUser("Op Anomaly B", "916000000013", operatorTypeId);
+        insertSchemeMapping(opA, schemeId, 1);
+        insertSchemeMapping(opB, scheme2, 1);
+        insertAnomalyNowUtc(opA, schemeId, 6); // NO_WATER_SUPPLY
+        insertAnomalyNowUtc(opB, scheme2, 9);  // NO_SUBMISSION
+
+        assertThat(collectNoUploadToday("tenant_test")).isEmpty();
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_ignoresOtherAnomalyTypesAndYesterdaysAnomalies() {
+        int scheme2 = insertScheme("S-002");
+        int opA = insertUser("Op Other Anomaly", "916000000014", operatorTypeId);
+        int opB = insertUser("Op Old Anomaly", "916000000015", operatorTypeId);
+        insertSchemeMapping(opA, schemeId, 1);
+        insertSchemeMapping(opB, scheme2, 1);
+        insertAnomalyNowUtc(opA, schemeId, 1);
+        jdbcTemplate.update(
+                "INSERT INTO tenant_test.anomaly_table (user_id, scheme_id, type, created_at) " +
+                "VALUES (?, ?, 6, (NOW() AT TIME ZONE 'UTC') - INTERVAL '2 days')",
+                opB, scheme2);
+
+        assertThat(collectNoUploadToday("tenant_test")).hasSize(2);
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_skipsOperator_withChatbotActivityInsideTheQuietWindow() {
+        int scheme2 = insertScheme("S-002");
+        int opId = insertUser("Op Busy", "916000000016", operatorTypeId);
+        insertSchemeMapping(opId, schemeId, 1);
+        insertSchemeMapping(opId, scheme2, 1);
+        // mid-conversation: a scheme-selection placeholder written a minute ago
+        jdbcTemplate.update(
+                "INSERT INTO tenant_test.flow_reading_table " +
+                "(scheme_id, reading_date, created_by, updated_by, updated_at) " +
+                "VALUES (?, ?, ?, ?, (NOW() AT TIME ZONE 'UTC') - INTERVAL '1 minute')",
+                schemeId, TODAY, opId, opId);
+
+        List<Map<String, Object>> quiet = new ArrayList<>();
+        nudgeRepository.streamUsersWithNoUploadToday("tenant_test", TODAY, 15, quiet::add);
+        List<Map<String, Object>> noQuietWindow = new ArrayList<>();
+        nudgeRepository.streamUsersWithNoUploadToday("tenant_test", TODAY, 0, noQuietWindow::add);
+
+        assertThat(quiet).isEmpty();
+        assertThat(noQuietWindow).hasSize(1);
+    }
+
+    @Test
+    void streamUsersWithNoUploadToday_nudgesOperator_whenLastActivityIsOutsideTheQuietWindow() {
+        int opId = insertUser("Op Earlier", "916000000017", operatorTypeId);
+        insertSchemeMapping(opId, schemeId, 1);
+        jdbcTemplate.update(
+                "INSERT INTO tenant_test.flow_reading_table " +
+                "(scheme_id, reading_date, created_by, updated_by, updated_at) " +
+                "VALUES (?, ?, ?, ?, (NOW() AT TIME ZONE 'UTC') - INTERVAL '2 hours')",
+                schemeId, TODAY, opId, opId);
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        nudgeRepository.streamUsersWithNoUploadToday("tenant_test", TODAY, 15, result::add);
+
+        assertThat(result).hasSize(1);
     }
 
     @Test
@@ -182,7 +362,7 @@ class NudgeRepositoryIntegrationTest {
     void streamUsersWithNoUploadToday_includesOperator_whenReadingFromYesterdayOnly() {
         int opId = insertUser("Op Yesterday", "915555555555", operatorTypeId);
         insertSchemeMapping(opId, schemeId, 1);
-        insertFlowReading(schemeId, opId, LocalDate.now().minusDays(1));
+        insertConfirmedReading(schemeId, opId, TODAY.minusDays(1));
 
         List<Map<String, Object>> result = collectNoUploadToday("tenant_test");
 
@@ -740,7 +920,7 @@ class NudgeRepositoryIntegrationTest {
 
     @Test
     void streamUsersWithNoUploadToday_rejectsInvalidSchemaName() {
-        assertThatThrownBy(() -> nudgeRepository.streamUsersWithNoUploadToday("invalid-schema!", LocalDate.now(), row -> {}))
+        assertThatThrownBy(() -> nudgeRepository.streamUsersWithNoUploadToday("invalid-schema!", TODAY, 0, row -> {}))
                 .rootCause()
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Invalid schema name");
@@ -767,7 +947,7 @@ class NudgeRepositoryIntegrationTest {
 
     private List<Map<String, Object>> collectNoUploadToday(String schema) {
         List<Map<String, Object>> result = new ArrayList<>();
-        int count = nudgeRepository.streamUsersWithNoUploadToday(schema, LocalDate.now(), result::add);
+        int count = nudgeRepository.streamUsersWithNoUploadToday(schema, TODAY, 0, result::add);
         assertThat(count).isEqualTo(result.size());
         return result;
     }
@@ -831,6 +1011,29 @@ class NudgeRepositoryIntegrationTest {
         jdbcTemplate.update(
                 "INSERT INTO tenant_test.user_scheme_mapping_table (user_id, scheme_id, status) VALUES (?, ?, ?)",
                 userId, schemeId, status);
+    }
+
+    /** A submitted reading: telemetry counts a reading as completed only when confirmed_reading &gt; 0. */
+    private void insertConfirmedReading(int schemeId, int createdBy, LocalDate date) {
+        jdbcTemplate.update(
+                "INSERT INTO tenant_test.flow_reading_table " +
+                "(scheme_id, reading_date, confirmed_reading, created_by, updated_by) VALUES (?, ?, 42, ?, ?)",
+                schemeId, date, createdBy, createdBy);
+    }
+
+    private void insertReasonRow(int schemeId, int createdBy, LocalDate date, String reasonColumn, String reason) {
+        jdbcTemplate.update(
+                "INSERT INTO tenant_test.flow_reading_table " +
+                "(scheme_id, reading_date, " + reasonColumn + ", created_by, updated_by) VALUES (?, ?, ?, ?, ?)",
+                schemeId, date, reason, createdBy, createdBy);
+    }
+
+    /** anomaly_table.created_at holds UTC wall-clock time, whatever the session timezone. */
+    private void insertAnomalyNowUtc(int userId, int schemeId, int type) {
+        jdbcTemplate.update(
+                "INSERT INTO tenant_test.anomaly_table (user_id, scheme_id, type, created_at) " +
+                "VALUES (?, ?, ?, NOW() AT TIME ZONE 'UTC')",
+                userId, schemeId, type);
     }
 
     private void insertFlowReading(int schemeId, int createdBy, LocalDate date) {

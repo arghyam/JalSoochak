@@ -267,9 +267,7 @@ public class MeterReadingConversationService {
             String selectedReason = resolveSelection(request.getReason(), reasons)
                     .orElseThrow(() -> new IllegalStateException("Invalid meter change reason selection"));
 
-            Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = resolveSchemeForToday(operatorWithSchema);
 
             String correlationId = telemetryTenantRepository.upsertPendingMeterChangeRecord(
                     operatorWithSchema.schemaName(),
@@ -530,9 +528,7 @@ public class MeterReadingConversationService {
             String selectedReason = selectedReasonNode.path("name").asText().trim();
             String selectedKey = selectedReasonNode.path("id").asText().trim();
 
-            Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = resolveSchemeForToday(operatorWithSchema);
 
             String correlationId = telemetryTenantRepository.upsertPendingMeterChangeRecord(
                     operatorWithSchema.schemaName(),
@@ -645,9 +641,7 @@ public class MeterReadingConversationService {
             String responseSelectedKey = normalizeIssueReportSelectedKey(selectedKey);
             String anomalySelectedKey = isReasonKey(selectedKey) ? responseSelectedKey : selectedKey;
 
-            Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = resolveSchemeForToday(operatorWithSchema);
             List<Long> analyticsUserIds = resolveAnalyticsUserIds(
                     operatorWithSchema.schemaName(),
                     schemeId,
@@ -883,9 +877,7 @@ public class MeterReadingConversationService {
                 );
             }
 
-            Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = resolveSchemeForToday(operatorWithSchema);
             List<Long> analyticsUserIds = resolveAnalyticsUserIds(
                     operatorWithSchema.schemaName(),
                     schemeId,
@@ -964,9 +956,7 @@ public class MeterReadingConversationService {
                 throw new IllegalStateException("Operator tenant could not be resolved");
             }
 
-            Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = resolveSchemeForToday(operatorWithSchema);
             List<Long> analyticsUserIds = resolveAnalyticsUserIds(
                     operatorWithSchema.schemaName(),
                     schemeId,
@@ -1701,9 +1691,7 @@ public class MeterReadingConversationService {
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
 
-            Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorId)
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = resolveSchemeForToday(operatorWithSchema);
 
             LocalDate today = ReadingTime.today();
 
@@ -2075,6 +2063,26 @@ public class MeterReadingConversationService {
             }
         }
         return out.toString();
+    }
+
+    /**
+     * NUDGE-SCHEME: the scheme this conversation is about — the one the operator picked today via
+     * {@code /scheme/selected} — falling back to their first mapped scheme, which is also the only
+     * one for a single-scheme operator (the flow asks only when there are several).
+     */
+    private Long resolveSchemeForToday(TelemetryOperatorWithSchema operatorWithSchema) {
+        return telemetryTenantRepository
+                .findLatestPendingSchemeSelectionForDate(
+                        operatorWithSchema.schemaName(),
+                        operatorWithSchema.operator().id(),
+                        ReadingTime.today()
+                )
+                .map(TelemetrySchemeSelectionRecord::schemeId)
+                .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
+                        operatorWithSchema.schemaName(),
+                        operatorWithSchema.operator().id()
+                ))
+                .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
     }
 
     private List<Long> resolveAnalyticsUserIds(String schemaName, Long schemeId, Long fallbackUserId) {

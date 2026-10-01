@@ -56,6 +56,26 @@ class KafkaProducerTest {
     // ── publishJson ───────────────────────────────────────────────────────────────
 
     @Test
+    void publishJson_withKey_sendsKeyedRecord() throws JsonProcessingException {
+        Map<String, Object> event = Map.of("eventType", "NUDGE");
+        when(objectMapper.writeValueAsString(event)).thenReturn("{\"eventType\":\"NUDGE\"}");
+
+        kafkaProducer.publishJson("common-topic", "1:77", event);
+
+        verify(kafkaTemplate).send("common-topic", "1:77", "{\"eventType\":\"NUDGE\"}");
+    }
+
+    @Test
+    void publishJson_withNullKey_sendsUnkeyedRecord() throws JsonProcessingException {
+        Map<String, Object> event = Map.of("eventType", "NUDGE");
+        when(objectMapper.writeValueAsString(event)).thenReturn("{}");
+
+        kafkaProducer.publishJson("common-topic", null, event);
+
+        verify(kafkaTemplate).send("common-topic", "{}");
+    }
+
+    @Test
     void publishJson_serializesEventAndSendsToGivenTopic() throws JsonProcessingException {
         Map<String, Object> event = Map.of("eventType", "TENANT_CREATED", "stateCode", "mp");
         when(objectMapper.writeValueAsString(event)).thenReturn("{\"eventType\":\"TENANT_CREATED\",\"stateCode\":\"mp\"}");

@@ -64,6 +64,7 @@ docker run -d --name postgres -p 5432:5432 \
 ### Service Startup Order
 
 Services must start in this order:
+
 1. PostgreSQL (database)
 2. Kafka broker
 3. `service-discovery` (Eureka, port 8761) — all other services register here
@@ -74,6 +75,7 @@ Services must start in this order:
 ### Multi-Tenancy Model
 
 The system uses **schema-per-tenant** multi-tenancy in PostgreSQL:
+
 - `common_schema` — shared tenant metadata, admin users, and LGD (Local Government Directory) location types
 - `tenant_<state_code>` — dynamically created per tenant (e.g., `tenant_mp`, `tenant_up`) via a PL/pgSQL function in `database/V2__create_tenant_schema_function.sql`
 
@@ -115,6 +117,7 @@ src/main/java/com/example/<service>/
 ### Message Service
 
 The `message-service` (port 8085) is distinct from others: it uses **Spring WebFlux** (non-blocking) to call external notification APIs. It supports three channels configured in `application.yml`:
+
 - Webhook (generic)
 - Email via SendGrid
 - WhatsApp via the `WhatsAppSender` port (adapter: `GlificWhatsAppSender`)
@@ -122,6 +125,7 @@ The `message-service` (port 8085) is distinct from others: it uses **Spring WebF
 ### Configuration
 
 All services use `src/main/resources/application.yml`. Key environment variables that override defaults:
+
 - `SPRING_DATASOURCE_URL`
 - `SPRING_DATASOURCE_USERNAME`
 - `SPRING_DATASOURCE_PASSWORD`
@@ -135,22 +139,29 @@ Note: Several `application.yml` files contain hardcoded credentials (development
 Cron jobs in `tenant-service` publish Kafka events; `message-service` consumes and delivers via WhatsApp.
 
 ### Flow
-- 8 AM cron (`NudgeSchedulerService`): operators with no upload today → `NUDGE` Kafka event
+
+- 18:00 IST cron (`NudgeSchedulerService`, per-tenant `PUMP_OPERATOR_REMINDER_NUDGE_TIME`): **one** `NUDGE`
+  event per operator who still has a scheme with nothing recorded today by _any_ operator on it
 - 9 AM cron (`EscalationSchedulerService`): operators with missed days ≥ threshold → `ESCALATION` Kafka event
 - `message-service` (`NotificationEventRouter`): routes events → WhatsApp through the `WhatsAppSender` port (adapter: `GlificWhatsAppSender`, GraphQL HSM API)
 
 ### Language resolution
+
 Message text is fetched from `common_schema.tenant_config_master_table` using the pattern from
 `telemetry-service/ConversationLocalizationService`:
+
 - `user_table.language_id` (int) → `language_N` config key → language name → normalized key
 - Template keys: `nudge_message_{langKey}`, `escalation_message_{langKey}` (fallback: `_english` → generic)
 - Add per-tenant rows in `tenant_config_master_table` with these keys before running.
 
 ### Object storage + WhatsApp provider
+
 - Escalation PDFs are generated locally (PDFBox), uploaded to the S3-compatible store through
   `ObjectStorageService`, then the PDF's public URL is registered with the WhatsApp provider via
   `createMessageMedia` to get a `mediaId`
-- WhatsApp template for nudge: uses `sendHsmMessage`; body `{{1}}` = operator name, `{{2}}` = date
+- Nudge: `startContactFlow` of the Glific nudge flow (`WHATSAPP_NUDGE_FLOW_ID`) with `{name, date}`;
+  the flow sends the HSM (`{{1}}` name, `{{2}}` date) and enters the main flow with `nudge_action`.
+  Retried only when the start certainly did not happen (`NudgeSendOutcome`) — a retry re-sends the HSM.
 - WhatsApp template for escalation (two-step):
   1. `createMessageMedia(url, source_url)` → `mediaId`
   2. `createAndSendMessage(templateId, mediaId, receiverId, parameters=[bodyText])` — the document
@@ -174,6 +185,7 @@ must be public and anonymously readable either way.
   `DAILY_REPORT_LINK_BUTTON_BASE_URL` to have that checked at startup.
 
 ### Privacy rule
+
 Phone numbers are PII — log them only at `DEBUG` level. Never include raw phone numbers in
 `INFO`/`WARN`/`ERROR` log statements.
 
@@ -182,6 +194,7 @@ Phone numbers are PII — log them only at `DEBUG` level. Never include raw phon
 **Always follow Test-Driven Development (TDD)** for all new code in this repository.
 
 ### Rules
+
 1. **Write tests before or alongside implementation** — no production code ships without a corresponding test.
 2. **Integration tests use Testcontainers** — use `org.testcontainers:postgresql` for real database assertions;
    never mock the database in integration tests.
@@ -198,6 +211,7 @@ Phone numbers are PII — log them only at `DEBUG` level. Never include raw phon
    do not log them at INFO level even in test helpers.
 
 ### Test structure per service
+
 ```text
 src/test/
 ├── java/com/example/<service>/
@@ -210,6 +224,7 @@ src/test/
 ```
 
 ### Running tests
+
 ```bash
 # Run all tests for a service (requires Docker for Testcontainers)
 cd backend/<service-name>

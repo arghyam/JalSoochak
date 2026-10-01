@@ -1196,6 +1196,13 @@ public class TelemetryTenantRepository {
         return createdId != null ? createdId.longValue() : null;
     }
 
+    /**
+     * The operator's latest same-day row for the scheme, for {@link #createIssueReportRecord} to annotate.
+     *
+     * <p>NUDGE-SCHEME: the {@code scheme-selection-*} placeholder is skipped. Annotating it replaced its
+     * correlation id, so {@link #findLatestPendingSchemeSelectionForDate} lost the operator's choice and
+     * every later step of the same conversation fell back to their first mapped scheme.</p>
+     */
     private Optional<Long> findLatestFlowReadingRecordForDate(String schemaName,
                                                               Long schemeId,
                                                               Long operatorId,
@@ -1208,10 +1215,41 @@ public class TelemetryTenantRepository {
                   AND created_by = ?
                   AND reading_date = ?
                   AND deleted_at IS NULL
+                  AND correlation_id NOT LIKE ?
                 ORDER BY id DESC
                 LIMIT 1
                 """, schemaName);
-        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), schemeId, operatorId, readingDate);
+        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")),
+                schemeId, operatorId, readingDate, SCHEME_SELECTION_CORRELATION_PREFIX + "%");
+        return rows.stream().findFirst();
+    }
+
+    /** {@link #findLatestPendingMeterChangeRecord} restricted to one {@code reading_date}, for the upsert. */
+    private Optional<TelemetryPendingMeterChangeRecord> findLatestPendingMeterChangeRecordForDate(String schemaName,
+                                                                                                Long schemeId,
+                                                                                                Long operatorId,
+                                                                                                LocalDate readingDate) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                SELECT id, correlation_id, created_by, extracted_reading
+                FROM %s.flow_reading_table
+                WHERE scheme_id = ?
+                  AND created_by = ?
+                  AND reading_date = ?
+                  AND extracted_reading = 0
+                  AND confirmed_reading = 0
+                  AND meter_change_reason IS NOT NULL
+                  AND deleted_at IS NULL
+                ORDER BY id DESC
+                LIMIT 1
+                """, schemaName);
+        List<TelemetryPendingMeterChangeRecord> rows = jdbcTemplate.query(sql, (rs, n) ->
+                new TelemetryPendingMeterChangeRecord(
+                        toLong(rs.getObject("id")),
+                        rs.getString("correlation_id"),
+                        toLong(rs.getObject("created_by")),
+                        rs.getBigDecimal("extracted_reading")
+                ), schemeId, operatorId, readingDate);
         return rows.stream().findFirst();
     }
 
@@ -1239,13 +1277,23 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
-    public Optional<TelemetryPendingIssueReportRecord> findLatestPendingIssueReportRecord(String schemaName, Long schemeId, Long operatorId) {
+    /**
+     * The operator's issue-report row for the scheme on {@code readingDate}, if any.
+     *
+     * <p>Restricted to the one day: without it a reason given today overwrote the operator's last
+     * issue report on any earlier day and moved it to today, so that day lost its reason.</p>
+     */
+    public Optional<TelemetryPendingIssueReportRecord> findLatestPendingIssueReportRecord(String schemaName,
+                                                                                        Long schemeId,
+                                                                                        Long operatorId,
+                                                                                        LocalDate readingDate) {
         validateSchemaName(schemaName);
         String sql = String.format("""
                 SELECT id, correlation_id, created_by
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND created_by = ?
+                  AND reading_date = ?
                   AND extracted_reading = 0
                   AND confirmed_reading = 0
                   AND issue_report_reason IS NOT NULL
@@ -1258,7 +1306,7 @@ public class TelemetryTenantRepository {
                         toLong(rs.getObject("id")),
                         rs.getString("correlation_id"),
                         toLong(rs.getObject("created_by"))
-                ), schemeId, operatorId);
+                ), schemeId, operatorId, readingDate);
         return rows.stream().findFirst();
     }
 
@@ -1294,7 +1342,9 @@ public class TelemetryTenantRepository {
                                                  Long operatorId,
                                                  LocalDateTime readingAt,
                                                  String reason) {
-        Optional<TelemetryPendingMeterChangeRecord> pending = findLatestPendingMeterChangeRecord(schemaName, schemeId, operatorId);
+        LocalDate readingDate = LocalDate.from(readingAt);
+        Optional<TelemetryPendingMeterChangeRecord> pending =
+                findLatestPendingMeterChangeRecordForDate(schemaName, schemeId, operatorId, readingDate);
         if (pending.isPresent()) {
             String timeColumn = resolveFlowReadingTimeColumn(schemaName);
             String sql = String.format("""
@@ -1306,14 +1356,14 @@ public class TelemetryTenantRepository {
                         updated_at = NOW()
                     WHERE id = ?
                     """, schemaName, timeColumn);
-            jdbcTemplate.update(sql, readingAt, LocalDate.from(readingAt), reason, operatorId, pending.get().id());
-            cleanupOtherPendingMeterChangeRecords(schemaName, schemeId, operatorId, pending.get().id(), operatorId);
+            jdbcTemplate.update(sql, readingAt, readingDate, reason, operatorId, pending.get().id());
+            cleanupOtherPendingMeterChangeRecords(schemaName, schemeId, operatorId, readingDate, pending.get().id(), operatorId);
             return pending.get().correlationId();
         }
 
         String correlationId = "meter-change-" + UUID.randomUUID();
         Long createdId = createMeterChangeReasonRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason);
-        cleanupOtherPendingMeterChangeRecords(schemaName, schemeId, operatorId, createdId, operatorId);
+        cleanupOtherPendingMeterChangeRecords(schemaName, schemeId, operatorId, readingDate, createdId, operatorId);
         return correlationId;
     }
 
@@ -1322,7 +1372,8 @@ public class TelemetryTenantRepository {
                                                  Long operatorId,
                                                  LocalDateTime readingAt,
                                                  String reason) {
-        Optional<TelemetryPendingIssueReportRecord> pending = findLatestPendingIssueReportRecord(schemaName, schemeId, operatorId);
+        Optional<TelemetryPendingIssueReportRecord> pending =
+                findLatestPendingIssueReportRecord(schemaName, schemeId, operatorId, LocalDate.from(readingAt));
         if (pending.isPresent()) {
             String timeColumn = resolveFlowReadingTimeColumn(schemaName);
             String sql = String.format("""
@@ -1343,9 +1394,14 @@ public class TelemetryTenantRepository {
         return correlationId;
     }
 
+    /**
+     * Soft-deletes the operator's other pending meter-change rows for the scheme on {@code readingDate}.
+     * Restricted to that day: unrestricted, each new meter-change reason deleted every earlier day's.
+     */
     private void cleanupOtherPendingMeterChangeRecords(String schemaName,
                                                        Long schemeId,
                                                        Long operatorId,
+                                                       LocalDate readingDate,
                                                        Long keepId,
                                                        Long updatedBy) {
         validateSchemaName(schemaName);
@@ -1356,6 +1412,7 @@ public class TelemetryTenantRepository {
                     updated_at = NOW()
                 WHERE scheme_id = ?
                   AND created_by = ?
+                  AND reading_date = ?
                   AND extracted_reading = 0
                   AND confirmed_reading = 0
                   AND meter_change_reason IS NOT NULL
@@ -1364,7 +1421,7 @@ public class TelemetryTenantRepository {
                 """, schemaName);
         // deleted_by is left NULL: it references tenant_admin_user_master_table, and this cleanup is
         // done on behalf of a pump operator (a user_table id), who is recorded in updated_by instead.
-        jdbcTemplate.update(sql, updatedBy, schemeId, operatorId, keepId);
+        jdbcTemplate.update(sql, updatedBy, schemeId, operatorId, readingDate, keepId);
     }
 
     /** Writes both reading columns — see the warning on {@link #updateReadingValues}. Currently unused. */

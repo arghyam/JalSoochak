@@ -26,10 +26,22 @@ public class KafkaProducer {
      * Serializes {@code event} to JSON and publishes it to the given topic.
      */
     public void publishJson(String topic, Object event) {
+        publishJson(topic, null, event);
+    }
+
+    /**
+     * Serializes {@code event} to JSON and publishes it to the given topic under {@code key}, so every
+     * event for the same key lands on the same partition in order. A {@code null} key is unkeyed.
+     */
+    public void publishJson(String topic, String key, Object event) {
         try {
             String json = objectMapper.writeValueAsString(event);
             log.debug("Publishing event to topic [{}]: {}", topic, json);
-            kafkaTemplate.send(topic, json);
+            if (key == null) {
+                kafkaTemplate.send(topic, json);
+            } else {
+                kafkaTemplate.send(topic, key, json);
+            }
         } catch (JsonProcessingException e) {
             log.error("Failed to serialize event for topic [{}]: {}", topic, e.getMessage(), e);
             throw new RuntimeException("Failed to serialize Kafka event", e);

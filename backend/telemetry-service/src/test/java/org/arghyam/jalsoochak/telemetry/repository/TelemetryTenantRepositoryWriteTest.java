@@ -520,7 +520,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("issue_report_reason IS NOT NULL", row(
                     "id", 6L, "correlation_id", "issue-report-1", "created_by", 2L));
 
-            assertThat(repository.findLatestPendingIssueReportRecord(SCHEMA, 7L, 2L))
+            assertThat(repository.findLatestPendingIssueReportRecord(SCHEMA, 7L, 2L, LocalDate.of(2026, 3, 1)))
                     .hasValueSatisfying(r -> assertThat(r.id()).isEqualTo(6L));
         }
 
