@@ -3,8 +3,8 @@ package org.arghyam.jalsoochak.telemetry.dto.response;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
- * Response of {@code POST /api/v1/telemetry/readings/republish}, in the {@code success} + {@code data}
- * envelope the other {@code /readings} routes answer in.
+ * Response of {@code POST /api/v1/telemetry/internal/readings/republish}, in the {@code success} +
+ * {@code data} envelope the {@code /readings} routes answer in.
  */
 public record RepublishReadingsResponse(boolean success, Data data) {
 

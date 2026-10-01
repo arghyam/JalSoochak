@@ -75,7 +75,7 @@ class TelemetryApiKeyAuthFilterTest {
     @Test
     void canonicalReadingsRoutesAreProtected() throws Exception {
         for (String path : new String[]{"/api/v1/telemetry/readings", "/api/v1/telemetry/readings/",
-                "/api/v1/telemetry/readings/formats/assam", "/api/v1/telemetry/readings/republish"}) {
+                "/api/v1/telemetry/readings/formats/assam"}) {
             MockFilterChain chain = new MockFilterChain();
             MockHttpServletResponse response = new MockHttpServletResponse();
 
@@ -144,6 +144,21 @@ class TelemetryApiKeyAuthFilterTest {
 
         assertEquals(200, response.getStatus());
         assertEquals(request, chain.getRequest());
+    }
+
+    @Test
+    void internalRoutesAreLeftToTheInternalGate() throws Exception {
+        // They take the operations token instead, checked in InternalAuthFilter; a tenant's key must
+        // be neither required nor enough.
+        MockFilterChain chain = new MockFilterChain();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockHttpServletRequest request = post("/api/v1/telemetry/internal/readings/republish", null);
+
+        filter().doFilter(request, response, chain);
+
+        assertEquals(200, response.getStatus());
+        assertEquals(request, chain.getRequest());
+        assertNull(request.getAttribute(TelemetryApiKeyAuthFilter.TENANT_ID_ATTRIBUTE));
     }
 
     @Test

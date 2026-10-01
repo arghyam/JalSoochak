@@ -64,8 +64,8 @@ class RouteParityTest {
             "POST /api/v1/telemetry/readings/reset-latest",
             "PATCH /api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading",
             "POST /api/v1/telemetry/readings/formats/{format}",
-            // State IT backfill
-            "POST /api/v1/telemetry/readings/republish"
+            // Operations
+            "POST /api/v1/telemetry/internal/readings/republish"
     );
 
     @Test

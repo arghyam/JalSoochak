@@ -22,6 +22,9 @@ public class OpenApiConfig {
     /** OpenAPI name of the chatbot webhook-token scheme; referenced by {@code @SecurityRequirement}. */
     public static final String WEBHOOK_TOKEN_SCHEME = "WebhookToken";
 
+    /** OpenAPI name of the operations-token scheme; referenced by {@code @SecurityRequirement}. */
+    public static final String INTERNAL_TOKEN_SCHEME = "InternalToken";
+
     @Bean
     public OpenAPI telemetryServiceOpenAPI(WebhookAuthProperties webhookAuthProperties) {
         return new OpenAPI()
@@ -65,6 +68,17 @@ public class OpenApiConfig {
                                         .name(webhookAuthProperties.getHeaderName())
                                         .description("Shared secret held by the WhatsApp chatbot flow. "
                                                 + "When enforcement is on, requests without a valid token "
-                                                + "are rejected with 401.")));
+                                                + "are rejected with 401."))
+                        // The operations routes under /internal authenticate with a token checked in
+                        // InternalAuthFilter, not with a tenant's API key.
+                        .addSecuritySchemes(INTERNAL_TOKEN_SCHEME,
+                                new SecurityScheme()
+                                        .type(SecurityScheme.Type.APIKEY)
+                                        .in(SecurityScheme.In.HEADER)
+                                        .name(InternalAuthFilter.TOKEN_HEADER)
+                                        .description("Operations token for the routes under "
+                                                + "/api/v1/telemetry/internal. Requests without a valid "
+                                                + "token are rejected with 401, and every request is while "
+                                                + "no token is configured.")));
     }
 }

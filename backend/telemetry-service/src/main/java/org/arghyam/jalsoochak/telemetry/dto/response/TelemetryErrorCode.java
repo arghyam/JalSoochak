@@ -72,6 +72,9 @@ public enum TelemetryErrorCode {
     /** The submitted scheme could not be found. */
     SCHEME_NOT_FOUND("SCHEME_NOT_FOUND"),
 
+    /** The tenant named by the request's {@code X-Tenant-Code} could not be found. */
+    TENANT_NOT_FOUND("TENANT_NOT_FOUND"),
+
     /** The operator could not be found. */
     OPERATOR_NOT_FOUND("OPERATOR_NOT_FOUND"),
 

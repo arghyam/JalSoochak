@@ -1,9 +1,8 @@
-package org.arghyam.jalsoochak.telemetry.controller.ingest;
+package org.arghyam.jalsoochak.telemetry.controller.internal;
 
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
-import org.arghyam.jalsoochak.telemetry.config.TelemetryApiKeyAuthFilter;
+import org.arghyam.jalsoochak.telemetry.config.TenantInterceptor;
 import org.arghyam.jalsoochak.telemetry.service.ReadingBackfillService;
-import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,6 +21,8 @@ import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -31,44 +32,44 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class ReadingBackfillControllerTest {
 
-    private static final String PATH = "/api/v1/telemetry/readings/republish";
-    private static final String API_KEY = "js_valid_key";
+    private static final String PATH = "/api/v1/telemetry/internal/readings/republish";
+    private static final String TENANT_CODE = "AS";
     private static final int TENANT_ID = 22;
     private static final LocalDate FROM = LocalDate.of(2026, 9, 1);
     private static final LocalDate TO = LocalDate.of(2026, 9, 30);
 
     @Mock
     private ReadingBackfillService readingBackfillService;
-    @Mock
-    private TelemetryApiKeyService telemetryApiKeyService;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new ReadingBackfillController(readingBackfillService, telemetryApiKeyService))
+                .standaloneSetup(new ReadingBackfillController(readingBackfillService))
                 .build();
     }
 
     private ResultActions perform(String body) throws Exception {
-        return mockMvc.perform(request(body));
+        return perform(TENANT_CODE, body);
     }
 
-    private static MockHttpServletRequestBuilder request(String body) {
-        return post(PATH)
-                .header(TelemetryApiKeyAuthFilter.API_KEY_HEADER, API_KEY)
-                .contentType("application/json")
-                .content(body);
+    /** @param tenantCode {@code null} to send no {@code X-Tenant-Code} header */
+    private ResultActions perform(String tenantCode, String body) throws Exception {
+        MockHttpServletRequestBuilder request = post(PATH).contentType("application/json").content(body);
+        if (tenantCode != null) {
+            request.header(TenantInterceptor.TENANT_HEADER, tenantCode);
+        }
+        return mockMvc.perform(request);
     }
 
-    private void authenticated() {
-        when(telemetryApiKeyService.resolveTenantIdFromRawApiKey(API_KEY)).thenReturn(Optional.of(TENANT_ID));
+    private void knownTenant() {
+        when(readingBackfillService.findTenantId(TENANT_CODE)).thenReturn(Optional.of(TENANT_ID));
     }
 
     @Test
     void republishesAndReturnsTheCounts() throws Exception {
-        authenticated();
+        knownTenant();
         when(readingBackfillService.republish(TENANT_ID, FROM, TO, "S-1", null, ReadingChannel.PDU))
                 .thenReturn(new ReadingBackfillService.Outcome(3, 1, 0));
 
@@ -86,7 +87,7 @@ class ReadingBackfillControllerTest {
     /** The State IT integration sends the scheme ids in snake case on POST /readings. */
     @Test
     void acceptsSnakeCaseFieldsAndDefaultsToEveryChannel() throws Exception {
-        authenticated();
+        knownTenant();
         when(readingBackfillService.republish(TENANT_ID, FROM, TO, null, "C-9", null))
                 .thenReturn(new ReadingBackfillService.Outcome(0, 0, 0));
 
@@ -98,37 +99,75 @@ class ReadingBackfillControllerTest {
     }
 
     @Test
-    void usesTheTenantTheFilterAuthenticated() throws Exception {
+    void looksTheTenantUpByTheTrimmedHeader() throws Exception {
+        when(readingBackfillService.findTenantId("as")).thenReturn(Optional.of(TENANT_ID));
         when(readingBackfillService.republish(TENANT_ID, FROM, TO, null, null, null))
                 .thenReturn(new ReadingBackfillService.Outcome(1, 0, 0));
 
-        mockMvc.perform(request("""
-                        {"fromDate": "2026-09-01", "toDate": "2026-09-30"}
-                        """).requestAttr(TelemetryApiKeyAuthFilter.TENANT_ID_ATTRIBUTE, TENANT_ID))
-                .andExpect(status().isOk());
+        perform("  as ", """
+                {"fromDate": "2026-09-01", "toDate": "2026-09-30"}
+                """)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.republishedCount").value(1));
+    }
 
-        verifyNoInteractions(telemetryApiKeyService);
+    @ParameterizedTest
+    @ValueSource(strings = {"", "   "})
+    void rejectsABlankTenantCode(String tenantCode) throws Exception {
+        perform(tenantCode, """
+                {"fromDate": "2026-09-01", "toDate": "2026-09-30"}
+                """)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data.errorCode").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.data.message").value("X-Tenant-Code must be provided"));
+
+        verifyNoInteractions(readingBackfillService);
     }
 
     @Test
-    void rejectsAnUnknownApiKey() throws Exception {
-        when(telemetryApiKeyService.resolveTenantIdFromRawApiKey(API_KEY)).thenReturn(Optional.empty());
+    void rejectsAMissingTenantCode() throws Exception {
+        perform(null, """
+                {"fromDate": "2026-09-01", "toDate": "2026-09-30"}
+                """)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.data.errorCode").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.data.message").value("X-Tenant-Code must be provided"));
+
+        verifyNoInteractions(readingBackfillService);
+    }
+
+    @Test
+    void answersAnUnknownTenantWithNotFound() throws Exception {
+        when(readingBackfillService.findTenantId(TENANT_CODE)).thenReturn(Optional.empty());
 
         perform("""
                 {"fromDate": "2026-09-01", "toDate": "2026-09-30"}
                 """)
-                .andExpect(status().isUnauthorized())
+                .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data.errorCode").value("INVALID_API_KEY"));
+                .andExpect(jsonPath("$.data.errorCode").value("TENANT_NOT_FOUND"))
+                .andExpect(jsonPath("$.data.message").value("Tenant not found"));
 
-        verifyNoInteractions(readingBackfillService);
+        verify(readingBackfillService, never()).republish(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void answersAFailedTenantLookupWithoutItsDetail() throws Exception {
+        when(readingBackfillService.findTenantId(TENANT_CODE))
+                .thenThrow(new IllegalStateException("connection refused to common_schema"));
+
+        perform("""
+                {"fromDate": "2026-09-01", "toDate": "2026-09-30"}
+                """)
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.data.errorCode").value("PROCESSING_FAILED"))
+                .andExpect(jsonPath("$.data.message").value("Failed to republish readings"));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"BFM", "IOT", "flow"})
     void rejectsAChannelOtherThanElmOrPdu(String channel) throws Exception {
-        authenticated();
-
         perform("""
                 {"fromDate": "2026-09-01", "toDate": "2026-09-30", "channel": "%s"}
                 """.formatted(channel))
@@ -141,7 +180,7 @@ class ReadingBackfillControllerTest {
 
     @Test
     void acceptsARangeOfThirtyOneDays() throws Exception {
-        authenticated();
+        knownTenant();
         when(readingBackfillService.republish(TENANT_ID, FROM, LocalDate.of(2026, 10, 1), null, null, null))
                 .thenReturn(new ReadingBackfillService.Outcome(0, 0, 0));
 
@@ -197,7 +236,7 @@ class ReadingBackfillControllerTest {
 
     @Test
     void answersAnUnknownSchemeWithNotFound() throws Exception {
-        authenticated();
+        knownTenant();
         when(readingBackfillService.republish(TENANT_ID, FROM, TO, "S-404", null, null))
                 .thenThrow(new ResponseStatusException(HttpStatus.NOT_FOUND, "Scheme not found"));
 
@@ -212,7 +251,7 @@ class ReadingBackfillControllerTest {
     /** The counts say how far the run got, so the caller knows to send the same range again. */
     @Test
     void answersARunThatStoppedPartWayWithItsCounts() throws Exception {
-        authenticated();
+        knownTenant();
         when(readingBackfillService.republish(TENANT_ID, FROM, TO, null, null, null))
                 .thenReturn(new ReadingBackfillService.Outcome(4, 1, 7));
 
@@ -230,7 +269,7 @@ class ReadingBackfillControllerTest {
 
     @Test
     void answersAFailureWithoutItsDetail() throws Exception {
-        authenticated();
+        knownTenant();
         when(readingBackfillService.republish(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("Flow reading 7 not found in tenant_as"));
 

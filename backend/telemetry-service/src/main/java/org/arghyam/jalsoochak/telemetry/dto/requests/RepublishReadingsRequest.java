@@ -14,8 +14,8 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 
 /**
- * Body of {@code POST /api/v1/telemetry/readings/republish}: which stored readings to send to
- * analytics again. The scheme is named by its state or its centre scheme id, as on
+ * Body of {@code POST /api/v1/telemetry/internal/readings/republish}: which stored readings to send
+ * to analytics again. The scheme is named by its state or its centre scheme id, as on
  * {@code POST /readings}; leaving both out covers every scheme of the tenant.
  */
 @Data

@@ -98,6 +98,16 @@ telemetry:
       # Two entries make a rotation window: add the new hash, update the chatbot flows, drop the old one.
       # Startup fails if this is empty while mode=ENFORCE, or if an entry is not 64-char lowercase hex.
       token-hashes: ${TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES:}
+  internal:
+    auth:
+      # Operations token for the routes under /api/v1/telemetry/internal, sent in X-Internal-Token.
+      # The api-gateway routes /api/v1/telemetry/** publicly, so this token is the only thing in front
+      # of them.
+      #
+      # SHA-256 hex hash of the token — NOT the token itself. Left empty, the internal routes are
+      # disabled: the service still starts and every call to them gets 401. A value that is not
+      # 64-character hex disables them the same way, with a warning at startup.
+      token-hash: ${TELEMETRY_INTERNAL_AUTH_TOKEN_HASH:}
   supply-plausibility:
     # SUPPLY-PLAUSIBILITY: rejects a meter reading whose implied daily volume exceeds what the
     # scheme's connected population could physically consume:

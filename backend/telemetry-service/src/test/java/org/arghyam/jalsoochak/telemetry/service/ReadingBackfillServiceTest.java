@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.ReadingRepublisher.Result;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,6 +42,9 @@ class ReadingBackfillServiceTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
+    private TenantConfigRepository tenantConfigRepository;
+
+    @Mock
     private ReadingRepublisher readingRepublisher;
 
     @InjectMocks
@@ -48,6 +52,20 @@ class ReadingBackfillServiceTest {
 
     private void tenantSchema() {
         when(telemetryTenantRepository.findSchemaNameByTenantId(TENANT_ID)).thenReturn(Optional.of(SCHEMA));
+    }
+
+    @Test
+    void findsTheTenantByItsStateCode() {
+        when(tenantConfigRepository.findTenantIdByStateCode("as")).thenReturn(Optional.of(TENANT_ID));
+
+        assertEquals(Optional.of(TENANT_ID), readingBackfillService.findTenantId("as"));
+    }
+
+    @Test
+    void findsNoTenantForAnUnknownStateCode() {
+        when(tenantConfigRepository.findTenantIdByStateCode("zz")).thenReturn(Optional.empty());
+
+        assertEquals(Optional.empty(), readingBackfillService.findTenantId("zz"));
     }
 
     /**

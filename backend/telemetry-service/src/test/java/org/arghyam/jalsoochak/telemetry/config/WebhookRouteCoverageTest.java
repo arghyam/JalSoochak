@@ -14,6 +14,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -34,6 +35,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @DisplayName("WebhookRoutes — coverage of the webhook controllers")
 class WebhookRouteCoverageTest {
+
+    private static final String INTERNAL_CONTROLLER_PACKAGE =
+            "org.arghyam.jalsoochak.telemetry.controller.internal";
 
     @Test
     @DisplayName("every @PostMapping on a webhook controller is in the protected set, and vice versa")
@@ -154,7 +158,9 @@ class WebhookRouteCoverageTest {
      * Closes the gap the allowlist cannot see: a controller that should have carried
      * {@link WebhookRoute} but does not. Its routes would be in no allowlist and, outside the
      * {@code /readings} and {@code /schemes/*} prefixes, behind no gate at all. Every route the
-     * service maps must therefore be authenticated by exactly one of the two gates.
+     * service maps must therefore be authenticated by exactly one of the three gates: the webhook
+     * token for {@code @WebhookRoute} controllers, the operations token for the controllers in
+     * {@code controller.internal}, and the API key for the rest.
      */
     @Test
     @DisplayName("every route the service maps is behind exactly one credential gate")
@@ -165,16 +171,26 @@ class WebhookRouteCoverageTest {
                 .filter(route -> {
                     boolean webhookGate = WebhookRoutes.isProtected(route.method(), route.path());
                     boolean apiKeyGate = TelemetryApiKeyAuthFilter.requiresApiKey(route.path());
-                    boolean webhookFamily = route.controller().isAnnotationPresent(WebhookRoute.class);
-                    return webhookFamily ? !webhookGate || apiKeyGate : webhookGate || !apiKeyGate;
+                    boolean internalGate = InternalAuthFilter.isInternal(route.path());
+                    boolean familyGate;
+                    if (route.controller().isAnnotationPresent(WebhookRoute.class)) {
+                        familyGate = webhookGate;
+                    } else if (route.controller().getPackageName().equals(INTERNAL_CONTROLLER_PACKAGE)) {
+                        familyGate = internalGate;
+                    } else {
+                        familyGate = apiKeyGate;
+                    }
+                    long gates = Stream.of(webhookGate, apiKeyGate, internalGate).filter(gate -> gate).count();
+                    return !familyGate || gates != 1;
                 })
                 .map(route -> route.controller().getSimpleName() + ": " + route.key())
                 .toList();
 
         assertThat(misgated)
                 .as("Routes not behind exactly the gate of their family. A webhook controller needs "
-                        + "@WebhookRoute and an allowlist entry; anything else must sit under the "
-                        + "API-key prefixes.")
+                        + "@WebhookRoute and an allowlist entry; a controller in controller.internal must "
+                        + "sit under " + InternalAuthFilter.INTERNAL_PREFIX + "; anything else must sit "
+                        + "under the API-key prefixes.")
                 .isEmpty();
     }
 

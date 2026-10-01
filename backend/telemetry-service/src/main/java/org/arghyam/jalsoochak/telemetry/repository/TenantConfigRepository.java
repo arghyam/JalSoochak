@@ -31,6 +31,7 @@ public class TenantConfigRepository {
                 SELECT id
                 FROM common_schema.tenant_master_table
                 WHERE LOWER(state_code) = LOWER(?)
+                  AND deleted_at IS NULL
                 LIMIT 1
                 """;
         List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getInt("id"), tenantCode);

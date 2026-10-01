@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -12,6 +13,7 @@ import java.time.LocalDate;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -45,6 +47,7 @@ public class ReadingBackfillService {
     static final String SCHEME_NOT_FOUND = "Scheme not found for the provided state or centre scheme id";
 
     private final TelemetryTenantRepository telemetryTenantRepository;
+    private final TenantConfigRepository tenantConfigRepository;
     private final ReadingRepublisher readingRepublisher;
 
     /**
@@ -54,6 +57,14 @@ public class ReadingBackfillService {
      *                         did not acknowledge and every one after it; 0 when the run finished
      */
     public record Outcome(int republishedCount, int withheldCount, int notSentCount) {
+    }
+
+    /**
+     * @param tenantCode the tenant's state code, in any case
+     * @return the tenant's id; empty for an unknown or deleted tenant
+     */
+    public Optional<Integer> findTenantId(String tenantCode) {
+        return tenantConfigRepository.findTenantIdByStateCode(tenantCode);
     }
 
     /**
