@@ -141,6 +141,7 @@ Set the following environment variables before running the Telemetry services:
 | PATCH | `/api/v1/scheme/schemes/{schemeId}/status?tenantCode={tenantCode}` | Update scheme work/operating status (one or both) |
 | POST | `/api/v1/scheme/schemes/upload` | Bulk upload schemes (CSV) |
 | POST | `/api/v1/scheme/schemes/mappings/upload` | Bulk upload scheme mappings (CSV) |
+| POST | `/api/v1/scheme/schemes/dimensions/republish?tenantCode={tenantCode}` | SUPER_USER / the tenant's STATE_ADMIN. Re-sends every live scheme to analytics as `SCHEME_DIMENSION_REPLACED` (one-off backfill of `dim_scheme_table`); returns `{schemes, failed}` |
 
 ### State master-data sync (`scheme-service`)
 

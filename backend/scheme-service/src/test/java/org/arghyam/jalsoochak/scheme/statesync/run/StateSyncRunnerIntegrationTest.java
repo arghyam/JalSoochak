@@ -53,7 +53,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         StaticListableBeanFactory beans = new StaticListableBeanFactory(Map.of("source", source));
         runner = new StateSyncRunner(properties, beans.getBeanProvider(StateMasterDataSource.class), runRepository,
                 tenantRepository, new HierarchyReconciler(tenantRepository), pii,
-                new StateSyncEventPublisher(kafka, tenantRepository),
+                new StateSyncEventPublisher(kafka, new org.arghyam.jalsoochak.scheme.kafka.SchemeDimensionEvents(jdbc)),
                 new DataSourceTransactionManager(dataSource));
 
         int district = lgd("Dibrugarh", 2, stateLgd, null);

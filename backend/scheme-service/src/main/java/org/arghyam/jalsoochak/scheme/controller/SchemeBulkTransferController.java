@@ -45,6 +45,18 @@ public class SchemeBulkTransferController {
         return ResponseEntity.ok(schemeService.uploadSchemeMappings(file));
     }
 
+    /**
+     * Operations backfill: re-sends every live scheme of the tenant to analytics as
+     * SCHEME_DIMENSION_REPLACED, so dim_scheme_table holds each scheme's full location set.
+     */
+    @PreAuthorize("hasAnyRole('SUPER_USER','STATE_ADMIN','SUPER_STATE_ADMIN') "
+            + "and @schemeSecurity.canAccessTenant(#tenantCode, authentication)")
+    @PostMapping("/schemes/dimensions/republish")
+    public ResponseEntity<java.util.Map<String, Integer>> republishSchemeDimensions(@RequestParam String tenantCode) {
+        log.info("POST /api/v1/scheme/schemes/dimensions/republish called for tenantCode {}", tenantCode);
+        return ResponseEntity.ok(schemeService.republishSchemeDimensions(tenantCode));
+    }
+
     @PreAuthorize("hasAnyRole('STATE_ADMIN','SUPER_STATE_ADMIN')")
     @GetMapping("/schemes/download")
     public ResponseEntity<ReportLinkResponseDTO> downloadSchemes() {

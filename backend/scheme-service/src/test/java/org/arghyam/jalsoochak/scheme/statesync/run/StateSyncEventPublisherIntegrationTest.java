@@ -3,14 +3,13 @@ package org.arghyam.jalsoochak.scheme.statesync.run;
 import org.arghyam.jalsoochak.scheme.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.scheme.statesync.StateSyncIntegrationTestBase;
 import org.arghyam.jalsoochak.scheme.statesync.reconcile.SchemeReconciler.Reassignment;
-import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantRepository;
+import org.arghyam.jalsoochak.scheme.kafka.SchemeDimensionEvents;
 import org.arghyam.jalsoochak.scheme.statesync.run.StateSyncEventPublisher.PendingEvents;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -24,11 +23,12 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** The SCHEME_DIMENSION_REPLACED fan-out, read back from real tenant tables. */
+/** {@link SchemeDimensionEvents}' fan-out, read back from real tenant tables, and the publish order. */
 class StateSyncEventPublisherIntegrationTest extends StateSyncIntegrationTestBase {
 
     private KafkaProducer kafka;
     private StateSyncEventPublisher publisher;
+    private SchemeDimensionEvents builder;
     private int district;
     private int block;
     private int panchayat;
@@ -44,7 +44,8 @@ class StateSyncEventPublisherIntegrationTest extends StateSyncIntegrationTestBas
     void setUp() {
         kafka = mock(KafkaProducer.class);
         when(kafka.publishJson(anyString(), any())).thenReturn(true);
-        publisher = new StateSyncEventPublisher(kafka, new StateSyncTenantRepository(jdbc));
+        builder = new SchemeDimensionEvents(jdbc);
+        publisher = new StateSyncEventPublisher(kafka, builder);
         district = lgd("Dibrugarh", 2, stateLgd, null);
         block = lgd("Tingkhong", 3, district, null);
         panchayat = lgd("Dillibari", 4, block, null);
@@ -74,7 +75,7 @@ class StateSyncEventPublisherIntegrationTest extends StateSyncIntegrationTestBas
         map(id, village1, subdivision1);
         map(id, village2, subdivision2);
 
-        List<Map<String, Object>> events = publisher.schemeDimensionEvents(SCHEMA, TENANT_ID, List.of(id));
+        List<Map<String, Object>> events = builder.build(SCHEMA, TENANT_ID, List.of(id));
 
         assertThat(events).singleElement().satisfies(e -> {
             assertThat(e).containsEntry("eventType", "SCHEME_DIMENSION_REPLACED").containsEntry("schemeId", id)
@@ -98,12 +99,26 @@ class StateSyncEventPublisherIntegrationTest extends StateSyncIntegrationTestBas
         int id = scheme("1", "2", "S", null);
         map(id, village1, null);
 
-        List<Map<String, Object>> rows = (List<Map<String, Object>>) publisher
-                .schemeDimensionEvents(SCHEMA, TENANT_ID, List.of(id)).get(0).get("rows");
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) builder
+                .build(SCHEMA, TENANT_ID, List.of(id)).get(0).get("rows");
 
         assertThat(rows).singleElement().satisfies(r -> {
             assertThat(r.get("parentDepartmentLocationId")).isNull();
             assertThat(r.get("deptLevels")).isNull();
+        });
+    }
+
+    @Test
+    void aSchemeWithNoVillageIsSentWithNoRowsAndADeletedOneIsSkipped() {
+        int bare = scheme("SS-1", "C-1", "No location yet", null);
+        int deleted = scheme("SS-2", "C-2", "Gone", null);
+        jdbc.update("UPDATE tenant_as.scheme_master_table SET deleted_at = NOW() WHERE id = ?", deleted);
+
+        List<Map<String, Object>> events = builder.build(SCHEMA, TENANT_ID, List.of(bare, deleted));
+
+        assertThat(events).singleElement().satisfies(e -> {
+            assertThat(e).containsEntry("schemeId", bare).containsEntry("stateSchemeId", 0).containsEntry("centreSchemeId", 0);
+            assertThat((List<?>) e.get("rows")).isEmpty();
         });
     }
 
@@ -122,12 +137,5 @@ class StateSyncEventPublisherIntegrationTest extends StateSyncIntegrationTestBas
         order.verify(kafka).publishJson(eq("scheme-service-topic"), moved.capture());
         assertThat((Map<String, Object>) moved.getValue()).containsEntry("eventType", "SCHEME_READINGS_REASSIGNED")
                 .containsEntry("fromSchemeId", 99).containsEntry("toSchemeId", id).containsEntry("tenantId", TENANT_ID);
-    }
-
-    @Test
-    void anUnparseableStateIdBecomesZero() {
-        assertThat(StateSyncEventPublisher.safeParseInt("SS-1")).isZero();
-        assertThat(Arrays.asList(StateSyncEventPublisher.safeParseInt(null), StateSyncEventPublisher.safeParseInt("7")))
-                .containsExactly(0, 7);
     }
 }

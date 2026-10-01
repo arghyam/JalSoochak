@@ -44,6 +44,12 @@ class SchemeMappingUploadTest {
     @Mock
     SchemeUploadChunkProcessor chunkProcessor;
 
+    @Mock
+    org.arghyam.jalsoochak.scheme.kafka.SchemeDimensionEvents schemeDimensionEvents;
+
+    @Mock
+    org.arghyam.jalsoochak.scheme.kafka.KafkaProducer kafkaProducer;
+
     @InjectMocks
     SchemeServiceImpl schemeService;
 
@@ -121,6 +127,9 @@ class SchemeMappingUploadTest {
         assertThat(deptRows.getFirst().parentDepartmentLevel()).isEqualTo("sub_division");
         assertThat(deptRows.getFirst().createdBy()).isEqualTo(10);
         assertThat(deptRows.getFirst().updatedBy()).isEqualTo(10);
+
+        // The re-mapped scheme's whole analytics row set is rebuilt from what was just written.
+        verify(schemeDimensionEvents).build(eq("tenant_ka"), org.mockito.ArgumentMatchers.anyInt(), eq(List.of(1)));
     }
 
     @Test

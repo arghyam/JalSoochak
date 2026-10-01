@@ -57,6 +57,9 @@ class SchemeServiceImplCoverageTest {
     @Mock
     KafkaProducer kafkaProducer;
 
+    @Mock
+    org.arghyam.jalsoochak.scheme.kafka.SchemeDimensionEvents schemeDimensionEvents;
+
     @InjectMocks
     SchemeServiceImpl schemeService;
 
@@ -254,10 +257,8 @@ class SchemeServiceImplCoverageTest {
         when(schemeDbRepository.findUserIdByEmail("tenant_ka", "admin@example.com")).thenReturn(10);
         when(schemeDbRepository.findTenantIdByUserId("tenant_ka", 10)).thenReturn(200);
         when(schemeDbRepository.updateSchemeStatusesById("tenant_ka", 77, 2, 1, 10)).thenReturn(true);
-        when(schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds("tenant_ka", List.of(77)))
-                .thenReturn(List.of(
-                        new SchemeDbRepository.SchemeAnalyticsRow(77, "101", "201", "Scheme Updated", 11.11, 22.22, 2, 1, 501, 601)
-                ));
+        when(schemeDimensionEvents.build("tenant_ka", 200, List.of(77)))
+                .thenReturn(List.of(Map.of("eventType", "SCHEME_DIMENSION_REPLACED", "schemeId", 77, "tenantId", 200)));
 
         SchemeStatusUpdateRequestDTO request = new SchemeStatusUpdateRequestDTO();
         request.setWorkStatus("Completed");
@@ -268,12 +269,39 @@ class SchemeServiceImplCoverageTest {
         verify(schemeDbRepository).updateSchemeStatusesById("tenant_ka", 77, 2, 1, 10);
         verify(kafkaProducer).publishJson(eq("scheme-service-topic"), payloadCaptor.capture());
         assertThat(payloadCaptor.getValue())
-                .containsEntry("eventType", "SCHEME_UPDATED")
+                .containsEntry("eventType", "SCHEME_DIMENSION_REPLACED")
                 .containsEntry("schemeId", 77)
-                .containsEntry("tenantId", 200)
-                .containsEntry("status", 1)
-                .containsEntry("operating_status", 1)
-                .containsEntry("work_status", 2);
+                .containsEntry("tenantId", 200);
+    }
+
+    @Test
+    void republishSchemeDimensions_sendsEverySchemeInChunksAndCountsFailures() {
+        List<Integer> ids = new java.util.ArrayList<>();
+        for (int i = 1; i <= 1500; i++) {
+            ids.add(i);
+        }
+        when(schemeDbRepository.findTenantIdByStateCode("as")).thenReturn(java.util.Optional.of(7));
+        when(schemeDbRepository.findLiveSchemeIds("tenant_as")).thenReturn(ids);
+        when(schemeDimensionEvents.build(eq("tenant_as"), eq(7), org.mockito.ArgumentMatchers.anyCollection()))
+                .thenReturn(List.of(Map.of("schemeId", 1)), List.of(Map.of("schemeId", 1001)));
+        when(kafkaProducer.publishJson(eq("scheme-service-topic"), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(true, false);
+
+        Map<String, Integer> result = schemeService.republishSchemeDimensions("as");
+
+        assertThat(result).containsEntry("schemes", 1500).containsEntry("failed", 1);
+        verify(schemeDimensionEvents).build("tenant_as", 7, ids.subList(0, 1000));
+        verify(schemeDimensionEvents).build("tenant_as", 7, ids.subList(1000, 1500));
+    }
+
+    @Test
+    void republishSchemeDimensions_unknownTenantIsNotFound() {
+        when(schemeDbRepository.findTenantIdByStateCode("zz")).thenReturn(java.util.Optional.empty());
+
+        assertThatThrownBy(() -> schemeService.republishSchemeDimensions("zz"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
+        verifyNoInteractions(schemeDimensionEvents);
     }
 
     @Test
@@ -306,7 +334,8 @@ class SchemeServiceImplCoverageTest {
         when(schemeDbRepository.findUserIdByEmail("tenant_ka", "admin@example.com")).thenReturn(10);
         when(schemeDbRepository.findTenantIdByUserId("tenant_ka", 10)).thenReturn(200);
         when(schemeDbRepository.findSchemeIdsByStateSchemeIds(eq("tenant_ka"), anyList()))
-                .thenReturn(Map.of("ss-existing", 77));
+                .thenReturn(Map.of("ss-existing", 77))
+                .thenReturn(Map.of("ss-new", 99, "ss-existing", 77));
         when(schemeDbRepository.findSchemeSnapshotsByStateSchemeIds(eq("tenant_ka"), anyList()))
                 .thenReturn(Map.of(
                         "ss-existing",
@@ -317,11 +346,11 @@ class SchemeServiceImplCoverageTest {
                 ));
         when(chunkProcessor.insertSchemesChunk(eq("tenant_ka"), anyList())).thenReturn(1);
         when(chunkProcessor.updateSchemesChunk(eq("tenant_ka"), anyList())).thenReturn(1);
-        when(schemeDbRepository.findSchemeAnalyticsRowsByStateSchemeIds(eq("tenant_ka"), anyList()))
+        when(schemeDimensionEvents.build(eq("tenant_ka"), eq(200),
+                org.mockito.ArgumentMatchers.argThat(ids -> ids.containsAll(List.of(99, 77)) && ids.size() == 2)))
                 .thenReturn(List.of(
-                        new SchemeDbRepository.SchemeAnalyticsRow(99, "101", "201", "Scheme New", 11.11, 22.22, 2, 1, 501, 601),
-                        new SchemeDbRepository.SchemeAnalyticsRow(77, "102", "ABC", "Scheme Existing Updated", 33.33, 44.44, 1, 0, 502, null)
-                ));
+                        Map.of("eventType", "SCHEME_DIMENSION_REPLACED", "schemeId", 99, "tenantId", 200),
+                        Map.of("eventType", "SCHEME_DIMENSION_REPLACED", "schemeId", 77, "tenantId", 200)));
 
         String csv = """
                 state_scheme_id,center_scheme_id,scheme_name,planned_fhtc,achieved_fhtc,house_hold_count,longitude,latitude,work_status,operating_status
@@ -339,19 +368,10 @@ class SchemeServiceImplCoverageTest {
         verify(chunkProcessor).updateSchemesChunk(eq("tenant_ka"), anyList());
         verify(kafkaProducer, times(2)).publishJson(eq("scheme-service-topic"), payloadCaptor.capture());
         assertThat(payloadCaptor.getAllValues())
-                .anySatisfy(payload -> {
-                    assertThat(payload.get("eventType")).isEqualTo("SCHEME_UPDATED");
-                    assertThat(payload.get("tenantId")).isEqualTo(200);
-                    assertThat(payload.get("stateSchemeId")).isEqualTo(101);
-                    assertThat(payload.get("operating_status")).isEqualTo(1);
-                    assertThat(payload.get("work_status")).isEqualTo(2);
-                })
-                .anySatisfy(payload -> {
-                    assertThat(payload.get("stateSchemeId")).isEqualTo(102);
-                    assertThat(payload.get("centreSchemeId")).isEqualTo(0);
-                    assertThat(payload.get("operating_status")).isEqualTo(0);
-                    assertThat(payload.get("work_status")).isEqualTo(1);
-                });
+                .extracting(payload -> payload.get("schemeId"))
+                .containsExactlyInAnyOrder(99, 77);
+        assertThat(payloadCaptor.getAllValues())
+                .allSatisfy(payload -> assertThat(payload).containsEntry("eventType", "SCHEME_DIMENSION_REPLACED"));
     }
 
     @Test

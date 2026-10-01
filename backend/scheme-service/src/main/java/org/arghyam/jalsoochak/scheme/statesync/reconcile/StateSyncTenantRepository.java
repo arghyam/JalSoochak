@@ -228,26 +228,6 @@ public class StateSyncTenantRepository {
                 + "updated_at = NOW() WHERE id = ? AND is_auto_provisioned AND deleted_at IS NULL", actor, actor, schemeId);
     }
 
-    /** Attributes analytics repeats on every dim_scheme row, for the given schemes. */
-    public List<SchemeDimensionAttributes> schemeDimensionAttributes(String schema, List<Integer> schemeIds) {
-        if (schemeIds.isEmpty()) {
-            return List.of();
-        }
-        return jdbc.query("SELECT id, scheme_name, state_scheme_id, centre_scheme_id, latitude, longitude, operating_status, "
-                        + "work_status, fhtc_count, planned_fhtc, house_hold_count FROM " + s(schema) + ".scheme_master_table "
-                        + "WHERE deleted_at IS NULL AND id = ANY (?)",
-                (rs, n) -> new SchemeDimensionAttributes(rs.getInt("id"), rs.getString("scheme_name"),
-                        rs.getString("state_scheme_id"), rs.getString("centre_scheme_id"), nullableDouble(rs, "latitude"),
-                        nullableDouble(rs, "longitude"), rs.getInt("operating_status"), rs.getInt("work_status"),
-                        rs.getInt("fhtc_count"), rs.getInt("planned_fhtc"), rs.getInt("house_hold_count")),
-                (Object) schemeIds.toArray(new Integer[0]));
-    }
-
-    public record SchemeDimensionAttributes(int schemeId, String name, String stateSchemeId, String centreSchemeId,
-                                            Double latitude, Double longitude, int operatingStatus, int workStatus,
-                                            int fhtcCount, int plannedFhtc, int houseHoldCount) {
-    }
-
     public boolean hasReadingSince(String schema, int schemeId, int days) {
         Boolean found = jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM " + s(schema) + ".flow_reading_table "
                         + "WHERE scheme_id = ? AND deleted_at IS NULL "
