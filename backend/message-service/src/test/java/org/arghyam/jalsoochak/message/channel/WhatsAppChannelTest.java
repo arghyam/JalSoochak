@@ -109,7 +109,7 @@ class WhatsAppChannelTest {
     }
 
     @Test
-    void sendNudgeViaFlow_returnsNotSent_whenGlificWasNeverReached() {
+    void sendNudgeViaFlow_returnsNotSent_whenProviderWasNeverReached() {
         doThrow(new WebClientRequestException(new ConnectException("Connection refused"),
                 HttpMethod.POST, URI.create("https://glific.example/api"), new HttpHeaders()))
                 .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
@@ -120,7 +120,7 @@ class WhatsAppChannelTest {
 
     @Test
     void sendNudgeViaFlow_returnsNotSent_whenContactIdWasRefusedBeforeSending() {
-        doThrow(new IllegalArgumentException("startNudgeFlow requires a resolved Glific contact id but got 0"))
+        doThrow(new IllegalArgumentException("startNudgeFlow requires a resolved provider contact id but got 0"))
                 .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
 
         assertThat(whatsAppChannel.sendNudgeViaFlow(0L, "Ramesh", "02 March 2026"))
@@ -129,8 +129,8 @@ class WhatsAppChannelTest {
 
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(ints = {429, 502, 503})
-    void sendNudgeViaFlow_returnsNotSent_whenGlificRejectedTheRequestUnprocessed(int status) {
-        doThrow(new RuntimeException("Glific GraphQL HTTP error: " + status,
+    void sendNudgeViaFlow_returnsNotSent_whenProviderRejectedTheRequestUnprocessed(int status) {
+        doThrow(new RuntimeException("provider HTTP error: " + status,
                 WebClientResponseException.create(status, "x", new HttpHeaders(), new byte[0], null)))
                 .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
 
@@ -140,7 +140,7 @@ class WhatsAppChannelTest {
 
     @Test
     void sendNudgeViaFlow_returnsUnknown_whenTheResponseTimedOut() {
-        // Reactor's block(Duration) wraps a TimeoutException; Glific may already have started the flow.
+        // Reactor's block(Duration) wraps a TimeoutException; the provider may already have started the flow.
         doThrow(new RuntimeException(new TimeoutException("Timeout on blocking read for 30000000000 NANOSECONDS")))
                 .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
 
@@ -158,8 +158,8 @@ class WhatsAppChannelTest {
     }
 
     @Test
-    void sendNudgeViaFlow_returnsUnknown_whenGlificAnsweredWithAnError() {
-        doThrow(new RuntimeException("Glific startContactFlow returned success=false for contactId=42"))
+    void sendNudgeViaFlow_returnsUnknown_whenProviderAnsweredWithAnError() {
+        doThrow(new RuntimeException("provider flow start returned success=false for contactId=42"))
                 .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
 
         assertThat(whatsAppChannel.sendNudgeViaFlow(42L, "Ramesh", "02 March 2026"))
@@ -168,7 +168,7 @@ class WhatsAppChannelTest {
 
     @Test
     void sendNudgeViaFlow_returnsUnknown_onServerErrorThatMayHaveBeenProcessed() {
-        doThrow(new RuntimeException("Glific GraphQL HTTP error: 500",
+        doThrow(new RuntimeException("provider HTTP error: 500",
                 WebClientResponseException.create(500, "x", new HttpHeaders(), new byte[0], null)))
                 .when(whatsAppSender).startNudgeFlow(anyLong(), anyString(), anyString());
 

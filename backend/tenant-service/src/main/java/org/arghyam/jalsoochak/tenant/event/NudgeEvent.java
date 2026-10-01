@@ -7,7 +7,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * One nudge for one pump operator for one day, however many of their schemes are still pending.
- * The Glific flow asks which scheme when the operator has more than one.
+ * The chatbot flow asks which scheme when the operator has more than one.
  */
 @Data
 @Builder

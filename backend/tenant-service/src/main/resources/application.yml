@@ -107,8 +107,9 @@ nudge:
   schedule:
     hour: 18
     minute: 00
-  # Operators who used the chatbot within this many minutes are not nudged: Glific replaces a
-  # contact's active flow when the nudge flow starts, which would cut a submission short. 0 = off.
+  # Operators who used the chatbot within this many minutes are not nudged: the WhatsApp provider
+  # replaces a contact's active flow when the nudge flow starts, which would cut a submission short.
+  # 0 = off.
   quiet-window-minutes: ${NUDGE_QUIET_WINDOW_MINUTES:0}
 escalation:
   schedule:

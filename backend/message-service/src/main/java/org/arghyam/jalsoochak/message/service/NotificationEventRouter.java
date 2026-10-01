@@ -54,7 +54,7 @@ import java.util.UUID;
  * based on the {@code eventType} field.
  *
  * <ul>
- *   <li>{@code NUDGE} — starts the Glific nudge flow for the operator (one event per operator per
+ *   <li>{@code NUDGE} — starts the WhatsApp provider's nudge flow for the operator (one event per operator per
  *       day; the flow sends the nudge template and asks which scheme when they hold several).</li>
  *   <li>{@code ESCALATION} — generates a PDF, uploads it to object storage, fetches
  *       the localized body text, and sends a document HSM to the officer.</li>

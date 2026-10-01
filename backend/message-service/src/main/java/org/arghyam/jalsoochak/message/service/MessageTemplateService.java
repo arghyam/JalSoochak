@@ -31,7 +31,7 @@ public class MessageTemplateService {
      * Returns the localized nudge message for the given tenant/user, with
      * {@code {name}} and {@code {scheme}} placeholders filled in.
      *
-     * <p>Not used by the scheduled nudge, which starts the Glific nudge flow and so takes its text
+     * <p>Not used by the scheduled nudge, which starts the provider's nudge flow and so takes its text
      * from the flow's template; kept for the text-message path.</p>
      */
     public String findNudgeMessage(int tenantId, int languageId,

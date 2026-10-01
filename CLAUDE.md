@@ -159,7 +159,7 @@ Message text is fetched from `common_schema.tenant_config_master_table` using th
 - Escalation PDFs are generated locally (PDFBox), uploaded to the S3-compatible store through
   `ObjectStorageService`, then the PDF's public URL is registered with the WhatsApp provider via
   `createMessageMedia` to get a `mediaId`
-- Nudge: `startContactFlow` of the Glific nudge flow (`WHATSAPP_NUDGE_FLOW_ID`) with `{name, date}`;
+- Nudge: `WhatsAppSender.startNudgeFlow` starts the provider's nudge flow (`WHATSAPP_NUDGE_FLOW_ID`) with `{name, date}`;
   the flow sends the HSM (`{{1}}` name, `{{2}}` date) and enters the main flow with `nudge_action`.
   Retried only when the start certainly did not happen (`NudgeSendOutcome`) — a retry re-sends the HSM.
 - WhatsApp template for escalation (two-step):

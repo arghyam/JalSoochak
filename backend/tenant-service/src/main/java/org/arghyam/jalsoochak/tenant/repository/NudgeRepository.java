@@ -64,8 +64,9 @@ public class NudgeRepository {
      * </ul>
      *
      * <p>{@code quietWindowMinutes > 0} skips operators with chatbot activity (any reading row they
-     * touched) within that many minutes: Glific replaces a contact's active flow when a new one
-     * starts, so a nudge would cut short a submission in progress. {@code 0} disables the check.</p>
+     * touched) within that many minutes: the WhatsApp provider replaces a contact's active flow when a
+     * new one starts, so a nudge would cut short a submission in progress. {@code 0} disables the
+     * check.</p>
      *
      * <p>Uses a server-side cursor (fetchSize=500) to avoid materialising the full result set
      * into heap, preventing OOM on large tenants.</p>

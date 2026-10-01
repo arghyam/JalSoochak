@@ -26,7 +26,7 @@ import java.util.Map;
 /**
  * WhatsApp channel, sending HSM templates through the {@link WhatsAppSender} port.
  *
- * <p>Scheduled nudges go through {@link #sendNudgeViaFlow} (a Glific flow start). The plain nudge HSM
+ * <p>Scheduled nudges go through {@link #sendNudgeViaFlow} (a provider flow start). The plain nudge HSM
  * ({@code {{1}}} = operator name, {@code {{2}}} = date) is only used by the REST notification API.</p>
  * <p>Escalations use a document HSM template with {@code {{1}}} = the PDF's public URL
  * and {@code {{2}}} = localized body text.</p>
@@ -64,7 +64,7 @@ public class WhatsAppChannel implements NotificationChannel {
 
     /**
      * Sends the nudge HSM template with two variables. REST notification API only — the scheduled
-     * nudge starts the Glific flow instead ({@link #sendNudgeViaFlow}).
+     * nudge starts the provider flow instead ({@link #sendNudgeViaFlow}).
      *
      * @param phone        recipient WhatsApp phone number (E.164 format)
      * @param operatorName operator name for template {@code {{1}}}
@@ -109,7 +109,7 @@ public class WhatsAppChannel implements NotificationChannel {
 
     /**
      * {@link NudgeSendOutcome#NOT_SENT} only when the failure proves the flow never started: the
-     * request was refused before sending, the connection never opened, or Glific answered 429/502/503.
+     * request was refused before sending, the connection never opened, or the provider answered 429/502/503.
      * Everything else — a response timeout above all — is {@link NudgeSendOutcome#UNKNOWN}.
      */
     static NudgeSendOutcome classifyNudgeFailure(Throwable failure) {
