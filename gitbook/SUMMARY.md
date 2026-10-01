@@ -10,6 +10,7 @@
 * [Architecture Decision Records](architecture-decision-records.md)
 * [API Specifications](api-specifications.md)
 * [Database Design](database-design.md)
+  * [Entity-Relationship Diagrams](database-er-diagram.md)
 * [Non-functional Requirements](nfrs.md)
 * [Future Work](future-work.md)
 
