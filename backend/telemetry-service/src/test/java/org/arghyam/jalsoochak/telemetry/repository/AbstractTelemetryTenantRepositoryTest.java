@@ -90,6 +90,12 @@ abstract class AbstractTelemetryTenantRepositoryTest {
         lenient().when(jdbcTemplate.queryForObject(anyString(), any(Class.class), any(Object[].class)))
                 .thenAnswer(inv -> scalarFor(inv.getArgument(0), inv.getArgument(1), varargsOf(inv, 2)));
 
+        // queryForObject(sql, rowMapper, args...) — a write that RETURNs one whole row, answered from
+        // the same onQuery rules as query(...).
+        lenient().when(jdbcTemplate.queryForObject(anyString(), any(RowMapper.class), any(Object[].class)))
+                .thenAnswer(inv -> mapRows(inv.getArgument(0), inv.getArgument(1)).stream()
+                        .findFirst().orElse(null));
+
         lenient().when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
     }
 
@@ -189,6 +195,30 @@ abstract class AbstractTelemetryTenantRepositoryTest {
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate, org.mockito.Mockito.atLeastOnce())
                 .queryForObject(anyString(), org.mockito.ArgumentMatchers.eq(Number.class), args.capture());
+        return args.getAllValues().get(args.getAllValues().size() - 1);
+    }
+
+    /** SQL of the last {@code queryForObject(..., RowMapper, ...)} call: a write that RETURNs a row. */
+    protected String capturedReturningRowSql() {
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate, org.mockito.Mockito.atLeastOnce())
+                .queryForObject(sql.capture(), any(RowMapper.class), any(Object[].class));
+        return sql.getAllValues().get(sql.getAllValues().size() - 1);
+    }
+
+    /** Parameters of the last {@code queryForObject(..., RowMapper, ...)} call. */
+    protected Object[] capturedReturningRowArgs() {
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate, org.mockito.Mockito.atLeastOnce())
+                .queryForObject(anyString(), any(RowMapper.class), args.capture());
+        return args.getAllValues().get(args.getAllValues().size() - 1);
+    }
+
+    /** Parameters of the last {@code query(...)} issued through the varargs overload. */
+    protected Object[] lastQueryArgs() {
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate, org.mockito.Mockito.atLeastOnce())
+                .query(anyString(), any(RowMapper.class), args.capture());
         return args.getAllValues().get(args.getAllValues().size() - 1);
     }
 

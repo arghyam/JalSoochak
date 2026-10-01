@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSupplyCounts;
@@ -16,6 +17,8 @@ import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService
 import org.arghyam.jalsoochak.telemetry.service.location.LocationVerdict;
 import org.arghyam.jalsoochak.telemetry.service.location.ReadingSubmission;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -72,9 +75,13 @@ class BfmReadingServiceLocationMismatchTest {
     private static final BigDecimal LNG = new BigDecimal("91.7362");
 
     @Mock
-    private TelemetryTenantRepository repo;
+    private PduDayLimit pduDayLimit;
+
     @Mock
-    private MeterReadingExtractor defaultOcrExtractor;
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
+    private TelemetryTenantRepository repo;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
@@ -96,7 +103,7 @@ class BfmReadingServiceLocationMismatchTest {
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);
-        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, null))
+        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
         lenient().when(tenantConfigRepository.findConfigValue(anyInt(), anyString()))
@@ -106,22 +113,30 @@ class BfmReadingServiceLocationMismatchTest {
                 .thenReturn(Optional.empty());
         lenient().when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                any(), any(), any(), anyInt(), any(), any(), any(), any(), any())).thenReturn(READING_ID);
+                any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(READING_ID, null));
         lenient().when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
-                .thenReturn(READING_ID);
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(READING_ID, null));
         lenient().when(locationAffinityService.recordMismatchIfAny(
                 anyString(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new LocationVerdict.Outside(1201.0d, 500.0d));
 
         service = new BfmReadingService(
-                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
-                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
+                repo,
+                telemetryEventPublisher,
+                null,
+                tenantConfigRepository,
+                new ObjectMapper(),
+                operatorContextService,
+                readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
                 null,
-                null,
+                new SubmittedValueCapture(),
+                pduDayLimit,
+                calculationParametersSnapshotter,
                 locationAffinityService);
     }
 
@@ -152,7 +167,7 @@ class BfmReadingServiceLocationMismatchTest {
         assertThat(response.getErrorCode()).isNull();
         verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                any(), any(), any(), anyInt(), any(), any(), any(), any(), any());
+                any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -238,7 +253,7 @@ class BfmReadingServiceLocationMismatchTest {
         // of the other would lose a real signal.
         when(repo.supportsQuarantine(SCHEMA)).thenReturn(true);
         when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
-                eq(SCHEMA), eq(SCHEME_ID), any(LocalDate.class), isNull()))
+                eq(SCHEMA), eq(SCHEME_ID), eq(ReadingChannel.BFM), any(LocalDate.class), isNull()))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
         when(repo.findSchemeSupplyCounts(SCHEMA, SCHEME_ID))
                 .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(1, 0, 0)));
@@ -266,12 +281,21 @@ class BfmReadingServiceLocationMismatchTest {
         // Matches how the OCR collaborators are treated: a unit test that does not exercise the
         // boundary check may pass null, and the reading must still go through.
         BfmReadingService withoutCheck = new BfmReadingService(
-                repo, defaultOcrExtractor, telemetryEventPublisher, tenantConfigRepository,
-                new ObjectMapper(), operatorContextService, null, readingChannelResolver,
+                repo,
+                telemetryEventPublisher,
+                null,
+                tenantConfigRepository,
+                new ObjectMapper(),
+                operatorContextService,
+                readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
-                null, null, null);
+                null,
+                new SubmittedValueCapture(),
+                pduDayLimit,
+                calculationParametersSnapshotter,
+                null);
 
         CreateReadingResponse response = withoutCheck.createReading(
                 submission(LAT, LNG), SCHEMA, operator, CONTACT, false);

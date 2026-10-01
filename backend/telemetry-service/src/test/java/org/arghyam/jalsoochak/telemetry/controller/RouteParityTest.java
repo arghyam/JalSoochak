@@ -63,7 +63,9 @@ class RouteParityTest {
             "PUT /api/v1/telemetry/readings/",
             "POST /api/v1/telemetry/readings/reset-latest",
             "PATCH /api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading",
-            "POST /api/v1/telemetry/readings/formats/{format}"
+            "POST /api/v1/telemetry/readings/formats/{format}",
+            // Operations
+            "POST /api/v1/telemetry/internal/readings/republish"
     );
 
     @Test

@@ -42,7 +42,7 @@ class OcrReadingsRetryServiceTest {
 
     @Test
     void retriesTimeoutsAndReturnsSuccessfulResult() {
-        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
+        MeterReadingExtractor extractor = mock(MeterReadingExtractor.class);
         OcrReadingResult expected = OcrReadingResult.builder()
                 .adjustedReading(new BigDecimal("123.4"))
                 .qualityStatus("GOOD")
@@ -50,61 +50,78 @@ class OcrReadingsRetryServiceTest {
                 .correlationId("corr-1")
                 .build();
 
-        when(defaultOcrExtractor.extractReadingOrThrow("https://example.com/img.jpg", null))
+        when(extractor.extractReadingOrThrow("https://example.com/img.jpg", null))
                 .thenThrow(new ResourceAccessException("Read timed out"))
                 .thenThrow(new ResourceAccessException("Read timed out"))
                 .thenReturn(expected);
 
-        OcrReadingsRetryService service = newService(defaultOcrExtractor);
+        OcrReadingsRetryService service = newService();
 
-        OcrReadingResult actual = service.extractReading("https://example.com/img.jpg");
+        OcrReadingResult actual = service.extractReading(extractor, "https://example.com/img.jpg", null);
 
         assertEquals(expected, actual);
-        verify(defaultOcrExtractor, times(3)).extractReadingOrThrow("https://example.com/img.jpg", null);
+        verify(extractor, times(3)).extractReadingOrThrow("https://example.com/img.jpg", null);
+    }
+
+    @Test
+    void callsTheExtractorItIsGivenWithTheTenantsSettings() {
+        MeterReadingExtractor extractor = mock(MeterReadingExtractor.class);
+        OcrReadingResult expected = OcrReadingResult.builder()
+                .adjustedReading(new BigDecimal("42"))
+                .qualityStatus("GOOD")
+                .build();
+        OcrProviderSettings settings =
+                new OcrProviderSettings("vision-x", "https://vision-x/extract", "key", "Authorization");
+        when(extractor.extractReadingOrThrow("https://example.com/img.jpg", settings)).thenReturn(expected);
+
+        OcrReadingResult actual = newService().extractReading(extractor, "https://example.com/img.jpg", settings);
+
+        assertEquals(expected, actual);
+        verify(extractor).extractReadingOrThrow("https://example.com/img.jpg", settings);
     }
 
     @Test
     void throwsServiceUnavailableAfterRetriableFailuresAreExhausted() {
-        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
-        when(defaultOcrExtractor.extractReadingOrThrow("https://example.com/img.jpg", null))
+        MeterReadingExtractor extractor = mock(MeterReadingExtractor.class);
+        when(extractor.extractReadingOrThrow("https://example.com/img.jpg", null))
                 .thenThrow(new ResourceAccessException("Read timed out"));
 
-        OcrReadingsRetryService service = newService(defaultOcrExtractor);
+        OcrReadingsRetryService service = newService();
 
         assertThrows(OcrReadingsUnavailableException.class,
-                () -> service.extractReading("https://example.com/img.jpg"));
-        verify(defaultOcrExtractor, times(3)).extractReadingOrThrow("https://example.com/img.jpg", null);
+                () -> service.extractReading(extractor, "https://example.com/img.jpg", null));
+        verify(extractor, times(3)).extractReadingOrThrow("https://example.com/img.jpg", null);
     }
 
     @ParameterizedTest
     @MethodSource("retriableHttpExceptions")
     void retriesTransientHttpFailuresAndThrowsServiceUnavailable(RuntimeException transientException) {
-        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
-        when(defaultOcrExtractor.extractReadingOrThrow("https://example.com/img.jpg", null))
+        MeterReadingExtractor extractor = mock(MeterReadingExtractor.class);
+        when(extractor.extractReadingOrThrow("https://example.com/img.jpg", null))
                 .thenThrow(transientException);
 
-        OcrReadingsRetryService service = newService(defaultOcrExtractor);
+        OcrReadingsRetryService service = newService();
 
         assertThrows(OcrReadingsUnavailableException.class,
-                () -> service.extractReading("https://example.com/img.jpg"));
-        verify(defaultOcrExtractor, times(3)).extractReadingOrThrow("https://example.com/img.jpg", null);
+                () -> service.extractReading(extractor, "https://example.com/img.jpg", null));
+        verify(extractor, times(3)).extractReadingOrThrow("https://example.com/img.jpg", null);
     }
 
     @Test
     void doesNotRetryNonTransientClientErrors() {
-        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
-        when(defaultOcrExtractor.extractReadingOrThrow("https://example.com/img.jpg", null))
+        MeterReadingExtractor extractor = mock(MeterReadingExtractor.class);
+        when(extractor.extractReadingOrThrow("https://example.com/img.jpg", null))
                 .thenThrow(new HttpClientErrorException(HttpStatus.BAD_REQUEST, "Bad request"));
 
-        OcrReadingsRetryService service = newService(defaultOcrExtractor);
+        OcrReadingsRetryService service = newService();
 
-        assertThrows(HttpClientErrorException.class, () -> service.extractReading("https://example.com/img.jpg"));
-        verify(defaultOcrExtractor).extractReadingOrThrow("https://example.com/img.jpg", null);
+        assertThrows(HttpClientErrorException.class, () -> service.extractReading(extractor, "https://example.com/img.jpg", null));
+        verify(extractor).extractReadingOrThrow("https://example.com/img.jpg", null);
     }
 
     @Test
     void releasesBulkheadPermitBetweenRetryAttempts() throws Exception {
-        MeterReadingExtractor defaultOcrExtractor = mock(MeterReadingExtractor.class);
+        MeterReadingExtractor extractor = mock(MeterReadingExtractor.class);
         CountDownLatch firstAttemptFailed = new CountDownLatch(1);
         AtomicInteger firstCallAttempts = new AtomicInteger();
         OcrReadingResult firstResult = OcrReadingResult.builder()
@@ -116,7 +133,7 @@ class OcrReadingsRetryServiceTest {
                 .qualityStatus("GOOD")
                 .build();
 
-        when(defaultOcrExtractor.extractReadingOrThrow(anyString(), isNull())).thenAnswer(invocation -> {
+        when(extractor.extractReadingOrThrow(anyString(), isNull())).thenAnswer(invocation -> {
             String readingUrl = invocation.getArgument(0);
             if ("https://example.com/first.jpg".equals(readingUrl)
                     && firstCallAttempts.incrementAndGet() == 1) {
@@ -130,17 +147,13 @@ class OcrReadingsRetryServiceTest {
         });
 
         BulkheadRegistry bulkheadRegistry = BulkheadRegistry.of(bulkheadConfig(1));
-        OcrReadingsRetryService service = newService(
-                defaultOcrExtractor,
-                bulkheadRegistry,
-                Duration.ofMillis(300)
-        );
+        OcrReadingsRetryService service = newService(bulkheadRegistry, Duration.ofMillis(300));
         // Same instance the service resolved, so a rename cannot leave this watching an idle bulkhead.
         Bulkhead bulkhead = bulkheadRegistry.bulkhead(OcrReadingsRetryService.INSTANCE_NAME);
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             Future<OcrReadingResult> firstFuture = executor.submit(
-                    () -> service.extractReading("https://example.com/first.jpg")
+                    () -> service.extractReading(extractor, "https://example.com/first.jpg", null)
             );
             assertTrue(firstAttemptFailed.await(1, TimeUnit.SECONDS));
 
@@ -150,7 +163,7 @@ class OcrReadingsRetryServiceTest {
             assertTrue(awaitFreePermit(bulkhead, Duration.ofSeconds(1)),
                     "the failed attempt should release its bulkhead permit before the retry backoff");
 
-            OcrReadingResult secondActual = service.extractReading("https://example.com/second.jpg");
+            OcrReadingResult secondActual = service.extractReading(extractor, "https://example.com/second.jpg", null);
             OcrReadingResult firstActual = firstFuture.get(1, TimeUnit.SECONDS);
 
             assertEquals(secondResult, secondActual);
@@ -172,13 +185,11 @@ class OcrReadingsRetryServiceTest {
         return false;
     }
 
-    private OcrReadingsRetryService newService(MeterReadingExtractor defaultOcrExtractor) {
-        return newService(defaultOcrExtractor, BulkheadRegistry.of(bulkheadConfig(10)), Duration.ZERO);
+    private OcrReadingsRetryService newService() {
+        return newService(BulkheadRegistry.of(bulkheadConfig(10)), Duration.ZERO);
     }
 
-    private OcrReadingsRetryService newService(MeterReadingExtractor defaultOcrExtractor,
-                                                      BulkheadRegistry bulkheadRegistry,
-                                                      Duration waitDuration) {
+    private OcrReadingsRetryService newService(BulkheadRegistry bulkheadRegistry, Duration waitDuration) {
         RetryConfig retryConfig = RetryConfig.custom()
                 .maxAttempts(3)
                 .waitDuration(waitDuration)
@@ -187,11 +198,7 @@ class OcrReadingsRetryServiceTest {
         CircuitBreakerConfig circuitBreakerConfig = CircuitBreakerConfig.custom()
                 .recordExceptions(OcrTransientFailures.retriableExceptions())
                 .build();
-        // Null registry: these tests exercise the default-provider path (null settings), which the retry
-        // service routes straight to defaultOcrExtractor without consulting the registry.
         return new OcrReadingsRetryService(
-                defaultOcrExtractor,
-                null,
                 RetryRegistry.of(retryConfig),
                 CircuitBreakerRegistry.of(circuitBreakerConfig),
                 bulkheadRegistry

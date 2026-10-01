@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 
 import org.arghyam.jalsoochak.analytics.constant.EscalationType;
 import org.arghyam.jalsoochak.analytics.dto.event.AnomalyEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.CalculationParameters;
 import org.arghyam.jalsoochak.analytics.dto.event.EscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
@@ -12,25 +13,28 @@ import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
-import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
+import org.arghyam.jalsoochak.analytics.exception.MalformedEventException;
 import org.arghyam.jalsoochak.analytics.repository.AnomalyRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimDateRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactOperatorAttendanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactIngestionRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactIngestionRepository.SchemeDay;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactWaterQuantityRepository;
-import org.arghyam.jalsoochak.analytics.service.water.BfmWaterQuantityCalculator;
-import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorRegistry;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityRangeReporter;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityRecalculationService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 
@@ -40,13 +44,16 @@ import java.time.LocalDateTime;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -56,6 +63,8 @@ class FactServiceImplTest {
     private FactMeterReadingRepository meterReadingRepository;
     @Mock
     private FactWaterQuantityRepository waterQuantityRepository;
+    @Mock
+    private FactIngestionRepository factIngestionRepository;
     @Mock
     private FactEscalationRepository escalationRepository;
     @Mock
@@ -71,17 +80,30 @@ class FactServiceImplTest {
     @Mock
     private org.arghyam.jalsoochak.analytics.repository.SubmissionAttemptRepository submissionAttemptRepository;
 
-    // Real registry (with the default BFM calculator) so ingestMeterReading runs the
-    // historical cumulative-delta calculation. @Spy is injected by @InjectMocks.
-    @Spy
-    private WaterQuantityCalculatorRegistry waterQuantityCalculatorRegistry =
-            new WaterQuantityCalculatorRegistry(List.of(new BfmWaterQuantityCalculator()));
+    @Mock
+    private WaterQuantityRecalculationService waterQuantityRecalculationService;
 
-    @Spy
-    private SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
 
-    @InjectMocks
     private FactServiceImpl service;
+
+    @BeforeEach
+    void setUp() {
+        service = new FactServiceImpl(
+                meterReadingRepository,
+                waterQuantityRepository,
+                factIngestionRepository,
+                escalationRepository,
+                schemePerformanceRepository,
+                anomalyRepository,
+                dimTenantRepository,
+                dimDateRepository,
+                factOperatorAttendanceRepository,
+                submissionAttemptRepository,
+                waterQuantityRecalculationService,
+                new WaterQuantityRangeReporter(meterRegistry, 100_000L),
+                meterRegistry);
+    }
 
     @Test
     void ingestSubmissionRejected_resolvesSchemeAndInserts() {
@@ -150,10 +172,12 @@ class FactServiceImplTest {
         when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
 
+        storedAsNewRow();
+
         service.ingestMeterReading(event);
 
         ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
-        verify(meterReadingRepository).save(captor.capture());
+        verify(factIngestionRepository).upsertMeterReading(captor.capture());
         assertThat(captor.getValue().getCorrelationId()).isEqualTo("flow-corr-77");
     }
 
@@ -172,10 +196,12 @@ class FactServiceImplTest {
         when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
 
+        storedAsNewRow();
+
         service.ingestMeterReading(event);
 
         ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
-        verify(meterReadingRepository).save(captor.capture());
+        verify(factIngestionRepository).upsertMeterReading(captor.capture());
         assertThat(captor.getValue().getCorrelationId()).isNull();
     }
 
@@ -244,10 +270,12 @@ class FactServiceImplTest {
         when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
 
+        storedAsNewRow();
+
         service.ingestMeterReading(event);
 
         ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
-        verify(meterReadingRepository, times(1)).save(captor.capture());
+        verify(factIngestionRepository, times(1)).upsertMeterReading(captor.capture());
         assertThat(captor.getValue().getTenantId()).isEqualTo(1);
         assertThat(captor.getValue().getSchemeId()).isEqualTo(11);
         // The meters' decimal digit reaches the column intact — no rounding anywhere on this path.
@@ -260,88 +288,195 @@ class FactServiceImplTest {
     }
 
     @Test
-    void ingestMeterReading_whenComputedWaterQuantityIsNegative_storesZero() {
-        MeterReadingEvent event = new MeterReadingEvent();
+    void ingestMeterReading_carriesTheSubmissionIdentityAndSnapshotIntoTheFactRow() {
+        MeterReadingEvent event = readingEvent("40", "2026-01-02");
+        event.setSourceReadingId(501L);
+        event.setSourceUpdatedAt("2026-01-02T10:15:30.123456");
+        CalculationParameters snapshot = new CalculationParameters(1, "F2", new BigDecimal("0.95"), List.of());
+        event.setCalculationParameters(snapshot);
+        storedAsNewRow();
+
+        service.ingestMeterReading(event);
+
+        ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
+        verify(factIngestionRepository).upsertMeterReading(captor.capture());
+        assertThat(captor.getValue().getSourceReadingId()).isEqualTo(501L);
+        assertThat(captor.getValue().getSourceUpdatedAt())
+                .isEqualTo(LocalDateTime.parse("2026-01-02T10:15:30.123456"));
+        assertThat(captor.getValue().getCalculationParameters()).isEqualTo(snapshot);
+    }
+
+    @Test
+    void ingestMeterReading_fromAnOlderTelemetryIsStoredWithoutASubmissionIdentity() {
+        // No sourceReadingId: the upsert inserts a new row, exactly as every event did before V56.
+        MeterReadingEvent event = readingEvent("40", "2026-01-02");
+        storedAsNewRow();
+
+        service.ingestMeterReading(event);
+
+        ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
+        verify(factIngestionRepository).upsertMeterReading(captor.capture());
+        assertThat(captor.getValue().getSourceReadingId()).isNull();
+        assertThat(captor.getValue().getSourceUpdatedAt()).isNull();
+        assertThat(captor.getValue().getCalculationParameters()).isNull();
+        verify(waterQuantityRecalculationService)
+                .recalculateAfterReading(1, 11, LocalDate.of(2026, 1, 2));
+    }
+
+    @Test
+    void ingestMeterReading_anUnparseableVersionFailsTheEventBeforeAnyWrite() {
+        // Falling back to now would let a broken event outrank every real version of the submission,
+        // and treating it as unknown would drop it as stale against any stored one.
+        MeterReadingEvent event = readingEvent("40", "2026-01-02");
+        event.setSourceReadingId(501L);
+        event.setSourceUpdatedAt("not-a-timestamp");
+
+        assertThrows(MalformedEventException.class, () -> service.ingestMeterReading(event));
+
+        assertThat(meterRegistry.counter("meter_reading.source_updated_at.unparseable").count()).isEqualTo(1.0);
+        verifyNoInteractions(factIngestionRepository, waterQuantityRecalculationService,
+                factOperatorAttendanceRepository);
+    }
+
+    @Test
+    void ingestMeterReading_locksTheSchemeBeforeWritingTheReading() {
+        MeterReadingEvent event = readingEvent("40", "2026-01-02");
+        storedAsNewRow();
+
+        service.ingestMeterReading(event);
+
+        InOrder order = inOrder(factIngestionRepository, waterQuantityRecalculationService);
+        order.verify(factIngestionRepository).lockScheme(1, 11);
+        order.verify(factIngestionRepository).upsertMeterReading(any());
+        order.verify(waterQuantityRecalculationService).recalculateAfterReading(any(), any(), any());
+    }
+
+    @Test
+    void ingestMeterReading_aStaleEventIsCountedAndChangesNothingElse() {
+        // The upsert refused it: a newer version of the submission is already stored.
+        MeterReadingEvent event = readingEvent("40", "2026-01-02");
+        event.setSourceReadingId(501L);
+        event.setSourceUpdatedAt("2026-01-02T08:00:00");
+        when(factIngestionRepository.upsertMeterReading(any())).thenReturn(Optional.empty());
+
+        service.ingestMeterReading(event);
+
+        assertThat(meterRegistry.counter("meter_reading.stale_event").count()).isEqualTo(1.0);
+        verify(waterQuantityRecalculationService, never()).recalculateAfterReading(any(), any(), any());
+        verify(factOperatorAttendanceRepository, never()).save(any());
+        verify(dimDateRepository, never()).findByFullDate(any());
+    }
+
+    // ---- a correction that moves the reading to another scheme or day ------------------------
+
+    @Test
+    void ingestMeterReading_aReadingMovedToAnotherSchemeLocksBothAndRecalculatesTheDayItLeft() {
+        MeterReadingEvent event = versionedReadingEvent("2026-01-02");
+        when(factIngestionRepository.findSchemeDay(1, 501L))
+                .thenReturn(Optional.of(new SchemeDay(12, LocalDate.of(2026, 1, 1))));
+        storedAsNewRow();
+
+        service.ingestMeterReading(event);
+
+        InOrder order = inOrder(factIngestionRepository, waterQuantityRecalculationService);
+        order.verify(factIngestionRepository).findSchemeDay(1, 501L);
+        order.verify(factIngestionRepository).lockSchemes(1, Set.of(11, 12));
+        // Read again under the locks: another event may have moved it in between.
+        order.verify(factIngestionRepository).findSchemeDay(1, 501L);
+        order.verify(factIngestionRepository).upsertMeterReading(any());
+        order.verify(waterQuantityRecalculationService).recalculateAfterReading(1, 11, LocalDate.of(2026, 1, 2));
+        order.verify(waterQuantityRecalculationService).recalculateAfterRemoval(1, 12, LocalDate.of(2026, 1, 1));
+    }
+
+    @Test
+    void ingestMeterReading_aReadingMovedToAnotherDayRecalculatesTheDayItLeft() {
+        MeterReadingEvent event = versionedReadingEvent("2026-01-02");
+        when(factIngestionRepository.findSchemeDay(1, 501L))
+                .thenReturn(Optional.of(new SchemeDay(11, LocalDate.of(2026, 1, 1))));
+        storedAsNewRow();
+
+        service.ingestMeterReading(event);
+
+        verify(factIngestionRepository).lockSchemes(1, Set.of(11));
+        verify(waterQuantityRecalculationService).recalculateAfterReading(1, 11, LocalDate.of(2026, 1, 2));
+        verify(waterQuantityRecalculationService).recalculateAfterRemoval(1, 11, LocalDate.of(2026, 1, 1));
+    }
+
+    @Test
+    void ingestMeterReading_aCorrectionThatStaysOnItsDayRecalculatesOnlyThatDay() {
+        MeterReadingEvent event = versionedReadingEvent("2026-01-02");
+        when(factIngestionRepository.findSchemeDay(1, 501L))
+                .thenReturn(Optional.of(new SchemeDay(11, LocalDate.of(2026, 1, 2))));
+        storedAsNewRow();
+
+        service.ingestMeterReading(event);
+
+        verify(waterQuantityRecalculationService).recalculateAfterReading(1, 11, LocalDate.of(2026, 1, 2));
+        verify(waterQuantityRecalculationService, never()).recalculateAfterRemoval(any(), any(), any());
+    }
+
+    @Test
+    void ingestMeterReading_aReadingMovedToASchemeNotLockedMeanwhileIsRetried() {
+        // Stored under scheme 11 when first looked up, and moved to 13 by another event before the
+        // locks were granted: writing now would change scheme 13's readings without its lock.
+        MeterReadingEvent event = versionedReadingEvent("2026-01-02");
+        when(factIngestionRepository.findSchemeDay(1, 501L)).thenReturn(
+                Optional.of(new SchemeDay(11, LocalDate.of(2026, 1, 2))),
+                Optional.of(new SchemeDay(13, LocalDate.of(2026, 1, 2))));
+
+        assertThrows(ConcurrencyFailureException.class, () -> service.ingestMeterReading(event));
+
+        verify(factIngestionRepository, never()).upsertMeterReading(any());
+        verify(waterQuantityRecalculationService, never()).recalculateAfterReading(any(), any(), any());
+    }
+
+    @Test
+    void ingestMeterReading_aStaleEventLeavesTheDayItsSubmissionIsStoredOnAlone() {
+        MeterReadingEvent event = versionedReadingEvent("2026-01-02");
+        when(factIngestionRepository.findSchemeDay(1, 501L))
+                .thenReturn(Optional.of(new SchemeDay(12, LocalDate.of(2026, 1, 1))));
+        when(factIngestionRepository.upsertMeterReading(any())).thenReturn(Optional.empty());
+
+        service.ingestMeterReading(event);
+
+        verify(waterQuantityRecalculationService, never()).recalculateAfterRemoval(any(), any(), any());
+    }
+
+    @Test
+    void ingestMeterReading_aLegacyEventLocksOnlyItsSchemeAndNeverLooksUpAStoredRow() {
+        MeterReadingEvent event = readingEvent("40", "2026-01-02");
+        storedAsNewRow();
+
+        service.ingestMeterReading(event);
+
+        verify(factIngestionRepository).lockScheme(1, 11);
+        verify(factIngestionRepository, never()).findSchemeDay(any(), any());
+        verify(waterQuantityRecalculationService, never()).recalculateAfterRemoval(any(), any(), any());
+    }
+
+    @Test
+    void ingestWaterQuantity_locksTheSchemeBeforeItsFirstWrite() {
+        // Both writers of a day's row find it and then update or insert; the reading path holds the
+        // same lock, so the two cannot interleave. Taken before the dim_tenant/dim_date inserts too,
+        // so a reading event holding the lock can never be waiting on one of this event's writes.
+        WaterQuantityEvent event = new WaterQuantityEvent();
         event.setTenantId(1);
         event.setSchemeId(11);
         event.setUserId(21);
-        event.setConfirmedReading(m3("95"));
-        event.setReadingAt("2026-01-02T10:15:00");
-        event.setReadingDate("2026-01-02");
-        event.setSubmissionStatus(1);
-        event.setReadingType(0);
+        event.setWaterQuantity(BigDecimal.ZERO);
+        event.setSubmissionStatus(0);
+        event.setOutageReason("power cut");
+        event.setDate("2026-01-02");
 
-        stubReadingLookups("95", "100");
-        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
-                .thenReturn(false);
-        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
-                .thenReturn(Optional.empty());
+        service.ingestWaterQuantity(event);
 
-        service.ingestMeterReading(event);
-
-        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
-        verify(waterQuantityRepository).save(captor.capture());
-        assertThat(captor.getValue().getWaterQuantity()).isZero();
-    }
-
-    @Test
-    void ingestMeterReading_storesTheDeltaInLitresNotCubicMetres() {
-        MeterReadingEvent event = readingEvent("150", "2026-01-02");
-        stubReadingLookups("150", "100");
-        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
-                .thenReturn(false);
-        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
-                .thenReturn(Optional.empty());
-
-        service.ingestMeterReading(event);
-
-        // 50 m3 of supply is 50,000 L — the unit every consumer of this column already assumes.
-        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
-        verify(waterQuantityRepository).save(captor.capture());
-        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(50_000L);
-    }
-
-    @Test
-    void ingestMeterReading_whenNoPriorReadingExists_storesZeroNotTheWholeMeterIndex() {
-        MeterReadingEvent event = readingEvent("1250000", "2026-01-02");
-        // A first-ever reading: nothing before this date.
-        stubReadingLookups("1250000", null);
-        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
-                .thenReturn(false);
-        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
-                .thenReturn(Optional.empty());
-
-        service.ingestMeterReading(event);
-
-        // The old rule defaulted the baseline to 0 and stored 1,250,000 m3 as one day's supply.
-        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
-        verify(waterQuantityRepository).save(captor.capture());
-        assertThat(captor.getValue().getWaterQuantity()).isZero();
-    }
-
-    @Test
-    void ingestMeterReading_whenTheDerivedVolumeCannotBeStored_keepsTheReadingAndSkipsTheVolume() {
-        // A mis-read reading: the submission API bounds readings only from below and the column is
-        // unbounded NUMERIC, so this reaches ingestion. 1e16 m3 x 1000 is past BIGINT.
-        //
-        // What must NOT happen is the exception escaping: this runs inside ingestMeterReading's
-        // transaction, so it would roll back the reading that was just saved, and the consumer would
-        // retry and eventually drop a submission worth keeping. Only the derived volume is undecidable.
-        MeterReadingEvent event = readingEvent("1e16", "2026-01-02");
-        stubReadingLookups("1e16", "100");
-        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
-                .thenReturn(false);
-
-        service.ingestMeterReading(event);
-
-        verify(meterReadingRepository, times(1)).save(any(FactMeterReading.class));
-        verify(waterQuantityRepository, never()).save(any());
-        assertThat(meterRegistry.counter("water_quantity.unstorable", "source", "reading").count())
-                .isEqualTo(1.0);
+        InOrder order = inOrder(factIngestionRepository, dimTenantRepository, dimDateRepository, waterQuantityRepository);
+        order.verify(factIngestionRepository).lockScheme(1, 11);
+        order.verify(dimTenantRepository).existsById(1);
+        order.verify(dimDateRepository).findByFullDate(LocalDate.of(2026, 1, 2));
+        order.verify(waterQuantityRepository)
+                .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(1, 11, LocalDate.of(2026, 1, 2));
+        order.verify(waterQuantityRepository).save(any());
     }
 
     @Test
@@ -361,49 +496,14 @@ class FactServiceImplTest {
                 .isEqualTo(1.0);
     }
 
-    @Test
-    void ingestMeterReading_afterAGapMeasuresAgainstTheLastActualReading() {
-        // R1=100 on Jan 1, nothing on Jan 2 or Jan 3, R2=175 on Jan 4. The catch-up day carries all
-        // three days of volume; it is not measured against a Jan 3 that has no reading.
-        MeterReadingEvent event = readingEvent("175", "2026-01-04");
-        stubReadingLookups("175", "100");
-        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
-                .thenReturn(false);
-        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
-                .thenReturn(Optional.empty());
-
-        service.ingestMeterReading(event);
-
-        // The baseline lookup is anchored on the reading date itself, not on readingDate.minusDays(1).
-        verify(meterReadingRepository).findLatestBefore(1, 11, LocalDate.of(2026, 1, 4));
-        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
-        verify(waterQuantityRepository).save(captor.capture());
-        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(75_000L);
-    }
-
-    @Test
-    void ingestMeterReading_takesTheCurrentReadingFromTheTableNotTheEvent() {
-        // The event is a correction re-published for a day that already holds a later reading. Live
-        // ingestion must agree with the history recompute, which reads "the latest row on the date".
-        MeterReadingEvent event = readingEvent("120", "2026-01-02");
-        stubReadingLookups("150", "100");
-        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
-                .thenReturn(false);
-        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
-                .thenReturn(Optional.empty());
-
-        service.ingestMeterReading(event);
-
-        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
-        verify(waterQuantityRepository).save(captor.capture());
-        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(50_000L);
-    }
-
     /** A reading or derived volume in the meter's native cubic metres. */
     private static BigDecimal m3(String cubicMetres) {
         return cubicMetres == null ? null : new BigDecimal(cubicMetres);
+    }
+
+    /** The upsert stored the event's row, so ingestion carries on past it. */
+    private void storedAsNewRow() {
+        when(factIngestionRepository.upsertMeterReading(any())).thenReturn(Optional.of(1L));
     }
 
     private static MeterReadingEvent readingEvent(String confirmedReading, String readingDate) {
@@ -419,41 +519,12 @@ class FactServiceImplTest {
         return event;
     }
 
-    /**
-     * Stubs the two reading lookups the water-quantity derivation makes: the day's own reading, and
-     * the baseline strictly before it ({@code null} = the scheme has none).
-     */
-    private void stubReadingLookups(String currentReading, String previousReading) {
-        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(
-                any(), any(), any()))
-                .thenReturn(Optional.of(FactMeterReading.builder().confirmedReading(m3(currentReading)).build()));
-        when(meterReadingRepository.findLatestBefore(any(), any(), any()))
-                .thenReturn(Optional.ofNullable(previousReading)
-                        .map(r -> FactMeterReading.builder().confirmedReading(m3(r)).build()));
-    }
-
-    @Test
-    void ingestMeterReading_resolvesWaterQuantityCalculatorByEventChannel() {
-        MeterReadingEvent event = new MeterReadingEvent();
-        event.setTenantId(1);
-        event.setSchemeId(11);
-        event.setUserId(21);
-        event.setConfirmedReading(m3("150"));
-        event.setReadingAt("2026-01-02T10:15:00");
-        event.setReadingDate("2026-01-02");
-        event.setSubmissionStatus(1);
-        event.setChannel(ReadingChannel.ELM.getCode());
-
-        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
-        when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
-                .thenReturn(false);
-
-        service.ingestMeterReading(event);
-
-        // The per-channel calculator is selected using the event's channel code; ELM has no
-        // registered calculator here, so the water quantity is skipped rather than mis-derived as BFM.
-        verify(waterQuantityCalculatorRegistry).resolve(ReadingChannel.ELM.getCode());
-        verify(waterQuantityRepository, never()).save(any());
+    /** A reading from a telemetry-service that sends the submission's identity and version. */
+    private static MeterReadingEvent versionedReadingEvent(String readingDate) {
+        MeterReadingEvent event = readingEvent("40", readingDate);
+        event.setSourceReadingId(501L);
+        event.setSourceUpdatedAt(readingDate + "T10:15:30.123456");
+        return event;
     }
 
     @Test
@@ -889,10 +960,12 @@ class FactServiceImplTest {
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.of(new org.arghyam.jalsoochak.analytics.entity.DimDate()));
         when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(false);
 
+        storedAsNewRow();
+
         service.ingestMeterReading(event);
 
         ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
-        verify(meterReadingRepository, times(1)).save(captor.capture());
+        verify(factIngestionRepository, times(1)).upsertMeterReading(captor.capture());
         assertThat(captor.getValue().getSubmissionStatus()).isEqualTo(1); // SUBMITTED
     }
 
@@ -909,10 +982,12 @@ class FactServiceImplTest {
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.of(new org.arghyam.jalsoochak.analytics.entity.DimDate()));
         when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(false);
 
+        storedAsNewRow();
+
         service.ingestMeterReading(event);
 
         ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
-        verify(meterReadingRepository, times(1)).save(captor.capture());
+        verify(factIngestionRepository, times(1)).upsertMeterReading(captor.capture());
         assertThat(captor.getValue().getReadingType()).isEqualTo(0);
     }
 
@@ -927,6 +1002,8 @@ class FactServiceImplTest {
         event.setSubmissionStatus(1);
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.of(new org.arghyam.jalsoochak.analytics.entity.DimDate()));
         when(factOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(true);
+
+        storedAsNewRow();
 
         service.ingestMeterReading(event);
 

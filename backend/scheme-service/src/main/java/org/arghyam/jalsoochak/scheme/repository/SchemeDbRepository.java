@@ -397,6 +397,11 @@ public class SchemeDbRepository {
         return total == null ? 0 : total;
     }
 
+    /**
+     * The fix-readings list of the SO/SDO staff screens, which show bulk-flow-meter (BFM) readings
+     * only: each scheme's latest BFM reading, a NULL channel being a legacy BFM row. A scheme with
+     * no BFM reading shows 0, as one with no reading at all does.
+     */
     public List<SchemeYesterdayFinalReadingDTO> listSchemesWithYesterdayFinalReadingForUser(String schemaName,
                                                                                             int userId,
                                                                                             String schemeName,
@@ -417,6 +422,7 @@ public class SchemeDbRepository {
                     FROM %1$s.flow_reading_table
                     WHERE scheme_id = sm.id
                       AND deleted_at IS NULL
+                      AND COALESCE(channel, 'BFM') = 'BFM'
                     ORDER BY %2$s DESC, created_at DESC, id DESC
                     LIMIT 1
                 ) fr ON TRUE

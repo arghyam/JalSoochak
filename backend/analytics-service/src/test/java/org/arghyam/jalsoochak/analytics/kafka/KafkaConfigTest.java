@@ -2,7 +2,10 @@ package org.arghyam.jalsoochak.analytics.kafka;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.arghyam.jalsoochak.analytics.exception.MalformedEventException;
 import org.junit.jupiter.api.Test;
+import org.springframework.classify.Classifier;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
@@ -88,6 +91,30 @@ class KafkaConfigTest {
         assertThat(factory.getConsumerFactory()).isSameAs(consumerFactory);
         Object configuredHandler = ReflectionTestUtils.getField(factory, "commonErrorHandler");
         assertThat(configuredHandler).isSameAs(errorHandler);
+    }
+
+    @Test
+    void kafkaErrorHandler_sendsAMalformedEventToTheDltWithoutRetrying() {
+        // The listeners wrap every failure in a RuntimeException, so the cause must be looked through.
+        Throwable wrapped = new RuntimeException(new MalformedEventException("bad", null));
+
+        assertThat(retryable(wrapped)).isFalse();
+    }
+
+    @Test
+    void kafkaErrorHandler_stillRetriesAConcurrentMove() {
+        // A reading moved to a scheme not locked succeeds once the event is replayed.
+        Throwable wrapped = new RuntimeException(new ConcurrencyFailureException("moved"));
+
+        assertThat(retryable(wrapped)).isTrue();
+    }
+
+    private static boolean retryable(Throwable thrown) {
+        KafkaConfig config = configWith("localhost:9092", "g1");
+        DefaultErrorHandler errorHandler =
+                config.kafkaErrorHandler(new KafkaTemplate<>(config.producerFactory()));
+        Classifier<Throwable, Boolean> classifier = ReflectionTestUtils.invokeMethod(errorHandler, "getClassifier");
+        return classifier.classify(thrown);
     }
 }
 

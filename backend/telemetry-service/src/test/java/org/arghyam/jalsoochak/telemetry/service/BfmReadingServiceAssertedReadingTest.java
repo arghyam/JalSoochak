@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
@@ -14,6 +15,9 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -56,9 +60,17 @@ class BfmReadingServiceAssertedReadingTest {
     private static final String CONTACT = "919999999999";
 
     @Mock
+    private PduDayLimit pduDayLimit;
+
+    @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository repo;
     @Mock
     private MeterReadingExtractor defaultOcrExtractor;
+    @Mock
+    private OcrProviderResolver ocrProviderResolver;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
@@ -76,24 +88,30 @@ class BfmReadingServiceAssertedReadingTest {
     void setUp() {
         service = new BfmReadingService(
                 repo,
-                defaultOcrExtractor,
                 telemetryEventPublisher,
+                null,
                 tenantConfigRepository,
                 new ObjectMapper(),
                 operatorContextService,
-                null,
                 readingChannelResolver,
                 new RolloverResolutionService(true, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
-                null,
-                null,
+                new ImageReadingCapture(
+                        repo,
+                        telemetryEventPublisher,
+                        null,
+                        ocrProviderResolver,
+                        OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
+                new SubmittedValueCapture(),
+                pduDayLimit,
+                calculationParametersSnapshotter,
                 null);
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);
-        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, null))
+        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
                         new BigDecimal("140"), ReadingTime.now().minusDays(1))));
     }
@@ -110,7 +128,7 @@ class BfmReadingServiceAssertedReadingTest {
                 isNull(), isNull(), isNull(), eq(IngestionSource.NORMAL), isNull(), isNull(), isNull(),
                 eq(RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED),
                 // SUPPLY-PLAUSIBILITY: unchecked path, so the row carries no quarantine marker.
-                isNull());
+                isNull(), any(), any());
     }
 
     @Test
@@ -149,8 +167,8 @@ class BfmReadingServiceAssertedReadingTest {
         when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(SCHEME_ID), eq(OPERATOR_ID),
                 any(LocalDate.class))).thenReturn(Optional.empty());
         when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
-                .thenReturn(99L);
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse response = service.createReading(
                 CreateReadingRequest.builder()
@@ -164,7 +182,7 @@ class BfmReadingServiceAssertedReadingTest {
         // The image path must not be routed through the tracking/provenance overload.
         verify(repo, org.mockito.Mockito.never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(),
                 anyLong(), any(), any(), any(), anyString(), any(), any(), any(), anyInt(), any(), any(),
-                any(), any());
+                any(), any(), any(), any(), any());
     }
 
     @Test
@@ -179,7 +197,7 @@ class BfmReadingServiceAssertedReadingTest {
         // count every API submission as an operator overriding the AI.
         verify(telemetryEventPublisher).publishMeterReadingRecorded(eq(TENANT_ID), eq(SCHEME_ID),
                 eq(OPERATOR_ID), isNull(), eq(new BigDecimal("150")), isNull(), isNull(),
-                any(LocalDateTime.class), anyInt(), any(LocalDate.class), eq(1), eq(0), any());
+                any(LocalDateTime.class), anyInt(), any(LocalDate.class), eq(1), eq(0), any(), any(), any(), any());
     }
 
     @Test
@@ -219,7 +237,7 @@ class BfmReadingServiceAssertedReadingTest {
                 any(LocalDate.class))).thenReturn(Optional.empty());
         when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any()))
-                .thenReturn(99L);
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(99L, null));
     }
 }

@@ -32,4 +32,15 @@ class OpenApiConfigTest {
         assertEquals(SecurityScheme.In.HEADER, scheme.getIn());
         assertEquals("X-Custom-Webhook-Token", scheme.getName());
     }
+
+    @Test
+    void internalTokenSchemeIsTheHeaderTheInternalFilterReads() {
+        SecurityScheme scheme = new OpenApiConfig().telemetryServiceOpenAPI(new WebhookAuthProperties())
+                .getComponents().getSecuritySchemes().get(OpenApiConfig.INTERNAL_TOKEN_SCHEME);
+
+        assertNotNull(scheme);
+        assertEquals(SecurityScheme.Type.APIKEY, scheme.getType());
+        assertEquals(SecurityScheme.In.HEADER, scheme.getIn());
+        assertEquals(InternalAuthFilter.TOKEN_HEADER, scheme.getName());
+    }
 }

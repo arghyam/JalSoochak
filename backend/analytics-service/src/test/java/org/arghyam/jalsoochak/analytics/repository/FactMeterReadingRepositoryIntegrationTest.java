@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.repository;
 
 import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
+import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,9 +22,9 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Pins the two reading lookups the water-quantity derivation depends on: the day's own reading, and
- * the baseline strictly before it. Both are ordering-sensitive against real SQL, which is why this is
- * an integration test rather than a mocked one.
+ * Pins the reading lookups the water-quantity recalculation depends on: the day's own reading, the
+ * starting point strictly before it, the next date and a day's submissions. All are ordering-
+ * sensitive against real SQL, which is why this is an integration test rather than a mocked one.
  */
 @DataJpaTest
 @Testcontainers
@@ -59,7 +60,12 @@ class FactMeterReadingRepositoryIntegrationTest {
 
     private static final LocalDate D1 = LocalDate.of(2026, 1, 1);
     private static final LocalDate D2 = LocalDate.of(2026, 1, 2);
+    private static final LocalDate D3 = LocalDate.of(2026, 1, 3);
     private static final LocalDate D4 = LocalDate.of(2026, 1, 4);
+
+    private static final Integer BFM = ReadingChannel.BFM.getCode();
+    private static final Integer ELM = ReadingChannel.ELM.getCode();
+    private static final Integer PDU = ReadingChannel.PDU.getCode();
 
     @BeforeEach
     void setUp() {
@@ -91,8 +97,8 @@ class FactMeterReadingRepositoryIntegrationTest {
         insertReading(SCHEME, D2, "140", "2026-01-02T08:00:00");
         insertReading(SCHEME, D4, "175", "2026-01-04T08:00:00");
 
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualByComparingTo("140");
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D2))).isEqualByComparingTo("100");
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4, ReadingChannel.BFM))).isEqualByComparingTo("140");
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D2, ReadingChannel.BFM))).isEqualByComparingTo("100");
     }
 
     @Test
@@ -100,14 +106,14 @@ class FactMeterReadingRepositoryIntegrationTest {
         // Only D1 exists; D2 and D3 have no reading at all.
         insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00");
 
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualByComparingTo("100");
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4, ReadingChannel.BFM))).isEqualByComparingTo("100");
     }
 
     @Test
     void findLatestBefore_whenNothingPrecedesTheDate_returnsEmpty() {
         insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00");
 
-        assertThat(repository.findLatestBefore(TENANT, SCHEME, D1)).isEmpty();
+        assertThat(repository.findLatestBefore(TENANT, SCHEME, D1, ReadingChannel.BFM)).isEmpty();
     }
 
     @Test
@@ -117,7 +123,7 @@ class FactMeterReadingRepositoryIntegrationTest {
         insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00");
         insertReading(SCHEME, D2, "0", "2026-01-02T08:00:00");
 
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualByComparingTo("100");
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4, ReadingChannel.BFM))).isEqualByComparingTo("100");
     }
 
     @Test
@@ -127,7 +133,7 @@ class FactMeterReadingRepositoryIntegrationTest {
         // skipped here, silently promoting an older reading to baseline.
         insertReading(SCHEME, D1, "0.4", "2026-01-01T08:00:00");
 
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D2)))
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D2, ReadingChannel.BFM)))
                 .isEqualByComparingTo("0.4");
     }
 
@@ -136,7 +142,7 @@ class FactMeterReadingRepositoryIntegrationTest {
         insertReading(OTHER_SCHEME, D2, "900", "2026-01-02T08:00:00");
         insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00");
 
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualByComparingTo("100");
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4, ReadingChannel.BFM))).isEqualByComparingTo("100");
     }
 
     @Test
@@ -146,7 +152,7 @@ class FactMeterReadingRepositoryIntegrationTest {
         insertReading(SCHEME, D2, "140", "2026-01-02T08:00:00");
         insertReading(SCHEME, D2, "145", "2026-01-02T08:00:00");
 
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualByComparingTo("145");
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4, ReadingChannel.BFM))).isEqualByComparingTo("145");
     }
 
     @Test
@@ -174,15 +180,105 @@ class FactMeterReadingRepositoryIntegrationTest {
         assertThat(readingAt(latest)).isEqualByComparingTo("141");
     }
 
-    /** {@code confirmedReading} is text so the fixture states an exact NUMERIC rather than a double. */
+
+    // ---- channel filters ---------------------------------------------------------------------
+
+    @Test
+    void findLatestBefore_countsALegacyNullChannelAsBfm() {
+        insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00", null);
+
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D2, ReadingChannel.BFM)))
+                .isEqualByComparingTo("100");
+    }
+
+    @Test
+    void findLatestBefore_neverTakesAnotherChannelsReadingAsTheStartingPoint() {
+        // An ELM kWh total sits between two BFM days: the BFM day after it still measures from BFM.
+        insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00", BFM);
+        insertReading(SCHEME, D2, "40", "2026-01-02T08:00:00", ELM);
+
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4, ReadingChannel.BFM)))
+                .isEqualByComparingTo("100");
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4, ReadingChannel.ELM)))
+                .isEqualByComparingTo("40");
+    }
+
+    @Test
+    void findNextReadingDate_returnsTheFirstLaterDateOnTheChannel() {
+        insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00", BFM);
+        insertReading(SCHEME, D2, "40", "2026-01-02T08:00:00", ELM);
+        insertReading(SCHEME, D3, "0", "2026-01-03T08:00:00", null);
+        insertReading(SCHEME, D4, "175", "2026-01-04T08:00:00", BFM);
+        insertReading(OTHER_SCHEME, D2, "900", "2026-01-02T08:00:00", BFM);
+
+        // D2 is ELM and OTHER_SCHEME is another scheme; D3's legacy NULL is BFM, zero reading or not.
+        assertThat(repository.findNextReadingDate(TENANT, SCHEME, D1, BFM)).contains(D3);
+        assertThat(repository.findNextReadingDate(TENANT, SCHEME, D3, BFM)).contains(D4);
+        assertThat(repository.findNextReadingDate(TENANT, SCHEME, D1, ELM)).contains(D2);
+        assertThat(repository.findNextReadingDate(TENANT, SCHEME, D4, BFM)).isEmpty();
+    }
+
+    @Test
+    void existsOnAnotherChannelBetween_looksOnlyStrictlyBetweenTheDatesAndOnlyAtOtherChannels() {
+        insertReading(SCHEME, D1, "40", "2026-01-01T17:00:00", ELM);
+        insertReading(SCHEME, D2, "100", "2026-01-02T08:00:00", null);
+        insertReading(SCHEME, D3, "30", "2026-01-03T08:00:00", PDU);
+        insertReading(SCHEME, D4, "45", "2026-01-04T08:00:00", ELM);
+        insertReading(OTHER_SCHEME, D2, "20", "2026-01-02T08:00:00", PDU);
+
+        // D3's PDU run is another channel to both meter-index channels.
+        assertThat(repository.existsOnAnotherChannelBetween(TENANT, SCHEME, D2, D4, BFM)).isTrue();
+        assertThat(repository.existsOnAnotherChannelBetween(TENANT, SCHEME, D2, D4, ELM)).isTrue();
+        // Between D1 and D3 there is only D2's legacy NULL, which is BFM. The ELM and PDU readings on
+        // D1 and D3 themselves don't count, and neither does OTHER_SCHEME's run on D2.
+        assertThat(repository.existsOnAnotherChannelBetween(TENANT, SCHEME, D1, D3, BFM)).isFalse();
+        assertThat(repository.existsOnAnotherChannelBetween(TENANT, SCHEME, D1, D3, ELM)).isTrue();
+    }
+
+    @Test
+    void findDayReadings_returnsTheDaysSubmissionsOnTheChannelOldestFirst() {
+        insertReading(SCHEME, D2, "30", "2026-01-02T17:00:00", PDU);
+        insertReading(SCHEME, D2, "90", "2026-01-02T06:00:00", PDU);
+        insertReading(SCHEME, D2, "150", "2026-01-02T08:00:00", BFM);
+        insertReading(SCHEME, D1, "45", "2026-01-01T06:00:00", PDU);
+
+        assertThat(repository.findDayReadings(TENANT, SCHEME, D2, PDU))
+                .extracting(FactMeterReading::getConfirmedReading)
+                .usingElementComparator(BigDecimal::compareTo)
+                .containsExactly(new BigDecimal("90"), new BigDecimal("30"));
+    }
+
+    @Test
+    void findByReadingDate_returnsTheDaysReadingsOnEveryChannelLatestFirstAndBreaksTiesOnId() {
+        insertReading(SCHEME, D2, "130", "2026-01-02T08:00:00", BFM);
+        insertReading(SCHEME, D2, "40", "2026-01-02T17:00:00", ELM);
+        insertReading(SCHEME, D2, "30", "2026-01-02T12:00:00", PDU);
+        // A corrected re-publish of the 08:00 reading: same timestamp, higher id, so the later write.
+        insertReading(SCHEME, D2, "131", "2026-01-02T08:00:00", null);
+        insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00", BFM);
+        insertReading(OTHER_SCHEME, D2, "900", "2026-01-02T09:00:00", BFM);
+
+        assertThat(repository.findByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(TENANT, SCHEME, D2))
+                .extracting(FactMeterReading::getConfirmedReading)
+                .usingElementComparator(BigDecimal::compareTo)
+                .containsExactly(new BigDecimal("40"), new BigDecimal("30"), new BigDecimal("131"),
+                        new BigDecimal("130"));
+    }
+
     private void insertReading(int schemeId, LocalDate readingDate, String confirmedReading, String readingAt) {
+        insertReading(schemeId, readingDate, confirmedReading, readingAt, null);
+    }
+
+    /** {@code confirmedReading} is text so the fixture states an exact NUMERIC rather than a double. */
+    private void insertReading(int schemeId, LocalDate readingDate, String confirmedReading, String readingAt,
+                               Integer channel) {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.fact_meter_reading_table
                 (tenant_id, scheme_id, user_id, extracted_reading, confirmed_reading,
-                 reading_at, reading_date, submission_status, reading_type, created_at)
-                VALUES (?, ?, 11, ?, ?, ?, ?, 1, 0, NOW())
+                 reading_at, reading_date, channel, submission_status, reading_type, created_at)
+                VALUES (?, ?, 11, ?, ?, ?, ?, ?, 1, 0, NOW())
                 """, TENANT, schemeId, new BigDecimal(confirmedReading), new BigDecimal(confirmedReading),
-                LocalDateTime.parse(readingAt), readingDate);
+                LocalDateTime.parse(readingAt), readingDate, channel);
     }
 
     private static BigDecimal readingAt(Optional<FactMeterReading> reading) {

@@ -17,26 +17,27 @@ import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
+import org.arghyam.jalsoochak.analytics.exception.MalformedEventException;
 import org.arghyam.jalsoochak.analytics.repository.AnomalyRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimDateRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactOperatorAttendanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactIngestionRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactIngestionRepository.SchemeDay;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactWaterQuantityRepository;
 import org.arghyam.jalsoochak.analytics.repository.SubmissionAttemptRepository;
 import org.arghyam.jalsoochak.analytics.service.FactService;
-import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculator;
-import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorRegistry;
-import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityContext;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityRangeReporter;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityRecalculationService;
 import org.arghyam.jalsoochak.analytics.service.water.WaterVolumeOutOfRangeException;
 import org.arghyam.jalsoochak.analytics.service.water.WaterVolumeUnits;
 import io.micrometer.core.instrument.MeterRegistry;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,10 +48,13 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.time.format.TextStyle;
 import java.time.temporal.WeekFields;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -74,6 +78,7 @@ public class FactServiceImpl implements FactService {
 
     private final FactMeterReadingRepository meterReadingRepository;
     private final FactWaterQuantityRepository waterQuantityRepository;
+    private final FactIngestionRepository factIngestionRepository;
     private final FactEscalationRepository escalationRepository;
     private final FactSchemePerformanceRepository schemePerformanceRepository;
     private final AnomalyRepository anomalyRepository;
@@ -82,36 +87,9 @@ public class FactServiceImpl implements FactService {
     private final FactOperatorAttendanceRepository factOperatorAttendanceRepository;
     // REPORTED-METRIC: persistence for pre-anomaly submission rejects.
     private final SubmissionAttemptRepository submissionAttemptRepository;
-    private final WaterQuantityCalculatorRegistry waterQuantityCalculatorRegistry;
+    private final WaterQuantityRecalculationService waterQuantityRecalculationService;
+    private final WaterQuantityRangeReporter waterQuantityRangeReporter;
     private final MeterRegistry meterRegistry;
-
-    /**
-     * Daily volume (in the meter's native m&sup3;) above which a derived quantity is reported as
-     * implausible. The default of 100,000 m&sup3;/day is 100 MLD — an order of magnitude beyond any
-     * single rural scheme, so it only fires on genuine garbage such as an OCR misread or a replaced
-     * meter. Implausible values are logged and counted, never clamped: clamping would invent data and
-     * hide the bad reading behind a plausible-looking number.
-     */
-    @Value("${analytics.water-quantity.implausible-daily-cubic-metres:100000}")
-    private long implausibleDailyCubicMetres = 100_000L;
-
-    /**
-     * Rejects a threshold that would make {@link WaterVolumeUnits#cubicMetresToLitres} throw on every
-     * implausibility check: negative values, and values whose litre conversion overflows {@code long}.
-     * Caught here rather than left to surface from {@link #warnIfImplausible} — that method runs on the
-     * Kafka consumer thread, where an uncaught {@code ArithmeticException} would fail the offset commit
-     * and retry forever, stalling the partition.
-     */
-    @PostConstruct
-    void validateImplausibleDailyCubicMetres() {
-        if (implausibleDailyCubicMetres < 0
-                || implausibleDailyCubicMetres > Long.MAX_VALUE / WaterVolumeUnits.LITRES_PER_CUBIC_METRE) {
-            throw new IllegalStateException(
-                    "analytics.water-quantity.implausible-daily-cubic-metres must be between 0 and "
-                            + (Long.MAX_VALUE / WaterVolumeUnits.LITRES_PER_CUBIC_METRE)
-                            + ", got " + implausibleDailyCubicMetres);
-        }
-    }
 
     @Override
     @Transactional
@@ -140,13 +118,67 @@ public class FactServiceImpl implements FactService {
                 // joins against.
                 .correlationId(event.getCorrelationId())
                 .createdAt(LocalDateTime.now())
+                .sourceReadingId(event.getSourceReadingId())
+                .sourceUpdatedAt(parseSourceUpdatedAt(event.getSourceUpdatedAt()))
+                .calculationParameters(event.getCalculationParameters())
                 .build();
 
-        meterReadingRepository.save(fact);
+        // Before the first write, so a concurrent event for the same scheme cannot recalculate from a
+        // half-applied set of readings.
+        Optional<SchemeDay> stored = lockSchemes(fact);
+        if (factIngestionRepository.upsertMeterReading(fact).isEmpty()) {
+            // A newer version of this submission is already stored, and everything below already ran
+            // for it. Recalculating now would change nothing, so the event is dropped here.
+            log.info("Skipping stale METER_READING_RECORDED for sourceReadingId={} sourceUpdatedAt={} "
+                            + "(tenantId={}, schemeId={}); a newer version is stored",
+                    event.getSourceReadingId(), event.getSourceUpdatedAt(), event.getTenantId(), event.getSchemeId());
+            meterRegistry.counter("meter_reading.stale_event").increment();
+            return;
+        }
         ensureDateExists(readingDate);
         updateOperatorAttendance(event, readingDate);
-        updateWaterQuantityFromReading(event, readingDate, submissionStatus);
+        recalculateWaterQuantity(event, readingDate);
+        stored.filter(previous -> !previous.equals(new SchemeDay(fact.getSchemeId(), readingDate)))
+                .ifPresent(previous -> {
+                    log.info("Reading sourceReadingId={} moved from schemeId={} date={} to schemeId={} date={} "
+                                    + "(tenantId={}); recalculating the day it left",
+                            event.getSourceReadingId(), previous.schemeId(), previous.readingDate(),
+                            event.getSchemeId(), readingDate, event.getTenantId());
+                    waterQuantityRecalculationService.recalculateAfterRemoval(
+                            event.getTenantId(), previous.schemeId(), previous.readingDate());
+                });
         log.info("Ingested fact_meter_reading_table for scheme={} tenant={}", event.getSchemeId(), event.getTenantId());
+    }
+
+    /**
+     * Locks the reading's scheme and, when the submission is stored under another one, that scheme
+     * too: a correction can move a reading to another scheme or day, and both days are rewritten.
+     * Where it is stored is read again once the locks are held, since another event for the same
+     * submission may have moved it in between.
+     *
+     * @return where the submission was stored before this event; empty for a new or legacy one
+     * @throws ConcurrencyFailureException if the submission was moved to a scheme not locked here.
+     *         The consumer retries, and the retry locks the scheme it is stored under by then.
+     */
+    private Optional<SchemeDay> lockSchemes(FactMeterReading fact) {
+        Integer tenantId = fact.getTenantId();
+        Long sourceReadingId = fact.getSourceReadingId();
+        if (sourceReadingId == null) {
+            factIngestionRepository.lockScheme(tenantId, fact.getSchemeId());
+            return Optional.empty();
+        }
+        Set<Integer> schemeIds = new HashSet<>();
+        schemeIds.add(fact.getSchemeId());
+        factIngestionRepository.findSchemeDay(tenantId, sourceReadingId)
+                .ifPresent(unlocked -> schemeIds.add(unlocked.schemeId()));
+        factIngestionRepository.lockSchemes(tenantId, schemeIds);
+        Optional<SchemeDay> stored = factIngestionRepository.findSchemeDay(tenantId, sourceReadingId);
+        if (stored.isPresent() && !schemeIds.contains(stored.get().schemeId())) {
+            throw new ConcurrencyFailureException(
+                    "Reading sourceReadingId=%d (tenantId=%d) moved to schemeId=%d while its schemes were being locked"
+                            .formatted(sourceReadingId, tenantId, stored.get().schemeId()));
+        }
+        return stored;
     }
 
     // REPORTED-METRIC: persist a pre-anomaly submission reject. Resolves the submitted gov scheme id to
@@ -173,6 +205,10 @@ public class FactServiceImpl implements FactService {
     @Override
     @Transactional
     public void ingestWaterQuantity(WaterQuantityEvent event) {
+        // Same lock as the reading path: both find the day's row and then update or insert it. Taken
+        // before the dim_tenant/dim_date inserts below, so no write of this transaction can be what a
+        // reading event holding the lock is waiting on.
+        factIngestionRepository.lockScheme(event.getTenantId(), event.getSchemeId());
         ensureTenantExists(event.getTenantId(), null);
         LocalDate date = parseDate(event.getDate());
         ensureDateExists(date);
@@ -187,10 +223,11 @@ public class FactServiceImpl implements FactService {
             normalizedWaterQuantity = WaterVolumeUnits.cubicMetresToLitres(
                     reportedWaterQuantity.max(BigDecimal.ZERO));
         } catch (WaterVolumeOutOfRangeException e) {
-            reportUnstorable(e, event.getTenantId(), event.getSchemeId(), date, "correction");
+            waterQuantityRangeReporter.reportUnstorable(e, event.getTenantId(), event.getSchemeId(), date, "correction");
             return;
         }
-        warnIfImplausible(normalizedWaterQuantity, event.getTenantId(), event.getSchemeId(), date, "correction");
+        waterQuantityRangeReporter.reportIfImplausible(
+                normalizedWaterQuantity, event.getTenantId(), event.getSchemeId(), date, "correction");
         FactWaterQuantity fact = waterQuantityRepository
                 .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
                         event.getTenantId(),
@@ -334,147 +371,32 @@ public class FactServiceImpl implements FactService {
         factOperatorAttendanceRepository.save(attendance);
     }
 
-    private void updateWaterQuantityFromReading(MeterReadingEvent event, LocalDate readingDate, Integer submissionStatus) {
+    private void recalculateWaterQuantity(MeterReadingEvent event, LocalDate readingDate) {
         if (event.getTenantId() == null || event.getSchemeId() == null || readingDate == null) {
             log.warn("Skipping water quantity update due to missing tenant/scheme/date (tenantId={}, schemeId={}, date={})",
                     event.getTenantId(), event.getSchemeId(), readingDate);
             return;
         }
+        waterQuantityRecalculationService.recalculateAfterReading(event.getTenantId(), event.getSchemeId(), readingDate);
+    }
 
-        Optional<WaterQuantityCalculator> calculatorOpt = waterQuantityCalculatorRegistry.resolve(event.getChannel());
-        if (calculatorOpt.isEmpty()) {
-            log.warn("Skipping water quantity update; no calculator registered for channel={} (tenantId={}, schemeId={}, date={}). "
-                            + "Not falling back to BFM to avoid mis-deriving the reading with the wrong calculator.",
-                    event.getChannel(), event.getTenantId(), event.getSchemeId(), readingDate);
-            meterRegistry.counter("water_quantity.calculator.missing",
-                            "channel", String.valueOf(event.getChannel()),
-                            "tenantId", String.valueOf(event.getTenantId()),
-                            "schemeId", String.valueOf(event.getSchemeId()))
-                    .increment();
-            return;
+    /**
+     * The submission's version. Unlike the other timestamps it never falls back to now: a version
+     * made up here would outrank the real ones. Nor is an unparseable one treated as absent, which
+     * the upsert would drop as stale against any stored version; the event fails instead.
+     *
+     * @throws MalformedEventException if the value is present but unparseable
+     */
+    private LocalDateTime parseSourceUpdatedAt(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
         }
-
-        // Read the day's reading back from the table rather than taking it off the event. The history
-        // recompute defines it as "the latest row on that date"; if live ingestion used the event's own
-        // reading instead, the two would disagree on any day carrying more than one reading and would
-        // flip each other's values. Going through the table makes the definitions identical by
-        // construction. The row saved moments ago is visible here — the query flushes first.
-        BigDecimal currentReading = meterReadingRepository
-                .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(
-                        event.getTenantId(),
-                        event.getSchemeId(),
-                        readingDate
-                )
-                .map(FactMeterReading::getConfirmedReading)
-                .orElse(null);
-        if (currentReading == null) {
-            log.warn("Skipping water quantity update; no stored reading for the day (tenantId={}, schemeId={}, date={})",
-                    event.getTenantId(), event.getSchemeId(), readingDate);
-            return;
-        }
-
-        // Baseline is the latest reading strictly before this date, not the previous calendar day's.
-        // Left null when the scheme has none: the calculator decides what its channel can derive
-        // without one (BFM: nothing, so 0). Never defaulted to 0 here — that is what made every
-        // first-ever and post-gap reading store the whole cumulative meter index as a day's supply.
-        BigDecimal previousReading = meterReadingRepository
-                .findLatestBefore(event.getTenantId(), event.getSchemeId(), readingDate)
-                .map(FactMeterReading::getConfirmedReading)
-                .orElse(null);
-
-        WaterQuantityContext context = WaterQuantityContext.builder()
-                .tenantId(event.getTenantId())
-                .schemeId(event.getSchemeId())
-                .readingDate(readingDate)
-                .currentReading(currentReading)
-                .previousReading(previousReading)
-                .channel(event.getChannel())
-                .build();
-        long waterQuantity;
         try {
-            waterQuantity = calculatorOpt.get().calculate(context);
-        } catch (WaterVolumeOutOfRangeException e) {
-            // The reading itself is already saved and stays saved: this method is called from within
-            // ingestMeterReading's transaction, so letting this propagate would roll the reading back,
-            // and the consumer would then retry and ultimately drop a submission that was fine to store.
-            // Only the derived volume is undecidable, so only the derived volume is skipped.
-            reportUnstorable(e, event.getTenantId(), event.getSchemeId(), readingDate, "reading");
-            return;
+            return LocalDateTime.parse(value);
+        } catch (DateTimeParseException e) {
+            meterRegistry.counter("meter_reading.source_updated_at.unparseable").increment();
+            throw new MalformedEventException("Could not parse sourceUpdatedAt '" + value + "'", e);
         }
-        warnIfImplausible(waterQuantity, event.getTenantId(), event.getSchemeId(), readingDate, "reading");
-        LocalDateTime now = LocalDateTime.now();
-        FactWaterQuantity fact = waterQuantityRepository
-                .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
-                        event.getTenantId(),
-                        event.getSchemeId(),
-                        readingDate
-                )
-                .map(existing -> {
-                    existing.setWaterQuantity(waterQuantity);
-                    existing.setUserId(event.getUserId());
-                    existing.setSubmissionStatus(submissionStatus);
-                    existing.setOutageReason(null);
-                    existing.setNonSubmissionReason(null);
-                    existing.setUpdatedAt(now);
-                    return existing;
-                })
-                .orElseGet(() -> FactWaterQuantity.builder()
-                        .tenantId(event.getTenantId())
-                        .schemeId(event.getSchemeId())
-                        .userId(event.getUserId())
-                        .waterQuantity(waterQuantity)
-                        .submissionStatus(submissionStatus)
-                        .outageReason(null)
-                        .nonSubmissionReason(null)
-                        .date(readingDate)
-                        .createdAt(now)
-                        .updatedAt(now)
-                        .build());
-
-        waterQuantityRepository.save(fact);
-    }
-
-    /**
-     * Reports a derived daily volume that is too large to be real. The value is still stored as
-     * derived — the column is BIGINT and holds it fine — because clamping would fabricate a plausible
-     * number and hide the underlying bad reading. The log line and the counter are what make it
-     * findable.
-     *
-     * @param litres the derived quantity, in litres
-     * @param source which write path produced it ({@code reading} or {@code correction})
-     */
-    private void warnIfImplausible(long litres, Integer tenantId, Integer schemeId, LocalDate date, String source) {
-        long thresholdLitres = WaterVolumeUnits.cubicMetresToLitres(implausibleDailyCubicMetres);
-        if (litres <= thresholdLitres) {
-            return;
-        }
-        log.warn("Implausible daily water quantity {} L (> {} L) stored as-is from {} path "
-                        + "(tenantId={}, schemeId={}, date={}); check the underlying meter reading",
-                litres, thresholdLitres, source, tenantId, schemeId, date);
-        meterRegistry.counter("water_quantity.implausible", "source", source)
-                .increment();
-    }
-
-    /**
-     * Reports a derived volume that cannot be stored at all — its litre value is past the column's
-     * {@code BIGINT} range, which takes a reading around {@code 9.2e15} m&sup3;.
-     *
-     * <p>Distinct from {@link #warnIfImplausible} in outcome, not in kind: that one has a number it can
-     * still store and keeps it, while here there is nothing storable to keep, so the day is left without
-     * a derived volume. Both refuse to clamp, for the same reason — a fabricated plausible number hides
-     * the bad reading instead of surfacing it. The separate counter exists because these two want
-     * different alerts: "a suspicious value went in" versus "a submission was too broken to derive".
-     *
-     * @param source which write path produced it ({@code reading} or {@code correction})
-     */
-    private void reportUnstorable(WaterVolumeOutOfRangeException e,
-                                  Integer tenantId, Integer schemeId, LocalDate date, String source) {
-        log.warn("Water quantity {} m3 from the {} path exceeds the storable range "
-                        + "(tenantId={}, schemeId={}, date={}); no volume recorded for the day. "
-                        + "The meter reading is almost certainly wrong — check it",
-                e.getCubicMetres(), source, tenantId, schemeId, date);
-        meterRegistry.counter("water_quantity.unstorable", "source", source)
-                .increment();
     }
 
     @Override

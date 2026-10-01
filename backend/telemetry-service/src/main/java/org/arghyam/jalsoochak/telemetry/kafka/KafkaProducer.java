@@ -8,7 +8,11 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Component
 @RequiredArgsConstructor
@@ -51,6 +55,45 @@ public class KafkaProducer {
             return true;
         } catch (JsonProcessingException e) {
             log.error("[kafka:publish] SERIALIZE_FAILED topic={} err={}", topic, e.getMessage(), e);
+            return false;
+        } catch (Exception e) {
+            log.error("[kafka:publish] FAILED topic={} err={}", topic, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Like {@link #publishJson}, but waits up to {@code timeout} for the broker to acknowledge the
+     * event, for a caller that sends many events in a row: it cannot run ahead of Kafka, and it learns
+     * which events did not go. The payload is logged at DEBUG only, since such a caller sends many.
+     *
+     * <p>{@code false} after a timeout does not mean the event was lost: the producer may still deliver
+     * it, so a consumer must be able to apply it twice.
+     *
+     * @return {@code true} once the broker has acknowledged the event; {@code false} when it could not
+     *         be serialised, the send failed, or no acknowledgement came within {@code timeout}
+     */
+    public boolean publishJsonAndAwait(String topic, Object event, Duration timeout) {
+        try {
+            String json = objectMapper.writeValueAsString(event);
+            log.debug("[kafka:publish] topic={} payload={}", topic, json);
+
+            kafkaTemplate.send(topic, json).get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            log.debug("[kafka:publish] ACKNOWLEDGED topic={}", topic);
+            return true;
+        } catch (JsonProcessingException e) {
+            log.error("[kafka:publish] SERIALIZE_FAILED topic={} err={}", topic, e.getMessage(), e);
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("[kafka:publish] INTERRUPTED topic={}", topic);
+            return false;
+        } catch (TimeoutException e) {
+            log.error("[kafka:publish] NOT_ACKNOWLEDGED topic={} timeout={}", topic, timeout);
+            return false;
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            log.error("[kafka:publish] FAILED topic={} err={}", topic, cause.getMessage(), cause);
             return false;
         } catch (Exception e) {
             log.error("[kafka:publish] FAILED topic={} err={}", topic, e.getMessage(), e);

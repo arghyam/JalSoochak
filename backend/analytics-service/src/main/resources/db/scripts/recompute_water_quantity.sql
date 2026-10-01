@@ -4,20 +4,30 @@
 -- scripts/water_quantity_units_fix.py reads it to repair history, and
 -- WaterQuantityBackfillParityIntegrationTest runs this exact text against the same fixture that live
 -- ingestion writes. If the two definitions were separate copies they could drift, and the whole point
--- of the backfill is that it must land on the value FactServiceImpl would have written.
+-- of the backfill is that it must land on the value live ingestion would have written.
 --
--- The definitions below mirror FactServiceImpl.updateWaterQuantityFromReading term for term:
+-- The definitions below mirror WaterQuantityRecalculationService's BFM (METER_INDEX) rule term for term:
 --
---   current  = the latest reading on that date          -- findTopBy...ReadingDateOrderByReadingAtDescIdDesc
---              ordered by reading_at DESC, id DESC,      -- deliberately NOT filtered on > 0: a corrected
---              with no minimum value filter                 reading of 0 is a real 0 for the day
---   previous = the latest reading strictly BEFORE it     -- FactMeterReadingRepository.findLatestBefore
---              with confirmed_reading > 0, ordered by
+--   current  = the latest reading on that date, on any   -- findTopBy...ReadingDateOrderByReadingAtDescIdDesc
+--              channel, ordered by reading_at DESC,      -- deliberately NOT filtered on > 0: a corrected
+--              id DESC, with no minimum value filter        reading of 0 is a real 0 for the day
+--   day_channel = that reading's channel, NULL as BFM    -- ReadingChannel.fromCode
+--   previous = the latest BFM reading strictly BEFORE    -- FactMeterReadingRepository.findLatestBefore
+--              it with confirmed_reading > 0, ordered by
 --              reading_date DESC, reading_at DESC, id DESC
---   quantity = ROUND(GREATEST(0, current - previous)     -- BfmWaterQuantityCalculator + WaterVolumeUnits
---                    * 1000)
+--              -- unless another channel has a reading     -- existsOnAnotherChannelBetween
+--              dated strictly between the two, in which
+--              case there is no previous
+--   quantity = ROUND(GREATEST(0, current - previous)     -- the METER_INDEX amount + BfmWaterQuantityCalculator
+--                    * 1000)                                + WaterVolumeUnits
 --
--- and the two boundary cases that caused the defects this backfill repairs:
+-- Only BFM days are recomputed. A day's channel is its latest reading's channel, so "the latest BFM
+-- reading on the date" is simply the latest reading when day_channel is BFM (1); other channels are
+-- the live path's alone and come out as new_qty NULL:
+--
+--   latest reading not BFM  -> new_qty NULL, whatever else the day holds. The caller skips these days.
+--
+-- and the boundary cases that caused the defects this backfill repairs:
 --
 --   no reading on the date  -> new_qty NULL. Live ingestion writes nothing at all in this case, so the
 --                              backfill must not write either. The caller reports any such row whose
@@ -27,6 +37,12 @@
 --                              declines too rather than aborting the run on the ::bigint cast.
 --   no previous reading     -> 0, NOT the whole meter index. A cumulative index needs a baseline to be
 --                              a volume; without one there is no derivable supply for the day.
+--   another channel read    -> 0, as for no previous reading. The dates in between were counted on the
+--   the scheme in between      other channel, so measuring across them would count their water twice.
+--   no previous reading,    -> new_qty NULL. The live path works such a day out from the other channel's
+--   and another channel        reading when that gives the day a total, which needs that channel's
+--   read the scheme on the     calculator and starting point, so this declines rather than write a 0
+--   date                       over it. The caller skips these days, like a non-BFM day.
 --
 -- Takes no parameters and covers the whole table: callers wrap it in a CTE and apply their own window
 -- so that this text stays runnable as-is from psql and from a test.
@@ -35,11 +51,21 @@ SELECT fwq.id,
        fwq.scheme_id,
        fwq.date,
        fwq.water_quantity                                  AS old_qty,
+       cur.day_channel,
        cur.confirmed_reading                               AS current_reading,
        prev.confirmed_reading                              AS previous_reading,
        prev.reading_date                                   AS previous_date,
        CASE
+           WHEN cur.day_channel <> 1 THEN NULL
            WHEN cur.confirmed_reading IS NULL THEN NULL
+           WHEN prev.confirmed_reading IS NULL AND EXISTS (
+               SELECT 1
+               FROM analytics_schema.fact_meter_reading_table o
+               WHERE o.tenant_id = fwq.tenant_id
+                 AND o.scheme_id = fwq.scheme_id
+                 AND o.reading_date = fwq.date
+                 AND COALESCE(o.channel, 1) <> 1
+           ) THEN NULL
            WHEN prev.confirmed_reading IS NULL THEN 0
            -- Past what the BIGINT column holds (a reading around 9.2e15 m3), so there is no value to
            -- write — exactly the case where live ingestion catches WaterVolumeOutOfRangeException and
@@ -59,7 +85,7 @@ SELECT fwq.id,
                            ORDER BY fwq.updated_at DESC, fwq.id DESC) = 1) AS is_latest
 FROM analytics_schema.fact_water_quantity_table fwq
 LEFT JOIN LATERAL (
-    SELECT r.confirmed_reading
+    SELECT r.confirmed_reading, COALESCE(r.channel, 1) AS day_channel
     FROM analytics_schema.fact_meter_reading_table r
     WHERE r.tenant_id = fwq.tenant_id
       AND r.scheme_id = fwq.scheme_id
@@ -73,16 +99,31 @@ LEFT JOIN LATERAL (
     WHERE r.tenant_id = fwq.tenant_id
       AND r.scheme_id = fwq.scheme_id
       AND r.reading_date < fwq.date
+      AND COALESCE(r.channel, 1) = 1
       AND r.confirmed_reading > 0
     ORDER BY r.reading_date DESC, r.reading_at DESC, r.id DESC
     LIMIT 1
+) candidate ON TRUE
+-- The candidate is the previous reading only when no other channel read the scheme on a date strictly
+-- between the two. Otherwise prev is all NULL, exactly as when there is no candidate at all.
+LEFT JOIN LATERAL (
+    SELECT candidate.confirmed_reading, candidate.reading_date
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM analytics_schema.fact_meter_reading_table o
+        WHERE o.tenant_id = fwq.tenant_id
+          AND o.scheme_id = fwq.scheme_id
+          AND o.reading_date > candidate.reading_date
+          AND o.reading_date < fwq.date
+          AND COALESCE(o.channel, 1) <> 1
+    )
 ) prev ON TRUE
 -- The litre value, named once so the CASE above can both range-check it and return it without
 -- restating the arithmetic. NULL whenever either side is missing; the CASE decides what that means.
 --
 -- The readings are NUMERIC (the meters carry a decimal digit), so the subtraction happens at their own
 -- precision and the result is rounded once, at the litre boundary — the same order
--- BfmWaterQuantityCalculator and WaterVolumeUnits use. Rounding the readings first and subtracting
+-- WaterQuantityRecalculationService and WaterVolumeUnits use. Rounding the readings first and subtracting
 -- after is what cost up to 1000 L per day. ROUND() on numeric rounds half-away-from-zero, which is the
 -- Java HALF_UP for the non-negative values GREATEST admits; it is spelled out rather than left to the
 -- implicit assignment cast into the BIGINT column, because the parity with the Java path is the point
