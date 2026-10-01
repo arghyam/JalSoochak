@@ -93,9 +93,9 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 
 A star schema fed asynchronously via Kafka, with its own Flyway migrations in analytics-service (`src/main/resources/db/migration`). Every table name carries a `_table` suffix (e.g. `dim_date_table`):
 
-* **Dimensions:** `dim_date`, `dim_tenant` (with `dim_tenant_water_norm` and `dim_tenant_work_status_filter` keeping their history by effective date), `dim_user`, `dim_scheme` (carrying the scheme's `work_status` and `operating_status` as ingested from the tenant schema), `dim_lgd_location`, `dim_department_location`, `dim_user_scheme_mapping`
-* **Facts:** `fact_meter_reading`, `fact_water_quantity` (daily quantity per scheme, the basis for LPCD and norm achievement), `fact_escalation`, `fact_scheme_performance` (performance score, last supply date), `fact_operator_attendance`, `fact_anomaly` (anomalies received from telemetry-service)
-* **Pre-aggregations:** `fact_scheme_daily`, `fact_region_metrics`, `fact_submission_activity_hourly`, rebuilt from the facts above
+* **Dimensions:** `dim_date_table`, `dim_tenant_table` (with `dim_tenant_water_norm_table` and `dim_tenant_work_status_filter_table` keeping their history by effective date), `dim_user_table`, `dim_scheme_table` (carrying the scheme's `work_status` and `operating_status` as ingested from the tenant schema), `dim_lgd_location_table`, `dim_department_location_table`, `dim_user_scheme_mapping_table`
+* **Facts:** `fact_meter_reading_table`, `fact_water_quantity_table` (daily quantity per scheme, the basis for LPCD and norm achievement), `fact_escalation_table`, `fact_scheme_performance_table` (performance score, last supply date), `fact_operator_attendance_table`, `fact_anomaly_table` (anomalies received from telemetry-service)
+* **Pre-aggregations:** `fact_scheme_daily_table`, `fact_region_metrics_table`, `fact_submission_activity_hourly_table`, rebuilt from the facts above
 * **Other:** `submission_attempt_table` (submissions rejected before any reading was stored)
 
 {% hint style="danger" %}

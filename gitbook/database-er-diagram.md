@@ -111,7 +111,7 @@ erDiagram
     language_master ||--o{ language_alias : "spelled as"
 ```
 
-Two common tables have no relationships and are not drawn: `channel_master_table` (submission and notification channels) and `language_master_table` (the language list shown in the admin UI).
+Two common tables have no relationships and are not drawn: `channel_master_table` (submission and notification channels) and `common_schema.language_master_table` (a language list with labels and locale codes, which the services do not read). Each tenant schema has its own `language_master_table`, which is the one the services use; see the tenant schema section below.
 
 ## Tenant schema (`tenant_<stateCode>`)
 
@@ -430,7 +430,9 @@ erDiagram
     dim_user_table |o..o{ fact_meter_reading_table : "user_id"
     dim_scheme_table ||..o{ fact_water_quantity_table : "scheme_id"
     dim_date_table ||--o{ fact_water_quantity_table : "full_date"
+    dim_user_table |o..o{ fact_water_quantity_table : "user_id"
     dim_scheme_table ||..o{ fact_operator_attendance_table : "scheme_id"
+    dim_user_table ||..o{ fact_operator_attendance_table : "user_id"
     dim_date_table ||--o{ fact_operator_attendance_table : "date_key"
 ```
 
@@ -441,6 +443,10 @@ erDiagram
     dim_scheme_table {
         int tenant_id
         int scheme_id
+    }
+    dim_user_table {
+        int tenant_id
+        int user_id
     }
     fact_escalation_table {
         bigint id PK
@@ -475,10 +481,12 @@ erDiagram
         timestamp attempted_at
     }
 
-    dim_scheme_table ||..o{ fact_escalation_table : "scheme_id"
+    dim_scheme_table |o..o{ fact_escalation_table : "scheme_id"
     dim_scheme_table ||..o{ fact_scheme_performance_table : "scheme_id"
-    dim_scheme_table ||..o{ fact_anomaly_table : "scheme_id"
+    dim_scheme_table |o..o{ fact_anomaly_table : "scheme_id"
     dim_scheme_table |o..o{ submission_attempt_table : "scheme_id"
+    dim_user_table ||..o{ fact_escalation_table : "user_id"
+    dim_user_table |o..o{ fact_anomaly_table : "user_id"
 ```
 
 The `tenant_id` columns marked FK in the two fact diagrams above reference `dim_tenant_table`; that link is left out of the drawings.
