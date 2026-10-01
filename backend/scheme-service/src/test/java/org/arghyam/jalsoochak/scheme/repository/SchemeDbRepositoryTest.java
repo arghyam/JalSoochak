@@ -169,8 +169,6 @@ class SchemeDbRepositoryTest {
         assertThat(repository.findExistingSchemeLgdMappingKeys("tenant_ka", List.of(), List.of(1))).isEqualTo(Set.of());
         assertThat(repository.findExistingSchemeDepartmentMappingKeys("tenant_ka", List.of(1), List.of())).isEqualTo(Set.of());
         assertThat(repository.findSchemeSnapshotsByStateSchemeIds("tenant_ka", List.of())).isEqualTo(Map.of());
-        assertThat(repository.findSchemeAnalyticsRowsByStateSchemeIds("tenant_ka", List.of())).isEqualTo(List.of());
-        assertThat(repository.findSchemeAnalyticsRowsBySchemeIds("tenant_ka", List.of())).isEqualTo(List.of());
     }
 
     @Test

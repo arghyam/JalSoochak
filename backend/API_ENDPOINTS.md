@@ -141,6 +141,20 @@ Set the following environment variables before running the Telemetry services:
 | PATCH | `/api/v1/scheme/schemes/{schemeId}/status?tenantCode={tenantCode}` | Update scheme work/operating status (one or both) |
 | POST | `/api/v1/scheme/schemes/upload` | Bulk upload schemes (CSV) |
 | POST | `/api/v1/scheme/schemes/mappings/upload` | Bulk upload scheme mappings (CSV) |
+| POST | `/api/v1/scheme/schemes/dimensions/republish?tenantCode={tenantCode}` | SUPER_USER / the tenant's STATE_ADMIN. Re-sends every live scheme to analytics as `SCHEME_DIMENSION_REPLACED` (one-off backfill of `dim_scheme_table`); returns `{schemes, failed}` |
+
+### State master-data sync (`scheme-service`)
+
+SUPER_USER / STATE_ADMIN of the configured tenant only. Off unless `STATE_SYNC_ENABLED=true` — the two
+POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/scheme/state-sync/config?tenantCode={tenantCode}` | Effective flag, mode (`DRY_RUN`/`APPLY`) and crons |
+| POST | `/api/v1/scheme/state-sync/runs?tenantCode={tenantCode}&kind={FULL\|DELTA}` | Start a run in the background → 202 `{runId}`; 409 while another run holds the lock |
+| POST | `/api/v1/scheme/state-sync/schemes/refresh?tenantCode={tenantCode}&ref={SCH-code\|IMIS id}` | Re-pull and reconcile one scheme now; returns the run's counts and issues |
+| GET | `/api/v1/scheme/state-sync/runs?tenantCode={tenantCode}&limit={n}` | Run history, newest first |
+| GET | `/api/v1/scheme/state-sync/issues?tenantCode={tenantCode}&runId={id?}&category={c?}&limit={n}&offset={n}` | What a run declined to write (conflicts, unmatched villages, spared archives …) |
 
 ### Scheme Status Integer Mapping
 

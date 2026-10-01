@@ -53,6 +53,14 @@ public interface SchemeService {
 
     SchemeUploadResponseDTO uploadSchemeMappings(MultipartFile file);
 
+    /**
+     * Re-sends SCHEME_DIMENSION_REPLACED for every live scheme of the tenant, so analytics rebuilds each
+     * scheme's dim_scheme_table rows from the tenant DB. A one-off backfill; safe to repeat.
+     *
+     * @return "schemes" sent and "failed" events Kafka did not accept
+     */
+    java.util.Map<String, Integer> republishSchemeDimensions(String tenantCode);
+
     ReportLinkResponseDTO downloadSchemesReport();
 
     ReportLinkResponseDTO downloadSchemeMappingsReport();

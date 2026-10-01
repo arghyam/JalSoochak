@@ -28,6 +28,7 @@ import org.arghyam.jalsoochak.scheme.enums.SchemeWorkStatus;
 import org.arghyam.jalsoochak.scheme.exception.FileValidationException;
 import org.arghyam.jalsoochak.scheme.exception.UnsupportedFileTypeException;
 import org.arghyam.jalsoochak.scheme.kafka.KafkaProducer;
+import org.arghyam.jalsoochak.scheme.kafka.SchemeDimensionEvents;
 import org.arghyam.jalsoochak.scheme.repository.SchemeCreateRecord;
 import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository;
 import org.arghyam.jalsoochak.scheme.repository.SchemeLgdMappingCreateRecord;
@@ -60,6 +61,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -78,6 +80,7 @@ public class SchemeServiceImpl implements SchemeService {
     private static final int MAX_VALIDATION_ERRORS = 1000;
     private static final int CHUNK_SIZE = 1000;
     private static final String SCHEME_TOPIC = "scheme-service-topic";
+    private static final int DIMENSION_REPUBLISH_CHUNK = 1000;
 
     // New upload contract:
     // - `center_scheme_id` (CSV) maps to DB `centre_scheme_id`
@@ -139,6 +142,7 @@ public class SchemeServiceImpl implements SchemeService {
     private final ObjectStorageService objectStorageService;
     private final StorageProperties storageProperties;
     private final PiiEncryptionService piiEncryptionService;
+    private final SchemeDimensionEvents schemeDimensionEvents;
 
     @Override
     public PageResponseDTO<SchemeDTO> listSchemes(
@@ -302,9 +306,7 @@ public class SchemeServiceImpl implements SchemeService {
         if (!updated) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Scheme not found");
         }
-        List<SchemeDbRepository.SchemeAnalyticsRow> rows =
-                schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds(schemaName, List.of(schemeId));
-        publishSchemeDimensionEventsFromRows(tenantId, rows);
+        publishSchemeDimensionEvents(schemaName, tenantId, List.of(schemeId));
     }
 
     @Override
@@ -995,7 +997,8 @@ public class SchemeServiceImpl implements SchemeService {
             for (SchemeUpdateRecord row : updates) {
                 changedStateSchemeIds.add(row.stateSchemeId());
             }
-            publishSchemeDimensionEvents(schemaName, tenantId, changedStateSchemeIds);
+            publishSchemeDimensionEvents(schemaName, tenantId,
+                    schemeDbRepository.findSchemeIdsByStateSchemeIds(schemaName, changedStateSchemeIds).values());
         }
         return new UpsertResult(uploaded, unchanged);
     }
@@ -1233,13 +1236,7 @@ public class SchemeServiceImpl implements SchemeService {
             schemeDbRepository.clearSchemeMappingsForSchemes(schemaName, schemesToClear, actorUserId);
         }
         insertMappingsInChunks(schemaName, lgd, dept);
-        if (!schemesToClear.isEmpty()) {
-            List<SchemeDbRepository.SchemeAnalyticsRow> updatedSchemes =
-                    schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds(schemaName, new ArrayList<>(rowsByScheme.keySet()));
-            if (!updatedSchemes.isEmpty()) {
-                publishSchemeDimensionEventsFromRows(tenantId, updatedSchemes);
-            }
-        }
+        publishSchemeDimensionEvents(schemaName, tenantId, schemesToClear);
 
         return new MappingProcessResult(uploaded, unchanged);
     }
@@ -1267,61 +1264,37 @@ public class SchemeServiceImpl implements SchemeService {
         }
     }
 
-    private void publishSchemeDimensionEvents(String schemaName, Integer tenantId, List<String> stateSchemeIds) {
-        if (tenantId == null || stateSchemeIds == null || stateSchemeIds.isEmpty()) {
-            return;
+    @Override
+    public Map<String, Integer> republishSchemeDimensions(String tenantCode) {
+        String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        Integer tenantId = schemeDbRepository.findTenantIdByStateCode(tenantCode)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found"));
+        List<Integer> schemeIds = schemeDbRepository.findLiveSchemeIds(schemaName);
+        int failed = 0;
+        for (int from = 0; from < schemeIds.size(); from += DIMENSION_REPUBLISH_CHUNK) {
+            List<Integer> chunk = schemeIds.subList(from, Math.min(schemeIds.size(), from + DIMENSION_REPUBLISH_CHUNK));
+            for (Map<String, Object> event : schemeDimensionEvents.build(schemaName, tenantId, chunk)) {
+                failed += kafkaProducer.publishJson(SCHEME_TOPIC, event) ? 0 : 1;
+            }
         }
-        List<SchemeDbRepository.SchemeAnalyticsRow> rows =
-                schemeDbRepository.findSchemeAnalyticsRowsByStateSchemeIds(schemaName, stateSchemeIds);
-        publishSchemeDimensionEventsFromRows(tenantId, rows);
+        log.info("Republished SCHEME_DIMENSION_REPLACED for {} scheme(s) of tenant {} ({} not accepted by Kafka)",
+                schemeIds.size(), tenantId, failed);
+        Map<String, Integer> result = new LinkedHashMap<>();
+        result.put("schemes", schemeIds.size());
+        result.put("failed", failed);
+        return result;
     }
 
-    private void publishSchemeDimensionEventsFromRows(Integer tenantId, List<SchemeDbRepository.SchemeAnalyticsRow> rows) {
-        if (tenantId == null || rows == null || rows.isEmpty()) {
+    /**
+     * Sends {@code SCHEME_DIMENSION_REPLACED} for each scheme, so analytics rebuilds the scheme's whole
+     * {@code dim_scheme_table} set (every location row, not just one) from the committed tenant rows.
+     */
+    private void publishSchemeDimensionEvents(String schemaName, Integer tenantId, Collection<Integer> schemeIds) {
+        if (tenantId == null || schemeIds == null || schemeIds.isEmpty()) {
             return;
         }
-        for (SchemeDbRepository.SchemeAnalyticsRow row : rows) {
-            Integer parentLgd = row.parentLgdId() != null ? row.parentLgdId() : 0;
-            Integer parentDept = row.parentDepartmentId();
-            int deptLevelFallback = parentDept != null ? parentDept : 0;
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("eventType", "SCHEME_UPDATED");
-            payload.put("schemeId", row.schemeId());
-            payload.put("tenantId", tenantId);
-            payload.put("schemeName", row.schemeName());
-            payload.put("stateSchemeId", safeParseInt(row.stateSchemeId()));
-            payload.put("centreSchemeId", safeParseInt(row.centreSchemeId()));
-            payload.put("longitude", row.longitude());
-            payload.put("latitude", row.latitude());
-            payload.put("parentLgdLocationId", parentLgd);
-            payload.put("level1LgdId", parentLgd);
-            payload.put("level2LgdId", parentLgd);
-            payload.put("level3LgdId", parentLgd);
-            payload.put("level4LgdId", parentLgd);
-            payload.put("level5LgdId", parentLgd);
-            payload.put("level6LgdId", parentLgd);
-            payload.put("parentDepartmentLocationId", parentDept);
-            payload.put("level1DeptId", deptLevelFallback);
-            payload.put("level2DeptId", deptLevelFallback);
-            payload.put("level3DeptId", deptLevelFallback);
-            payload.put("level4DeptId", deptLevelFallback);
-            payload.put("level5DeptId", deptLevelFallback);
-            payload.put("level6DeptId", deptLevelFallback);
-            payload.put("status", row.operatingStatus());
-            payload.put("operating_status", row.operatingStatus());
-            payload.put("work_status", row.workStatus());
-            kafkaProducer.publishJson(SCHEME_TOPIC, payload);
-        }
-    }
-
-    private Integer safeParseInt(String value) {
-        if (value == null || value.isBlank()) {
-            return 0;
-        }
-        try {
-            return Integer.parseInt(value.trim());
-        } catch (NumberFormatException ex) {
-            return 0;
+        for (Map<String, Object> event : schemeDimensionEvents.build(schemaName, tenantId, schemeIds)) {
+            kafkaProducer.publishJson(SCHEME_TOPIC, event);
         }
     }
 
