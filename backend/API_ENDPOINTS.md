@@ -390,6 +390,12 @@ processed them. `withheldCount` is the number of quarantined readings, which are
 every other path. Readings go oldest first, and sending the same range again is safe: analytics
 updates the reading it already holds instead of adding another.
 
+With `ANALYTICS_READ_FROM_AGGREGATES` on, the dashboards read pre-aggregated tables, which the nightly
+job rebuilds only for the last `ANALYTICS_AGG_DAILY_LOOKBACK_DAYS` days (3 by default). After
+republishing older dates, re-aggregate them: restart analytics-service with
+`ANALYTICS_AGG_BACKFILL_ENABLED=true` and `ANALYTICS_AGG_BACKFILL_START_DATE` set to the earliest
+`fromDate`, then turn it off again once its log shows `[aggregation-backfill] DONE`.
+
 Failures return `success: false` with a code in `data.errorCode`:
 
 - `400 VALIDATION_FAILED`: `X-Tenant-Code` or a date is missing, `toDate` is before `fromDate`, or
