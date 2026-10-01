@@ -40,7 +40,7 @@ fourth value. **No migration is needed** — the column already exists and this 
 `extracted_reading` is `NOT NULL`, so a value-only submission still writes the caller's number into
 the column named "what the AI extracted". Before this change such a row was indistinguishable from an
 AI-verified one in every column — same `extracted_reading`, same `confirmed_reading`, same
-`confirmed_reading_source = 0`. Absence of `image_url` / `flowvision_correlation_id` is a weak proxy
+`confirmed_reading_source = 0`. Absence of `image_url` / `ocr_correlation_id` is a weak proxy
 (other paths also leave them empty). The marker makes it explicit and queryable.
 
 ### Where it is written

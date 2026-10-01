@@ -184,7 +184,7 @@ class TelemetryTenantRepositorySchemesQueryTest {
                 eq("tenant_as"),
                 eq("flow_reading_table"),
                 anyString()
-        )).thenAnswer(invocation -> "flowvision_correlation_id".equals(invocation.getArgument(4)));
+        )).thenAnswer(invocation -> "ocr_correlation_id".equals(invocation.getArgument(4)));
 
         repository.updateFlowReadingFromIngestion(
                 "tenant_as",
@@ -217,7 +217,7 @@ class TelemetryTenantRepositorySchemesQueryTest {
         assertTrue(sql.contains("correlation_id = CASE"));
         assertTrue(sql.contains("correlation_id LIKE 'scheme-selection-%'"));
         assertTrue(sql.contains("THEN COALESCE(?, correlation_id)"));
-        assertTrue(sql.contains("flowvision_correlation_id = COALESCE(?, flowvision_correlation_id)"));
+        assertTrue(sql.contains("ocr_correlation_id = COALESCE(?, ocr_correlation_id)"));
     }
 
     // SCHEME-ID-MISMATCH: after a reading resolves on one id, the other submitted id is cross-checked

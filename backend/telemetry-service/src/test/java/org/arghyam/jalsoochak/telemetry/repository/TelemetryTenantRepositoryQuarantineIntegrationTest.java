@@ -4,7 +4,9 @@ import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -55,6 +57,8 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
     private static final PiiEncryptionService PII = newPiiEncryptionService();
 
     private static JdbcTemplate jdbcTemplate;
+    /** The correlation lookup locks flow_reading_table until its transaction ends, so it needs one. */
+    private static TransactionTemplate transaction;
 
     private static PiiEncryptionService newPiiEncryptionService() {
         String key = Base64.getEncoder().encodeToString(new byte[32]);
@@ -67,6 +71,7 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
         dataSource.setDriverClassName("org.postgresql.Driver");
         jdbcTemplate = new JdbcTemplate(dataSource);
+        transaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
 
         insertScheme(MIGRATED_SCHEMA, SCHEME, 120, 150, 200);
         insertScheme(PRE_MIGRATION_SCHEMA, SCHEME, 10, 20, 30);
@@ -164,8 +169,8 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
     @Test
     void quarantinedRowStaysReachableByCorrelationId() {
         // The correction endpoint has to be able to reach the quarantined row — that is the release path.
-        Optional<TelemetryLatestFlowReadingRecord> reading =
-                repository().findFlowReadingDetailsByCorrelationId(MIGRATED_SCHEMA, "corr-day3");
+        Optional<TelemetryLatestFlowReadingRecord> reading = transaction.execute(status ->
+                repository().findFlowReadingDetailsByCorrelationId(MIGRATED_SCHEMA, "corr-day3"));
 
         assertTrue(reading.isPresent());
         assertEquals(3L, reading.get().id());
@@ -214,7 +219,8 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
                         PRE_MIGRATION_SCHEMA, SCHEME, DAY_3, null)
                 .isPresent());
         assertEquals(null,
-                repository.findFlowReadingDetailsByCorrelationId(PRE_MIGRATION_SCHEMA, "legacy-day2")
+                transaction.execute(status ->
+                                repository.findFlowReadingDetailsByCorrelationId(PRE_MIGRATION_SCHEMA, "legacy-day2"))
                         .orElseThrow().quarantineReason(),
                 "a schema without the column reads NULL rather than failing the lookup");
     }

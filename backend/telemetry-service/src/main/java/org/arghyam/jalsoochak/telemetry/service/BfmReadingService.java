@@ -238,7 +238,7 @@ public class BfmReadingService {
                 .map(OcrReadingResult::getCorrelationId)
                 .filter(value -> !value.isBlank())
                 .orElse(storageCorrelationId);
-        String flowVisionCorrelationId = Optional.ofNullable(ocrResult)
+        String ocrCorrelationId = Optional.ofNullable(ocrResult)
                 .map(OcrReadingResult::getCorrelationId)
                 .filter(value -> !value.isBlank())
                 .orElse(null);
@@ -494,7 +494,7 @@ public class BfmReadingService {
                     extractedReading,
                     effectiveConfirmedReading,
                     storageCorrelationId,
-                    flowVisionCorrelationId,
+                    ocrCorrelationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason(),
                     request.getIngestionSource() != null ? request.getIngestionSource() : IngestionSource.NORMAL,
@@ -514,7 +514,7 @@ public class BfmReadingService {
                     extractedReading,
                     effectiveConfirmedReading,
                     storageCorrelationId,
-                    flowVisionCorrelationId,
+                    ocrCorrelationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason(),
                     operatorInRequest.id()
@@ -528,7 +528,7 @@ public class BfmReadingService {
                     extractedReading,
                     effectiveConfirmedReading,
                     storageCorrelationId,
-                    flowVisionCorrelationId,
+                    ocrCorrelationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason()
             );
