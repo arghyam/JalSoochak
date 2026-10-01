@@ -138,7 +138,7 @@ class BfmReadingServiceReadingUnitTest {
                 assertedValue(ReadingChannel.BFM, "1500", "L"), SCHEMA, operator, CONTACT, false);
 
         assertThat(response.isSuccess()).isTrue();
-        verifyStored("1.5", "BFM", "L");
+        verifyStored("1.5", ReadingChannel.BFM, "L");
         verifyPublished("1.5");
     }
 
@@ -147,7 +147,7 @@ class BfmReadingServiceReadingUnitTest {
     void hoursAreStoredAsMinutes() {
         service.createReading(assertedValue(ReadingChannel.PDU, "1.5", "H"), SCHEMA, operator, CONTACT, false);
 
-        verifyStored("90", "PDU", "h");
+        verifyStored("90", ReadingChannel.PDU, "h");
         verifyPublished("90");
     }
 
@@ -158,7 +158,7 @@ class BfmReadingServiceReadingUnitTest {
                 assertedValue(ReadingChannel.PDU, "24", "h"), SCHEMA, operator, CONTACT, false);
 
         assertThat(response.isSuccess()).isTrue();
-        verifyStored("1440", "PDU", "h");
+        verifyStored("1440", ReadingChannel.PDU, "h");
     }
 
     @Test
@@ -301,7 +301,7 @@ class BfmReadingServiceReadingUnitTest {
         order.verify(defaultOcrExtractor).extractReading(IMAGE_URL, null);
     }
 
-    private void verifyStored(String value, String channel, String submittedUnit) {
+    private void verifyStored(String value, ReadingChannel channel, String submittedUnit) {
         verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), argThat(sameValue(value)), anyString(), any(),
                 any(), any(), anyInt(), any(), any(), any(), any(), any(), eq(channel), eq(submittedUnit));

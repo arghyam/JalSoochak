@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -60,7 +61,7 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
         return repository;
     }
 
-    private static FlowReadingVersion insert(String schema, String channel, String submittedUnit) {
+    private static FlowReadingVersion insert(String schema, ReadingChannel channel, String submittedUnit) {
         return repository().createFlowReading(schema, SCHEME, OPERATOR, READING_AT,
                 BigDecimal.ZERO, new BigDecimal("90"), "corr-" + System.nanoTime(), null, null, null,
                 channel, submittedUnit);
@@ -77,10 +78,10 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
 
     @Test
     void insertStoresTheChannelAndUnitAndReturnsTheStoredVersion() {
-        FlowReadingVersion version = insert(MIGRATED_SCHEMA, "PDU", "min");
+        FlowReadingVersion version = insert(MIGRATED_SCHEMA, ReadingChannel.PDU, "min");
 
         Map<String, Object> row = stored(MIGRATED_SCHEMA, version.id());
-        assertEquals("PDU", row.get("channel"));
+        assertEquals(ReadingChannel.PDU.getCode(), row.get("channel_id"));
         assertEquals("min", row.get("submitted_unit"));
         assertNotNull(version.updatedAt());
         assertEquals(storedVersion(MIGRATED_SCHEMA, version.id()), version.updatedAt());
@@ -91,10 +92,10 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
     /** A schema that predates V56 still stores the reading and its channel; only the unit is dropped. */
     @Test
     void insertDropsOnlyTheUnitOnAPreV56Schema() {
-        FlowReadingVersion version = insert(PRE_V56_SCHEMA, "ELM", "kW.h");
+        FlowReadingVersion version = insert(PRE_V56_SCHEMA, ReadingChannel.ELM, "kW.h");
 
         Map<String, Object> row = stored(PRE_V56_SCHEMA, version.id());
-        assertEquals("ELM", row.get("channel"));
+        assertEquals(ReadingChannel.ELM.getCode(), row.get("channel_id"));
         assertFalse(row.containsKey("submitted_unit"));
         assertEquals(storedVersion(PRE_V56_SCHEMA, version.id()), version.updatedAt());
     }
@@ -104,7 +105,7 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
         long id = insert(MIGRATED_SCHEMA, null, null).id();
 
         FlowReadingVersion version = repository().updateFlowReadingFromIngestion(MIGRATED_SCHEMA, id, READING_AT,
-                BigDecimal.ZERO, new BigDecimal("120"), "corr-1", null, "", null, OPERATOR, "BFM", "m3");
+                BigDecimal.ZERO, new BigDecimal("120"), "corr-1", null, "", null, OPERATOR, ReadingChannel.BFM, "m3");
 
         assertEquals(new FlowReadingVersion(id, storedVersion(MIGRATED_SCHEMA, id)), version);
         // The legacy overload passes no channel or unit, which leaves both as they are.
@@ -112,14 +113,14 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
                 BigDecimal.ZERO, new BigDecimal("121"), "corr-1", "", null, OPERATOR);
 
         Map<String, Object> row = stored(MIGRATED_SCHEMA, id);
-        assertEquals("BFM", row.get("channel"));
+        assertEquals(ReadingChannel.BFM.getCode(), row.get("channel_id"));
         assertEquals("m3", row.get("submitted_unit"));
     }
 
     @Test
     void correctionWritesTheUnitItArrivedInAndDropsItOnAPreV56Schema() {
-        long migrated = insert(MIGRATED_SCHEMA, "PDU", "min").id();
-        long preV56 = insert(PRE_V56_SCHEMA, "PDU", null).id();
+        long migrated = insert(MIGRATED_SCHEMA, ReadingChannel.PDU, "min").id();
+        long preV56 = insert(PRE_V56_SCHEMA, ReadingChannel.PDU, null).id();
 
         repository().updateConfirmedReading(MIGRATED_SCHEMA, migrated, new BigDecimal("120"), OPERATOR, 1, "h");
         repository().updateConfirmedReading(PRE_V56_SCHEMA, preV56, new BigDecimal("120"), OPERATOR, 1, "h");
@@ -134,7 +135,7 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
     @Test
     void placeholderUpdateOfAMissingRowReturnsNoVersion() {
         FlowReadingVersion version = repository().updateFlowReadingFromIngestion(MIGRATED_SCHEMA, 404_404L,
-                READING_AT, BigDecimal.ZERO, BigDecimal.ONE, "corr-1", null, "", null, OPERATOR, "BFM", "m3");
+                READING_AT, BigDecimal.ZERO, BigDecimal.ONE, "corr-1", null, "", null, OPERATOR, ReadingChannel.BFM, "m3");
 
         assertNull(version.updatedAt());
     }
@@ -151,10 +152,10 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
 
         LocalDateTime[] versions = transaction.execute(status -> {
             TelemetryTenantRepository repository = repository();
-            FlowReadingVersion inserted = insert(MIGRATED_SCHEMA, "BFM", "m3");
+            FlowReadingVersion inserted = insert(MIGRATED_SCHEMA, ReadingChannel.BFM, "m3");
             FlowReadingVersion updated = repository.updateFlowReadingFromIngestion(MIGRATED_SCHEMA,
                     inserted.id(), READING_AT, BigDecimal.ZERO, new BigDecimal("95"), "corr-1", null, "",
-                    null, OPERATOR, "BFM", "m3");
+                    null, OPERATOR, ReadingChannel.BFM, "m3");
             repository.updateConfirmedReading(MIGRATED_SCHEMA, inserted.id(), new BigDecimal("96"), OPERATOR);
             LocalDateTime corrected = repository.findFlowReadingById(MIGRATED_SCHEMA, inserted.id())
                     .orElseThrow().updatedAt();

@@ -106,6 +106,21 @@ public enum ReadingChannel {
     }
 
     /**
+     * Maps a stored {@code flow_reading_table.channel_id} to a {@link ReadingChannel}, defaulting to
+     * {@link #BFM} for null and for an id no channel carries. A NULL {@code channel_id} is a BFM reading
+     * from before the channel was recorded.
+     */
+    public static ReadingChannel fromCode(Integer code) {
+        if (code == null) {
+            return DEFAULT;
+        }
+        return Arrays.stream(values())
+                .filter(channel -> channel.code == code)
+                .findFirst()
+                .orElse(DEFAULT);
+    }
+
+    /**
      * Whether a caller actually declared a channel. Null and blank both read as "not declared", so a
      * field left out and a field sent empty behave the same: the channel is resolved from the
      * operator's stored preference as before.

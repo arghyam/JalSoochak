@@ -114,20 +114,11 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
         }
 
         @Test
-        void findSchemeChannelReadsChannelColumnWhenPresent() {
-            onColumnsExisting("channel");
-            onQuery("scheme_master_table", row("channel", 2));
+        void findSchemeChannelReadsChannelId() {
+            onQuery("scheme_master_table", row("channel_id", 2));
 
             assertThat(repository.findSchemeChannel(SCHEMA, 3L)).contains(2);
-        }
-
-        @Test
-        void findSchemeChannelFallsBackToNullLiteralWhenColumnMissing() {
-            onColumnExists(false);
-
-            assertThat(repository.findSchemeChannel(SCHEMA, 3L)).isEmpty();
-            assertThat(allQuerySql())
-                    .anySatisfy(sql -> assertThat(sql).contains("NULL::integer AS channel"));
+            assertThat(allQuerySql()).anySatisfy(sql -> assertThat(sql).contains("SELECT channel_id"));
         }
 
         /**
@@ -139,8 +130,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
          */
         @Test
         void findSchemeChannelThrowsWhenStoredChannelIsNull() {
-            onColumnsExisting("channel");
-            onQuery("scheme_master_table", row("channel", null));
+            onQuery("scheme_master_table", row("channel_id", null));
 
             assertThatThrownBy(() -> repository.findSchemeChannel(SCHEMA, 3L))
                     .isInstanceOf(NullPointerException.class);
@@ -627,7 +617,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             assertThat(allQuerySql())
                     .filteredOn(sql -> sql.contains("flow_reading_table"))
                     .hasSize(3)
-                    .allSatisfy(sql -> assertThat(sql).contains("COALESCE(channel, 'BFM') = ?"));
+                    .allSatisfy(sql -> assertThat(sql).contains("COALESCE(channel_id, 1) = ?"));
         }
 
         @Test
@@ -665,7 +655,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     "id", 99L, "scheme_id", 10L, "created_by", 1L, "correlation_id", "corr-1",
                     "extracted_reading", new BigDecimal("0"), "confirmed_reading", new BigDecimal("150"),
                     "image_url", "", "reading_date", LocalDate.of(2026, 3, 3),
-                    "reading_time", LocalDateTime.of(2026, 3, 3, 6, 0), "channel", "BFM",
+                    "reading_time", LocalDateTime.of(2026, 3, 3, 6, 0), "channel_id", 1,
                     "quarantine_reason", 1));
 
             assertThat(repository.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
@@ -683,7 +673,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     "id", 99L, "scheme_id", 10L, "created_by", 1L, "correlation_id", "corr-1",
                     "extracted_reading", new BigDecimal("0"), "confirmed_reading", new BigDecimal("150"),
                     "image_url", "", "reading_date", LocalDate.of(2026, 3, 3),
-                    "reading_time", LocalDateTime.of(2026, 3, 3, 6, 0), "channel", "BFM",
+                    "reading_time", LocalDateTime.of(2026, 3, 3, 6, 0), "channel_id", 1,
                     "quarantine_reason", null));
 
             assertThat(repository.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
@@ -741,7 +731,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     "image_url", "https://storage.example.org/img.jpg",
                     "reading_date", LocalDate.of(2026, 3, 1),
                     "reading_time", LocalDateTime.of(2026, 3, 1, 6, 15),
-                    "channel", "BFM"));
+                    "channel_id", 1));
 
             Optional<TelemetryLatestFlowReadingRecord> record =
                     repository.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1");
@@ -756,7 +746,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             assertThat(value.imageUrl()).isEqualTo("https://storage.example.org/img.jpg");
             assertThat(value.readingDate()).isEqualTo(LocalDate.of(2026, 3, 1));
             assertThat(value.readingAt()).isEqualTo(LocalDateTime.of(2026, 3, 1, 6, 15));
-            assertThat(value.channel()).isEqualTo("BFM");
+            assertThat(value.channel()).isEqualTo(1);
         }
 
         @Test
@@ -795,10 +785,10 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     "id", 5L, "scheme_id", 7L, "created_by", 2L, "correlation_id", "c",
                     "extracted_reading", new BigDecimal("1"), "confirmed_reading", new BigDecimal("2"),
                     "image_url", "", "reading_date", LocalDate.of(2026, 3, 1),
-                    "reading_time", LocalDateTime.of(2026, 3, 1, 6, 0), "channel", "ELM"));
+                    "reading_time", LocalDateTime.of(2026, 3, 1, 6, 0), "channel_id", 2));
 
             assertThat(repository.findLatestFlowReadingByOperator(SCHEMA, 2L))
-                    .hasValueSatisfying(r -> assertThat(r.channel()).isEqualTo("ELM"));
+                    .hasValueSatisfying(r -> assertThat(r.channel()).isEqualTo(2));
         }
 
         @Test
@@ -806,14 +796,14 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             onQuery("reading_date < ?", row(
                     "id", 5L, "correlation_id", "c", "created_by", 2L,
                     "reading_date", LocalDate.of(2026, 2, 28), "confirmed_reading", new BigDecimal("9"),
-                    "channel", "PDU"));
+                    "channel_id", 3));
 
             // The channel comes with the row: the WhatsApp correction applies that channel's rules.
             assertThat(repository.findLatestCompletedFlowReadingBeforeDate(
                     SCHEMA, 7L, 2L, LocalDate.of(2026, 3, 1)))
                     .hasValueSatisfying(r -> {
                         assertThat(r.readingDate()).isEqualTo(LocalDate.of(2026, 2, 28));
-                        assertThat(r.channel()).isEqualTo("PDU");
+                        assertThat(r.channel()).isEqualTo(3);
                     });
         }
 

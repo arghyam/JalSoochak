@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,20 +56,21 @@ class TelemetryTenantRepositoryBfmCorrectionIntegrationTest {
         repository.invalidateMetadataCaches();
     }
 
-    private long insertReading(String reading, LocalDateTime readingAt, String channel) {
+    private long insertReading(String reading, LocalDateTime readingAt, ReadingChannel channel) {
         return jdbcTemplate.queryForObject("INSERT INTO " + SCHEMA + ".flow_reading_table "
                         + "(scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
-                        + " correlation_id, channel, created_by) "
+                        + " correlation_id, channel_id, created_by) "
                         + "VALUES (?, ?, ?, ?, ?, 'corr-1', ?, ?) RETURNING id",
                 Long.class,
                 SCHEME, readingAt, readingAt.toLocalDate(),
-                new BigDecimal(reading), new BigDecimal(reading), channel, OPERATOR);
+                new BigDecimal(reading), new BigDecimal(reading),
+                channel == null ? null : channel.getCode(), OPERATOR);
     }
 
     @Test
     void targetsTheLatestBfmReadingWhenALaterElmReadingExists() {
-        long bfm = insertReading("100", DAY.atTime(6, 0), "BFM");
-        insertReading("5000", DAY.atTime(8, 0), "ELM");
+        long bfm = insertReading("100", DAY.atTime(6, 0), ReadingChannel.BFM);
+        insertReading("5000", DAY.atTime(8, 0), ReadingChannel.ELM);
 
         assertThat(repository.findLatestCompletedFlowReadingForScheme(SCHEMA, SCHEME))
                 .hasValueSatisfying(r -> assertThat(r.id()).isEqualTo(bfm));
@@ -86,7 +88,7 @@ class TelemetryTenantRepositoryBfmCorrectionIntegrationTest {
 
     @Test
     void findsNoTargetOnASchemeWithOnlyElmReadings() {
-        insertReading("5000", DAY.atTime(8, 0), "ELM");
+        insertReading("5000", DAY.atTime(8, 0), ReadingChannel.ELM);
 
         assertThat(repository.findLatestCompletedFlowReadingForScheme(SCHEMA, SCHEME)).isEmpty();
         assertThat(repository.findLatestCompletedFlowReadingOnDate(SCHEMA, SCHEME, DAY)).isEmpty();

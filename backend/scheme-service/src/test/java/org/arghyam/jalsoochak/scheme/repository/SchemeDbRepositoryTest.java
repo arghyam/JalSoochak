@@ -64,7 +64,7 @@ class SchemeDbRepositoryTest {
                     when(rs.getInt("house_hold_count")).thenReturn(30);
                     when(rs.getObject("latitude")).thenReturn(12.3d);
                     when(rs.getObject("longitude")).thenReturn(77.6d);
-                    when(rs.getObject("channel")).thenReturn(1);
+                    when(rs.getObject("channel_id")).thenReturn(1);
                     when(rs.getObject("work_status")).thenReturn(1);
                     when(rs.getObject("operating_status")).thenReturn(0);
                     return List.of(mapper.mapRow(rs, 0));
@@ -79,6 +79,7 @@ class SchemeDbRepositoryTest {
 
         assertThat(rows).hasSize(1);
         assertThat(rows.getFirst().getSchemeName()).isEqualTo("Scheme One");
+        assertThat(rows.getFirst().getChannel()).isEqualTo(1);
         assertThat(rows.getFirst().getWorkStatus()).isEqualTo("Ongoing");
         assertThat(rows.getFirst().getOperatingStatus()).isEqualTo("Non-Operative");
         assertThat(total).isEqualTo(4);

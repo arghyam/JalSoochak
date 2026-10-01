@@ -30,6 +30,10 @@ class SchemeDbRepositoryFixReadingsIntegrationTest {
     private static final int OFFICER = 7;
     private static final int OPERATOR = 9;
     private static final LocalDate DAY = LocalDate.of(2026, 3, 1);
+    /** common_schema.channel_master_table ids. */
+    private static final int BFM = 1;
+    private static final int ELM = 2;
+    private static final int PDU = 3;
 
     @Container
     static final PostgreSQLContainer<?> postgres =
@@ -65,10 +69,10 @@ class SchemeDbRepositoryFixReadingsIntegrationTest {
                 OFFICER, schemeId);
     }
 
-    private void insertReading(String reading, LocalDateTime readingAt, String channel) {
+    private void insertReading(String reading, LocalDateTime readingAt, Integer channel) {
         jdbcTemplate.update("INSERT INTO tenant_mp.flow_reading_table "
                         + "(scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
-                        + " correlation_id, channel, created_by) "
+                        + " correlation_id, channel_id, created_by) "
                         + "VALUES (?, ?, ?, ?, ?, 'corr-1', ?, ?)",
                 schemeId, readingAt, readingAt.toLocalDate(),
                 new BigDecimal(reading), new BigDecimal(reading), channel, OPERATOR);
@@ -84,8 +88,8 @@ class SchemeDbRepositoryFixReadingsIntegrationTest {
 
     @Test
     void showsTheLatestBfmReading() {
-        insertReading("100", DAY.atTime(6, 0), "BFM");
-        insertReading("101.5", DAY.plusDays(1).atTime(6, 0), "BFM");
+        insertReading("100", DAY.atTime(6, 0), BFM);
+        insertReading("101.5", DAY.plusDays(1).atTime(6, 0), BFM);
 
         assertThat(yesterdayFinalReading()).isEqualByComparingTo("101.5");
     }
@@ -99,15 +103,15 @@ class SchemeDbRepositoryFixReadingsIntegrationTest {
 
     @Test
     void skipsALaterElmReading() {
-        insertReading("100", DAY.atTime(6, 0), "BFM");
-        insertReading("5000", DAY.atTime(8, 0), "ELM");
+        insertReading("100", DAY.atTime(6, 0), BFM);
+        insertReading("5000", DAY.atTime(8, 0), ELM);
 
         assertThat(yesterdayFinalReading()).isEqualByComparingTo("100");
     }
 
-    @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {"ELM", "PDU"})
-    void showsANonBfmOnlySchemeLikeOneWithNoReadings(String channel) {
+    @ParameterizedTest(name = "channel_id {0}")
+    @ValueSource(ints = {ELM, PDU})
+    void showsANonBfmOnlySchemeLikeOneWithNoReadings(int channel) {
         insertReading("40", DAY.atTime(6, 0), channel);
 
         assertThat(yesterdayFinalReading()).isEqualByComparingTo("0");

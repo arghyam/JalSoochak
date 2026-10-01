@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
@@ -98,7 +99,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
 
     @Test
     void correctionPublishesTheCorrectedRowAgainInsteadOfWaterQuantities() {
-        targetRow("BFM", "1100");
+        targetRow(ReadingChannel.BFM, "1100");
 
         CreateReadingResponse resp = update("1000");
 
@@ -116,7 +117,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
 
     @Test
     void restatingTheStoredValueKeepsItsProvenance() {
-        targetRow("BFM", "1100");
+        targetRow(ReadingChannel.BFM, "1100");
 
         CreateReadingResponse resp = update("1100");
 
@@ -136,7 +137,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
 
     @Test
     void aPduRowIsCorrectedInMinutes() {
-        targetRow("PDU", "90");
+        targetRow(ReadingChannel.PDU, "90");
 
         CreateReadingResponse resp = update("1440");
 
@@ -148,7 +149,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
 
     @Test
     void aPduRunLongerThanADayIsRejectedWithoutWritingAnything() {
-        targetRow("PDU", "90");
+        targetRow(ReadingChannel.PDU, "90");
         when(localizationService.localizeMessage(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE, "english"))
                 .thenReturn(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE);
 
@@ -163,7 +164,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
 
     @Test
     void aPduCorrectionTakingItsDayPastTheLimitIsRejectedWithoutWritingAnything() {
-        targetRow("PDU", "90");
+        targetRow(ReadingChannel.PDU, "90");
         doReturn(Optional.empty()).when(pduDayLimit).writeWithinLimit(any(), any(), any(), any(), any(), any());
         when(localizationService.localizeMessage(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE, "english"))
                 .thenReturn(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE);
@@ -183,11 +184,11 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
 
-    private void targetRow(String channel, String confirmedReading) {
+    private void targetRow(ReadingChannel channel, String confirmedReading) {
         when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryLatestFlowReadingRecord(
                         22L, 10L, 1L, "corr-2", BigDecimal.ZERO, new BigDecimal(confirmedReading), "",
-                        TARGET_DATE, TARGET_DATE.atTime(7, 0), channel, 0, TARGET_DATE.atTime(7, 0))));
+                        TARGET_DATE, TARGET_DATE.atTime(7, 0), channel == null ? null : channel.getCode(), 0, TARGET_DATE.atTime(7, 0))));
     }
 
     private CreateReadingResponse update(String reading) {

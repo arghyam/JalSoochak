@@ -97,8 +97,8 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
                                       int quarantineReason) {
         jdbcTemplate.update("INSERT INTO " + schemaName + ".flow_reading_table "
                         + "(id, scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
-                        + " correlation_id, channel, created_by, quarantine_reason) "
-                        + "VALUES (?, ?, ?, ?, 0, ?, ?, 'BFM', ?, ?)",
+                        + " correlation_id, channel_id, created_by, quarantine_reason) "
+                        + "VALUES (?, ?, ?, ?, 0, ?, ?, 1, ?, ?)",
                 id, SCHEME, readingDate.atTime(6, 0), readingDate,
                 new BigDecimal(confirmedReading), correlationId, OPERATOR, quarantineReason);
     }
@@ -109,8 +109,8 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
                                                   String correlationId) {
         jdbcTemplate.update("INSERT INTO " + PRE_MIGRATION_SCHEMA + ".flow_reading_table "
                         + "(id, scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
-                        + " correlation_id, channel, created_by) "
-                        + "VALUES (?, ?, ?, ?, 0, ?, ?, 'BFM', ?)",
+                        + " correlation_id, channel_id, created_by) "
+                        + "VALUES (?, ?, ?, ?, 0, ?, ?, 1, ?)",
                 id, SCHEME, readingDate.atTime(6, 0), readingDate,
                 new BigDecimal(confirmedReading), correlationId, OPERATOR);
     }

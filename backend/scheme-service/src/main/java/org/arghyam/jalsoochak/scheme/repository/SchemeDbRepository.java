@@ -72,7 +72,7 @@ public class SchemeDbRepository {
         String sql = String.format("""
                 SELECT id, uuid, state_scheme_id, centre_scheme_id, scheme_name,
                        fhtc_count, planned_fhtc, house_hold_count,
-                       latitude, longitude, channel, work_status, operating_status
+                       latitude, longitude, channel_id, work_status, operating_status
                 FROM %s.scheme_master_table
                 WHERE deleted_at IS NULL%s
                 ORDER BY id DESC
@@ -89,7 +89,7 @@ public class SchemeDbRepository {
                 .houseHoldCount(rs.getInt("house_hold_count"))
                 .latitude((Double) rs.getObject("latitude"))
                 .longitude((Double) rs.getObject("longitude"))
-                .channel(rs.getInt("channel"))
+                .channel(rs.getInt("channel_id"))
                 .workStatus(SchemeWorkStatus.labelOf((Integer) rs.getObject("work_status")))
                 .operatingStatus(SchemeOperatingStatus.labelOf((Integer) rs.getObject("operating_status")))
                 .build());
@@ -152,7 +152,7 @@ public class SchemeDbRepository {
         String sql = String.format("""
                 SELECT id, uuid, state_scheme_id, centre_scheme_id, scheme_name,
                        fhtc_count, planned_fhtc, house_hold_count,
-                       latitude, longitude, channel, work_status, operating_status
+                       latitude, longitude, channel_id, work_status, operating_status
                 FROM %s.scheme_master_table
                 WHERE deleted_at IS NULL%s
                 ORDER BY id DESC
@@ -173,7 +173,7 @@ public class SchemeDbRepository {
                 .houseHoldCount(rs.getInt("house_hold_count"))
                 .latitude((Double) rs.getObject("latitude"))
                 .longitude((Double) rs.getObject("longitude"))
-                .channel(rs.getInt("channel"))
+                .channel(rs.getInt("channel_id"))
                 .workStatus(SchemeWorkStatus.labelOf((Integer) rs.getObject("work_status")))
                 .operatingStatus(SchemeOperatingStatus.labelOf((Integer) rs.getObject("operating_status")))
                 .build()));
@@ -348,7 +348,7 @@ public class SchemeDbRepository {
         String sql = String.format("""
                 SELECT id, uuid, state_scheme_id, centre_scheme_id, scheme_name,
                        fhtc_count, planned_fhtc, house_hold_count,
-                       latitude, longitude, channel, work_status, operating_status
+                       latitude, longitude, channel_id, work_status, operating_status
                 FROM %s.scheme_master_table
                 WHERE deleted_at IS NULL%s
                   %s
@@ -371,7 +371,7 @@ public class SchemeDbRepository {
                 .houseHoldCount(rs.getInt("house_hold_count"))
                 .latitude((Double) rs.getObject("latitude"))
                 .longitude((Double) rs.getObject("longitude"))
-                .channel((Integer) rs.getObject("channel"))
+                .channel((Integer) rs.getObject("channel_id"))
                 .workStatus(SchemeWorkStatus.labelOf((Integer) rs.getObject("work_status")))
                 .operatingStatus(SchemeOperatingStatus.labelOf((Integer) rs.getObject("operating_status")))
                 .build(), args.toArray());
@@ -422,7 +422,7 @@ public class SchemeDbRepository {
                     FROM %1$s.flow_reading_table
                     WHERE scheme_id = sm.id
                       AND deleted_at IS NULL
-                      AND COALESCE(channel, 'BFM') = 'BFM'
+                      AND COALESCE(channel_id, 1) = 1
                     ORDER BY %2$s DESC, created_at DESC, id DESC
                     LIMIT 1
                 ) fr ON TRUE
@@ -701,7 +701,7 @@ public class SchemeDbRepository {
         String sql = String.format("""
                 SELECT id, uuid, state_scheme_id, centre_scheme_id, scheme_name,
                        fhtc_count, planned_fhtc, house_hold_count,
-                       latitude, longitude, channel, work_status, operating_status
+                       latitude, longitude, channel_id, work_status, operating_status
                 FROM %s.scheme_master_table
                 WHERE deleted_at IS NULL
                   AND id = ?
@@ -719,7 +719,7 @@ public class SchemeDbRepository {
                     .houseHoldCount(rs.getInt("house_hold_count"))
                     .latitude((Double) rs.getObject("latitude"))
                     .longitude((Double) rs.getObject("longitude"))
-                    .channel((Integer) rs.getObject("channel"))
+                    .channel((Integer) rs.getObject("channel_id"))
                     .workStatus(SchemeWorkStatus.labelOf((Integer) rs.getObject("work_status")))
                     .operatingStatus(SchemeOperatingStatus.labelOf((Integer) rs.getObject("operating_status")))
                     .build(), schemeId);
@@ -1169,7 +1169,7 @@ public class SchemeDbRepository {
                 INSERT INTO %s.scheme_master_table
                     (uuid, state_scheme_id, centre_scheme_id, scheme_name,
                      fhtc_count, planned_fhtc, house_hold_count,
-                     latitude, longitude, channel, work_status, operating_status,
+                     latitude, longitude, channel_id, work_status, operating_status,
                      created_at, created_by, updated_at, updated_by, deleted_at, deleted_by)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW(), ?, NULL, NULL)
                 """, schemaName);

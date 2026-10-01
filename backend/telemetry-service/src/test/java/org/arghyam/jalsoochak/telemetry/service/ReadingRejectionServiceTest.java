@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -64,7 +65,7 @@ class ReadingRejectionServiceTest {
     private void latestReadingOn(LocalDate date) {
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(SCHEMA, OPERATOR)).thenReturn(Optional.of(
                 new TelemetryLatestFlowReadingRecord(501L, 7L, OPERATOR, "corr-1", new BigDecimal("1234"),
-                        new BigDecimal("1234"), "https://img", date, null, "BFM", 0, null)));
+                        new BigDecimal("1234"), "https://img", date, null, ReadingChannel.BFM.getCode(), 0, null)));
     }
 
     private IntroResponse reject() {

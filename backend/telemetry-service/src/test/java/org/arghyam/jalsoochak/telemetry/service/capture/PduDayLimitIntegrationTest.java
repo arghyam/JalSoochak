@@ -78,8 +78,8 @@ class PduDayLimitIntegrationTest {
     private long insertRun(String minutes, LocalDate day) {
         return jdbcTemplate.queryForObject("INSERT INTO " + SCHEMA + ".flow_reading_table "
                         + "(scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
-                        + " correlation_id, channel, created_by) "
-                        + "VALUES (?, ?, ?, 0, ?, 'corr-1', 'PDU', ?) RETURNING id",
+                        + " correlation_id, channel_id, created_by) "
+                        + "VALUES (?, ?, ?, 0, ?, 'corr-1', 3, ?) RETURNING id",
                 Long.class, SCHEME, day.atTime(6, 0), day, new BigDecimal(minutes), OPERATOR);
     }
 

@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -96,7 +97,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
                 "http://example.com/img.jpg",
                 READING_DATE,
                 READING_AT,
-                "BFM",
+                ReadingChannel.BFM.getCode(),
                 0,
                 null
         );
