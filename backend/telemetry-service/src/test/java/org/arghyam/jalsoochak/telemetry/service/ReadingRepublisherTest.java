@@ -57,18 +57,18 @@ class ReadingRepublisherTest {
 
     private static TelemetryLatestFlowReadingRecord row(BigDecimal extracted,
                                                         LocalDate readingDate,
-                                                        String channel) {
+                                                        ReadingChannel channel) {
         return row(extracted, readingDate, channel, QuarantineReason.NONE);
     }
 
     private static TelemetryLatestFlowReadingRecord row(BigDecimal extracted,
                                                         LocalDate readingDate,
-                                                        String channel,
+                                                        ReadingChannel channel,
                                                         Integer quarantineReason) {
         return new TelemetryLatestFlowReadingRecord(
                 READING_ID, 10L, 1L, "corr-1",
                 extracted, new BigDecimal("123"), "http://example.com/img.jpg",
-                readingDate, READING_AT, channel, quarantineReason, UPDATED_AT);
+                readingDate, READING_AT, channel == null ? null : channel.getCode(), quarantineReason, UPDATED_AT);
     }
 
     /** The event handed to the executor-backed publisher. */
@@ -89,7 +89,7 @@ class ReadingRepublisherTest {
      */
     @Test
     void publishesTheStoredRow() {
-        storedRow(row(new BigDecimal("100"), READING_DATE, "ELM"));
+        storedRow(row(new BigDecimal("100"), READING_DATE, ReadingChannel.ELM));
         when(calculationParametersSnapshotter.snapshot(SCHEMA, TENANT_ID, 10L, ReadingChannel.ELM))
                 .thenReturn(SNAPSHOT);
 
@@ -122,7 +122,7 @@ class ReadingRepublisherTest {
      */
     @Test
     void publishesNoExtractedReadingForTheZeroSentinel() {
-        storedRow(row(BigDecimal.ZERO, READING_DATE, "BFM"));
+        storedRow(row(BigDecimal.ZERO, READING_DATE, ReadingChannel.BFM));
 
         readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
 
@@ -144,7 +144,7 @@ class ReadingRepublisherTest {
 
     @Test
     void takesTheReadingDateFromReadingAtWhenTheRowHasNone() {
-        storedRow(row(BigDecimal.ZERO, null, "BFM"));
+        storedRow(row(BigDecimal.ZERO, null, ReadingChannel.BFM));
 
         readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
 
@@ -159,7 +159,7 @@ class ReadingRepublisherTest {
      */
     @Test
     void withholdsARowThatIsStillQuarantined() {
-        storedRow(row(BigDecimal.ZERO, READING_DATE, "BFM", QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY));
+        storedRow(row(BigDecimal.ZERO, READING_DATE, ReadingChannel.BFM, QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY));
 
         readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
 
@@ -169,7 +169,7 @@ class ReadingRepublisherTest {
     /** A pre-V40 schema has no quarantine column, so its rows read back with no marker at all. */
     @Test
     void publishesARowFromASchemaWithoutQuarantine() {
-        storedRow(row(BigDecimal.ZERO, READING_DATE, "BFM", null));
+        storedRow(row(BigDecimal.ZERO, READING_DATE, ReadingChannel.BFM, null));
 
         readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
 
@@ -192,7 +192,7 @@ class ReadingRepublisherTest {
         /** The same event as the queued path, published on the calling thread instead. */
         @Test
         void reportsAReadingKafkaAcknowledged() {
-            storedRow(row(new BigDecimal("100"), READING_DATE, "PDU"));
+            storedRow(row(new BigDecimal("100"), READING_DATE, ReadingChannel.PDU));
             when(calculationParametersSnapshotter.snapshot(SCHEMA, TENANT_ID, 10L, ReadingChannel.PDU))
                     .thenReturn(SNAPSHOT);
             ArgumentCaptor<MeterReadingEvent> event = ArgumentCaptor.forClass(MeterReadingEvent.class);
@@ -209,7 +209,7 @@ class ReadingRepublisherTest {
 
         @Test
         void reportsAReadingKafkaDidNotAcknowledge() {
-            storedRow(row(BigDecimal.ZERO, READING_DATE, "PDU"));
+            storedRow(row(BigDecimal.ZERO, READING_DATE, ReadingChannel.PDU));
             when(telemetryEventPublisher.publishMeterReadingRecordedAndAwait(any())).thenReturn(false);
 
             assertEquals(ReadingRepublisher.Result.NOT_ACKNOWLEDGED,
@@ -218,7 +218,7 @@ class ReadingRepublisherTest {
 
         @Test
         void withholdsARowThatIsStillQuarantined() {
-            storedRow(row(BigDecimal.ZERO, READING_DATE, "PDU", QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY));
+            storedRow(row(BigDecimal.ZERO, READING_DATE, ReadingChannel.PDU, QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY));
 
             assertEquals(ReadingRepublisher.Result.WITHHELD,
                     readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, READING_ID));

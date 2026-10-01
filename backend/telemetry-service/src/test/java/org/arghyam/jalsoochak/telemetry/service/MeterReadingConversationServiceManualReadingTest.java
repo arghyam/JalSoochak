@@ -424,7 +424,7 @@ class MeterReadingConversationServiceManualReadingTest {
 
         verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
-        verify(telemetryTenantRepository, never()).updateFlowReadingChannel(anyString(), anyLong(), anyString());
+        verify(telemetryTenantRepository, never()).updateFlowReadingChannel(anyString(), anyLong(), any());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
 
@@ -482,7 +482,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 ArgumentMatchers.isNull(), ArgumentMatchers.isNull(),
                 ArgumentMatchers.eq(RolloverResolutionService.SOURCE_MANUAL), ArgumentMatchers.isNull(),
                 // The operator's channel, and its standard unit: a typed-in value is never converted.
-                ArgumentMatchers.eq(ReadingChannel.BFM.name()), ArgumentMatchers.eq("m3"));
+                ArgumentMatchers.eq(ReadingChannel.BFM), ArgumentMatchers.eq("m3"));
         // The two-statement route is what allowed a row to commit unmarked if the second write failed.
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(),
                 any(), any(), anyString(), anyString(), any());
@@ -526,7 +526,7 @@ class MeterReadingConversationServiceManualReadingTest {
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(anyString(), any());
         verify(telemetryTenantRepository, never()).applyConfirmedReadingSource(anyString(), anyLong(), anyInt(), any());
         // Nor an event: there is no stored reading to publish.
-        verify(telemetryTenantRepository, never()).updateFlowReadingChannel(anyString(), anyLong(), anyString());
+        verify(telemetryTenantRepository, never()).updateFlowReadingChannel(anyString(), anyLong(), any());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
 
@@ -811,7 +811,7 @@ class MeterReadingConversationServiceManualReadingTest {
         InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
         order.verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 88L, new BigDecimal("150"), 1L,
                 RolloverResolutionService.SOURCE_MANUAL, "m3");
-        order.verify(telemetryTenantRepository).updateFlowReadingChannel("tenant_test", 88L, ReadingChannel.BFM.name());
+        order.verify(telemetryTenantRepository).updateFlowReadingChannel("tenant_test", 88L, ReadingChannel.BFM);
         order.verify(readingRepublisher).republish("tenant_test", 1, 88L);
         verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());
     }
@@ -837,7 +837,7 @@ class MeterReadingConversationServiceManualReadingTest {
         // A typed-in value is in the channel's standard unit.
         order.verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("123"), 1L,
                 RolloverResolutionService.SOURCE_MANUAL, "kW.h");
-        order.verify(telemetryTenantRepository).updateFlowReadingChannel("tenant_test", 99L, ReadingChannel.ELM.name());
+        order.verify(telemetryTenantRepository).updateFlowReadingChannel("tenant_test", 99L, ReadingChannel.ELM);
         order.verify(readingRepublisher).republish("tenant_test", 1, 99L);
         verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());
     }
@@ -864,7 +864,7 @@ class MeterReadingConversationServiceManualReadingTest {
         // The channel goes in with the insert, so no separate channel write follows it.
         order.verify(telemetryTenantRepository).persistFlowReadingWithTracking(anyString(), any(), anyLong(),
                 anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(),
-                any(), any(), any(), ArgumentMatchers.eq(ReadingChannel.BFM.name()), ArgumentMatchers.eq("m3"));
+                any(), any(), any(), ArgumentMatchers.eq(ReadingChannel.BFM), ArgumentMatchers.eq("m3"));
         order.verify(readingRepublisher).republish("tenant_test", 1, 4242L);
         verify(telemetryTenantRepository, never()).updateFlowReadingChannel(any(), any(), any());
         verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());

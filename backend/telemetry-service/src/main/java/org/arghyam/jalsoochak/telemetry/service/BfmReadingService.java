@@ -408,7 +408,6 @@ public class BfmReadingService {
         // Written by the insert itself rather than by a later UPDATE, so no stored reading is ever
         // without its channel. The value is in the channel's standard unit; submitted_unit records the
         // unit it arrived in.
-        String channelName = resolvedChannel.name();
         String submittedUnit = captured.submittedUnitCode();
         // Fixed here because a PDU run is written through a callback, inside its day's lock.
         BigDecimal valueToStore = effectiveConfirmedReading;
@@ -447,7 +446,7 @@ public class BfmReadingService {
                         // SUPPLY-PLAUSIBILITY: the marker commits inside the same transaction as the
                         // insert, so the row cannot land without it.
                         storeQuarantined ? QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY : null,
-                        channelName,
+                        resolvedChannel,
                         submittedUnit);
             }
             if (placeholderIdOpt.isPresent()) {
@@ -462,7 +461,7 @@ public class BfmReadingService {
                         request.getReadingUrl(),
                         request.getMeterChangeReason(),
                         operatorInRequest.id(),
-                        channelName,
+                        resolvedChannel,
                         submittedUnit
                 );
             }
@@ -477,7 +476,7 @@ public class BfmReadingService {
                     ocrCorrelationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason(),
-                    channelName,
+                    resolvedChannel,
                     submittedUnit
             );
         };
@@ -926,7 +925,7 @@ public class BfmReadingService {
                                                                   Integer eventTenantId) {
         LocalDate readingDate = readingDateOf(reading);
         // An absent channel reads as BFM, which is what analytics assumes for the same rows.
-        ReadingChannel channel = ReadingChannel.fromChannelValue(reading.channel());
+        ReadingChannel channel = ReadingChannel.fromCode(reading.channel());
 
         // A correction can't store what the same channel's submission would have been refused. A
         // refused unit, PDU run or PDU day writes nothing, and no anomaly: it is the request that is
@@ -1160,7 +1159,7 @@ public class BfmReadingService {
                 BigDecimal.ZERO,
                 operator.id(),
                 null,
-                ReadingChannel.fromChannelValue(latestReading.channel()).standardUnit()
+                ReadingChannel.fromCode(latestReading.channel()).standardUnit()
                         .map(ReadingUnit::code)
                         .orElse(null)
         );

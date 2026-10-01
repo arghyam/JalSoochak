@@ -60,13 +60,13 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
         today = ReadingTime.today();
     }
 
-    private void insertReading(String reading, LocalDate day, String channel) {
+    private void insertReading(String reading, LocalDate day, ReadingChannel channel) {
         LocalDateTime readingAt = day.atTime(6, 0);
         jdbcTemplate.update("INSERT INTO " + SCHEMA + ".flow_reading_table "
                         + "(scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
-                        + " correlation_id, channel, created_by) "
+                        + " correlation_id, channel_id, created_by) "
                         + "VALUES (?, ?, ?, 0, ?, 'corr-1', ?, ?)",
-                SCHEME, readingAt, day, new BigDecimal(reading), channel, OPERATOR);
+                SCHEME, readingAt, day, new BigDecimal(reading), code(channel), OPERATOR);
     }
 
     private BigDecimal latest(ReadingChannel channel) {
@@ -77,8 +77,8 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
 
     @Test
     void theLatestReadingComesFromTheSameChannelOnly() {
-        insertReading("100", today.minusDays(2), "BFM");
-        insertReading("5000", today.minusDays(1), "ELM");
+        insertReading("100", today.minusDays(2), ReadingChannel.BFM);
+        insertReading("5000", today.minusDays(1), ReadingChannel.ELM);
 
         assertThat(latest(ReadingChannel.BFM)).isEqualByComparingTo("100");
         assertThat(latest(ReadingChannel.ELM)).isEqualByComparingTo("5000");
@@ -91,7 +91,7 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
     @Test
     void aRowWithNoChannelCountsAsBfm() {
         insertReading("100", today.minusDays(2), null);
-        insertReading("5000", today.minusDays(1), "ELM");
+        insertReading("5000", today.minusDays(1), ReadingChannel.ELM);
 
         assertThat(latest(ReadingChannel.BFM)).isEqualByComparingTo("100");
         assertThat(latest(ReadingChannel.ELM)).isEqualByComparingTo("5000");
@@ -99,8 +99,8 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
 
     @Test
     void theBaselineBeforeADateComesFromTheSameChannelOnly() {
-        insertReading("100", today.minusDays(3), "BFM");
-        insertReading("5000", today.minusDays(2), "ELM");
+        insertReading("100", today.minusDays(3), ReadingChannel.BFM);
+        insertReading("5000", today.minusDays(2), ReadingChannel.ELM);
 
         assertThat(repository.findLatestConfirmedReadingSnapshotBeforeDate(
                         SCHEMA, SCHEME, ReadingChannel.BFM, today.minusDays(1), null))
@@ -112,8 +112,8 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
 
     @Test
     void theConsumptionBandHoldsOnlyTheSameChannelsDays() {
-        insertReading("100", today.minusDays(3), "BFM");
-        insertReading("5000", today.minusDays(2), "ELM");
+        insertReading("100", today.minusDays(3), ReadingChannel.BFM);
+        insertReading("5000", today.minusDays(2), ReadingChannel.ELM);
         insertReading("101", today.minusDays(1), null);
 
         assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, SCHEME, ReadingChannel.BFM, null, 18))
@@ -124,23 +124,27 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
                 .containsExactly(today.minusDays(2));
     }
 
-    private long insertRun(String minutes, LocalDate day, long scheme, String channel) {
+    private long insertRun(String minutes, LocalDate day, long scheme, ReadingChannel channel) {
         return jdbcTemplate.queryForObject("INSERT INTO " + SCHEMA + ".flow_reading_table "
                         + "(scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
-                        + " correlation_id, channel, created_by) "
+                        + " correlation_id, channel_id, created_by) "
                         + "VALUES (?, ?, ?, 0, ?, 'corr-1', ?, ?) RETURNING id",
-                Long.class, scheme, day.atTime(6, 0), day, new BigDecimal(minutes), channel, OPERATOR);
+                Long.class, scheme, day.atTime(6, 0), day, new BigDecimal(minutes), code(channel), OPERATOR);
+    }
+
+    private static Integer code(ReadingChannel channel) {
+        return channel == null ? null : channel.getCode();
     }
 
     @Test
     void theDaysPduMinutesAddUpTheSchemesPduRunsThatDayOnly() {
-        insertRun("300", today, SCHEME, "PDU");
-        insertRun("200.5", today, SCHEME, "PDU");
-        insertRun("900", today.minusDays(1), SCHEME, "PDU");
-        insertRun("900", today, 2L, "PDU");
-        insertRun("900", today, SCHEME, "ELM");
+        insertRun("300", today, SCHEME, ReadingChannel.PDU);
+        insertRun("200.5", today, SCHEME, ReadingChannel.PDU);
+        insertRun("900", today.minusDays(1), SCHEME, ReadingChannel.PDU);
+        insertRun("900", today, 2L, ReadingChannel.PDU);
+        insertRun("900", today, SCHEME, ReadingChannel.ELM);
         insertRun("900", today, SCHEME, null);
-        long deleted = insertRun("900", today, SCHEME, "PDU");
+        long deleted = insertRun("900", today, SCHEME, ReadingChannel.PDU);
         jdbcTemplate.update("UPDATE " + SCHEMA + ".flow_reading_table SET deleted_at = NOW() WHERE id = ?", deleted);
 
         assertThat(repository.sumPduMinutesForDay(SCHEMA, SCHEME, today, null)).isEqualByComparingTo("500.5");
@@ -148,8 +152,8 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
 
     @Test
     void theDaysPduMinutesLeaveOutTheExcludedRow() {
-        insertRun("300", today, SCHEME, "PDU");
-        long corrected = insertRun("200", today, SCHEME, "PDU");
+        insertRun("300", today, SCHEME, ReadingChannel.PDU);
+        long corrected = insertRun("200", today, SCHEME, ReadingChannel.PDU);
 
         assertThat(repository.sumPduMinutesForDay(SCHEMA, SCHEME, today, corrected)).isEqualByComparingTo("300");
     }

@@ -111,7 +111,7 @@ class BfmReadingServiceDeclaredChannelTest {
     }
 
     /** The insert writes the channel, and the value's unit, which is the channel's standard unit. */
-    private void verifyStoredWith(String channel, String submittedUnit) {
+    private void verifyStoredWith(ReadingChannel channel, String submittedUnit) {
         verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
                 any(), any(), anyInt(), any(), any(), any(), any(), any(), eq(channel), eq(submittedUnit));
@@ -123,7 +123,7 @@ class BfmReadingServiceDeclaredChannelTest {
     void declaredChannelWinsOverTheStoredPreference() {
         service.createReading(requestWithChannel(ReadingChannel.PDU), SCHEMA, operator, CONTACT, false);
 
-        verifyStoredWith("PDU", "min");
+        verifyStoredWith(ReadingChannel.PDU, "min");
         verify(readingChannelResolver, never()).resolve(any(), any());
     }
 
@@ -170,7 +170,7 @@ class BfmReadingServiceDeclaredChannelTest {
     void declaringBfmIsHonouredToo() {
         service.createReading(requestWithChannel(ReadingChannel.BFM), SCHEMA, operator, CONTACT, false);
 
-        verifyStoredWith("BFM", "m3");
+        verifyStoredWith(ReadingChannel.BFM, "m3");
         verify(readingChannelResolver, never()).resolve(any(), any());
     }
 
@@ -183,7 +183,7 @@ class BfmReadingServiceDeclaredChannelTest {
 
         verify(readingChannelResolver).resolve(SCHEMA, CONTACT);
         // MAN has no reading defined yet, so there is no unit to record.
-        verifyStoredWith("MAN", null);
+        verifyStoredWith(ReadingChannel.MAN, null);
     }
 
     @Test
@@ -193,7 +193,7 @@ class BfmReadingServiceDeclaredChannelTest {
 
         service.createReading(requestWithChannel(null), SCHEMA, operator, CONTACT, false);
 
-        verifyStoredWith("BFM", "m3");
+        verifyStoredWith(ReadingChannel.BFM, "m3");
     }
 
     private static CreateReadingRequest requestWithChannel(ReadingChannel channel) {

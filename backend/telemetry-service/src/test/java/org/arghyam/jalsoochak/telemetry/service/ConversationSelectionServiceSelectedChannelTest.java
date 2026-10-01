@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
@@ -84,7 +85,8 @@ class ConversationSelectionServiceSelectedChannelTest {
 
         assertTrue(response.isSuccess());
         assertEquals("Channel selected: Iot", response.getMessage());
-        verify(telemetryTenantRepository).updateSchemeChannel("tenant_test", 99L, 2);
+        // The channel itself (IOT, id 4), not the option's position in the tenant's list (2).
+        verify(telemetryTenantRepository).updateSchemeChannel("tenant_test", 99L, ReadingChannel.IOT);
         verify(userChannelPreferenceRepository).upsert("tenant_test", contactId, "Iot");
     }
 }

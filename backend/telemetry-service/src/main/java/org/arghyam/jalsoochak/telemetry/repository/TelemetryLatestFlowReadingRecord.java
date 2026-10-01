@@ -8,6 +8,8 @@ import java.time.LocalDateTime;
  * The flow-reading row a correction resolves to, by correlation id, by the submitter's phone or as the
  * operator's latest earlier reading, and the row a republish reads back by id.
  *
+ * @param channel the row's {@code channel_id}, a {@link org.arghyam.jalsoochak.telemetry.channel.ReadingChannel}
+ *        code; {@code null} on a BFM reading from before the channel was recorded
  * @param quarantineReason SUPPLY-PLAUSIBILITY: the row's quarantine marker, {@code null} on a
  *        pre-V40 tenant schema where the column does not exist (and where the plausibility check is
  *        skipped entirely anyway). It exists to <strong>select the anomaly reason text</strong> for a
@@ -29,7 +31,7 @@ public record TelemetryLatestFlowReadingRecord(
         String imageUrl,
         LocalDate readingDate,
         LocalDateTime readingAt,
-        String channel,
+        Integer channel,
         Integer quarantineReason,
         LocalDateTime updatedAt
 ) {

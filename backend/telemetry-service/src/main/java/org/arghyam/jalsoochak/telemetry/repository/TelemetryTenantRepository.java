@@ -414,29 +414,24 @@ public class TelemetryTenantRepository {
 
     public Optional<Integer> findSchemeChannel(String schemaName, Long schemeId) {
         validateSchemaName(schemaName);
-        String channelColumn = resolveSelectColumn(schemaName, "scheme_master_table", "channel", "NULL::integer AS channel");
         String sql = String.format("""
-                SELECT channel
+                SELECT channel_id
                 FROM %s.scheme_master_table
                 WHERE id = ?
                 LIMIT 1
                 """, schemaName);
-        sql = sql.replace("channel", channelColumn);
-        List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> toInteger(rs.getObject("channel")), schemeId);
+        List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> toInteger(rs.getObject("channel_id")), schemeId);
         return rows.stream().findFirst();
     }
 
-    public void updateSchemeChannel(String schemaName, Long schemeId, Integer channel) {
+    public void updateSchemeChannel(String schemaName, Long schemeId, ReadingChannel channel) {
         validateSchemaName(schemaName);
-        if (!columnExists(schemaName, "scheme_master_table", "channel")) {
-            throw new IllegalStateException("Missing required column " + schemaName + ".scheme_master_table.channel");
-        }
         String sql = String.format("""
                 UPDATE %s.scheme_master_table
-                SET channel = ?, updated_at = NOW()
+                SET channel_id = ?, updated_at = NOW()
                 WHERE id = ?
                 """, schemaName);
-        jdbcTemplate.update(sql, channel, schemeId);
+        jdbcTemplate.update(sql, channel.getCode(), schemeId);
     }
 
     public boolean schemeHasLatitudeAndLongitude(String schemaName, Long schemeId) {
@@ -886,7 +881,7 @@ public class TelemetryTenantRepository {
                                                              String submittedPhoneHash,
                                                              Integer confirmedReadingSource,
                                                              Integer quarantineReason,
-                                                             String channel,
+                                                             ReadingChannel channel,
                                                              String submittedUnit) {
         FlowReadingVersion version;
         if (existingReadingId != null) {
@@ -1034,7 +1029,7 @@ public class TelemetryTenantRepository {
                                                 String ocrCorrelationId,
                                                 String imageUrl,
                                                 String meterChangeReason,
-                                                String channel,
+                                                ReadingChannel channel,
                                                 String submittedUnit) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
@@ -1062,9 +1057,9 @@ public class TelemetryTenantRepository {
             values.append(", ?");
             params.add(ocrCorrelationId);
         }
-        columns.append(", quantity, channel");
+        columns.append(", quantity, channel_id");
         values.append(", 0, ?");
-        params.add(channel);
+        params.add(channel != null ? channel.getCode() : null);
         if (hasSubmittedUnit) {
             columns.append(", ").append(SUBMITTED_UNIT_COLUMN);
             values.append(", ?");
@@ -1090,18 +1085,18 @@ public class TelemetryTenantRepository {
                 params.toArray());
     }
 
-    /** Persists the resolved reading channel (short code, e.g. "BFM"/"ELM") on the flow reading row. */
-    public void updateFlowReadingChannel(String schemaName, Long readingId, String channel) {
+    /** Persists the resolved reading channel on the flow reading row. */
+    public void updateFlowReadingChannel(String schemaName, Long readingId, ReadingChannel channel) {
         validateSchemaName(schemaName);
         if (readingId == null) {
             return;
         }
         String sql = String.format("""
                 UPDATE %s.flow_reading_table
-                SET channel = ?, updated_at = clock_timestamp()
+                SET channel_id = ?, updated_at = clock_timestamp()
                 WHERE id = ?
                 """, schemaName);
-        jdbcTemplate.update(sql, channel, readingId);
+        jdbcTemplate.update(sql, channel.getCode(), readingId);
     }
 
     public Long createMeterChangeReasonRecord(String schemaName,
@@ -1117,14 +1112,14 @@ public class TelemetryTenantRepository {
                 ? String.format("""
                         INSERT INTO %s.flow_reading_table
                             (scheme_id, %s, reading_date, extracted_reading, confirmed_reading, payload_json,
-                             correlation_id, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
+                             correlation_id, quantity, channel_id, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
                         VALUES (?, ?, ?, 0, 0, jsonb_build_object('confirmed_reading', 0, 'extracted_reading', 0), ?, 0, NULL, ?, NULL, '', ?, NOW(), ?, clock_timestamp())
                         RETURNING id
                         """, schemaName, timeColumn)
                 : String.format("""
                         INSERT INTO %s.flow_reading_table
                             (scheme_id, %s, reading_date, extracted_reading, confirmed_reading,
-                             correlation_id, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
+                             correlation_id, quantity, channel_id, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
                         VALUES (?, ?, ?, 0, 0, ?, 0, NULL, ?, NULL, '', ?, NOW(), ?, clock_timestamp())
                         RETURNING id
                         """, schemaName, timeColumn);
@@ -1189,14 +1184,14 @@ public class TelemetryTenantRepository {
                 ? String.format("""
                         INSERT INTO %s.flow_reading_table
                             (scheme_id, %s, reading_date, extracted_reading, confirmed_reading, payload_json,
-                             correlation_id, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
+                             correlation_id, quantity, channel_id, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
                         VALUES (?, ?, ?, 0, 0, jsonb_build_object('confirmed_reading', 0, 'extracted_reading', 0), ?, 0, NULL, NULL, ?, '', ?, NOW(), ?, clock_timestamp())
                         RETURNING id
                         """, schemaName, timeColumn)
                 : String.format("""
                         INSERT INTO %s.flow_reading_table
                             (scheme_id, %s, reading_date, extracted_reading, confirmed_reading,
-                             correlation_id, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
+                             correlation_id, quantity, channel_id, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
                         VALUES (?, ?, ?, 0, 0, ?, 0, NULL, NULL, ?, '', ?, NOW(), ?, clock_timestamp())
                         RETURNING id
                         """, schemaName, timeColumn);
@@ -1514,13 +1509,13 @@ public class TelemetryTenantRepository {
                 SELECT confirmed_reading, created_at
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
-                  AND COALESCE(channel, 'BFM') = ?
+                  AND COALESCE(channel_id, 1) = ?
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL%s
                 """, schemaName, quarantineFilter(schemaName)));
         List<Object> params = new ArrayList<>();
         params.add(schemeId);
-        params.add(channel.name());
+        params.add(channel.getCode());
         if (excludeReadingId != null) {
             sql.append(" AND id <> ?");
             params.add(excludeReadingId);
@@ -1563,14 +1558,14 @@ public class TelemetryTenantRepository {
                 SELECT DISTINCT ON (reading_date) reading_date, confirmed_reading
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
-                  AND COALESCE(channel, 'BFM') = ?
+                  AND COALESCE(channel_id, 1) = ?
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL%s
                   AND reading_date >= ((now() AT TIME ZONE 'Asia/Kolkata')::date - CAST(? AS INTEGER))
                 """, schemaName, quarantineFilter(schemaName)));
         List<Object> params = new ArrayList<>();
         params.add(schemeId);
-        params.add(channel.name());
+        params.add(channel.getCode());
         params.add(days);
         if (excludeReadingId != null) {
             sql.append(" AND id <> ?");
@@ -1720,14 +1715,14 @@ public class TelemetryTenantRepository {
                 SELECT confirmed_reading, created_at
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
-                  AND COALESCE(channel, 'BFM') = ?
+                  AND COALESCE(channel_id, 1) = ?
                   AND confirmed_reading > 0
                   AND %s < ?
                   AND deleted_at IS NULL%s
                 """, schemaName, timeColumn, quarantineFilter(schemaName)));
         List<Object> params = new ArrayList<>();
         params.add(schemeId);
-        params.add(channel.name());
+        params.add(channel.getCode());
         params.add(cutoffTimeExclusive);
         if (excludeReadingId != null) {
             sql.append(" AND id <> ?");
@@ -1941,7 +1936,7 @@ public class TelemetryTenantRepository {
                 ? "(correlation_id = ? OR " + ocrCorrelationColumn + " = ?)"
                 : "correlation_id = ?";
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time, %s AS quarantine_reason, updated_at
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS reading_time, %s AS quarantine_reason, updated_at
                 FROM %s.flow_reading_table
                 WHERE %s
                   AND deleted_at IS NULL
@@ -1965,7 +1960,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time, %s AS quarantine_reason, updated_at
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS reading_time, %s AS quarantine_reason, updated_at
                 FROM %s.flow_reading_table
                 WHERE id = ?
                   AND deleted_at IS NULL
@@ -1995,11 +1990,11 @@ public class TelemetryTenantRepository {
                 SELECT id
                 FROM %s.flow_reading_table
                 WHERE reading_date BETWEEN ? AND ?
-                  AND channel IN (%s)
+                  AND channel_id IN (%s)
                   AND deleted_at IS NULL
                 """, schemaName, String.join(", ", Collections.nCopies(channels.size(), "?"))));
         List<Object> params = new ArrayList<>(List.of(fromDate, toDate));
-        channels.forEach(channel -> params.add(channel.name()));
+        channels.forEach(channel -> params.add(channel.getCode()));
         if (schemeId != null) {
             sql.append(" AND scheme_id = ?");
             params.add(schemeId);
@@ -2066,10 +2061,10 @@ public class TelemetryTenantRepository {
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND reading_date = ?
-                  AND channel = ?
+                  AND channel_id = ?
                   AND deleted_at IS NULL
                 """, schemaName));
-        List<Object> params = new ArrayList<>(List.of(schemeId, readingDate, ReadingChannel.PDU.name()));
+        List<Object> params = new ArrayList<>(List.of(schemeId, readingDate, ReadingChannel.PDU.getCode()));
         if (excludeReadingId != null) {
             sql.append(" AND id <> ?");
             params.add(excludeReadingId);
@@ -2140,7 +2135,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time, %s AS quarantine_reason, updated_at
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS reading_time, %s AS quarantine_reason, updated_at
                 FROM %s.flow_reading_table
                 WHERE created_by = ?
                   AND deleted_at IS NULL
@@ -2164,7 +2159,7 @@ public class TelemetryTenantRepository {
                 rs.getString("image_url"),
                 rs.getObject("reading_date", LocalDate.class),
                 rs.getObject("reading_time", LocalDateTime.class),
-                rs.getString("channel"),
+                toInteger(rs.getObject("channel_id")),
                 toInteger(rs.getObject("quarantine_reason")),
                 rs.getObject("updated_at", LocalDateTime.class)
         );
@@ -2182,7 +2177,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time, %s AS quarantine_reason, updated_at
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS reading_time, %s AS quarantine_reason, updated_at
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND created_by = ?
@@ -2218,7 +2213,7 @@ public class TelemetryTenantRepository {
                   AND reading_date = ?
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
-                  AND COALESCE(channel, 'BFM') = 'BFM'
+                  AND COALESCE(channel_id, 1) = 1
                 ORDER BY %s DESC, created_at DESC, id DESC
                 LIMIT 1
                 """, schemaName, timeColumn);
@@ -2256,7 +2251,7 @@ public class TelemetryTenantRepository {
                 WHERE scheme_id = ?
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
-                  AND COALESCE(channel, 'BFM') = 'BFM'
+                  AND COALESCE(channel_id, 1) = 1
                 ORDER BY %s DESC, created_at DESC, id DESC
                 LIMIT 1
                 """, schemaName, timeColumn);
@@ -2554,7 +2549,7 @@ public class TelemetryTenantRepository {
                                                              String imageUrl,
                                                              String meterChangeReason,
                                                              Long updatedBy,
-                                                             String channel,
+                                                             ReadingChannel channel,
                                                              String submittedUnit) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
@@ -2590,8 +2585,8 @@ public class TelemetryTenantRepository {
             assignments.append(String.format("%1$s = COALESCE(?, %1$s),\n", ocrCorrelationColumn));
             params.add(ocrCorrelationId);
         }
-        assignments.append("channel = COALESCE(?, channel),\n");
-        params.add(channel);
+        assignments.append("channel_id = COALESCE(?, channel_id),\n");
+        params.add(channel != null ? channel.getCode() : null);
         if (hasSubmittedUnit) {
             assignments.append(String.format("%1$s = COALESCE(?, %1$s),\n", SUBMITTED_UNIT_COLUMN));
             params.add(submittedUnit);

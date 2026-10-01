@@ -1093,7 +1093,7 @@ public class MeterReadingConversationService {
                     captured.submittedUnitCode()
             );
             telemetryTenantRepository.updateFlowReadingChannel(
-                    operatorWithSchema.schemaName(), pendingId, channel.name());
+                    operatorWithSchema.schemaName(), pendingId, channel);
             if (isMeterReplaced) {
                 telemetryTenantRepository.updateMeterChangeReason(
                         operatorWithSchema.schemaName(),
@@ -1126,7 +1126,7 @@ public class MeterReadingConversationService {
                     captured.submittedUnitCode()
             );
             telemetryTenantRepository.updateFlowReadingChannel(
-                    operatorWithSchema.schemaName(), todaysFlow.id(), channel.name());
+                    operatorWithSchema.schemaName(), todaysFlow.id(), channel);
             if (isMeterReplaced) {
                 telemetryTenantRepository.updateMeterChangeReason(
                         operatorWithSchema.schemaName(),
@@ -1170,7 +1170,7 @@ public class MeterReadingConversationService {
                 null,
                 RolloverResolutionService.SOURCE_MANUAL,
                 null,
-                channel.name(),
+                channel,
                 captured.submittedUnitCode()
         ).id();
         return new ManualReadingRow(newRowId, newRowCorrelationId);
@@ -1839,7 +1839,7 @@ public class MeterReadingConversationService {
 
             // The corrected value follows the rules of the target row's channel, as a submission on it
             // would. WhatsApp has no unit field, so the value is in that channel's standard unit.
-            ReadingChannel channel = ReadingChannel.fromChannelValue(targetDayRecord.channel());
+            ReadingChannel channel = ReadingChannel.fromCode(targetDayRecord.channel());
             CapturedReading captured;
             switch (submittedValueCapture.captureCorrection(channel, readingValue, null)) {
                 case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;

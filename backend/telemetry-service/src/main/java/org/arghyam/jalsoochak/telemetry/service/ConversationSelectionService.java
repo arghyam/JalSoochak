@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
@@ -278,11 +279,13 @@ public class ConversationSelectionService {
             }
             String selectedChannel = resolveSelection(request.getChannel(), channelOptions)
                     .orElseThrow(() -> new IllegalStateException("Invalid channel selection"));
-            int selectedChannelId = channelOptions.indexOf(selectedChannel) + 1;
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
-            telemetryTenantRepository.updateSchemeChannel(operatorWithSchema.schemaName(), schemeId, selectedChannelId);
+            // The channel readings will be resolved to from the preference stored below, not the
+            // option's position in the tenant's list.
+            telemetryTenantRepository.updateSchemeChannel(operatorWithSchema.schemaName(), schemeId,
+                    ReadingChannel.fromChannelValue(selectedChannel));
             userChannelPreferenceRepository.upsert(operatorWithSchema.schemaName(), request.getContactId(), selectedChannel);
 
             String confirmationTemplate = templatesService

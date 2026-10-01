@@ -40,7 +40,7 @@ import java.util.Objects;
  * No user-supplied data is ever concatenated into the query string.
  *
  * <p>These queries back the SO/SDO staff screens, which show bulk-flow-meter (BFM) readings only:
- * every {@code flow_reading_table} read keeps {@code COALESCE(fr.channel, 'BFM') = 'BFM'}, a NULL
+ * every {@code flow_reading_table} read keeps {@code COALESCE(fr.channel_id, 1) = 1}, a NULL
  * channel being a legacy BFM row. The filter sits inside each CTE, before {@code LAG}, so an ELM or
  * PDU value is never taken as a BFM reading's previous one. The analytics branch of the pump-operator
  * list skips days whose latest {@code fact_meter_reading_table} reading is not BFM (code 1), the rule
@@ -211,7 +211,7 @@ public class PersonSchemeRepository {
                         FROM %s.flow_reading_table fr
                         WHERE fr.deleted_at IS NULL
                           AND fr.scheme_id = ps.id
-                          AND COALESCE(fr.channel, 'BFM') = 'BFM'
+                          AND COALESCE(fr.channel_id, 1) = 1
                     )
                     SELECT confirmed_reading AS last_reading,
                            reading_at AS last_reading_at,
@@ -228,7 +228,7 @@ public class PersonSchemeRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.scheme_id = ps.id
-                      AND COALESCE(fr.channel, 'BFM') = 'BFM'
+                      AND COALESCE(fr.channel_id, 1) = 1
                       AND fr.reading_date = CURRENT_DATE - INTERVAL '1 day'
                     ORDER BY fr.%s DESC, fr.id DESC
                     LIMIT 1
@@ -343,7 +343,7 @@ public class PersonSchemeRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.scheme_id = sm.id
-                      AND COALESCE(fr.channel, 'BFM') = 'BFM'
+                      AND COALESCE(fr.channel_id, 1) = 1
                 ) rs ON true
                 LEFT JOIN LATERAL (
                     WITH bounds AS (
@@ -392,7 +392,7 @@ public class PersonSchemeRepository {
                   ON ut.id = u.user_type
                 WHERE fr.deleted_at IS NULL
                   AND fr.scheme_id = ?
-                  AND COALESCE(fr.channel, 'BFM') = 'BFM'
+                  AND COALESCE(fr.channel_id, 1) = 1
                   AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                 """, schemaName, schemaName);
         Long total = jdbcTemplate.queryForObject(sql, Long.class, schemeId);
@@ -420,7 +420,7 @@ public class PersonSchemeRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.scheme_id = ?
-                      AND COALESCE(fr.channel, 'BFM') = 'BFM'
+                      AND COALESCE(fr.channel_id, 1) = 1
                 )
                 SELECT o.created_by,
                        o.reading_at,
@@ -542,7 +542,7 @@ public class PersonSchemeRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.created_by = o.id
-                      AND COALESCE(fr.channel, 'BFM') = 'BFM'
+                      AND COALESCE(fr.channel_id, 1) = 1
                 ) fl ON true
                 %s
                 """, schemaName, schemaName, schemaName,
@@ -678,7 +678,7 @@ public class PersonSchemeRepository {
                         FROM %s.flow_reading_table fr
                         WHERE fr.deleted_at IS NULL
                           AND fr.created_by = o.id
-                          AND COALESCE(fr.channel, 'BFM') = 'BFM'
+                          AND COALESCE(fr.channel_id, 1) = 1
                     )
                     SELECT reading_at AS last_submission_at,
                            CASE
@@ -695,7 +695,7 @@ public class PersonSchemeRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.created_by = o.id
-                      AND COALESCE(fr.channel, 'BFM') = 'BFM'
+                      AND COALESCE(fr.channel_id, 1) = 1
                 ) rs ON true
                 LEFT JOIN LATERAL (
                     WITH bounds AS (
@@ -878,7 +878,7 @@ public class PersonSchemeRepository {
                  AND sm.deleted_at IS NULL
                 WHERE fr.deleted_at IS NULL
                   AND fr.created_by = ?
-                  AND COALESCE(fr.channel, 'BFM') = 'BFM'
+                  AND COALESCE(fr.channel_id, 1) = 1
                   %s
                 """, schemaName, schemaName, filter);
         Long total = jdbcTemplate.queryForObject(sql, Long.class, args.toArray());
@@ -934,7 +934,7 @@ public class PersonSchemeRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.created_by = ?
-                      AND COALESCE(fr.channel, 'BFM') = 'BFM'
+                      AND COALESCE(fr.channel_id, 1) = 1
                 )
                 SELECT o.scheme_id,
                        o.reading_at,

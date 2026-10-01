@@ -29,7 +29,7 @@ CREATE TABLE tenant_mp.flow_reading_table (
     extracted_reading NUMERIC      NOT NULL,
     confirmed_reading NUMERIC      NOT NULL,
     correlation_id    VARCHAR(255) NOT NULL,
-    channel           VARCHAR(50),
+    channel_id        INTEGER,
     created_by        INTEGER      NOT NULL,
     created_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
     deleted_at        TIMESTAMP

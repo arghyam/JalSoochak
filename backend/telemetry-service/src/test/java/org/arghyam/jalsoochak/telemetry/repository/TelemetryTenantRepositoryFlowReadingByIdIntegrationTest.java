@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -53,13 +54,13 @@ class TelemetryTenantRepositoryFlowReadingByIdIntegrationTest {
 
         jdbcTemplate.update("INSERT INTO " + MIGRATED_SCHEMA + ".flow_reading_table "
                         + "(id, scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
-                        + " correlation_id, channel, image_url, created_by, quarantine_reason) "
-                        + "VALUES (?, ?, ?, ?, 118.5, 120.25, 'corr-live', 'ELM', 'https://img/1.jpg', ?, 1)",
+                        + " correlation_id, channel_id, image_url, created_by, quarantine_reason) "
+                        + "VALUES (?, ?, ?, ?, 118.5, 120.25, 'corr-live', 2, 'https://img/1.jpg', ?, 1)",
                 LIVE_ROW, SCHEME, READING_AT, DAY, OPERATOR);
         jdbcTemplate.update("INSERT INTO " + MIGRATED_SCHEMA + ".flow_reading_table "
                         + "(id, scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
-                        + " correlation_id, channel, created_by, deleted_at) "
-                        + "VALUES (?, ?, ?, ?, 0, 130, 'corr-deleted', 'BFM', ?, NOW())",
+                        + " correlation_id, channel_id, created_by, deleted_at) "
+                        + "VALUES (?, ?, ?, ?, 0, 130, 'corr-deleted', 1, ?, NOW())",
                 DELETED_ROW, SCHEME, READING_AT, DAY, OPERATOR);
         jdbcTemplate.update("INSERT INTO " + PRE_MIGRATION_SCHEMA + ".flow_reading_table "
                         + "(id, scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
@@ -90,7 +91,7 @@ class TelemetryTenantRepositoryFlowReadingByIdIntegrationTest {
         assertEquals("https://img/1.jpg", row.imageUrl());
         assertEquals(DAY, row.readingDate());
         assertEquals(READING_AT, row.readingAt());
-        assertEquals("ELM", row.channel());
+        assertEquals(ReadingChannel.ELM.getCode(), row.channel());
         assertEquals(1, row.quarantineReason());
         assertEquals(jdbcTemplate.queryForObject("SELECT updated_at FROM " + MIGRATED_SCHEMA
                 + ".flow_reading_table WHERE id = ?", LocalDateTime.class, LIVE_ROW), row.updatedAt());

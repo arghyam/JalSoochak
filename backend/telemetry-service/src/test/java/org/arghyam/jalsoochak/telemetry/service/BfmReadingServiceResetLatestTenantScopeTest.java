@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -102,7 +103,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                 "http://example.com/img.jpg",
                 READING_DATE,
                 READING_AT,
-                "BFM",
+                ReadingChannel.BFM.getCode(),
                 0,
                 READING_AT
         );
@@ -161,7 +162,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                         BigDecimal.ZERO,
                         new BigDecimal("1450"),
                         "",
-                        READING_DATE, READING_AT, "BFM",
+                        READING_DATE, READING_AT, ReadingChannel.BFM.getCode(),
                         QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY, READING_AT)));
 
         service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID);

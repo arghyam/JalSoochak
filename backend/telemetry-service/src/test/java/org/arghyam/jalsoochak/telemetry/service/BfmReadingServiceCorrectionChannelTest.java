@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
@@ -102,14 +103,14 @@ class BfmReadingServiceCorrectionChannelTest {
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
     }
 
-    private void correcting(String channel, String storedValue) {
+    private void correcting(ReadingChannel channel, String storedValue) {
         when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
                 .thenReturn(Optional.of(row(channel, storedValue)));
     }
 
-    private static TelemetryLatestFlowReadingRecord row(String channel, String storedValue) {
+    private static TelemetryLatestFlowReadingRecord row(ReadingChannel channel, String storedValue) {
         return new TelemetryLatestFlowReadingRecord(READING_ID, 10L, OPERATOR_ID, "corr-1", BigDecimal.ZERO,
-                new BigDecimal(storedValue), "", READING_DATE, READING_DATE.atTime(9, 30), channel, 0, null);
+                new BigDecimal(storedValue), "", READING_DATE, READING_DATE.atTime(9, 30), channel == null ? null : channel.getCode(), 0, null);
     }
 
     private CreateReadingResponse correct(String value, String unit) {
@@ -125,7 +126,7 @@ class BfmReadingServiceCorrectionChannelTest {
     @Test
     @DisplayName("a BFM correction in litres is stored in cubic metres, with L recorded")
     void bfmCorrectionInLitresIsStoredInCubicMetres() {
-        correcting("BFM", "1.2");
+        correcting(ReadingChannel.BFM, "1.2");
 
         CreateReadingResponse response = correct("1500", "L");
 
@@ -150,7 +151,7 @@ class BfmReadingServiceCorrectionChannelTest {
     @Test
     @DisplayName("a unit the corrected row's channel doesn't accept is refused, and nothing is written")
     void unitOfAnotherChannelIsRefused() {
-        correcting("PDU", "90");
+        correcting(ReadingChannel.PDU, "90");
 
         CreateReadingResponse response = correct("1.5", "m3");
 
@@ -164,7 +165,7 @@ class BfmReadingServiceCorrectionChannelTest {
     @Test
     @DisplayName("a PDU correction in hours is stored in minutes, without the BFM-only supply check")
     void pduCorrectionInHoursIsStoredInMinutes() {
-        correcting("PDU", "90");
+        correcting(ReadingChannel.PDU, "90");
 
         CreateReadingResponse response = correct("2", "h");
 
@@ -177,7 +178,7 @@ class BfmReadingServiceCorrectionChannelTest {
     @Test
     @DisplayName("a PDU correction longer than a day is refused, and nothing is written")
     void pduCorrectionLongerThanADayIsRefused() {
-        correcting("PDU", "90");
+        correcting(ReadingChannel.PDU, "90");
 
         CreateReadingResponse response = correct("25", "h");
 
@@ -190,7 +191,7 @@ class BfmReadingServiceCorrectionChannelTest {
     @Test
     @DisplayName("a PDU correction that takes its day past 1,440 minutes is refused, and nothing is written")
     void pduCorrectionTakingItsDayPastTheLimitIsRefused() {
-        correcting("PDU", "90");
+        correcting(ReadingChannel.PDU, "90");
         doReturn(Optional.empty()).when(pduDayLimit).writeWithinLimit(any(), any(), any(), any(), any(), any());
 
         CreateReadingResponse response = correct("2", "h");
@@ -214,7 +215,7 @@ class BfmReadingServiceCorrectionChannelTest {
     void resetWritesTheStandardUnitOfTheRowsChannel() {
         when(operatorContextService.resolveOperatorWithSchema(CONTACT, TENANT_ID))
                 .thenReturn(new TelemetryOperatorWithSchema(SCHEMA, operator));
-        when(repo.findLatestFlowReadingByOperator(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(row("PDU", "90")));
+        when(repo.findLatestFlowReadingByOperator(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(row(ReadingChannel.PDU, "90")));
 
         service.resetLatestConfirmedReadingByPhone(CONTACT, TENANT_ID);
 

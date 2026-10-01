@@ -95,7 +95,7 @@ readings AS (
            fr.extracted_reading,
            fr.ai_confidence_percentage,
            NULLIF(fr.image_url, '')     AS image_url,
-           fr.channel,
+           fr.channel_id,
            fr.confirmed_reading_source,
            fr.quarantine_reason,
            fr.correlation_id
@@ -104,7 +104,7 @@ readings AS (
     WHERE fr.deleted_at IS NULL
       AND fr.confirmed_reading > 0
       AND fr.meter_change_reason IS NULL       -- meter swap: the delta is meaningless, check skipped
-      AND COALESCE(fr.channel, 'BFM') = 'BFM'          -- BFM only; a null channel reads as BFM
+      AND COALESCE(fr.channel_id, 1) = 1       -- BFM only; a null channel reads as BFM
 ),
 
 assessed AS (
