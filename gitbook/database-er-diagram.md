@@ -15,10 +15,10 @@ Each state gets its own `tenant_<stateCode>` schema, created by `common_schema.c
 
 ```mermaid
 flowchart LR
-    CS[("common_schema<br/>tenant_master_table<br/>tenant_config_master_table<br/>tenant_admin_user_master_table")]
-    TS[("tenant_{stateCode}<br/>one per tenant<br/>user_table<br/>scheme_master_table<br/>flow_reading_table")]
-    AS[("analytics_schema<br/>dim_* tables<br/>fact_* tables")]
-    CS -. "state_code names the schema" .-> TS
+    CS["common_schema<br/>tenants, config,<br/>admin users"]
+    TS["tenant_{stateCode}<br/>one per tenant:<br/>users, schemes,<br/>readings"]
+    AS["analytics_schema<br/>dim_* and fact_*<br/>tables"]
+    CS -. "state_code names<br/>the schema" .-> TS
     TS -. "tenant_id" .-> CS
     TS -- "Kafka events" --> AS
 ```
@@ -117,9 +117,9 @@ Two common tables have no relationships and are not drawn: `channel_master_table
 
 One copy per tenant. It holds the tenant's users, location hierarchies, schemes and their assignments, meter readings, anomalies and cached reports.
 
-### Locations and schemes
+### Locations, schemes and assignments
 
-The LGD hierarchy (State → District → Block → Panchayat → Village) and the departmental hierarchy (State → Zone → Circle → Division → Sub-Division) are both self-referencing trees whose level names come from `location_config_master_table`. A scheme is placed in both.
+The LGD hierarchy (State → District → Block → Panchayat → Village) and the departmental hierarchy (State → Zone → Circle → Division → Sub-Division) are both trees stored in a single table each: every node's `parent_id` is a foreign key to the `id` of its parent in the same table (empty for the State node). The level names come from `location_config_master_table`. A scheme is placed in both hierarchies, and `user_scheme_mapping_table` assigns operators to it.
 
 ```mermaid
 erDiagram
@@ -135,7 +135,7 @@ erDiagram
         varchar lgd_code
         varchar state_lgd_id
         int lgd_location_config_id FK
-        int parent_id FK
+        int parent_id FK "parent node, same table"
         numeric house_hold_count
     }
     department_location_master_table {
@@ -143,7 +143,7 @@ erDiagram
         varchar title
         varchar state_dept_id "State IT system id"
         int department_location_config_id FK
-        int parent_id FK
+        int parent_id FK "parent node, same table"
     }
     scheme_master_table {
         int id PK
@@ -172,6 +172,16 @@ erDiagram
         int parent_department_id FK
         varchar parent_department_level
     }
+    user_scheme_mapping_table {
+        int id PK
+        int user_id FK
+        int scheme_id FK
+        int status
+    }
+    user_table {
+        int id PK
+        varchar title "encrypted name"
+    }
     asset_pump_registry_table {
         int id PK
         int scheme_id FK
@@ -184,13 +194,13 @@ erDiagram
 
     location_config_master_table ||--o{ lgd_location_master_table : "level of"
     location_config_master_table ||--o{ department_location_master_table : "level of"
-    lgd_location_master_table |o--o{ lgd_location_master_table : "parent of"
-    department_location_master_table |o--o{ department_location_master_table : "parent of"
     lgd_location_master_table ||--o{ scheme_lgd_mapping_table : "contains"
     scheme_master_table ||--o{ scheme_lgd_mapping_table : "located in"
     department_location_master_table ||--o{ scheme_department_mapping_table : "manages"
     scheme_master_table ||--o{ scheme_department_mapping_table : "managed by"
     scheme_master_table ||--o{ asset_pump_registry_table : "has pumps"
+    scheme_master_table ||--o{ user_scheme_mapping_table : "operated by"
+    user_table ||--o{ user_scheme_mapping_table : "assigned"
 ```
 
 ### Users, readings and operations
@@ -200,12 +210,6 @@ erDiagram
     scheme_master_table {
         int id PK
         varchar scheme_name
-    }
-    user_scheme_mapping_table {
-        int id PK
-        int user_id FK
-        int scheme_id FK
-        int status
     }
     user_table {
         int id PK
@@ -269,8 +273,6 @@ erDiagram
         bigint version
     }
 
-    scheme_master_table ||--o{ user_scheme_mapping_table : "operated by"
-    user_table ||--o{ user_scheme_mapping_table : "assigned"
     user_table |o--o{ flow_reading_table : "submits"
     scheme_master_table ||--o{ flow_reading_table : "readings"
     flow_reading_table |o--o{ anomaly_table : "detected in"
@@ -287,7 +289,7 @@ Three tenant tables have no relationships and are not drawn: `user_channel_prefe
 
 ## Analytics warehouse (`analytics_schema`)
 
-A star schema owned by analytics-service and filled asynchronously from Kafka. The `*_id` columns (`scheme_id`, `user_id`, `level_N_lgd_id`, ...) carry the source ids from the tenant schema, so joins between facts and dimensions are on `(tenant_id, <source id>)`. Only `tenant_id` and the date keys are enforced foreign keys.
+A star schema owned by analytics-service and filled asynchronously from Kafka. The `*_id` columns (`scheme_id`, `user_id`, `level_N_lgd_id`, ...) carry the source ids from the tenant schema, so joins between facts and dimensions are on `(tenant_id, <source id>)`. Only `tenant_id` and the date keys are enforced foreign keys. In the fact diagrams, an unlabelled dashed line joins on the column of the same name (`scheme_id` or `user_id`).
 
 ### Dimensions
 
@@ -426,14 +428,14 @@ erDiagram
         int attendance
     }
 
-    dim_scheme_table ||..o{ fact_meter_reading_table : "scheme_id"
-    dim_user_table |o..o{ fact_meter_reading_table : "user_id"
-    dim_scheme_table ||..o{ fact_water_quantity_table : "scheme_id"
-    dim_date_table ||--o{ fact_water_quantity_table : "full_date"
-    dim_user_table |o..o{ fact_water_quantity_table : "user_id"
-    dim_scheme_table ||..o{ fact_operator_attendance_table : "scheme_id"
-    dim_user_table ||..o{ fact_operator_attendance_table : "user_id"
+    dim_scheme_table ||..o{ fact_operator_attendance_table : ""
+    dim_user_table ||..o{ fact_operator_attendance_table : ""
     dim_date_table ||--o{ fact_operator_attendance_table : "date_key"
+    dim_scheme_table ||..o{ fact_water_quantity_table : ""
+    dim_date_table ||--o{ fact_water_quantity_table : "full_date"
+    dim_user_table |o..o{ fact_water_quantity_table : ""
+    dim_scheme_table ||..o{ fact_meter_reading_table : ""
+    dim_user_table |o..o{ fact_meter_reading_table : ""
 ```
 
 ### Escalation, anomaly and performance facts
@@ -481,12 +483,12 @@ erDiagram
         timestamp attempted_at
     }
 
-    dim_scheme_table |o..o{ fact_escalation_table : "scheme_id"
-    dim_scheme_table ||..o{ fact_scheme_performance_table : "scheme_id"
-    dim_scheme_table |o..o{ fact_anomaly_table : "scheme_id"
-    dim_scheme_table |o..o{ submission_attempt_table : "scheme_id"
-    dim_user_table ||..o{ fact_escalation_table : "user_id"
-    dim_user_table |o..o{ fact_anomaly_table : "user_id"
+    dim_scheme_table |o..o{ fact_escalation_table : ""
+    dim_scheme_table ||..o{ fact_scheme_performance_table : ""
+    dim_scheme_table |o..o{ fact_anomaly_table : ""
+    dim_scheme_table |o..o{ submission_attempt_table : ""
+    dim_user_table ||..o{ fact_escalation_table : ""
+    dim_user_table |o..o{ fact_anomaly_table : ""
 ```
 
 The `tenant_id` columns marked FK in the two fact diagrams above reference `dim_tenant_table`; that link is left out of the drawings.
