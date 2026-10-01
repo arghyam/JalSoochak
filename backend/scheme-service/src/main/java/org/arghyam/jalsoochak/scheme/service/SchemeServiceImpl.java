@@ -28,6 +28,7 @@ import org.arghyam.jalsoochak.scheme.enums.SchemeWorkStatus;
 import org.arghyam.jalsoochak.scheme.exception.FileValidationException;
 import org.arghyam.jalsoochak.scheme.exception.UnsupportedFileTypeException;
 import org.arghyam.jalsoochak.scheme.kafka.KafkaProducer;
+import org.arghyam.jalsoochak.scheme.kafka.SchemeDimensionEventPayloads;
 import org.arghyam.jalsoochak.scheme.repository.SchemeCreateRecord;
 import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository;
 import org.arghyam.jalsoochak.scheme.repository.SchemeLgdMappingCreateRecord;
@@ -1281,47 +1282,7 @@ public class SchemeServiceImpl implements SchemeService {
             return;
         }
         for (SchemeDbRepository.SchemeAnalyticsRow row : rows) {
-            Integer parentLgd = row.parentLgdId() != null ? row.parentLgdId() : 0;
-            Integer parentDept = row.parentDepartmentId();
-            int deptLevelFallback = parentDept != null ? parentDept : 0;
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("eventType", "SCHEME_UPDATED");
-            payload.put("schemeId", row.schemeId());
-            payload.put("tenantId", tenantId);
-            payload.put("schemeName", row.schemeName());
-            payload.put("stateSchemeId", safeParseInt(row.stateSchemeId()));
-            payload.put("centreSchemeId", safeParseInt(row.centreSchemeId()));
-            payload.put("longitude", row.longitude());
-            payload.put("latitude", row.latitude());
-            payload.put("parentLgdLocationId", parentLgd);
-            payload.put("level1LgdId", parentLgd);
-            payload.put("level2LgdId", parentLgd);
-            payload.put("level3LgdId", parentLgd);
-            payload.put("level4LgdId", parentLgd);
-            payload.put("level5LgdId", parentLgd);
-            payload.put("level6LgdId", parentLgd);
-            payload.put("parentDepartmentLocationId", parentDept);
-            payload.put("level1DeptId", deptLevelFallback);
-            payload.put("level2DeptId", deptLevelFallback);
-            payload.put("level3DeptId", deptLevelFallback);
-            payload.put("level4DeptId", deptLevelFallback);
-            payload.put("level5DeptId", deptLevelFallback);
-            payload.put("level6DeptId", deptLevelFallback);
-            payload.put("status", row.operatingStatus());
-            payload.put("operating_status", row.operatingStatus());
-            payload.put("work_status", row.workStatus());
-            kafkaProducer.publishJson(SCHEME_TOPIC, payload);
-        }
-    }
-
-    private Integer safeParseInt(String value) {
-        if (value == null || value.isBlank()) {
-            return 0;
-        }
-        try {
-            return Integer.parseInt(value.trim());
-        } catch (NumberFormatException ex) {
-            return 0;
+            kafkaProducer.publishJson(SCHEME_TOPIC, SchemeDimensionEventPayloads.schemeUpdated(tenantId, row));
         }
     }
 

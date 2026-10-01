@@ -49,7 +49,13 @@ class RouteParityTest {
             "POST /api/v1/scheme/schemes/upload",
             "POST /api/v1/scheme/schemes/mappings/upload",
             "GET /api/v1/scheme/schemes/download",
-            "GET /api/v1/scheme/schemes/mappings/download"
+            "GET /api/v1/scheme/schemes/mappings/download",
+            // State master-data sync (JJM Brain) — operator surface
+            "GET /api/v1/scheme/state-sync/config",
+            "POST /api/v1/scheme/state-sync/runs",
+            "GET /api/v1/scheme/state-sync/runs",
+            "POST /api/v1/scheme/state-sync/schemes/refresh",
+            "GET /api/v1/scheme/state-sync/issues"
     );
 
     @Test

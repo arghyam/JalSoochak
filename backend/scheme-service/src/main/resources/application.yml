@@ -77,3 +77,26 @@ storage:
   reports-bucket: ${STORAGE_REPORTS_BUCKET:jalsoochak-reports}
   presigned-base-url: ${STORAGE_PRESIGNED_BASE_URL:} # public origin for download links; blank = the URL as signed
   presigned-ttl-seconds: ${STORAGE_PRESIGNED_TTL_SECONDS:3600}
+
+# State master-data sync (Assam: JJM Brain). Off unless STATE_SYNC_ENABLED=true; with it off no
+# schedule is registered and the upstream is never called. Start in DRY_RUN: runs record counts and
+# issues (GET /api/v1/scheme/state-sync/issues) but roll back every write.
+state-sync:
+  enabled: ${STATE_SYNC_ENABLED:false}
+  mode: ${STATE_SYNC_MODE:DRY_RUN}
+  tenant-code: ${STATE_SYNC_TENANT_CODE:}
+  actor-user-id: ${STATE_SYNC_ACTOR_USER_ID:}
+  delta-cron: ${STATE_SYNC_DELTA_CRON:0 15 * * * *}
+  full-cron: ${STATE_SYNC_FULL_CRON:0 0 2 * * *}
+  zone: ${STATE_SYNC_ZONE:Asia/Kolkata}
+  delta-overlap: ${STATE_SYNC_DELTA_OVERLAP:PT30M}
+  stale-run-after: ${STATE_SYNC_STALE_RUN_AFTER:PT2H}
+  archive-spare-reading-days: ${STATE_SYNC_ARCHIVE_SPARE_READING_DAYS:90}
+  retire-on-empty-list: ${STATE_SYNC_RETIRE_ON_EMPTY_LIST:false}
+  placeholder-lookups-per-run: ${STATE_SYNC_PLACEHOLDER_LOOKUPS_PER_RUN:25}
+  placeholder-retry-after: ${STATE_SYNC_PLACEHOLDER_RETRY_AFTER:PT24H}
+  jjm:
+    base-url: ${JJM_BRAIN_BASE_URL:https://jjmbrain.in/api/v1}
+    api-key: ${JJM_BRAIN_API_KEY:}
+    min-request-interval: ${JJM_BRAIN_MIN_REQUEST_INTERVAL:PT0.5S}
+    max-attempts: ${JJM_BRAIN_MAX_ATTEMPTS:4}
