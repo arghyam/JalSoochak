@@ -29,15 +29,16 @@ clamped page rather than `400`.
 
 Set the following environment variables before running the Telemetry services:
 
-- `GLIFIC_API_URL`
-- `GLIFIC_API_KEY`
-- `GLIFIC_NUDGE_TEMPLATE_ID`
-- `GLIFIC_ESCALATION_TEMPLATE_ID`
-- `MINIO_ENDPOINT`
-- `MINIO_ACCESS_KEY`
-- `MINIO_SECRET_KEY`
-- `MINIO_BUCKET`
-- `MINIO_BASE_URL`
+- `WHATSAPP_API_URL`
+- `WHATSAPP_USERNAME`
+- `WHATSAPP_PASSWORD`
+- `WHATSAPP_NUDGE_TEMPLATE_ID`
+- `WHATSAPP_ESCALATION_TEMPLATE_ID`
+- `STORAGE_ENDPOINT`
+- `STORAGE_ACCESS_KEY`
+- `STORAGE_SECRET_KEY`
+- `STORAGE_BUCKET`
+- `STORAGE_PUBLIC_BASE_URL`
 
 ---
 
@@ -172,7 +173,6 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/analytics/water-supply/average-per-region` | Average water supply per region |
 | GET | `/api/v1/analytics/national/dashboard` | National dashboard data |
 | GET | `/api/v1/analytics/scheme-regularity/periodic/national` | National periodic scheme regularity |
-| POST | `/api/v1/analytics/date-dimension/populate` | Populate date dimension table |
 | GET | `/api/v1/analytics/schemes/status-count` | Scheme status counts |
 | GET | `/api/v1/analytics/schemes/dashboard` | Scheme dashboard |
 | GET | `/api/v1/analytics/schemes/region-report` | Scheme region report |
@@ -203,7 +203,6 @@ Set the following environment variables before running the Telemetry services:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/message/notifications` | List notifications |
 | POST | `/api/v1/message/notifications` | Send a notification (specify channel in body) |
 | POST | `/api/v1/message/events` | Dispatch a Kafka event |
 
@@ -256,10 +255,10 @@ The tables below list every endpoint that changed across all services. If your f
 
 ---
 
-### Telemetry service — webhook base URL (affects all 26 Glific webhook endpoints)
+### Telemetry service — webhook base URL (affects all 26 chatbot webhook endpoints)
 
 > ## Telemetry · Webhook (`telemetry-service` · port 8989)
-> These endpoints are called by **Glific** (WhatsApp bot platform), not by the frontend.
+> These endpoints are called by the **WhatsApp chatbot platform**, not by the frontend.
 >
 > **All 26 require the `X-Webhook-Token: <token>` header.** Ingress exposes them publicly, bypassing
 > the API gateway, so this shared secret is the only thing in front of them. Requests without a valid
@@ -283,9 +282,52 @@ An unsupported value returns `400` with `errorCode: CHANNEL_NOT_SUPPORTED`. `PUT
 `PATCH /schemes/{id}/yesterday-final-reading` do not take it — a correction keeps the channel
 recorded when the reading was first submitted.
 
+### Partner ingestion — the optional `reading_unit` parameter
+
+`POST /api/v1/telemetry/readings`, `POST /api/v1/telemetry/readings/formats/{format}` and
+`PUT /api/v1/telemetry/readings` accept an optional `reading_unit` (`PUT` also accepts `readingUnit`):
+the unit `confirmed_reading` is given in. The value is converted to the channel's standard unit before
+it is stored. Omitted or blank, `confirmed_reading` is taken to be in the standard unit, which is what
+every caller sent before the field existed.
+
+| Channel | Accepted `reading_unit` | Also accepted | Standard unit |
+|---------|-------------------------|---------------|---------------|
+| BFM | `m3`, `kL`, `L` | `m³` for `m3`; `litre`, `liter` for `L` | `m3` |
+| ELM | `kW.h` | `kWh` | `kW.h` |
+| PDU | `min`, `h` | `hr` for `h` | `min` |
+| IOT, MAN | none | none | none |
+
+Only these spellings are accepted. An alternative spelling is stored as the unit it stands for, so
+`kWh` is stored as `kW.h`. Case and surrounding whitespace are ignored, but other spellings, such as
+plurals like `litres` or `hrs`, are rejected rather than guessed at. The channel is the one the reading
+is recorded under: on `POST`, the declared `channel` or else the operator's
+stored preference; on `PUT`, the channel of the reading being corrected.
+`PATCH /schemes/{id}/yesterday-final-reading` does not take a unit; its value is always in `m3`.
+
+Both errors below return `400`:
+
+- `READING_UNIT_NOT_SUPPORTED` — `reading_unit` is not one of the channel's units (any value, for IOT
+  and MAN), or a photo sent without `confirmed_reading` names a unit other than the channel's standard
+  one: OCR reads a meter in its standard unit.
+- `IMAGE_NOT_SUPPORTED_FOR_CHANNEL` — `POST` only. A photo (`reading_url`) sent without
+  `confirmed_reading`, on a channel that can't read photos: PDU, IOT and MAN, and ELM while no OCR
+  provider reads electric meters. A photo sent with `confirmed_reading` is accepted on every channel;
+  the photo is kept and not read.
+
+### Partner ingestion — PDU limits
+
+A PDU reading is how long the pumps ran, and a day has 1,440 minutes. On `POST /readings`,
+`POST /readings/formats/{format}` and `PUT /readings`, and on WhatsApp, a PDU value is refused when:
+
+- it is longer than 1,440 minutes on its own, or
+- the scheme's PDU readings on that day would add up to more than 1,440 minutes with it. A `PUT`
+  replaces the corrected reading's old value, so only the scheme's other readings that day count.
+
+Both return `400` with `errorCode: ABNORMAL_READING`, and nothing is stored.
+
 | Method | Endpoint                                          | Description |
 |--------|---------------------------------------------------|-------------|
-| POST | `/api/v1/telemetry/readings/glific`               | Receive the generic Glific webhook payload for image-based meter readings |
+| POST | `/api/v1/telemetry/readings/whatsapp`             | Receive the chatbot webhook payload for image-based meter readings |
 | POST | `/api/v1/telemetry/intro`                         | Send the flow intro message for a contact |
 | POST | `/api/v1/telemetry/closing`                       | Send the flow closing message for a contact |
 | POST | `/api/v1/telemetry/language/selection`            | Return the language selection prompt/options for a contact |
@@ -309,8 +351,92 @@ recorded when the reading was first submitted.
 | POST | `/api/v1/telemetry/others/submitted`              | Save “other issue” details |
 | POST | `/api/v1/telemetry/take-meter-reading`            | Return the take‑meter‑reading prompt/options |
 | POST | `/api/v1/telemetry/manual-reading`                | Submit a manual meter reading |
-| POST | `/api/v1/telemetry/location`                      | Submit/update location details for a contact |
+| POST | `/api/v1/telemetry/location`                      | Submit/update location details for a contact. Response carries `locationMismatch` — see [location-affinity-check.md](../docs/location-affinity-check.md) |
 | POST | `/api/v1/telemetry/update-previous-reading`       | Update the previous reading for a contact |
+
+---
+
+### Telemetry service — republishing ELM and PDU readings (operations)
+
+`POST /api/v1/telemetry/internal/readings/republish` sends a tenant's stored ELM and PDU readings to
+analytics again, so their water quantities are recalculated from the formula and pump data configured
+now. Use it after setting up a tenant's ELM formula or a scheme's pumps or `k_factor`: readings stored
+before that have no water quantity, and saving the configuration doesn't recalculate them.
+
+It is an operations route, not a partner one, and takes two headers:
+
+- `X-Internal-Token`: the operations token. Configure its SHA-256 hex hash, not the token, in
+  `TELEMETRY_INTERNAL_AUTH_TOKEN_HASH`. While that is unset, the route is disabled and every call gets
+  `401`. The api-gateway routes `/api/v1/telemetry/**` publicly, so this token is the only thing in
+  front of it.
+- `X-Tenant-Code`: the tenant's state code, in any case, such as `AS`. The run covers only that tenant.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `fromDate`, `toDate` | yes | Reading dates (`yyyy-MM-dd`), both included, at most 31 days |
+| `stateSchemeId`, `centreSchemeId` | no | One scheme, found as on `POST /readings`: the state id first, then the centre id. Left out, every scheme |
+| `channel` | no | `ELM` or `PDU`, case-insensitive. Left out, both |
+
+`from_date`, `to_date`, `state_scheme_id` and `centre_scheme_id` are accepted too. A scheme created
+automatically for an unknown scheme id can't be named; leave the scheme out to include it.
+
+```json
+{"success": true, "data": {"republishedCount": 42, "withheldCount": 1}}
+```
+
+`republishedCount` is the number of readings sent to analytics. Each is sent before the response,
+and Kafka acknowledges it before the next one goes; the dashboards update once analytics has
+processed them. `withheldCount` is the number of quarantined readings, which aren't sent, as on
+every other path. Readings go oldest first, and sending the same range again is safe: analytics
+updates the reading it already holds instead of adding another.
+
+With `ANALYTICS_READ_FROM_AGGREGATES` on, the dashboards read pre-aggregated tables, which the nightly
+job rebuilds only for the last `ANALYTICS_AGG_DAILY_LOOKBACK_DAYS` days (3 by default). After
+republishing older dates, re-aggregate them: restart analytics-service with
+`ANALYTICS_AGG_BACKFILL_ENABLED=true` and `ANALYTICS_AGG_BACKFILL_START_DATE` set to the earliest
+`fromDate`, then turn it off again once its log shows `[aggregation-backfill] DONE`.
+
+Failures return `success: false` with a code in `data.errorCode`:
+
+- `400 VALIDATION_FAILED`: `X-Tenant-Code` or a date is missing, `toDate` is before `fromDate`, or
+  the range is longer than 31 days.
+- `400 MALFORMED_REQUEST`: the body isn't JSON, or a date isn't `yyyy-MM-dd`.
+- `400 CHANNEL_NOT_SUPPORTED`: a channel other than ELM or PDU. BFM readings can't be republished:
+  their water quantity doesn't depend on configuration, and older ones would be counted twice.
+- `401`, with the body `{"success": false, "message": "Unauthorized"}` and no `data`: the token is
+  missing or wrong, or no token is configured.
+- `404 TENANT_NOT_FOUND`: no tenant has that state code.
+- `404 SCHEME_NOT_FOUND`: the scheme id matches none of the tenant's schemes.
+- `503 PROCESSING_FAILED`: Kafka stopped acknowledging readings part-way, so the run stopped.
+  `republishedCount` and `withheldCount` count the readings before it stopped, and `notSentCount`
+  the ones not sent. Send the same range again.
+- `500 PROCESSING_FAILED`: safe to retry.
+
+#### Before the first run
+
+ELM and PDU readings that reached analytics before its V56 have fact rows with no source reading id.
+Republishing one adds a second fact row instead of updating the first, so the submission counts
+twice. Once both telemetry-service and analytics-service from this release are deployed, find them:
+
+```sql
+SELECT tenant_id, channel, COUNT(*), MIN(reading_date), MAX(reading_date)
+FROM analytics_schema.fact_meter_reading_table
+WHERE channel IN (2, 3) AND source_reading_id IS NULL
+GROUP BY tenant_id, channel;
+```
+
+Channel `2` is ELM and `3` is PDU. For each tenant it returns, delete those rows, then straight away
+republish the tenant from its earliest `MIN` to its latest `MAX`, in calls of at most 31 days. Its
+dashboards miss those readings until the run finishes.
+
+```sql
+DELETE FROM analytics_schema.fact_meter_reading_table
+WHERE tenant_id = :tenantId AND channel IN (2, 3) AND source_reading_id IS NULL;
+```
+
+Only readings telemetry still holds are sent again, so a fact row whose reading has since been
+deleted doesn't come back. Don't link the old rows to their readings by `correlation_id` instead:
+the WhatsApp flows share one correlation id across several readings (analytics V48).
 
 ---
 
@@ -336,6 +462,6 @@ recorded when the reading was first submitted.
 
 | Old | New | Notes |
 |-----|-----|-------|
-| `GET /api/notifications` | `GET /api/v1/message/notifications` | Added `/v1/message/` prefix |
+| `GET /api/notifications` | — | Removed; only ever returned placeholder data |
 | `POST /api/notifications/send` | `POST /api/v1/message/notifications` | Verb `/send` removed; use POST to collection |
 | `POST /api/publish` | `POST /api/v1/message/events` | Renamed to noun; added `/v1/message/` prefix |

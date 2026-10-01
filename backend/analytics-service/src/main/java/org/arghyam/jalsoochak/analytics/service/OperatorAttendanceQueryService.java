@@ -2,7 +2,7 @@ package org.arghyam.jalsoochak.analytics.service;
 
 import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.analytics.dto.response.OperatorAttendanceDayItemDto;
-import org.arghyam.jalsoochak.analytics.repository.DimOperatorAttendanceRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactOperatorAttendanceRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -18,7 +18,7 @@ public class OperatorAttendanceQueryService {
 
     private static final int ABSENT = 0;
 
-    private final DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
+    private final FactOperatorAttendanceRepository factOperatorAttendanceRepository;
 
     public List<OperatorAttendanceDayItemDto> getDayWiseAttendance(UUID userUuid, LocalDate startDate, LocalDate endDate) {
         LocalDate safeEnd = (endDate != null) ? endDate : LocalDate.now();
@@ -29,7 +29,7 @@ public class OperatorAttendanceQueryService {
         }
 
         List<OperatorAttendanceDayItemDto> rows =
-                dimOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(userUuid, safeStart, safeEnd);
+                factOperatorAttendanceRepository.findDayWiseByUserUuidAndDateRange(userUuid, safeStart, safeEnd);
 
         Map<LocalDate, Integer> bestAttendanceByDate = new HashMap<>();
         for (OperatorAttendanceDayItemDto row : rows) {

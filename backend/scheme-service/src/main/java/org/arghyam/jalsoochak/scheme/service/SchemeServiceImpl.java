@@ -12,6 +12,7 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.arghyam.jalsoochak.scheme.config.SchemeSecurityEvaluator;
 import org.arghyam.jalsoochak.scheme.config.TenantContext;
+import org.arghyam.jalsoochak.scheme.config.properties.StorageProperties;
 import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
@@ -32,6 +33,7 @@ import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository;
 import org.arghyam.jalsoochak.scheme.repository.SchemeLgdMappingCreateRecord;
 import org.arghyam.jalsoochak.scheme.repository.SchemeSubdivisionMappingCreateRecord;
 import org.arghyam.jalsoochak.scheme.repository.SchemeUpdateRecord;
+import org.arghyam.jalsoochak.scheme.storage.ObjectStorageService;
 import org.arghyam.jalsoochak.scheme.util.TenantSchemaResolver;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -50,6 +52,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -133,7 +136,8 @@ public class SchemeServiceImpl implements SchemeService {
     private final SchemeDbRepository schemeDbRepository;
     private final SchemeUploadChunkProcessor chunkProcessor;
     private final KafkaProducer kafkaProducer;
-    private final MinioService minioService;
+    private final ObjectStorageService objectStorageService;
+    private final StorageProperties storageProperties;
     private final PiiEncryptionService piiEncryptionService;
 
     @Override
@@ -431,7 +435,7 @@ public class SchemeServiceImpl implements SchemeService {
                 paramsHash,
                 paramsJson,
                 dataVersion,
-                minioService.getBucket(),
+                storageProperties.getReportsBucket(),
                 objectKey,
                 rowCount,
                 fileSizeBytes,
@@ -444,8 +448,17 @@ public class SchemeServiceImpl implements SchemeService {
         String filenamePrefix = "SCHEME".equals(reportType) ? "scheme_report" : "scheme_mapping_report";
         String filename = buildDownloadFilename(filenamePrefix, tenantCode, OffsetDateTime.now(ZoneOffset.UTC));
         return schemeDbRepository.findReportObjectKey(schemaName, reportType, REPORT_FORMAT_CSV, paramsHash, dataVersion)
-                .map(key -> minioService.getObjectUrl(key, filename))
+                .map(key -> presignedReportUrl(key, filename))
                 .orElse(null);
+    }
+
+    private String presignedReportUrl(String objectKey, String downloadFilename) {
+        return objectStorageService.presignedGetUrl(
+                storageProperties.getReportsBucket(),
+                objectKey,
+                Duration.ofSeconds(storageProperties.getPresignedTtlSeconds()),
+                downloadFilename
+        ).toString();
     }
 
     private ReportLinkResponseDTO generateAndUploadSchemesReport(
@@ -497,11 +510,11 @@ public class SchemeServiceImpl implements SchemeService {
             long fileSize = Files.size(tempFile);
             String link;
             try (InputStream input = Files.newInputStream(tempFile)) {
-                minioService.upload(input, fileSize, objectKey, "text/csv");
+                objectStorageService.upload(storageProperties.getReportsBucket(), objectKey, input, fileSize, "text/csv");
             }
             String tenantCode = tenantCodeFromSchema(schemaName);
             String filename = buildDownloadFilename("scheme_report", tenantCode, OffsetDateTime.now(ZoneOffset.UTC));
-            link = minioService.getObjectUrl(objectKey, filename);
+            link = presignedReportUrl(objectKey, filename);
             saveReportRecord(schemaName, actorUserId, reportType, REPORT_FORMAT_CSV, paramsJson, paramsHash, dataVersion, objectKey, fileSize, rowCount.get());
             return ReportLinkResponseDTO.builder().link(link).build();
         } catch (IOException e) {
@@ -557,11 +570,11 @@ public class SchemeServiceImpl implements SchemeService {
             long fileSize = Files.size(tempFile);
             String link;
             try (InputStream input = Files.newInputStream(tempFile)) {
-                minioService.upload(input, fileSize, objectKey, "text/csv");
+                objectStorageService.upload(storageProperties.getReportsBucket(), objectKey, input, fileSize, "text/csv");
             }
             String tenantCode = tenantCodeFromSchema(schemaName);
             String filename = buildDownloadFilename("scheme_mapping_report", tenantCode, OffsetDateTime.now(ZoneOffset.UTC));
-            link = minioService.getObjectUrl(objectKey, filename);
+            link = presignedReportUrl(objectKey, filename);
             saveReportRecord(schemaName, actorUserId, reportType, REPORT_FORMAT_CSV, paramsJson, paramsHash, dataVersion, objectKey, fileSize, rowCount.get());
             return ReportLinkResponseDTO.builder().link(link).build();
         } catch (IOException e) {

@@ -89,6 +89,16 @@ class TenantConfigRepositoryTest {
         }
 
         @Test
+        void findTenantIdByStateCodeSkipsADeletedTenant() {
+            when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
+                    .thenReturn(List.of(TENANT));
+
+            repository.findTenantIdByStateCode("AS");
+
+            verify(jdbcTemplate).query(contains("deleted_at IS NULL"), any(RowMapper.class), any(Object[].class));
+        }
+
+        @Test
         void findTenantIdByApiKeyHashRejectsABlankHashWithoutQuerying() {
             assertThat(repository.findTenantIdByApiKeyHash(null)).isEmpty();
             assertThat(repository.findTenantIdByApiKeyHash("  ")).isEmpty();

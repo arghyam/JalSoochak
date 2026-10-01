@@ -151,7 +151,7 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
-        <!-- AWS SDK v2 S3 — works with AWS S3, MinIO, Cloudflare R2, and any S3-compatible store -->
+        <!-- AWS SDK v2 S3 — works with AWS S3 and any other S3-compatible store -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
@@ -168,6 +168,8 @@
                 <targetPath>db/migration</targetPath>
                 <includes>
                     <include>V*.sql</include>
+                    <!-- Flyway script config files, e.g. executeInTransaction=false -->
+                    <include>V*.sql.conf</include>
                 </includes>
             </resource>
         </resources>

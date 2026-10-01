@@ -39,6 +39,15 @@ class AnomalyConstantsTest {
         }
 
         @Test
+        @DisplayName("the location-mismatch anomaly is type 11")
+        void locationMismatchIsEleven() {
+            // Mirrored by EscalationType.LOCATION_MISMATCH in analytics-service and by the "11" entry
+            // in message-service's AnomalyLabels.CODE_TO_NAME, neither of which can be imported here.
+            // All three are pinned to the literal so a change to any one of them fails.
+            assertThat(AnomalyConstants.TYPE_LOCATION_MISMATCH).isEqualTo(11);
+        }
+
+        @Test
         @DisplayName("codes are unique and contiguous from 1")
         void codesAreUniqueAndContiguous() {
             List<Integer> codes = intConstants("TYPE_");
@@ -58,6 +67,24 @@ class AnomalyConstantsTest {
                     AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_SUBMITTED,
                     AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_CORRECTION_REJECTED_PUBLISHED,
                     AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_CORRECTION_REJECTED_QUARANTINED);
+        }
+
+        /**
+         * Every reason constant, not just the supply ones. Kept separate from
+         * {@link #supplyReasons()} because that source also feeds {@link #casesAreDistinct()}, which
+         * is specifically about telling the three implausible-supply cases apart.
+         */
+        static Stream<String> allReasons() {
+            return Stream.concat(
+                    supplyReasons(),
+                    Stream.of(AnomalyConstants.REASON_LOCATION_MISMATCH));
+        }
+
+        @Test
+        @DisplayName("the location-mismatch reason names the condition without the distance")
+        void locationMismatch() {
+            assertThat(AnomalyConstants.REASON_LOCATION_MISMATCH)
+                    .isEqualTo("Reading submitted outside the scheme boundary.");
         }
 
         @Test
@@ -92,11 +119,12 @@ class AnomalyConstantsTest {
         }
 
         @ParameterizedTest
-        @MethodSource("supplyReasons")
+        @MethodSource("allReasons")
         @DisplayName("carry no interpolated values, so the column stays groupable")
         void carryNoInterpolatedValues(String reason) {
             // A per-row number appended here would make "12 corrections rejected" a text parse
-            // rather than a GROUP BY. The numbers belong in overridden_reading / previous_reading.
+            // rather than a GROUP BY. The numbers belong in overridden_reading / previous_reading,
+            // or — for a location mismatch, which has no numeric column — in the log line alone.
             assertThat(reason)
                     .doesNotContainPattern("\\d")
                     .doesNotContain("%s", "%d", "{}", "{0}");

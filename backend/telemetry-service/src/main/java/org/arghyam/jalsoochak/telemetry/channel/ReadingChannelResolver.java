@@ -6,7 +6,7 @@ import org.springframework.stereotype.Service;
 
 /**
  * Resolves the {@link ReadingChannel} a user submits readings through, from their
- * stored preference in {@code common_schema.user_channel_preference}. Falls back to
+ * stored preference in {@code <tenant schema>.user_channel_preference}. Falls back to
  * {@link ReadingChannel#DEFAULT BFM} when no preference exists or the inputs are
  * missing, so reading submissions keep working exactly as before.
  */
@@ -16,17 +16,17 @@ public class ReadingChannelResolver {
 
     private final UserChannelPreferenceRepository userChannelPreferenceRepository;
 
-    public ReadingChannel resolve(Integer tenantId, String contactId) {
-        if (tenantId == null || contactId == null || contactId.isBlank()) {
+    public ReadingChannel resolve(String schemaName, String contactId) {
+        if (schemaName == null || contactId == null || contactId.isBlank()) {
             return ReadingChannel.DEFAULT;
         }
-        return userChannelPreferenceRepository.findChannelValue(tenantId, contactId)
+        return userChannelPreferenceRepository.findChannelValue(schemaName, contactId)
                 .map(ReadingChannel::fromChannelValue)
                 .orElse(ReadingChannel.DEFAULT);
     }
 
     /** Convenience for producers that attach the numeric channel code to an event. */
-    public int resolveCode(Integer tenantId, String contactId) {
-        return resolve(tenantId, contactId).getCode();
+    public int resolveCode(String schemaName, String contactId) {
+        return resolve(schemaName, contactId).getCode();
     }
 }

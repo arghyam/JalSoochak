@@ -6,9 +6,10 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSupplyCounts;
@@ -17,6 +18,10 @@ import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
+import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimitFixtures;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -65,15 +70,23 @@ class BfmReadingServiceImplausibleSupplyTest {
     private static final LocalDateTime BASELINE_AT = LocalDateTime.of(2026, 9, 7, 9, 0);
 
     @Mock
+    private PduDayLimit pduDayLimit;
+
+    @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
+    @Mock
+    private OcrProviderResolver ocrProviderResolver;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private ReadingChannelResolver readingChannelResolver;
 
@@ -82,10 +95,11 @@ class BfmReadingServiceImplausibleSupplyTest {
 
     @BeforeEach
     void setUp() {
+        PduDayLimitFixtures.allowsEveryRun(pduDayLimit);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);
-        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, null))
+        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
         // createReading reads two tenant configs on every submission for a block that is commented
@@ -96,19 +110,33 @@ class BfmReadingServiceImplausibleSupplyTest {
                 eq(SCHEMA), eq(SCHEME_ID), eq(OPERATOR_ID), any(LocalDate.class))).thenReturn(Optional.empty());
         lenient().when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                any(), any(), any(), anyInt(), any(), any(), any(), any(), any())).thenReturn(READING_ID);
+                any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(READING_ID, null));
         lenient().when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
-                .thenReturn(READING_ID);
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(READING_ID, null));
     }
 
     private BfmReadingService service(SupplyPlausibilityProperties.Mode mode) {
         return new BfmReadingService(
-                repo, flowVisionService, telemetryEventPublisher, tenantConfigRepository,
-                new ObjectMapper(), glificOperatorContextService, null, readingChannelResolver,
+                repo,
+                telemetryEventPublisher,
+                null,
+                tenantConfigRepository,
+                new ObjectMapper(),
+                operatorContextService,
+                readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
-                null,
+                new ImageReadingCapture(
+                        repo,
+                        telemetryEventPublisher,
+                        null,
+                        ocrProviderResolver,
+                        OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
+                new SubmittedValueCapture(),
+                pduDayLimit,
+                calculationParametersSnapshotter,
                 null);
     }
 
@@ -116,7 +144,7 @@ class BfmReadingServiceImplausibleSupplyTest {
     private void checkableScheme() {
         when(repo.supportsQuarantine(SCHEMA)).thenReturn(true);
         when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
-                eq(SCHEMA), eq(SCHEME_ID), any(LocalDate.class), isNull()))
+                eq(SCHEMA), eq(SCHEME_ID), eq(ReadingChannel.BFM), any(LocalDate.class), isNull()))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
         when(repo.findSchemeSupplyCounts(SCHEMA, SCHEME_ID))
                 .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(100, 0, 0)));
@@ -152,7 +180,7 @@ class BfmReadingServiceImplausibleSupplyTest {
                     any(LocalDateTime.class), any(BigDecimal.class), eq(new BigDecimal("1100")), anyString(),
                     isNull(), isNull(), isNull(), eq(IngestionSource.NORMAL), isNull(), isNull(), isNull(),
                     eq(RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED),
-                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY));
+                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), any(), any());
         }
 
         @Test
@@ -163,9 +191,9 @@ class BfmReadingServiceImplausibleSupplyTest {
             submit(SupplyPlausibilityProperties.Mode.ENFORCE, "1100", true);
 
             // publishMeterReadingRecorded is the single event that writes fact_meter_reading,
-            // dim_operator_attendance and fact_water_quantity. Withholding it is the whole point.
+            // fact_operator_attendance and fact_water_quantity. Withholding it is the whole point.
             verify(telemetryEventPublisher, never()).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -175,7 +203,10 @@ class BfmReadingServiceImplausibleSupplyTest {
 
             submit(SupplyPlausibilityProperties.Mode.ENFORCE, "1100", true);
 
-            verify(repo).updateFlowReadingChannel(SCHEMA, READING_ID, ReadingChannel.BFM.name());
+            verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
+                    any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
+                    any(), any(), any(), anyInt(), any(), any(), any(), any(),
+                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), eq(ReadingChannel.BFM.name()), eq("m3"));
         }
 
         @Test
@@ -265,7 +296,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             assertThat(response.isSuccess()).isTrue();
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), eq(new BigDecimal("950")), anyString(),
-                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull());
+                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull(), any(), any());
             verify(repo, never()).createTenantAnomalyRecord(anyString(), any());
         }
 
@@ -274,7 +305,7 @@ class BfmReadingServiceImplausibleSupplyTest {
                 + "cannot land separately from the row")
         void imageSubmissionTakesTheTransactionalPath() {
             checkableScheme();
-            when(flowVisionService.extractReading(anyString())).thenReturn(FlowVisionResult.builder()
+            when(defaultOcrExtractor.extractReading(anyString(), isNull())).thenReturn(OcrReadingResult.builder()
                     .adjustedReading(new BigDecimal("1100"))
                     .qualityConfidence(new BigDecimal("0.95"))
                     .build());
@@ -295,10 +326,10 @@ class BfmReadingServiceImplausibleSupplyTest {
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
                     any(), any(), any(), anyInt(), any(), any(), any(), any(),
-                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY));
+                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), any(), any());
             verify(repo, never()).createFlowReading(anyString(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                    any(), any(), any());
+                    any(), any(), any(), any(), any());
         }
     }
 
@@ -325,10 +356,10 @@ class BfmReadingServiceImplausibleSupplyTest {
             submit(SupplyPlausibilityProperties.Mode.AUDIT, "1100", true);
 
             verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull());
+                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull(), any(), any());
         }
 
         @Test
@@ -350,14 +381,14 @@ class BfmReadingServiceImplausibleSupplyTest {
     class Scope {
 
         @Test
-        @DisplayName("a caller that did not opt in is never checked, so the Glific path is untouched")
+        @DisplayName("a caller that did not opt in is never checked, so the chatbot path is untouched")
         void unopposedCallerIsNotChecked() {
             // No checkableScheme(): under strict stubs, consulting the scheme's counts would fail.
             CreateReadingResponse response = submit(SupplyPlausibilityProperties.Mode.ENFORCE, "1100", false);
 
             assertThat(response.isSuccess()).isTrue();
             verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -406,7 +437,7 @@ class BfmReadingServiceImplausibleSupplyTest {
         void firstReadingIsAccepted() {
             when(repo.supportsQuarantine(SCHEMA)).thenReturn(true);
             when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
-                    eq(SCHEMA), eq(SCHEME_ID), any(LocalDate.class), isNull())).thenReturn(Optional.empty());
+                    eq(SCHEMA), eq(SCHEME_ID), eq(ReadingChannel.BFM), any(LocalDate.class), isNull())).thenReturn(Optional.empty());
 
             CreateReadingResponse response = submit(SupplyPlausibilityProperties.Mode.ENFORCE, "99999", true);
 

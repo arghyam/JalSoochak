@@ -31,7 +31,7 @@ telemetry-service / tenant-service
           |                             |
           |                     analytics-service
           |                             |
-          +---- operational record      +---- analytics_schema.anomaly_table
+          +---- operational record      +---- analytics_schema.fact_anomaly_table
                                         +---- optional fact_escalation_table row
 ```
 
@@ -56,6 +56,7 @@ The current anomaly type constants in `telemetry-service` are:
 - `8` - `OVER_WATER_SUPPLY`
 - `9` - `NO_SUBMISSION`
 - `10` - `IMPLAUSIBLE_WATER_SUPPLY`
+- `11` - `LOCATION_MISMATCH`
 
 Source: `telemetry-service` `AnomalyConstants`.
 
@@ -76,6 +77,12 @@ of three situations produced it, and the anomaly's `reason` text says which:
 
 See [implausible-water-supply-runbook.md](implausible-water-supply-runbook.md) §5 before treating
 such a gap as a pipeline fault, or a type-10 anomaly as evidence of one.
+
+`11` is the only type that does **not** reject or withhold the reading. It records that a submission
+was made farther from the scheme than the configured `LOCATION_AFFINITY_THRESHOLD` metres; the
+reading itself is stored and counted normally. On the WhatsApp path the operator saw a warning and
+chose to proceed, and on the state-IT reading API there is no interactive step at all. See
+[location-affinity-check.md](location-affinity-check.md).
 
 ---
 
@@ -158,7 +165,7 @@ different metric and has no tenant column.
 
 ### Trigger
 
-During Glific issue-report and meter workflow flows, the operator can report issues such as no water supply or no submission reasons.
+During the WhatsApp chatbot's issue-report and meter workflow flows, the operator can report issues such as no water supply or no submission reasons.
 
 These issues eventually produce anomaly or water-quantity side effects depending on the selected workflow branch and downstream processing.
 
@@ -256,7 +263,7 @@ Typical event payload fields include:
 
 `analytics-service` consumes `ANOMALY_RECORDED` from `telemetry-service-topic` and writes a row to:
 
-- `analytics_schema.anomaly_table`
+- `analytics_schema.fact_anomaly_table`
 
 This is the analytics-facing anomaly store used by reporting and list APIs.
 
@@ -348,7 +355,7 @@ This means the system is designed to support a full operational lifecycle, even 
 
 ### Analytics tables
 
-- `analytics_schema.anomaly_table`
+- `analytics_schema.fact_anomaly_table`
 - `analytics_schema.fact_escalation_table`
 - `analytics_schema.fact_meter_reading_table`
 - `analytics_schema.fact_water_quantity_table`

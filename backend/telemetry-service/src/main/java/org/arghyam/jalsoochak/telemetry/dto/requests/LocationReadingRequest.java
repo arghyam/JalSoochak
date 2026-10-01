@@ -41,7 +41,7 @@ public class LocationReadingRequest {
     }
 
     /**
-     * Glific posts the full contact object, but only {@code phone} is used — it resolves the
+     * The chatbot posts the full contact object, but only {@code phone} is used — it resolves the
      * operator. The WhatsApp profile name it also sends is deliberately not bound: nothing reads it,
      * and an unbound field cannot become a sink for whatever a caller puts there. {@code
      * ignoreUnknown} keeps those extra keys from failing the request.

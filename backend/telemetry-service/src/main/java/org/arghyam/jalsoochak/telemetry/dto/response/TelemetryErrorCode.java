@@ -18,16 +18,16 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 public enum TelemetryErrorCode {
 
-    /** The FlowVision OCR call threw / failed while extracting a reading from the image. */
+    /** The OCR provider call threw / failed while extracting a reading from the image. */
     FLOW_VISION_FAILED("FLOW_VISION_FAILED"),
 
     /**
-     * Reserved for an explicit FlowVision provider "REJECTED" status. Not currently emitted — the
+     * Reserved for an explicit OCR provider "REJECTED" status. Not currently emitted — the
      * unreadable-image path uses {@link #UNREADABLE_IMAGE}. Kept for forward compatibility.
      */
     FLOW_VISION_REJECTED("FLOW_VISION_REJECTED"),
 
-    /** FlowVision responded but produced no usable meter reading (image could not be read). */
+    /** The OCR provider responded but produced no usable meter reading (image could not be read). */
     UNREADABLE_IMAGE("UNREADABLE_IMAGE"),
 
     /** The submitted image's extracted reading duplicates the previous confirmed reading. */
@@ -49,6 +49,20 @@ public enum TelemetryErrorCode {
      */
     CHANNEL_NOT_SUPPORTED("CHANNEL_NOT_SUPPORTED"),
 
+    /**
+     * The submission's {@code reading_unit} is not one of the units its reading channel accepts, or a
+     * unit other than the channel's standard unit came with a photo and no {@code confirmed_reading}.
+     * Rejected rather than ignored, so a value is never stored in the wrong unit.
+     */
+    READING_UNIT_NOT_SUPPORTED("READING_UNIT_NOT_SUPPORTED"),
+
+    /**
+     * The submission sent only a meter photo, and its reading channel can't read one: PDU readings are
+     * always typed in, and ELM photos wait for an ELM OCR model. A photo sent with a
+     * {@code confirmed_reading} is accepted on every channel; the photo is kept and not read.
+     */
+    IMAGE_NOT_SUPPORTED_FOR_CHANNEL("IMAGE_NOT_SUPPORTED_FOR_CHANNEL"),
+
     /** Unclassified server-side failure while processing the reading. */
     PROCESSING_FAILED("PROCESSING_FAILED"),
 
@@ -57,6 +71,9 @@ public enum TelemetryErrorCode {
 
     /** The submitted scheme could not be found. */
     SCHEME_NOT_FOUND("SCHEME_NOT_FOUND"),
+
+    /** The tenant named by the request's {@code X-Tenant-Code} could not be found. */
+    TENANT_NOT_FOUND("TENANT_NOT_FOUND"),
 
     /** The operator could not be found. */
     OPERATOR_NOT_FOUND("OPERATOR_NOT_FOUND"),
@@ -72,7 +89,8 @@ public enum TelemetryErrorCode {
 
     /**
      * The reading is not usable: the daily volume it implies is not plausible for the scheme that
-     * produced it.
+     * produced it, or a PDU run, or a scheme's PDU runs on one day together, are longer than a day
+     * (1,440 minutes).
      *
      * <p><b>Deliberately vaguer than the anomaly it comes from.</b> Internally the same rejection is
      * {@code AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY} / {@code EscalationType

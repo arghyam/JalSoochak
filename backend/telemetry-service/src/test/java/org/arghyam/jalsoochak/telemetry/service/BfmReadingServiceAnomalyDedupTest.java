@@ -1,9 +1,10 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
@@ -12,6 +13,9 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,6 +36,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -41,10 +46,18 @@ import static org.mockito.Mockito.when;
 class BfmReadingServiceAnomalyDedupTest {
 
     @Mock
+    private PduDayLimit pduDayLimit;
+
+    @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
+    @Mock
+    private OcrProviderResolver ocrProviderResolver;
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
@@ -53,7 +66,7 @@ class BfmReadingServiceAnomalyDedupTest {
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
     private ReadingChannelResolver readingChannelResolver;
@@ -64,19 +77,27 @@ class BfmReadingServiceAnomalyDedupTest {
     void setUp() {
         service = new BfmReadingService(
                 telemetryTenantRepository,
-                flowVisionService,
                 telemetryEventPublisher,
+                null,
                 tenantConfigRepository,
                 new ObjectMapper(),
-                glificOperatorContextService,
-                null,
+                operatorContextService,
                 readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, telemetryTenantRepository, tenantConfigRepository),
-                null,
-                null
-        );
+                new ImageReadingCapture(
+                        telemetryTenantRepository,
+                        telemetryEventPublisher,
+                        null,
+                        ocrProviderResolver,
+                        OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
+                new SubmittedValueCapture(),
+                pduDayLimit,
+                calculationParametersSnapshotter,
+                null);
+        // The channel is resolved before the photo is read, so every submission here needs it.
+        lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
     }
 
     @Test
@@ -85,7 +106,7 @@ class BfmReadingServiceAnomalyDedupTest {
         when(telemetryTenantRepository.existsSchemeById("tenant_up", 100L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById("tenant_up", 11L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_up", 11L, 100L)).thenReturn(true);
-        when(flowVisionService.extractReading("https://img.example.com/a.jpg")).thenReturn(null);
+        when(defaultOcrExtractor.extractReading("https://img.example.com/a.jpg", null)).thenReturn(null);
 
         CreateReadingRequest request = CreateReadingRequest.builder()
                 .schemeId(100L)
@@ -138,14 +159,14 @@ class BfmReadingServiceAnomalyDedupTest {
         when(telemetryTenantRepository.existsSchemeById("tenant_up", 100L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById("tenant_up", 11L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_up", 11L, 100L)).thenReturn(true);
-        when(flowVisionService.extractReading("https://img.example.com/dup.jpg")).thenReturn(
-                FlowVisionResult.builder()
+        when(defaultOcrExtractor.extractReading("https://img.example.com/dup.jpg", null)).thenReturn(
+                OcrReadingResult.builder()
                         .adjustedReading(new BigDecimal("123"))
                         .qualityConfidence(new BigDecimal("0.95"))
                         .correlationId("ocr-correlation")
                         .build()
         );
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_up", 100L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_up", 100L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("123"), ReadingTime.now().minusDays(1))));
         when(tenantConfigRepository.findConfigValue(anyInt(), anyString())).thenReturn(Optional.empty());
 

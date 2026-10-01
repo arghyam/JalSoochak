@@ -63,11 +63,18 @@ CREATE TABLE tenant_zz.user_scheme_mapping_table (
 -- tenant_as is on the current migration level (flow_reading_table has
 -- quarantine_reason); tenant_zz predates V40 and must keep the legacy SQL.
 
+-- LOCATION-AFFINITY: latitude/longitude are present on tenant_as (V6/V7/V30 level) and absent on
+-- tenant_zz below, so the repository's column probes are exercised both ways — the boundary check
+-- must degrade to "no location" on an unmigrated schema rather than fail the reading.
 CREATE TABLE tenant_as.scheme_master_table (
     id               SERIAL   PRIMARY KEY,
     fhtc_count       INTEGER  NOT NULL DEFAULT 0,
     planned_fhtc     INTEGER  NOT NULL DEFAULT 0,
-    house_hold_count INTEGER  NOT NULL DEFAULT 0
+    house_hold_count INTEGER  NOT NULL DEFAULT 0,
+    latitude         DOUBLE PRECISION,
+    longitude        DOUBLE PRECISION,
+    -- V54, an input to the ELM and PDU formulas.
+    k_factor         FLOAT
 );
 
 CREATE TABLE tenant_as.flow_reading_table (
@@ -78,12 +85,23 @@ CREATE TABLE tenant_as.flow_reading_table (
     extracted_reading NUMERIC      NOT NULL,
     confirmed_reading NUMERIC      NOT NULL,
     correlation_id    VARCHAR(255) NOT NULL,
+    -- Written by every insert, so createFlowReading can run against this table.
+    quantity          NUMERIC,
     channel           VARCHAR(64),
     image_url         TEXT DEFAULT '',
     created_by        INTEGER      NOT NULL,
     created_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_by        INTEGER,
     updated_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
     quarantine_reason SMALLINT     NOT NULL DEFAULT 0,
+    latitude          DOUBLE PRECISION,
+    longitude         DOUBLE PRECISION,
+    -- V9/V11. Part of the placeholder-row predicate, so the same-day reuse that the location
+    -- boundary check depends on cannot be exercised for real without them.
+    meter_change_reason  TEXT,
+    issue_report_reason  TEXT,
+    -- V56. Absent on tenant_zz, so the insert's column probe is exercised both ways.
+    submitted_unit    VARCHAR(16),
     deleted_at        TIMESTAMP
 );
 
@@ -102,10 +120,15 @@ CREATE TABLE tenant_zz.flow_reading_table (
     extracted_reading NUMERIC      NOT NULL,
     confirmed_reading NUMERIC      NOT NULL,
     correlation_id    VARCHAR(255) NOT NULL,
+    -- The columns every insert writes, which a pre-V40 schema already had (V9/V11 for the reasons).
+    quantity          NUMERIC,
     channel           VARCHAR(64),
+    meter_change_reason  TEXT,
+    issue_report_reason  TEXT,
     image_url         TEXT DEFAULT '',
     created_by        INTEGER      NOT NULL,
     created_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_by        INTEGER,
     updated_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
     deleted_at        TIMESTAMP
 );
@@ -151,4 +174,21 @@ CREATE TABLE tenant_zz.anomaly_table (
     detail     TEXT,
     status     INTEGER   NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- ── ELM and PDU calculation inputs (V53) ─────────────────────────────────────
+-- The pumps a scheme's ELM and PDU readings are converted to litres with.
+
+CREATE TABLE tenant_as.asset_pump_registry_table (
+    id                       SERIAL      PRIMARY KEY,
+    scheme_id                INTEGER     NOT NULL,
+    status                   INTEGER     NOT NULL,
+    pump_discharge_capacity  FLOAT,
+    pump_efficiency          FLOAT,
+    pump_head                FLOAT,
+    motor_power              FLOAT,
+    motor_power_unit         VARCHAR(20),
+    motor_efficiency         FLOAT,
+    units_consumed_per_hour  FLOAT,
+    deleted_at               TIMESTAMP
 );

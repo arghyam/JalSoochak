@@ -25,17 +25,18 @@ public class RestTemplateConfig {
     private final int readTimeoutMs;
 
     public RestTemplateConfig(
-            @Value("${flowvision.http.connect-timeout-ms:5000}") int connectTimeoutMs,
-            @Value("${flowvision.http.read-timeout-ms:10000}") int readTimeoutMs
+            @Value("${ocr.http.connect-timeout-ms:5000}") int connectTimeoutMs,
+            @Value("${ocr.http.read-timeout-ms:10000}") int readTimeoutMs
     ) {
         this.connectTimeoutMs = connectTimeoutMs;
         this.readTimeoutMs = readTimeoutMs;
     }
 
     /**
-     * The general-purpose client for FlowVision, Glific and MinIO. Marked primary because
-     * {@link MediaFetchRestTemplateConfig} contributes a second, SSRF-guarded RestTemplate that only
-     * the caller-supplied media fetch should use — every other injection point keeps getting this one.
+     * The general-purpose client for the OCR provider, the WhatsApp provider and object storage.
+     * Marked primary because {@link MediaFetchRestTemplateConfig} contributes a second, SSRF-guarded
+     * RestTemplate that only the caller-supplied media fetch should use — every other injection point
+     * keeps getting this one.
      */
     @Primary
     @Bean

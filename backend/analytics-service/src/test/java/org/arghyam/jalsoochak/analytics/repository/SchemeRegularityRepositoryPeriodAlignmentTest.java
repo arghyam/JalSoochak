@@ -13,14 +13,19 @@ import static org.mockito.Mockito.mock;
 class SchemeRegularityRepositoryPeriodAlignmentTest {
 
     @Test
-    void weekIsRollingAnchoredToStartDate_monthIsCalendarAligned() throws Exception {
+    void weekIsSundayAlignedCalendarWeek_monthIsCalendarAligned() throws Exception {
         SchemeRegularityRepository repo = new SchemeRegularityRepository(mock(JdbcTemplate.class), "4", false, "90");
 
         Object weekParts = invokeBuildPeriodSqlParts(repo, PeriodScale.WEEK);
         String weekSeriesStart = invokeStringAccessor(weekParts, "periodStartFromSeries");
+        String weekSeriesEnd = invokeStringAccessor(weekParts, "periodEndFromSeries");
         String weekFactStart = invokeStringAccessor(weekParts, "periodStartFromFact");
-        assertTrue(weekSeriesStart.contains("params.anchor_start"));
-        assertTrue(weekFactStart.contains("params.anchor_start"));
+        // Sunday-aligned calendar weeks: EXTRACT(DOW)=0 on Sunday, no rolling anchor.
+        assertTrue(weekSeriesStart.contains("EXTRACT(DOW"));
+        assertTrue(weekFactStart.contains("EXTRACT(DOW"));
+        assertTrue(weekSeriesEnd.contains("+ 6"));
+        assertFalse(weekSeriesStart.contains("params.anchor_start"));
+        assertFalse(weekFactStart.contains("params.anchor_start"));
         assertFalse(weekSeriesStart.contains("DATE_TRUNC('week'"));
 
         Object monthParts = invokeBuildPeriodSqlParts(repo, PeriodScale.MONTH);

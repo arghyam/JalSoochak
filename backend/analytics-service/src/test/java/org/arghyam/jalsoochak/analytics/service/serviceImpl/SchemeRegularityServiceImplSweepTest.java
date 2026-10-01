@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.analytics.repository.AggregateReadRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
@@ -60,6 +61,8 @@ class SchemeRegularityServiceImplSweepTest {
     private SchemeRegularityRepository schemeRegularityRepository;
 
     @Mock
+    private AggregateReadRepository aggregateReadRepository;
+    @Mock
     private DimTenantRepository dimTenantRepository;
     @Mock
     private DimUserRepository dimUserRepository;
@@ -78,7 +81,7 @@ class SchemeRegularityServiceImplSweepTest {
                 invocation -> neutralValueFor(invocation.getMethod().getReturnType()));
 
         service = new SchemeRegularityServiceImpl(
-                schemeRegularityRepository, dimTenantRepository, dimUserRepository,
+                schemeRegularityRepository, aggregateReadRepository, dimTenantRepository, dimUserRepository,
                 redisTemplate, new ObjectMapper());
 
         ReflectionTestUtils.setField(service, "regularitySingleDayLookbackDays", 30);

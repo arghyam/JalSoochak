@@ -206,6 +206,8 @@ public class UserManagementServiceImpl implements UserManagementService {
                 .inviteLink(inviteUrl)
                 .expiryHours(inviteProperties.expiryHours())
                 .stateName(tenantName)
+                // Super users belong to no tenant (tenantId 0) and are served by the system default provider
+                .tenantCode(tenantId != 0 ? request.getTenantCode() : null)
                 .build());
     }
 
@@ -313,6 +315,8 @@ public class UserManagementServiceImpl implements UserManagementService {
                 .inviteLink(inviteUrl)
                 .expiryHours(inviteProperties.expiryHours())
                 .stateName(tenantName)
+                // Null for super users (tenantId 0), who are served by the system default provider
+                .tenantCode(tenantCode)
                 .build());
     }
 

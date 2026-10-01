@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.user.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -404,7 +405,10 @@ class UserManagementServiceImplTest {
 
             verify(userCommonRepository).insertToken(
                     eq("new@example.com"), eq("invite-hash"), eq("INVITE"), anyString(), any(), eq(1));
-            verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(any(InviteEmailEvent.class));
+            ArgumentCaptor<InviteEmailEvent> captor = ArgumentCaptor.forClass(InviteEmailEvent.class);
+            verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(captor.capture());
+            // Super users belong to no tenant, so the event carries none and falls back to the system default
+            assertNull(captor.getValue().getTenantCode());
         }
 
         @Test
@@ -580,6 +584,7 @@ class UserManagementServiceImplTest {
             ArgumentCaptor<InviteEmailEvent> captor = ArgumentCaptor.forClass(InviteEmailEvent.class);
             verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(captor.capture());
             assertEquals("Madhya Pradesh", captor.getValue().getStateName());
+            assertEquals("MP", captor.getValue().getTenantCode());
         }
 
         @Test
@@ -1024,6 +1029,7 @@ class UserManagementServiceImplTest {
             ArgumentCaptor<InviteEmailEvent> captor = ArgumentCaptor.forClass(InviteEmailEvent.class);
             verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(captor.capture());
             assertEquals("Madhya Pradesh", captor.getValue().getStateName());
+            assertEquals("MP", captor.getValue().getTenantCode());
         }
 
         @Test

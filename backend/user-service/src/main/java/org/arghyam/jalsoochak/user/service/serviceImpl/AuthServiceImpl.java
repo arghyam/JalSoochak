@@ -396,11 +396,20 @@ public class AuthServiceImpl implements AuthService {
                 .queryParam("token", raw)
                 .build()
                 .toUriString();
+        // Super users belong to no tenant (tenantId 0) and are served by the system default provider
+        Integer tenantId = userOpt.get().tenantId() != null && userOpt.get().tenantId() != 0
+                ? userOpt.get().tenantId()
+                : null;
+        String tenantCode = tenantId != null
+                ? userCommonRepository.findTenantStateCodeById(tenantId).orElse(null)
+                : null;
         userNotificationEventPublisher.publishResetPasswordEmailAfterCommit(ResetPasswordEmailEvent.builder()
                 .eventType("SEND_PASSWORD_RESET_EMAIL")
                 .to(request.getEmail())
                 .resetLink(resetUrl)
                 .expiryMinutes(passwordResetProperties.expiryMinutes())
+                .tenantId(tenantId)
+                .tenantCode(tenantCode)
                 .build());
     }
 

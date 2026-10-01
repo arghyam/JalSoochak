@@ -1,6 +1,7 @@
 # Lenient ingestion — recording submissions with a missing scheme / operator
 
-**Scope:** Assam REST channel (`POST /api/v1/telemetry/readings`) only.
+**Scope:** State-IT REST ingestion (`POST /api/v1/telemetry/readings`, and
+`POST /api/v1/telemetry/readings/formats/{format}`, which maps into the same request) only.
 **Status:** on by default, gated by a flag and a greppable code marker so it can be reverted.
 **Marker:** every code/DB change for this feature is tagged `LENIENT-INGEST`.
 
@@ -11,14 +12,14 @@
 Every meter reading becomes a row in `<tenant>.flow_reading_table`, which has three `NOT NULL`
 foreign keys: `scheme_id → scheme_master_table`, and `created_by`/`updated_by → user_table`.
 So a reading could not be inserted unless both the scheme **and** the operator already existed in
-the tenant master data. Assam submissions were being dropped at two points in
+the tenant master data. State-IT submissions were being dropped at two points in
 `telemetry-service`:
 
 1. **Unknown operator** — the submitted `phone_number` was not in `user_table`
-   (`GlificOperatorContextService` threw `No operator found…`).
+   (`OperatorContextService` threw `No operator found…`).
 2. **Unknown / unmapped scheme** — the submitted `state_scheme_id`/`centre_scheme_id` was not in
    `scheme_master_table`, or existed but the operator was not mapped to it
-   (`GlificImageWorkflowService.resolveAssamSchemeId` threw `scheme_not_found` /
+   (`MeterImageWorkflowService`'s scheme lookup threw `scheme_not_found` /
    `operator_not_mapped_to_scheme`).
 
 > Note: a scheme id is always present (bean-validation requires one), and originally so was the phone
@@ -27,8 +28,8 @@ the tenant master data. Assam submissions were being dropped at two points in
 
 ## 2. What changed
 
-Instead of rejecting, the Assam path now **records the submission and tags it** so nothing is lost
-and it can be filtered / reconciled later. Four cases, each represented differently:
+Instead of rejecting, the canonical reading path now **records the submission and tags it** so
+nothing is lost and it can be filtered / reconciled later. Four cases, each represented differently:
 
 | Case                                       | Representation                                                                                                      | `ingestion_source` bit    |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ------------------------- |
@@ -77,7 +78,7 @@ be looked up by. It therefore needs **one of two identifiers**, and either alone
 
 | Payload                                    | Row corrected                                                         |
 | ------------------------------------------ | --------------------------------------------------------------------- |
-| `correlation_id` (with or without a phone) | the reading with that `correlation_id` or `flowvision_correlation_id` |
+| `correlation_id` (with or without a phone) | the reading with that `correlation_id` or `ocr_correlation_id`        |
 | `phone_number` only                        | the latest reading created by the operator behind that phone          |
 | neither                                    | rejected — `400 Either correlationId or phoneNumber must be provided` |
 
@@ -132,7 +133,7 @@ Partial index `idx_<schema>_user_auto_prov … WHERE is_auto_provisioned`.
 The sentinel is a single row per tenant: `email = 'unknown-operator@auto.jalsoochak.invalid'`,
 `title = 'Unknown Operator'`, `status = 0` (inactive, so it never appears in active-operator KPIs).
 
-> Find the Assam schema name: `SELECT id, state_code FROM common_schema.tenant_master_table;`
+> Find the tenant's schema name: `SELECT id, state_code FROM common_schema.tenant_master_table;`
 > The schema is `tenant_<state_code>` (e.g. `tenant_as`). Substitute it for `<schema>` below.
 
 ## 4. How to filter / track each category (SQL)
@@ -179,20 +180,20 @@ ORDER BY reading_date DESC;
 
 ## 5. How to track it in the logs
 
-Logger: `org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService` (INFO).
+Logger: `org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService` (INFO).
 
-| What                                                       | Grep                                                                |
-| ---------------------------------------------------------- | ------------------------------------------------------------------- |
-| Every leniently-recorded submission (canonical audit line) | `assam_reading_lenient_recorded`                                    |
-| Unknown-scheme events (with the auto-provisioned id)       | `assam_reading_lenient reason="scheme_not_found"`                   |
-| Unknown-operator events (masked phone)                     | `assam_reading_lenient reason="operator_not_found"`                 |
-| Operator-not-mapped events                                 | `assam_reading_lenient reason="operator_not_mapped_to_scheme"`      |
-| Phone-less submissions (both outcomes)                     | `assam_reading_phone_absent`                                        |
-| …credited to the scheme's pump operator                    | `assam_reading_phone_absent reason="operator_inferred_from_scheme"` |
-| …with no pump operator on the scheme (sentinel)            | `assam_reading_phone_absent reason="no_operator_mapped_to_scheme"`  |
-| The actual phone behind an unknown-operator row (PII)      | `rawContactId=` — **DEBUG only**                                    |
+| What                                                       | Grep                                                          |
+| ---------------------------------------------------------- | ------------------------------------------------------------- |
+| Every leniently-recorded submission (canonical audit line) | `reading_lenient_recorded`                                    |
+| Unknown-scheme events (with the auto-provisioned id)       | `reading_lenient reason="scheme_not_found"`                   |
+| Unknown-operator events (masked phone)                     | `reading_lenient reason="operator_not_found"`                 |
+| Operator-not-mapped events                                 | `reading_lenient reason="operator_not_mapped_to_scheme"`      |
+| Phone-less submissions (both outcomes)                     | `reading_phone_absent`                                        |
+| …credited to the scheme's pump operator                    | `reading_phone_absent reason="operator_inferred_from_scheme"` |
+| …with no pump operator on the scheme (sentinel)            | `reading_phone_absent reason="no_operator_mapped_to_scheme"`  |
+| The actual phone behind an unknown-operator row (PII)      | `rawContactId=` — **DEBUG only**                              |
 
-The `assam_reading_lenient_recorded` line prints `ingestionSource`, boolean flags
+The `reading_lenient_recorded` line prints `ingestionSource`, boolean flags
 (`unknownScheme` / `unknownOperator` / `operatorNotMapped` / `phoneAbsent`), `operatorId`,
 `schemeId`, the submitted scheme ids, and the **masked** phone (`****1234`, `n/a` when none was
 submitted). Raw phone numbers only ever appear at DEBUG, per the project privacy rule.
@@ -236,12 +237,12 @@ submitted). Raw phone numbers only ever appear at DEBUG, per the project privacy
   grep -rn "LENIENT-INGEST\|PHONE-OPTIONAL" backend/ docs/
   ```
 
-  Reverting the optional phone means restoring `@NotBlank` on `AssamReadingRequest.phoneNumber` and
+  Reverting the optional phone means restoring `@NotBlank` on `CanonicalReadingRequest.phoneNumber` and
   dropping `resolveOperatorFromScheme` / `findFirstPumpOperatorForScheme`; already-recorded rows keep
   their `PHONE_ABSENT` bit.
   Touched files: `database/V31__add_lenient_ingestion_tracking.sql`,
   `telemetry-service/.../service/IngestionSource.java`,
-  `.../service/GlificImageWorkflowService.java`, `.../service/GlificOperatorContextService.java`,
+  `.../service/MeterImageWorkflowService.java`, `.../service/OperatorContextService.java`,
   `.../service/BfmReadingService.java`, `.../repository/TelemetryTenantRepository.java`,
   `.../dto/requests/CreateReadingRequest.java`, `telemetry-service/.../application.yml`.
   The DB columns are additive and safe to leave in place even if the code is removed.

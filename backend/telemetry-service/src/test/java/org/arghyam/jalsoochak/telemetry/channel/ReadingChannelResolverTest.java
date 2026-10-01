@@ -16,6 +16,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class ReadingChannelResolverTest {
 
+    private static final String SCHEMA = "tenant_as";
+
     @Mock
     private UserChannelPreferenceRepository userChannelPreferenceRepository;
 
@@ -24,26 +26,26 @@ class ReadingChannelResolverTest {
 
     @Test
     void resolve_whenPreferencePresent_mapsStoredChannelValue() {
-        when(userChannelPreferenceRepository.findChannelValue(7, "919999999999"))
+        when(userChannelPreferenceRepository.findChannelValue(SCHEMA, "919999999999"))
                 .thenReturn(Optional.of("ELM"));
 
-        assertThat(resolver.resolve(7, "919999999999")).isEqualTo(ReadingChannel.ELM);
-        assertThat(resolver.resolveCode(7, "919999999999")).isEqualTo(ReadingChannel.ELM.getCode());
+        assertThat(resolver.resolve(SCHEMA, "919999999999")).isEqualTo(ReadingChannel.ELM);
+        assertThat(resolver.resolveCode(SCHEMA, "919999999999")).isEqualTo(ReadingChannel.ELM.getCode());
     }
 
     @Test
     void resolve_whenNoPreference_defaultsToBfm() {
-        when(userChannelPreferenceRepository.findChannelValue(7, "919999999999"))
+        when(userChannelPreferenceRepository.findChannelValue(SCHEMA, "919999999999"))
                 .thenReturn(Optional.empty());
 
-        assertThat(resolver.resolve(7, "919999999999")).isEqualTo(ReadingChannel.BFM);
+        assertThat(resolver.resolve(SCHEMA, "919999999999")).isEqualTo(ReadingChannel.BFM);
     }
 
     @Test
-    void resolve_whenTenantOrContactMissing_defaultsToBfmWithoutLookup() {
+    void resolve_whenSchemaOrContactMissing_defaultsToBfmWithoutLookup() {
         assertThat(resolver.resolve(null, "919999999999")).isEqualTo(ReadingChannel.BFM);
-        assertThat(resolver.resolve(7, null)).isEqualTo(ReadingChannel.BFM);
-        assertThat(resolver.resolve(7, "  ")).isEqualTo(ReadingChannel.BFM);
+        assertThat(resolver.resolve(SCHEMA, null)).isEqualTo(ReadingChannel.BFM);
+        assertThat(resolver.resolve(SCHEMA, "  ")).isEqualTo(ReadingChannel.BFM);
         verifyNoInteractions(userChannelPreferenceRepository);
     }
 }

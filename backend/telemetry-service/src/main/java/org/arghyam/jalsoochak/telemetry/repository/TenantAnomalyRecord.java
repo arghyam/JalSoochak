@@ -24,7 +24,7 @@ import java.util.Objects;
  * {@code flow_reading_table} row the anomaly was raised over. It is the submission's surrogate id
  * and not its {@code correlation_id} because the latter is mutable (an issue report overwrites it
  * on a reused same-day row), carries no unique constraint, is deliberately shared across rows by the
- * Glific flows, and is overloaded with {@code scheme-selection-}/{@code issue-report-} prefixes that
+ * chatbot flows, and is overloaded with {@code scheme-selection-}/{@code issue-report-} prefixes that
  * are matched with LIKE. {@code createFlowReading} already returns the id at every call site.
  *
  * @param userId                    operator the anomaly is filed against
@@ -33,8 +33,8 @@ import java.util.Objects;
  * @param reason                    human-readable text; prefer a fixed constant so the column stays
  *                                  groupable
  * @param status                    an {@code AnomalyConstants.STATUS_*} code
- * @param aiReading                 value FlowVision extracted, or {@code null} when no image was read
- * @param aiConfidencePercentage    FlowVision's confidence, or {@code null}
+ * @param aiReading                 value the OCR provider extracted, or {@code null} when no image was read
+ * @param aiConfidencePercentage    the OCR provider's confidence, or {@code null}
  * @param overriddenReading         the value that was submitted or attempted
  * @param retries                   attempts already made today, where the flow counts them
  * @param previousReading           the baseline the reading was judged against, not the standing

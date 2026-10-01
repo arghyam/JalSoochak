@@ -6,19 +6,23 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -43,22 +47,34 @@ import static org.mockito.Mockito.when;
 class BfmReadingServicePlaceholderRowTest {
 
     @Mock
+    private PduDayLimit pduDayLimit;
+
+    @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
 
     @Mock
+    private ReadingRepublisher readingRepublisher;
+
+    @Mock
     private TenantConfigRepository tenantConfigRepository;
 
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
 
     @Mock
-    private FlowVisionReadingsRetryService flowVisionReadingsRetryService;
+    private OcrReadingsRetryService ocrReadingsRetryService;
+
+    @Mock
+    private OcrProviderResolver ocrProviderResolver;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -69,13 +85,38 @@ class BfmReadingServicePlaceholderRowTest {
     @Mock
     private RolloverResolutionService rolloverResolutionService;
 
-    // SUPPLY-PLAUSIBILITY: declared so @InjectMocks supplies it rather than leaving it null. These
-    // tests never set CreateReadingRequest.supplyPlausibilityChecked, so the guard is never consulted.
+    // SUPPLY-PLAUSIBILITY: these tests never set CreateReadingRequest.supplyPlausibilityChecked, so
+    // the guard is never consulted.
     @Mock
     private SupplyPlausibilityGuard supplyPlausibilityGuard;
 
-    @InjectMocks
     private BfmReadingService service;
+
+    // Built by hand rather than with @InjectMocks, so the photo goes through the real image capture
+    // and these tests still pin which OCR path each retry mode takes.
+    @BeforeEach
+    void setUp() {
+        service = new BfmReadingService(
+                telemetryTenantRepository,
+                telemetryEventPublisher,
+                readingRepublisher,
+                tenantConfigRepository,
+                objectMapper,
+                operatorContextService,
+                readingChannelResolver,
+                rolloverResolutionService,
+                supplyPlausibilityGuard,
+                new ImageReadingCapture(
+                        telemetryTenantRepository,
+                        telemetryEventPublisher,
+                        ocrReadingsRetryService,
+                        ocrProviderResolver,
+                        OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
+                new SubmittedValueCapture(),
+                pduDayLimit,
+                calculationParametersSnapshotter,
+                null);
+    }
 
     @AfterEach
     void clearTenantContext() {
@@ -97,8 +138,8 @@ class BfmReadingServicePlaceholderRowTest {
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
-        when(flowVisionService.extractReading("http://example.com/img.jpg")).thenReturn(
-                FlowVisionResult.builder()
+        when(defaultOcrExtractor.extractReading("http://example.com/img.jpg", null)).thenReturn(
+                OcrReadingResult.builder()
                         .requestId("request-1")
                         .correlationId("corr-1")
                         .qualityStatus("GOOD")
@@ -107,7 +148,7 @@ class BfmReadingServicePlaceholderRowTest {
                         .build()
         );
 
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
@@ -116,7 +157,11 @@ class BfmReadingServicePlaceholderRowTest {
                 1L,
                 ReadingTime.today()
         )).thenReturn(Optional.of(99L));
-        when(readingChannelResolver.resolve(1, "919999999999")).thenReturn(ReadingChannel.BFM);
+        when(readingChannelResolver.resolve(schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
+        when(telemetryTenantRepository.updateFlowReadingFromIngestion(anyString(), anyLong(),
+                any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
+                anyString(), any(), anyLong(), any(), any()))
+                .thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
@@ -125,9 +170,10 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         assertEquals("corr-1", resp.getCorrelationId());
 
+        // The resolved channel is written onto the reused row by its short code, with its standard unit.
         verify(telemetryTenantRepository).updateFlowReadingFromIngestion(
                 anyString(),
-                anyLong(),
+                eq(99L),
                 any(LocalDateTime.class),
                 any(BigDecimal.class),
                 any(BigDecimal.class),
@@ -135,12 +181,14 @@ class BfmReadingServicePlaceholderRowTest {
                 eq("corr-1"),
                 anyString(),
                 any(),
-                anyLong()
+                anyLong(),
+                eq(ReadingChannel.BFM.name()),
+                eq("m3")
         );
-        // The resolved channel is persisted onto the reading row by its short code.
-        verify(telemetryTenantRepository).updateFlowReadingChannel(schemaName, 99L, ReadingChannel.BFM.name());
+        verify(telemetryTenantRepository, never()).updateFlowReadingChannel(any(), any(), any());
         verify(telemetryTenantRepository, never()).createFlowReading(
-                anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any()
+                anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(),
+                any(), any()
         );
     }
 
@@ -158,8 +206,9 @@ class BfmReadingServicePlaceholderRowTest {
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
-        when(flowVisionReadingsRetryService.extractReading("http://example.com/img.jpg"))
-                .thenThrow(new FlowVisionReadingsUnavailableException("temporarily unavailable", new RuntimeException("timeout")));
+        when(readingChannelResolver.resolve(schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
+        when(ocrReadingsRetryService.extractReading(defaultOcrExtractor, "http://example.com/img.jpg", null))
+                .thenThrow(new OcrReadingsUnavailableException("temporarily unavailable", new RuntimeException("timeout")));
 
         CreateReadingResponse resp = service.createReading(
                 request,
@@ -167,7 +216,7 @@ class BfmReadingServicePlaceholderRowTest {
                 operator,
                 "919999999999",
                 false,
-                FlowVisionRetryMode.RESILIENT
+                OcrRetryMode.RESILIENT
         );
 
         assertNotNull(resp);
@@ -212,10 +261,11 @@ class BfmReadingServicePlaceholderRowTest {
                 readingDate,
                 readingAt,
                 "BFM",
-                0
+                0,
+                null
         );
 
-        when(glificOperatorContextService.resolveOperatorWithSchema("919999999999"))
+        when(operatorContextService.resolveOperatorWithSchema("919999999999"))
                 .thenReturn(new TelemetryOperatorWithSchema(schemaName, operator));
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(schemaName, 1L))
                 .thenReturn(Optional.of(latestReading));
@@ -227,21 +277,8 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals("corr-1", resp.getCorrelationId());
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                22,
-                10L,
-                1L,
-                new BigDecimal("100"),
-                new BigDecimal("123"),
-                null,
-                "http://example.com/img.jpg",
-                readingAt,
-                ReadingChannel.BFM.getCode(),
-                readingDate,
-                1,
-                0
-        , "corr-1");
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
+        verify(readingRepublisher).republish(schemaName, 22, 99L);
     }
 
     @Test
@@ -262,7 +299,8 @@ class BfmReadingServicePlaceholderRowTest {
                 readingDate,
                 readingAt,
                 "BFM",
-                0
+                0,
+                null
         );
 
         when(telemetryTenantRepository.findFlowReadingDetailsByCorrelationId(schemaName, "corr-1"))
@@ -276,20 +314,7 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals("corr-1", resp.getCorrelationId());
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL);
-        verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                22,
-                10L,
-                1L,
-                new BigDecimal("100"),
-                new BigDecimal("123"),
-                null,
-                "http://example.com/img.jpg",
-                readingAt,
-                ReadingChannel.BFM.getCode(),
-                readingDate,
-                1,
-                0
-        , "corr-1");
+                RolloverResolutionService.SOURCE_MANUAL, "m3");
+        verify(readingRepublisher).republish(schemaName, 22, 99L);
     }
 }

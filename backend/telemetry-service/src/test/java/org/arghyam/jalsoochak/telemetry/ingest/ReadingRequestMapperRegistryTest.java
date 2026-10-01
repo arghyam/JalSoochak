@@ -2,7 +2,7 @@ package org.arghyam.jalsoochak.telemetry.ingest;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -84,8 +84,8 @@ class ReadingRequestMapperRegistryTest {
         }
 
         @Override
-        public AssamReadingRequest map(JsonNode rawBody) {
-            return new AssamReadingRequest();
+        public CanonicalReadingRequest map(JsonNode rawBody) {
+            return new CanonicalReadingRequest();
         }
     }
 }

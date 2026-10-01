@@ -24,103 +24,152 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantRepositoryTest {
 
     private static final LocalDateTime READING_AT = LocalDateTime.of(2026, 3, 1, 6, 30);
+    private static final LocalDateTime UPDATED_AT = LocalDateTime.of(2026, 3, 1, 6, 30, 4, 567_000);
 
     @Nested
     @DisplayName("createFlowReading")
     class CreateFlowReading {
 
         @Test
-        void usesPayloadJsonAndFlowVisionColumnsOnFullyMigratedSchema() {
+        void usesPayloadJsonAndOcrCorrelationColumnsOnFullyMigratedSchema() {
             onColumnExists(true);
-            onScalar("INSERT INTO", Number.class, 501L);
+            onQuery("INSERT INTO", row("id", 501L, "updated_at", UPDATED_AT));
 
             Long id = repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "fv-1", "img", "reason");
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason");
 
             assertThat(id).isEqualTo(501L);
-            String sql = capturedInsertSql();
-            assertThat(sql).contains("payload_json").contains("flowvision_correlation_id");
+            String sql = capturedReturningRowSql();
+            assertThat(sql).contains("payload_json").contains("ocr_correlation_id");
+            assertThat(capturedReturningRowArgs()).contains("ocr-1");
         }
 
         @Test
         void omitsPayloadJsonOnLegacySchema() {
             onColumnExists(false);
-            onScalar("INSERT INTO", Number.class, 502L);
+            onQuery("INSERT INTO", row("id", 502L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason");
 
-            String sql = capturedInsertSql();
-            assertThat(sql).doesNotContain("payload_json").doesNotContain("flowvision_correlation_id");
+            String sql = capturedReturningRowSql();
+            assertThat(sql).doesNotContain("payload_json").contains("correlation_id, quantity");
             assertThat(sql).contains("reading_at");
         }
 
         @Test
-        void usesPayloadJsonOnlyWhenFlowVisionColumnAbsent() {
+        void usesPayloadJsonOnlyWhenOcrCorrelationColumnAbsent() {
             onColumnsExisting("payload_json", "observation_time");
-            onScalar("INSERT INTO", Number.class, 503L);
+            onQuery("INSERT INTO", row("id", 503L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason");
 
-            String sql = capturedInsertSql();
+            String sql = capturedReturningRowSql();
             assertThat(sql).contains("payload_json")
-                    .doesNotContain("flowvision_correlation_id")
+                    .contains("correlation_id, quantity")
                     .contains("observation_time");
         }
 
         @Test
-        void usesFlowVisionColumnOnlyWhenPayloadJsonAbsent() {
-            onColumnsExisting("flowvision_correlation_id");
-            onScalar("INSERT INTO", Number.class, 504L);
+        void usesOcrCorrelationColumnOnlyWhenPayloadJsonAbsent() {
+            onColumnsExisting("ocr_correlation_id");
+            onQuery("INSERT INTO", row("id", 504L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "fv-1", "img", "reason");
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason");
 
-            String sql = capturedInsertSql();
-            assertThat(sql).contains("flowvision_correlation_id").doesNotContain("payload_json");
+            String sql = capturedReturningRowSql();
+            assertThat(sql).contains("ocr_correlation_id").doesNotContain("payload_json");
         }
 
         @Test
         void prefersObservationTimeOverLegacyReadingAt() {
             onColumnsExisting("observation_time");
-            onScalar("INSERT INTO", Number.class, 505L);
+            onQuery("INSERT INTO", row("id", 505L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
                     BigDecimal.ONE, BigDecimal.ONE, "c", "", null);
 
-            assertThat(capturedInsertSql()).contains("observation_time");
+            assertThat(capturedReturningRowSql()).contains("observation_time");
         }
 
         @Test
         void substitutesEmptyStringForNullImageUrl() {
             onColumnExists(false);
-            onScalar("INSERT INTO", Number.class, 506L);
+            onQuery("INSERT INTO", row("id", 506L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
                     BigDecimal.ONE, BigDecimal.ONE, "c", null, null);
 
-            assertThat(capturedInsertArgs()).contains("");
+            assertThat(capturedReturningRowArgs()).contains("");
+        }
+
+        /**
+         * The version is the updated_at the insert itself wrote, returned by the same statement, so
+         * the event published for this row never pairs its values with another write's version.
+         */
+        @Test
+        void returnsTheIdAndTheVersionTheInsertWrote() {
+            onColumnExists(true);
+            onQuery("INSERT INTO", row("id", 508L, "updated_at", UPDATED_AT));
+
+            FlowReadingVersion version = repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, "ELM", "kW.h");
+
+            assertThat(version).isEqualTo(new FlowReadingVersion(508L, UPDATED_AT));
+            assertThat(capturedReturningRowSql())
+                    .contains("RETURNING id, updated_at")
+                    .contains("clock_timestamp()");
         }
 
         @Test
-        void returnsNullWhenInsertYieldsNoGeneratedId() {
-            onColumnExists(false);
-            onScalar("INSERT INTO", Number.class, null);
+        void writesTheChannelAndSubmittedUnitWithTheRow() {
+            onColumnExists(true);
+            onQuery("INSERT INTO", row("id", 509L, "updated_at", UPDATED_AT));
 
-            assertThat(repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    BigDecimal.ONE, BigDecimal.ONE, "c", "", null)).isNull();
+            repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, "PDU", "min");
+
+            assertThat(capturedReturningRowSql()).contains("quantity, channel, submitted_unit, meter_change_reason");
+            assertThat(capturedReturningRowArgs()).containsSequence("PDU", "min");
+        }
+
+        /** A pre-V56 schema has no submitted_unit column: the unit is dropped, the channel is not. */
+        @Test
+        void dropsTheSubmittedUnitOnAPreV56Schema() {
+            onColumnsExisting("payload_json");
+            onQuery("INSERT INTO", row("id", 510L, "updated_at", UPDATED_AT));
+
+            repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, "ELM", "kW.h");
+
+            assertThat(capturedReturningRowSql()).doesNotContain("submitted_unit").contains("quantity, channel");
+            assertThat(capturedReturningRowArgs()).contains("ELM").doesNotContain("kW.h");
+        }
+
+        /** Rows that hold no reading (scheme selection, location) keep a NULL channel, as before. */
+        @Test
+        void legacyOverloadStoresNoChannel() {
+            onColumnExists(true);
+            onQuery("INSERT INTO", row("id", 511L, "updated_at", UPDATED_AT));
+
+            Long id = repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
+                    BigDecimal.ZERO, BigDecimal.ZERO, "c", "", null);
+
+            assertThat(id).isEqualTo(511L);
+            assertThat(capturedReturningRowArgs()).containsSequence("c", null, null, null);
         }
 
         @Test
         void derivesReadingDateFromReadingTimestamp() {
             onColumnExists(false);
-            onScalar("INSERT INTO", Number.class, 507L);
+            onQuery("INSERT INTO", row("id", 507L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
                     BigDecimal.ONE, BigDecimal.ONE, "c", "", null);
 
-            assertThat(capturedInsertArgs()).contains(LocalDate.of(2026, 3, 1));
+            assertThat(capturedReturningRowArgs()).contains(LocalDate.of(2026, 3, 1));
         }
     }
 
@@ -380,7 +429,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
         @Test
         void insertsNewRowWhenNoPlaceholderExists() {
             onColumnExists(true);
-            onScalar("INSERT INTO", Number.class, 601L);
+            onQuery("INSERT INTO", row("id", 601L, "updated_at", UPDATED_AT));
 
             Long id = repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L, READING_AT,
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", "img", "reason",
@@ -401,14 +450,15 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             assertThat(id).isEqualTo(42L);
             Mockito.verify(jdbcTemplate, Mockito.never())
                     .queryForObject(ArgumentMatchers.contains("INSERT INTO"),
-                            ArgumentMatchers.eq(Number.class), ArgumentMatchers.any(Object[].class));
+                            ArgumentMatchers.any(org.springframework.jdbc.core.RowMapper.class),
+                            ArgumentMatchers.any(Object[].class));
         }
 
         @Test
         void writesTheConfirmedReadingSourceAlongsideTheInsert() {
             // READING-PROVENANCE: the EXTERNALLY_ASSERTED marker is committed with the row, not after it.
             onColumnExists(true);
-            onScalar("INSERT INTO", Number.class, 602L);
+            onQuery("INSERT INTO", row("id", 602L, "updated_at", UPDATED_AT));
 
             repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L, READING_AT,
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason",
@@ -418,9 +468,22 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
         }
 
         @Test
+        void returnsTheVersionOfTheInsertWithItsChannelAndUnit() {
+            onColumnExists(true);
+            onQuery("INSERT INTO", row("id", 606L, "updated_at", UPDATED_AT));
+
+            FlowReadingVersion version = repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L,
+                    READING_AT, BigDecimal.ZERO, new BigDecimal("11"), "corr-1", null, "", null,
+                    0, null, null, null, 3, null, "BFM", "m3");
+
+            assertThat(version).isEqualTo(new FlowReadingVersion(606L, UPDATED_AT));
+            assertThat(capturedReturningRowArgs()).containsSequence("BFM", "m3");
+        }
+
+        @Test
         void skipsTheIngestionTrackingUpdateWhenThereIsNothingToTrack() {
             onColumnExists(true);
-            onScalar("INSERT INTO", Number.class, 603L);
+            onQuery("INSERT INTO", row("id", 603L, "updated_at", UPDATED_AT));
 
             repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L, READING_AT,
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason",
@@ -478,7 +541,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             // The marker is what stops the row becoming a later baseline, so it must land with the
             // insert rather than in a separate write that could fail on its own.
             onColumnExists(true);
-            onScalar("INSERT INTO", Number.class, 604L);
+            onQuery("INSERT INTO", row("id", 604L, "updated_at", UPDATED_AT));
 
             repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L, READING_AT,
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason",
@@ -490,7 +553,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
         @Test
         void persistFlowReadingWithTrackingLeavesTheColumnAtItsDefaultWhenNoReasonGiven() {
             onColumnExists(true);
-            onScalar("INSERT INTO", Number.class, 605L);
+            onQuery("INSERT INTO", row("id", 605L, "updated_at", UPDATED_AT));
 
             repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L, READING_AT,
                     new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason",
@@ -519,7 +582,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("issue_report_reason IS NOT NULL", row(
                     "id", 6L, "correlation_id", "issue-report-1", "created_by", 2L));
 
-            assertThat(repository.findLatestPendingIssueReportRecord(SCHEMA, 7L, 2L))
+            assertThat(repository.findLatestPendingIssueReportRecord(SCHEMA, 7L, 2L, LocalDate.of(2026, 3, 1)))
                     .hasValueSatisfying(r -> assertThat(r.id()).isEqualTo(6L));
         }
 
@@ -546,6 +609,23 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             // The update, plus the cleanup that soft-deletes any other pending rows.
             assertThat(allUpdateSql()).hasSize(2);
             assertThat(allUpdateSql().get(1)).contains("deleted_at = NOW()");
+        }
+
+        @Test
+        void supersededMeterChangeRowsAreSoftDeletedWithoutAnAdminDeleter() {
+            // flow_reading_table.deleted_by references tenant_admin_user_master_table, but the chatbot
+            // acts as a pump operator (a user_table id). Writing the operator's id there failed the
+            // foreign key, so every second no-reading report of the day was answered "could not be
+            // saved". The operator is still recorded, in updated_by.
+            onQuery("meter_change_reason IS NOT NULL", row(
+                    "id", 5L, "correlation_id", "meter-change-1",
+                    "created_by", 2L, "extracted_reading", BigDecimal.ZERO));
+
+            repository.upsertPendingMeterChangeRecord(SCHEMA, 7L, 2L, READING_AT, "Meter replaced");
+
+            String cleanup = allUpdateSql().get(1);
+            assertThat(cleanup).contains("deleted_at = NOW()").contains("updated_by = ?");
+            assertThat(cleanup).doesNotContain("deleted_by");
         }
 
         @Test
@@ -675,13 +755,13 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
 
         @Test
         void upsertPendingSchemeSelectionCreatesZeroValuedPlaceholderReading() {
-            onScalar("INSERT INTO", Number.class, 800L);
+            onQuery("INSERT INTO", row("id", 800L, "updated_at", UPDATED_AT));
 
             String correlationId =
                     repository.upsertPendingSchemeSelectionRecord(SCHEMA, 9L, 2L, READING_AT);
 
             assertThat(correlationId).startsWith("scheme-selection-");
-            assertThat(capturedInsertArgs()).contains(BigDecimal.ZERO);
+            assertThat(capturedReturningRowArgs()).contains(BigDecimal.ZERO);
         }
     }
 

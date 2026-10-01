@@ -23,7 +23,7 @@ import java.util.UUID;
 /**
  * Generates an escalation PDF report for a given officer using Apache PDFBox.
  * The PDF is saved to the configured report directory and the filename is returned
- * so that it can be uploaded to MinIO.
+ * so that it can be uploaded to object storage.
  */
 @Service
 @Slf4j

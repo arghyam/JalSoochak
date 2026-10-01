@@ -35,6 +35,7 @@ import org.arghyam.jalsoochak.tenant.config.properties.TenantDefaultsProperties;
 import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.ElmFormulaConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
@@ -55,6 +56,7 @@ import org.arghyam.jalsoochak.tenant.dto.response.TenantConfigStatusResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantSummaryResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.ConfigStatusEnum;
+import org.arghyam.jalsoochak.tenant.enums.ElmFormula;
 import org.arghyam.jalsoochak.tenant.enums.RegionTypeEnum;
 import org.arghyam.jalsoochak.tenant.enums.StatusEnum;
 import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum;
@@ -84,6 +86,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
@@ -670,6 +674,35 @@ class TenantManagementServiceImplTest {
     class GetTenantConfigsTests {
 
         @Test
+        @DisplayName("Should skip stored config keys that are not UI-managed instead of failing the request")
+        void testGetTenantConfigs_UnknownStoredKeyIsSkipped() {
+            // tenant_config_master_table is shared: alongside the UI-managed TenantConfigKeyEnum keys it
+            // also holds runtime keys other services read (ocr_provider/ocr_url/ocr_api_key, language_N,
+            // nudge_message_*). Those are not UI config and must not make this endpoint 400.
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+            List<ConfigDTO> configsList = Arrays.asList(
+                    ConfigDTO.builder()
+                            .configKey("ocr_url")
+                            .configValue("https://flowvision-assam.example/v1/extract-reading")
+                            .build(),
+                    ConfigDTO.builder()
+                            .configKey(TenantConfigKeyEnum.TENANT_LOGO.name())
+                            .configValue("{\"value\":\"https://brand.com/logo.png\"}")
+                            .build()
+            );
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(tenantId)).thenReturn(configsList);
+
+            TenantConfigResponseDTO result = tenantManagementService.getTenantConfigs(tenantId, null);
+
+            assertNotNull(result);
+            assertTrue(result.getConfigs().containsKey(TenantConfigKeyEnum.TENANT_LOGO));
+            assertEquals(1, result.getConfigs().size());
+        }
+
+        @Test
         @DisplayName("Should retrieve all tenant configurations without key filter")
         void testGetTenantConfigs_AllConfigs() {
             // Arrange
@@ -1003,6 +1036,26 @@ class TenantManagementServiceImplTest {
         }
 
         @Test
+        @DisplayName("Rejects a JSON null value as invalid instead of failing with a NullPointerException")
+        void testSetTenantConfigs_weeklyReport_rejectsNullValue() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME, objectMapper.readTree("null"));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+            // treeToValue binds JSON null to a null DTO, so the range checks must not be called on it.
+            assertThrows(InvalidConfigValueException.class,
+                    () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
         @DisplayName("An omitted schedule still writes: missing fields mean the application default")
         void testSetTenantConfigs_weeklyReport_allowsAnOmittedSchedule() throws Exception {
             Integer tenantId = 1;
@@ -1027,6 +1080,55 @@ class TenantManagementServiceImplTest {
 
             verify(tenantCommonRepository).upsertConfig(eq(tenantId),
                     eq(TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME.name()), anyString(), eq(100));
+        }
+
+        @Test
+        @DisplayName("ELM_WATER_QUANTITY_FORMULA accepts the code in any case and stores it in upper case")
+        void testSetTenantConfigs_elmFormula_storesLowerCaseCodeInUpperCase() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.ELM_WATER_QUANTITY_FORMULA, objectMapper.readTree("{\"formula\":\"f2\"}"));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            ArgumentCaptor<String> serialized = ArgumentCaptor.forClass(String.class);
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.ELM_WATER_QUANTITY_FORMULA.name()), serialized.capture(), eq(100)))
+                    .thenAnswer(inv -> Optional.of(ConfigDTO.builder()
+                            .configKey(TenantConfigKeyEnum.ELM_WATER_QUANTITY_FORMULA.name())
+                            .configValue(inv.getArgument(2))
+                            .build()));
+
+            TenantConfigResponseDTO result = tenantManagementService.setTenantConfigs(tenantId, request);
+
+            assertEquals("{\"formula\":\"F2\"}", serialized.getValue());
+            assertEquals(ElmFormula.F2, ((ElmFormulaConfigDTO) result.getConfigs()
+                    .get(TenantConfigKeyEnum.ELM_WATER_QUANTITY_FORMULA)).getFormula());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"{\"formula\":\"F4\"}", "{\"formula\":\"\"}", "{}", "{\"formula\":null}", "null"})
+        @DisplayName("ELM_WATER_QUANTITY_FORMULA rejects an unknown or empty formula before it reaches the database")
+        void testSetTenantConfigs_elmFormula_rejectsUnknownOrEmptyFormula(String value) throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.ELM_WATER_QUANTITY_FORMULA, objectMapper.readTree(value));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+            // There is no default formula, so a value that names none must not be stored.
+            assertThrows(InvalidConfigValueException.class,
+                    () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
         }
 
         @Test
@@ -1120,6 +1222,31 @@ class TenantManagementServiceImplTest {
 
             assertThrows(InvalidConfigKeyException.class,
                     () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            verify(tenantCommonRepository, never()).upsertConfig(any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should reject the messaging provider settings keys on the generic config API")
+        void setTenantConfigs_messagingProviderKeys_throwsInvalidConfigKeyException() throws Exception {
+            // MESSAGING-PROVIDER-SETTINGS: these two are the only way an SMTP host reaches the
+            // database, so the generic endpoint must refuse them — writing one here would skip the
+            // allowlist, TLS and address checks entirely.
+            for (TenantConfigKeyEnum key : List.of(
+                    TenantConfigKeyEnum.EMAIL_PROVIDER_SETTINGS,
+                    TenantConfigKeyEnum.SMS_PROVIDER_SETTINGS)) {
+                Integer tenantId = 1;
+                TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+                Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+                configs.put(key, objectMapper.readTree("{\"provider\":\"smtp\"}"));
+                SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+                when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+                when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+                when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+                assertThrows(InvalidConfigKeyException.class,
+                        () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            }
             verify(tenantCommonRepository, never()).upsertConfig(any(), any(), any(), any());
         }
 
@@ -1592,8 +1719,8 @@ class TenantManagementServiceImplTest {
             assertEquals(total - 1, result.getSummary().getPending());
             assertEquals(ConfigStatusEnum.CONFIGURED, result.getConfigs().get(TenantConfigKeyEnum.TENANT_LOGO).getStatus());
             assertTrue(result.getConfigs().get(TenantConfigKeyEnum.TENANT_LOGO).isMandatory());
-            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES).isMandatory(),
-                    "GLIFIC_MESSAGE_TEMPLATES is optional");
+            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.WHATSAPP_MESSAGE_TEMPLATES).isMandatory(),
+                    "WHATSAPP_MESSAGE_TEMPLATES is optional");
             assertFalse(result.getConfigs().get(TenantConfigKeyEnum.STATE_IT_SYSTEM_CONNECTION).isMandatory(),
                     "STATE_IT_SYSTEM_CONNECTION is optional");
             assertFalse(result.getConfigs().get(TenantConfigKeyEnum.STATE_DATA_RECONCILIATION_TIME).isMandatory(),

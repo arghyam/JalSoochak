@@ -16,8 +16,19 @@ import org.springframework.validation.annotation.Validated;
  * </ul>
  *
  * <p>Both {@code sendgrid} and {@code smtp} fields may be null depending on the active provider.
- * The respective sender implementations validate that their required configuration is present
- * at construction time via {@code @ConditionalOnProperty}.
+ * {@code SystemDefaultProviders} validates that the active provider's configuration is present
+ * when it builds that provider's bean.
+ *
+ * <p>PER-TENANT-PROVIDERS: these are the <em>system default</em> mail settings (O2-4) — what every
+ * tenant used before the feature existed, and what a tenant with no settings of its own, an event
+ * with no tenant, and every send while the flag is off still use. A tenant that configures its own
+ * account gets the account-specific values from
+ * {@link org.arghyam.jalsoochak.message.dto.EmailProviderSettings} and the encrypted secret store
+ * instead. Three things here are shared by both paths: {@link SendGrid#apiUrl()}, because SendGrid
+ * serves every customer from one host and a per-tenant URL would only add an attacker-chosen
+ * destination for the API key (O2-13); the SMTP subject and body templates, which are this
+ * service's own text whichever relay carries them (O2-17); and {@link #fromName()} and
+ * {@link #logoImageUrl()}, which a tenant may leave unset and then falls back to.
  */
 @ConfigurationProperties(prefix = "notification.mail")
 @Validated
@@ -33,10 +44,25 @@ public record MailProperties(
     // ── SendGrid ─────────────────────────────────────────────────────────────────
 
     public record SendGrid(
+            String apiUrl,
             @NotBlank(message = "SendGrid API key must not be blank; set SENDGRID_API_KEY environment variable")
             String apiKey,
             @Valid Templates templates
-    ) {}
+    ) {
+
+        /** As the former {@code @Value} default on {@code SendGridMailSender.apiUrl}. */
+        public static final String DEFAULT_API_URL = "https://api.sendgrid.com";
+
+        public SendGrid {
+            apiUrl = (apiUrl == null || apiUrl.isBlank()) ? DEFAULT_API_URL : apiUrl.trim();
+        }
+
+        /** The API key is a credential and must not reach a log line or an exception message (S-4). */
+        @Override
+        public String toString() {
+            return "SendGrid(apiUrl=" + apiUrl + ")";
+        }
+    }
 
     public record Templates(
             @NotBlank(message = "SendGrid template ID for password-reset must not be blank")

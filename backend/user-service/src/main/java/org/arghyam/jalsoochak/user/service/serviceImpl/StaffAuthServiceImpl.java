@@ -145,10 +145,12 @@ public class StaffAuthServiceImpl implements StaffAuthService {
         SendLoginOtpEvent event = SendLoginOtpEvent.builder()
                 .eventType("SEND_LOGIN_OTP")
                 .officerPhoneNumber(user.phoneNumber())
-                .glificId(isWhatsapp ? user.whatsappConnectionId() : null)
+                .whatsappContactId(isWhatsapp ? user.whatsappConnectionId() : null)
                 .otp(rawOtp)
                 .expiryMinutes(otpProperties.expiryMinutes())
                 .deliveryChannel(otpProperties.deliveryChannel())
+                .tenantId(tenantId)
+                .tenantCode(tenantCode)
                 .build();
 
         eventPublisher.publishLoginOtpAfterCommit(event, user.id(), tenantCode);

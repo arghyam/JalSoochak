@@ -11,9 +11,9 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The two bounded thread pools behind telemetry's background work: the Glific contact sync and the
- * Kafka event publisher. Both are queue-bounded on purpose — an unbounded queue would let a Glific
- * or broker outage accumulate work until the service runs out of memory.
+ * The two bounded thread pools behind telemetry's background work: the WhatsApp contact sync and the
+ * Kafka event publisher. Both are queue-bounded on purpose — an unbounded queue would let a WhatsApp
+ * provider or broker outage accumulate work until the service runs out of memory.
  */
 @DisplayName("AsyncConfig")
 class AsyncConfigTest {
@@ -21,14 +21,14 @@ class AsyncConfigTest {
     private final AsyncConfig config = new AsyncConfig();
 
     @Test
-    void glificSyncExecutorIsABoundedInitialisedPool() {
-        Executor executor = config.glificSyncExecutor();
+    void whatsAppSyncExecutorIsABoundedInitialisedPool() {
+        Executor executor = config.whatsAppSyncExecutor();
 
         assertThat(executor).isInstanceOf(ThreadPoolTaskExecutor.class);
         ThreadPoolTaskExecutor pool = (ThreadPoolTaskExecutor) executor;
         assertThat(pool.getCorePoolSize()).isEqualTo(2);
         assertThat(pool.getMaxPoolSize()).isEqualTo(4);
-        assertThat(pool.getThreadNamePrefix()).isEqualTo("glific-sync-");
+        assertThat(pool.getThreadNamePrefix()).isEqualTo("whatsapp-sync-");
         assertThat(pool.getThreadPoolExecutor()).isNotNull();
 
         pool.shutdown();
@@ -49,8 +49,8 @@ class AsyncConfigTest {
     }
 
     @Test
-    void glificSyncExecutorActuallyRunsSubmittedWork() throws InterruptedException {
-        ThreadPoolTaskExecutor pool = (ThreadPoolTaskExecutor) config.glificSyncExecutor();
+    void whatsAppSyncExecutorActuallyRunsSubmittedWork() throws InterruptedException {
+        ThreadPoolTaskExecutor pool = (ThreadPoolTaskExecutor) config.whatsAppSyncExecutor();
         CountDownLatch ran = new CountDownLatch(1);
 
         pool.execute(ran::countDown);
@@ -61,10 +61,10 @@ class AsyncConfigTest {
 
     @Test
     void theTwoPoolsAreIndependentInstances() {
-        ThreadPoolTaskExecutor sync = (ThreadPoolTaskExecutor) config.glificSyncExecutor();
+        ThreadPoolTaskExecutor sync = (ThreadPoolTaskExecutor) config.whatsAppSyncExecutor();
         ThreadPoolTaskExecutor publisher = (ThreadPoolTaskExecutor) config.kafkaPublisherExecutor();
 
-        // A stalled Glific sync must not be able to starve Kafka publishing, or vice versa.
+        // A stalled WhatsApp sync must not be able to starve Kafka publishing, or vice versa.
         assertThat(sync).isNotSameAs(publisher);
 
         sync.shutdown();

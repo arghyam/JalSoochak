@@ -438,6 +438,28 @@ public class TenantCommonRepository {
     }
 
     /**
+     * Soft-deletes one configuration row, so the tenant falls back to whatever default the key has.
+     *
+     * <p>Soft rather than hard, matching every other delete in {@code common_schema}: the row stays
+     * as the record of what a tenant was configured with, which is what a later "why did this change"
+     * question is answered from. The partial unique index on {@code (tenant_id, config_key) WHERE
+     * deleted_at IS NULL} is what lets a subsequent upsert insert a fresh row beside it.
+     *
+     * @return the number of rows deleted — 0 when the key was not set
+     */
+    public int softDeleteConfig(Integer tenantId, String keyName, Integer currentUserId) {
+        String sql = """
+                UPDATE common_schema.tenant_config_master_table
+                   SET deleted_at = NOW(),
+                       deleted_by = ?,
+                       updated_at = NOW(),
+                       updated_by = ?
+                 WHERE tenant_id = ? AND config_key = ? AND deleted_at IS NULL
+                """;
+        return jdbcTemplate.update(sql, currentUserId, currentUserId, tenantId, keyName);
+    }
+
+    /**
      * Upserts the API key hash for a tenant.
      * Overwrites any previously stored hash, immediately invalidating the old token.
      */

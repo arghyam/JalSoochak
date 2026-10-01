@@ -19,8 +19,14 @@ public class OpenApiConfig {
     /** OpenAPI name of the {@code X-Api-Key} scheme; referenced by {@code @SecurityRequirement}. */
     public static final String API_KEY_SCHEME = "ApiKey";
 
+    /** OpenAPI name of the chatbot webhook-token scheme; referenced by {@code @SecurityRequirement}. */
+    public static final String WEBHOOK_TOKEN_SCHEME = "WebhookToken";
+
+    /** OpenAPI name of the operations-token scheme; referenced by {@code @SecurityRequirement}. */
+    public static final String INTERNAL_TOKEN_SCHEME = "InternalToken";
+
     @Bean
-    public OpenAPI telemetryServiceOpenAPI() {
+    public OpenAPI telemetryServiceOpenAPI(WebhookAuthProperties webhookAuthProperties) {
         return new OpenAPI()
                 .info(new Info()
                         .title("Telemetry Service API")
@@ -51,6 +57,28 @@ public class OpenApiConfig {
                                         .in(SecurityScheme.In.HEADER)
                                         .name(TelemetryApiKeyAuthFilter.API_KEY_HEADER)
                                         .description("Per-tenant ingestion key. Resolves the calling tenant; "
-                                                + "requests without a valid key are rejected with 401.")));
+                                                + "requests without a valid key are rejected with 401."))
+                        // The chatbot webhooks (@WebhookRoute controllers) authenticate with a shared
+                        // secret checked in WebhookAuthFilter. The header name is configurable, so it is
+                        // read from the same properties the filter uses.
+                        .addSecuritySchemes(WEBHOOK_TOKEN_SCHEME,
+                                new SecurityScheme()
+                                        .type(SecurityScheme.Type.APIKEY)
+                                        .in(SecurityScheme.In.HEADER)
+                                        .name(webhookAuthProperties.getHeaderName())
+                                        .description("Shared secret held by the WhatsApp chatbot flow. "
+                                                + "When enforcement is on, requests without a valid token "
+                                                + "are rejected with 401."))
+                        // The operations routes under /internal authenticate with a token checked in
+                        // InternalAuthFilter, not with a tenant's API key.
+                        .addSecuritySchemes(INTERNAL_TOKEN_SCHEME,
+                                new SecurityScheme()
+                                        .type(SecurityScheme.Type.APIKEY)
+                                        .in(SecurityScheme.In.HEADER)
+                                        .name(InternalAuthFilter.TOKEN_HEADER)
+                                        .description("Operations token for the routes under "
+                                                + "/api/v1/telemetry/internal. Requests without a valid "
+                                                + "token are rejected with 401, and every request is while "
+                                                + "no token is configured.")));
     }
 }

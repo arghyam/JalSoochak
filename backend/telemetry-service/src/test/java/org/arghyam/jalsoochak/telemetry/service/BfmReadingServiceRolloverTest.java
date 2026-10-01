@@ -6,11 +6,12 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.RolloverPosition;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -18,6 +19,9 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,15 +62,25 @@ class BfmReadingServiceRolloverTest {
     private static final String IMAGE_URL = "https://img.example.com/a.jpg";
 
     @Mock
+    private PduDayLimit pduDayLimit;
+
+    @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
+
+    @Mock
     private TelemetryTenantRepository repo;
     @Mock
-    private FlowVisionService flowVisionService;
+    private MeterReadingExtractor defaultOcrExtractor;
+    @Mock
+    private OcrProviderResolver ocrProviderResolver;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
+    private ReadingRepublisher readingRepublisher;
+    @Mock
     private TenantConfigRepository tenantConfigRepository;
     @Mock
-    private GlificOperatorContextService glificOperatorContextService;
+    private OperatorContextService operatorContextService;
     @Mock
     private ReadingChannelResolver readingChannelResolver;
 
@@ -78,17 +92,24 @@ class BfmReadingServiceRolloverTest {
     void setUp() {
         service = new BfmReadingService(
                 repo,
-                flowVisionService,
                 telemetryEventPublisher,
+                readingRepublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
-                glificOperatorContextService,
-                null,
+                operatorContextService,
                 readingChannelResolver,
                 new RolloverResolutionService(true, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
-                null,
+                new ImageReadingCapture(
+                        repo,
+                        telemetryEventPublisher,
+                        null,
+                        ocrProviderResolver,
+                        OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
+                new SubmittedValueCapture(),
+                pduDayLimit,
+                calculationParametersSnapshotter,
                 null);
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
     }
@@ -97,15 +118,15 @@ class BfmReadingServiceRolloverTest {
     void rolloverWithFavourableHistoryResolvesConfirmedAndSurfacesResolvedValue() {
         // Model read "0250" (250, a +110 jump); the sibling hundreds digit gives "0150" (150, a normal
         // +10 against the ~10/day band anchored at 140) → resolver overrides.
-        FlowVisionResult ocr = ocr("0250", "250",
+        OcrReadingResult ocr = ocr("0250", "250",
                 new RolloverPosition(2, 2, new BigDecimal("0.55"), 1, new BigDecimal("0.45")));
 
         stubCommon(ocr);
-        when(repo.findRecentDailyConfirmedReadings(eq(SCHEMA), eq(10L), isNull(), anyInt()))
+        when(repo.findRecentDailyConfirmedReadings(eq(SCHEMA), eq(10L), eq(ReadingChannel.BFM), isNull(), anyInt()))
                 .thenReturn(history(100, 110, 120, 130, 140));
         when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
-                .thenReturn(99L);
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse resp = service.createReading(request(), SCHEMA, operator, "919999999999", false);
 
@@ -116,7 +137,7 @@ class BfmReadingServiceRolloverTest {
         ArgumentCaptor<BigDecimal> extracted = ArgumentCaptor.forClass(BigDecimal.class);
         ArgumentCaptor<BigDecimal> confirmed = ArgumentCaptor.forClass(BigDecimal.class);
         verify(repo).createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                extracted.capture(), confirmed.capture(), anyString(), any(), any(), any());
+                extracted.capture(), confirmed.capture(), anyString(), any(), any(), any(), any(), any());
         assertEquals(0, extracted.getValue().compareTo(new BigDecimal("250")), "extracted_reading stays the model value");
         assertEquals(0, confirmed.getValue().compareTo(new BigDecimal("150")), "confirmed_reading seeded with the resolved value");
 
@@ -126,7 +147,7 @@ class BfmReadingServiceRolloverTest {
 
     @Test
     void noRolloverLeavesConfirmedEqualToExtractedAndSkipsProvenance() {
-        FlowVisionResult ocr = FlowVisionResult.builder()
+        OcrReadingResult ocr = OcrReadingResult.builder()
                 .adjustedReading(new BigDecimal("250"))
                 .rawMeterReading("0250")
                 .redLastDigit(false)
@@ -140,8 +161,8 @@ class BfmReadingServiceRolloverTest {
 
         stubCommon(ocr);
         when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
-                .thenReturn(99L);
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse resp = service.createReading(request(), SCHEMA, operator, "919999999999", false);
 
@@ -150,11 +171,11 @@ class BfmReadingServiceRolloverTest {
 
         ArgumentCaptor<BigDecimal> confirmed = ArgumentCaptor.forClass(BigDecimal.class);
         verify(repo).createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), confirmed.capture(), anyString(), any(), any(), any());
+                any(BigDecimal.class), confirmed.capture(), anyString(), any(), any(), any(), any(), any());
         assertEquals(0, confirmed.getValue().compareTo(new BigDecimal("250")));
 
         // Common path: no extra history round-trip and no provenance write.
-        verify(repo, never()).findRecentDailyConfirmedReadings(any(), any(), any(), anyInt());
+        verify(repo, never()).findRecentDailyConfirmedReadings(any(), any(), any(), any(), anyInt());
         verify(repo, never()).applyConfirmedReadingSource(any(), any(), anyInt(), any());
     }
 
@@ -166,7 +187,7 @@ class BfmReadingServiceRolloverTest {
                     99L, 10L, 1L, "corr-1",
                     new BigDecimal("250"),  // extracted (model)
                     new BigDecimal("150"),  // confirmed (resolver's value)
-                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), "BFM", 0);
+                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), "BFM", 0, null);
             when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
                     .thenReturn(Optional.of(reading));
             when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
@@ -176,7 +197,7 @@ class BfmReadingServiceRolloverTest {
             // Reject-and-manual-entry: the human value (999 ≠ stored 150) overwrites confirmed_reading and
             // retags provenance MANUAL — folded into the single confirm UPDATE, not a second write.
             verify(repo).updateConfirmedReading(SCHEMA, 99L, new BigDecimal("999"), 1L,
-                    RolloverResolutionService.SOURCE_MANUAL);
+                    RolloverResolutionService.SOURCE_MANUAL, "m3");
             verify(repo, never()).applyConfirmedReadingSource(any(), any(), anyInt(), any());
             assertEquals(0, resp.getMeterReading().compareTo(new BigDecimal("999")));
             assertTrue(resp.isSuccess());
@@ -193,7 +214,7 @@ class BfmReadingServiceRolloverTest {
                     99L, 10L, 1L, "corr-1",
                     new BigDecimal("250"),  // extracted (model)
                     new BigDecimal("150"),  // confirmed (resolver's value)
-                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), "BFM", 0);
+                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), "BFM", 0, null);
             when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
                     .thenReturn(Optional.of(reading));
             when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
@@ -202,7 +223,7 @@ class BfmReadingServiceRolloverTest {
             // UPDATE keeps SOURCE_ROLLOVER_RESOLVED — we can still tell "accepted our correction" apart.
             CreateReadingResponse resp = service.updateConfirmedReading("corr-1", new BigDecimal("150"));
 
-            verify(repo).updateConfirmedReading(SCHEMA, 99L, new BigDecimal("150"), 1L, null);
+            verify(repo).updateConfirmedReading(SCHEMA, 99L, new BigDecimal("150"), 1L, null, "m3");
             verify(repo, never()).applyConfirmedReadingSource(any(), any(), anyInt(), any());
             assertEquals(0, resp.getMeterReading().compareTo(new BigDecimal("150")));
             assertTrue(resp.isSuccess());
@@ -215,14 +236,14 @@ class BfmReadingServiceRolloverTest {
     void rolloverInputOnPreMigrationSchemaPersistsLegacyConfirmedAndSkipsProvenance() {
         // Rollover metadata is present, but the tenant schema is NOT migrated with confirmed_reading_source:
         // the resolver must not run, confirmed_reading stays the model value, and no provenance/history I/O.
-        FlowVisionResult ocr = ocr("0250", "250",
+        OcrReadingResult ocr = ocr("0250", "250",
                 new RolloverPosition(2, 2, new BigDecimal("0.55"), 1, new BigDecimal("0.45")));
 
         stubCommon(ocr);
         when(repo.supportsConfirmedReadingSource(SCHEMA)).thenReturn(false);
         when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
-                .thenReturn(99L);
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse resp = service.createReading(request(), SCHEMA, operator, "919999999999", false);
 
@@ -231,22 +252,22 @@ class BfmReadingServiceRolloverTest {
 
         ArgumentCaptor<BigDecimal> confirmed = ArgumentCaptor.forClass(BigDecimal.class);
         verify(repo).createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), confirmed.capture(), anyString(), any(), any(), any());
+                any(BigDecimal.class), confirmed.capture(), anyString(), any(), any(), any(), any(), any());
         assertEquals(0, confirmed.getValue().compareTo(new BigDecimal("250")), "confirmed_reading left equal to extracted");
 
         // Pre-migration: never fetch trailing history and never write provenance.
-        verify(repo, never()).findRecentDailyConfirmedReadings(any(), any(), any(), anyInt());
+        verify(repo, never()).findRecentDailyConfirmedReadings(any(), any(), any(), any(), anyInt());
         verify(repo, never()).applyConfirmedReadingSource(any(), any(), anyInt(), any());
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────
 
-    private void stubCommon(FlowVisionResult ocr) {
+    private void stubCommon(OcrReadingResult ocr) {
         when(repo.existsSchemeById(SCHEMA, 10L)).thenReturn(true);
         when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
         when(repo.isOperatorMappedToScheme(SCHEMA, 1L, 10L)).thenReturn(true);
-        when(flowVisionService.extractReading(IMAGE_URL)).thenReturn(ocr);
-        when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, 10L, null))
+        when(defaultOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(ocr);
+        when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("140"),
                         ReadingTime.now().minusDays(1))));
         when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(10L), eq(1L), any(LocalDate.class)))
@@ -264,8 +285,8 @@ class BfmReadingServiceRolloverTest {
                 .build();
     }
 
-    private static FlowVisionResult ocr(String rawReading, String adjusted, RolloverPosition... positions) {
-        return FlowVisionResult.builder()
+    private static OcrReadingResult ocr(String rawReading, String adjusted, RolloverPosition... positions) {
+        return OcrReadingResult.builder()
                 .adjustedReading(new BigDecimal(adjusted))
                 .rawMeterReading(rawReading)
                 .redLastDigit(false)

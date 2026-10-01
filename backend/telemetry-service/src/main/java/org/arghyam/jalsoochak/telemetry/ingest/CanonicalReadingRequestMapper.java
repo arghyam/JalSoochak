@@ -2,12 +2,12 @@ package org.arghyam.jalsoochak.telemetry.ingest;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.springframework.stereotype.Component;
 
 /**
  * Default {@link ReadingRequestMapper}: the incoming body already matches the canonical contract, so
- * this is an identity mapping that simply deserializes it into {@link AssamReadingRequest} (honouring
+ * this is an identity mapping that simply deserializes it into {@link CanonicalReadingRequest} (honouring
  * the DTO's {@code @JsonProperty}/{@code @JsonAlias} field aliases). This is also the fallback the
  * registry uses when no explicit format is requested.
  */
@@ -28,10 +28,10 @@ public class CanonicalReadingRequestMapper implements ReadingRequestMapper {
     }
 
     @Override
-    public AssamReadingRequest map(JsonNode rawBody) {
+    public CanonicalReadingRequest map(JsonNode rawBody) {
         if (rawBody == null || rawBody.isNull() || rawBody.isMissingNode()) {
-            return new AssamReadingRequest();
+            return new CanonicalReadingRequest();
         }
-        return objectMapper.convertValue(rawBody, AssamReadingRequest.class);
+        return objectMapper.convertValue(rawBody, CanonicalReadingRequest.class);
     }
 }

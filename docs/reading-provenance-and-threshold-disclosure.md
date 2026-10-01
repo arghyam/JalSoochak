@@ -1,14 +1,14 @@
 # Reading provenance + threshold disclosure — response to the CWE-840 audit finding
 
 **Audit finding:** `POST /api/v1/telemetry/readings` accepts `confirmed_reading`, which records a
-meter value with no image and no FlowVision AI analysis, answering `qualityStatus: "CONFIRMED"`.
+meter value with no image and no AI (OCR) analysis, answering `qualityStatus: "CONFIRMED"`.
 `POST /api/v1/telemetry/manual-reading` allows the same and echoes the tenant's configured
 validation threshold in its rejection message.
 
 **Decision:** submitting a value instead of an image is **intended behaviour** — it is the
 server-to-server contract for state IT systems that read their own meters (see
 `docs/pluggable-ingestion-testing-guide.md`). The bypass is accepted risk and is not restricted. The
-API-key authentication gap on the Glific webhook routes is owned by a separate change.
+API-key authentication gap on the chatbot webhook routes is owned by a separate change.
 
 **What this change does:** three things only.
 
@@ -29,7 +29,7 @@ the ingestion endpoints.
 fourth value. **No migration is needed** — the column already exists and this is a new value in it.
 
 ```
-0 = AS_EXTRACTED          confirmed_reading is FlowVision's pick
+0 = AS_EXTRACTED          confirmed_reading is the OCR provider's pick
 1 = ROLLOVER_RESOLVED     resolved to a sibling rollover digit
 2 = MANUAL                set by an explicit manual override
 3 = EXTERNALLY_ASSERTED   supplied by the caller via confirmed_reading — no image, no AI   <-- new
@@ -40,7 +40,7 @@ fourth value. **No migration is needed** — the column already exists and this 
 `extracted_reading` is `NOT NULL`, so a value-only submission still writes the caller's number into
 the column named "what the AI extracted". Before this change such a row was indistinguishable from an
 AI-verified one in every column — same `extracted_reading`, same `confirmed_reading`, same
-`confirmed_reading_source = 0`. Absence of `image_url` / `flowvision_correlation_id` is a weak proxy
+`confirmed_reading_source = 0`. Absence of `image_url` / `ocr_correlation_id` is a weak proxy
 (other paths also leave them empty). The marker makes it explicit and queryable.
 
 ### Where it is written
@@ -88,7 +88,7 @@ staff-side. The rejection threshold itself is unchanged: the same submissions ar
 | Other tables | **None.** No new table or column. |
 | Kafka / analytics | **None.** `MeterReadingEvent` is unchanged and does not carry the marker, so analytics KPIs and the dashboard are untouched. |
 | WhatsApp operators | Only the manual-reading over-maximum message, which no longer names the limit. |
-| Glific flow exports | Untouched. No new header, no new field, no changed branch. |
+| Chatbot flow exports | Untouched. No new header, no new field, no changed branch. |
 | Migrations | None. `confirmed_reading_source` already exists (`V35`). |
 | Historical rows | Not backfilled. Rows written before this change carry `0` whether or not they were API-supplied. |
 | Rollback | Delete the marker: `UPDATE tenant_<code>.flow_reading_table SET confirmed_reading_source = 0 WHERE confirmed_reading_source = 3;` The code change is one commit. |
@@ -101,13 +101,13 @@ If the marker is wanted on analytics events too, `MeterReadingEvent` would need 
 | Finding | Decision |
 |---|---|
 | `confirmed_reading` bypasses the AI pipeline | **Intended behaviour.** Documented contract; accepted risk. |
-| No plausibility bound on submitted values | **Not wanted.** Readings are deliberately not restricted by min/max checks. The commented-out below-previous and below-minimum validations in `BfmReadingService` / `GlificMeterWorkflowService` are left as they are. |
-| `/manual-reading` has no API-key authentication | **Owned by the Glific authentication change**, handled separately. |
+| No plausibility bound on submitted values | **Not wanted.** Readings are deliberately not restricted by min/max checks. The commented-out below-previous and below-minimum validations in `BfmReadingService` / `MeterReadingConversationService` are left as they are. |
+| `/manual-reading` has no API-key authentication | **Owned by the chatbot webhook authentication change**, handled separately. |
 | The tenant API key carries no capabilities | Not addressed — it only matters if value submission is to be restricted, which it is not. |
 
 ## 5. Raw exception text in error replies
 
-`GlificLocalizationService.resolveUserFacingErrorMessage` mapped a set of known exception messages to
+`ConversationLocalizationService.resolveUserFacingErrorMessage` mapped a set of known exception messages to
 friendly text and, for anything unmatched, **returned the raw exception message to the caller**. Every
 caller catches `Exception`, so that path was reachable by far more than the business validations it
 was written for. Messages that could reach a WhatsApp operator or an API response included:
@@ -126,7 +126,7 @@ was written for. Messages that could reach a WhatsApp operator or an API respons
 **Fix:** the method is now an **allowlist**. Only a message matched by an explicit rule is shown;
 everything else becomes the caller's own fallback, which is already context-specific — *"Manual
 reading could not be saved."*, *"Image could not be processed."*, *"Location could not be saved."*,
-*"Assam reading could not be processed."* — so the user still gets a message that fits what they were
+*"Reading could not be processed."* — so the user still gets a message that fits what they were
 doing, with no internal detail. Adding a user-facing message now means adding a rule; the safe
 default is not to disclose.
 

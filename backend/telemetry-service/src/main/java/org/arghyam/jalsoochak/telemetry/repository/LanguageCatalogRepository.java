@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
  * language id and to its locale code.
  *
  * <p>This is the single source of truth that replaces the hardcoded Java maps in
- * {@code GlificContactSyncService} and {@code WelcomeMessageService}; those services keep their
+ * the WhatsApp contact-directory adapter and {@code WelcomeMessageService}; those services keep their
  * maps only as a fallback and consult this repository first. Adding a new language then becomes an
  * INSERT rather than a code change.
  *

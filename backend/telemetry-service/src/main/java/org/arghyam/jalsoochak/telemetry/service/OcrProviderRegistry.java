@@ -1,70 +1,107 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /**
- * Dispatches to the right {@link MeterReadingExtractor} for a resolved {@link OcrProviderSettings}.
+ * Picks the {@link MeterReadingExtractor} that reads a photo for a channel.
  *
- * <p>All extractor beans are collected at startup and indexed by {@link MeterReadingExtractor#providerId()}
- * (case-insensitively). An unknown / unconfigured provider falls back to the configured default
- * ({@code flowvision.default-provider}, default {@code flowvision}) so a mis-typed tenant config can never
- * drop a reading — it degrades to the built-in provider with a warning.
+ * <p>All extractor beans are collected at startup and indexed by {@link MeterReadingExtractor#channel()}
+ * and {@link MeterReadingExtractor#providerId()} (case-insensitively), so a provider is only ever chosen
+ * for the channel whose meters it reads. A tenant's provider that isn't registered for the channel falls
+ * back to the channel's default provider with a warning, so a mis-typed tenant config can never drop a
+ * reading. BFM's default is {@code ocr.default-provider} (default
+ * {@link OcrProviderSettings#DEFAULT_PROVIDER_ID}); other channels have none until an extractor is
+ * written for them, so their photos can't be read yet.
  */
 @Component
 @Slf4j
 public class OcrProviderRegistry {
 
-    private final Map<String, MeterReadingExtractor> extractorsById;
-    private final String defaultProviderId;
+    private final Map<ReadingChannel, Map<String, MeterReadingExtractor>> extractorsByChannel;
+    private final String bfmDefaultProviderId;
 
     public OcrProviderRegistry(List<MeterReadingExtractor> extractors,
-                               @Value("${flowvision.default-provider:" + OcrProviderSettings.DEFAULT_PROVIDER_ID + "}")
-                               String defaultProviderId) {
-        Map<String, MeterReadingExtractor> byId = new HashMap<>();
+                               @Value("${ocr.default-provider:" + OcrProviderSettings.DEFAULT_PROVIDER_ID + "}")
+                               String bfmDefaultProviderId) {
+        Map<ReadingChannel, Map<String, MeterReadingExtractor>> byChannel = new EnumMap<>(ReadingChannel.class);
         for (MeterReadingExtractor extractor : extractors) {
             String id = normalize(extractor.providerId());
+            ReadingChannel channel = extractor.channel();
             if (id == null) {
                 log.warn("Ignoring OCR provider with blank id: {}", extractor.getClass().getSimpleName());
                 continue;
             }
-            MeterReadingExtractor previous = byId.putIfAbsent(id, extractor);
+            if (channel == null || !channel.supportsImageReading()) {
+                log.warn("Ignoring OCR provider '{}': channel {} doesn't read meter photos", id, channel);
+                continue;
+            }
+            MeterReadingExtractor previous = byChannel
+                    .computeIfAbsent(channel, ignored -> new HashMap<>())
+                    .putIfAbsent(id, extractor);
             if (previous != null) {
-                log.warn("Duplicate OCR provider id '{}' — keeping {}, ignoring {}",
-                        id, previous.getClass().getSimpleName(), extractor.getClass().getSimpleName());
+                log.warn("Duplicate OCR provider id '{}' for channel {} — keeping {}, ignoring {}",
+                        id, channel, previous.getClass().getSimpleName(), extractor.getClass().getSimpleName());
             }
         }
-        this.extractorsById = Map.copyOf(byId);
-        this.defaultProviderId = normalizeOrDefault(defaultProviderId);
-        log.info("Registered OCR providers {} (default '{}')", this.extractorsById.keySet(), this.defaultProviderId);
+        Map<ReadingChannel, Map<String, MeterReadingExtractor>> frozen = new EnumMap<>(ReadingChannel.class);
+        byChannel.forEach((channel, byId) -> frozen.put(channel, Map.copyOf(byId)));
+        this.extractorsByChannel = frozen;
+        this.bfmDefaultProviderId = normalizeOrDefault(bfmDefaultProviderId);
+        log.info("Registered OCR providers {} (BFM default '{}')", registeredIds(), this.bfmDefaultProviderId);
     }
 
     /**
-     * The extractor for {@code providerId}, or the default provider when {@code providerId} is null/blank
-     * or not registered. Never returns {@code null}.
+     * The extractor that reads {@code channel}'s photos: {@code providerId} when it is registered for the
+     * channel, otherwise the channel's default provider. Empty when the channel has no default provider,
+     * which means its photos can't be read.
+     *
+     * @throws IllegalStateException when BFM's configured default provider isn't registered
      */
-    public MeterReadingExtractor get(String providerId) {
+    public Optional<MeterReadingExtractor> get(ReadingChannel channel, String providerId) {
+        Map<String, MeterReadingExtractor> forChannel = extractorsByChannel.getOrDefault(channel, Map.of());
         String key = normalize(providerId);
         if (key != null) {
-            MeterReadingExtractor extractor = extractorsById.get(key);
+            MeterReadingExtractor extractor = forChannel.get(key);
             if (extractor != null) {
-                return extractor;
+                return Optional.of(extractor);
             }
-            log.warn("Unknown OCR provider '{}' — falling back to default '{}'", key, defaultProviderId);
         }
-        MeterReadingExtractor fallback = extractorsById.get(defaultProviderId);
+        Optional<String> defaultId = defaultProviderId(channel);
+        if (key != null) {
+            log.warn("OCR provider '{}' is not registered for channel {} — falling back to {}",
+                    key, channel, defaultId.map(id -> "default '" + id + "'").orElse("none"));
+        }
+        if (defaultId.isEmpty()) {
+            return Optional.empty();
+        }
+        MeterReadingExtractor fallback = forChannel.get(defaultId.get());
         if (fallback == null) {
             throw new IllegalStateException(
-                    "No OCR provider registered for default id '" + defaultProviderId + "'; registered: "
-                            + extractorsById.keySet());
+                    "No OCR provider registered for channel " + channel + " default id '" + defaultId.get()
+                            + "'; registered: " + registeredIds());
         }
-        return fallback;
+        return Optional.of(fallback);
+    }
+
+    /** Provider ids by channel, for logs, e.g. {@code {BFM=[a, b], ELM=[c]}}. */
+    private Map<ReadingChannel, List<String>> registeredIds() {
+        Map<ReadingChannel, List<String>> ids = new EnumMap<>(ReadingChannel.class);
+        extractorsByChannel.forEach((channel, byId) -> ids.put(channel, byId.keySet().stream().sorted().toList()));
+        return ids;
+    }
+
+    private Optional<String> defaultProviderId(ReadingChannel channel) {
+        return channel == ReadingChannel.BFM ? Optional.of(bfmDefaultProviderId) : Optional.empty();
     }
 
     private static String normalize(String providerId) {

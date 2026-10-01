@@ -135,7 +135,7 @@ public class DailySituationReportRepository {
      * Total anomalies raised against the officer's handed-over schemes in the half-open interval
      * {@code [fromInclusive, toExclusive)} of {@code created_at}.
      *
-     * <p>{@code anomaly_table.created_at} is UTC-naive while the report's day is an IST calendar day,
+     * <p>{@code fact_anomaly_table.created_at} is UTC-naive while the report's day is an IST calendar day,
      * so the caller converts the window before binding it. Counts {@code DISTINCT a.id} and excludes
      * soft-deleted rows.</p>
      */
@@ -151,7 +151,7 @@ public class DailySituationReportRepository {
                       AND usm.tenant_id = ?{{WS}}
                 )
                 SELECT COUNT(DISTINCT a.id)::int
-                FROM analytics_schema.anomaly_table a
+                FROM analytics_schema.fact_anomaly_table a
                 JOIN user_schemes us ON us.scheme_id = a.scheme_id
                 WHERE a.tenant_id = ?
                   AND a.deleted_at IS NULL
@@ -186,7 +186,7 @@ public class DailySituationReportRepository {
                       AND usm.tenant_id = ?{{WS}}
                 )
                 SELECT DISTINCT a.scheme_id, a.type
-                FROM analytics_schema.anomaly_table a
+                FROM analytics_schema.fact_anomaly_table a
                 JOIN user_schemes us ON us.scheme_id = a.scheme_id
                 WHERE a.tenant_id = ?
                   AND a.deleted_at IS NULL
@@ -223,7 +223,7 @@ public class DailySituationReportRepository {
                 )
                 SELECT a.type AS type,
                        COUNT(DISTINCT a.id)::int AS cnt
-                FROM analytics_schema.anomaly_table a
+                FROM analytics_schema.fact_anomaly_table a
                 JOIN user_schemes us ON us.scheme_id = a.scheme_id
                 WHERE a.tenant_id = ?
                   AND a.deleted_at IS NULL

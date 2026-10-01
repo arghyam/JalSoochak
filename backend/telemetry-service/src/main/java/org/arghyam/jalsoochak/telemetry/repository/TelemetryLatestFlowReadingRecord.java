@@ -5,7 +5,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
- * The flow-reading row a correction resolves to, by correlation id or by the submitter's phone.
+ * The flow-reading row a correction resolves to, by correlation id, by the submitter's phone or as the
+ * operator's latest earlier reading, and the row a republish reads back by id.
  *
  * @param quarantineReason SUPPLY-PLAUSIBILITY: the row's quarantine marker, {@code null} on a
  *        pre-V40 tenant schema where the column does not exist (and where the plausibility check is
@@ -15,6 +16,8 @@ import java.time.LocalDateTime;
  *        refused correction writes nothing and an accepted one clears the flag unconditionally,
  *        whatever the row's prior state. Keeping it out of the control flow is what stops
  *        state-dependent branching, and the store divergence it caused, from creeping back in.
+ * @param updatedAt the row's version, read in the same statement as the values beside it, so a
+ *        republish never pairs one write's values with another write's version
  */
 public record TelemetryLatestFlowReadingRecord(
         Long id,
@@ -27,6 +30,7 @@ public record TelemetryLatestFlowReadingRecord(
         LocalDate readingDate,
         LocalDateTime readingAt,
         String channel,
-        Integer quarantineReason
+        Integer quarantineReason,
+        LocalDateTime updatedAt
 ) {
 }

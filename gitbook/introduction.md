@@ -7,22 +7,22 @@
 **JalSoochak** is a **Digital Public Good (DPG)** for monitoring rural drinking-water service delivery under India's **Jal Jeevan Mission (JJM)**. It closes a key operational gap — the daily monitoring of actual water supply at the field level — by combining:
 
 * A **microservices** backend (Java 21 + Spring Boot) with a clear service-per-domain split
-* **WhatsApp-driven field data collection** via Glific, so pump operators submit daily meter readings without a smartphone app
-* **AI-assisted reading extraction** (FlowVision) that reads the meter value from a submitted photo
-* **Automated nudge and escalation** notifications for missed readings
+* **WhatsApp-driven field data collection**, so pump operators submit daily meter readings without a smartphone app
+* **AI-assisted reading extraction** that reads the meter value from a submitted photo
+* **Automated nudge and escalation** notifications for missed readings, plus daily and weekly situation reports for officers
 * **Public analytics dashboards** for programme officers at scheme, district, state, and national levels
 
 > **Terminology:** role labels vary by state (e.g. Section Officer, AEE, EE). This documentation uses platform-level role names; states map their own designations during onboarding.
 
 ### 1.2 Scope
 
-* **WhatsApp interactions** via Glific for operator data submission and notifications
+* **WhatsApp interactions** for operator data submission and notifications
 * **Public dashboards** and a BI/analytics layer for compliance, water quantity, and scheme performance
 * **Configuration services** for per-tenant (per-state) customisation
 * **Field-operations tracking** — schemes, operators, readings, anomalies, escalations
 * **Identity & access management** via Keycloak (OAuth2 / OIDC)
 
-The platform is deployed as a **multi-tenant** system, with each state onboarded as an isolated tenant. New states can be onboarded without code changes or redeployment.
+The platform is deployed as a **multi-tenant** system, with each state onboarded as an isolated tenant. New states can be onboarded without code changes or redeployment. A single-state deployment can instead run in **single-tenant mode** (`SINGLE_TENANT_MODE`), which allows only one tenant.
 
 ---
 
@@ -31,7 +31,7 @@ The platform is deployed as a **multi-tenant** system, with each state onboarded
 ### 2.1 Openness & Reusability
 
 * Open-source codebase hosted on a public repository
-* RESTful APIs documented with OpenAPI (Swagger) at every service
+* RESTful APIs documented with OpenAPI (Swagger), aggregated into a single Swagger UI at the API gateway
 * No proprietary infrastructure dependencies — reusable by any state and adaptable to other rural water-monitoring programmes
 
 ### 2.2 Cloud-neutrality
@@ -39,7 +39,7 @@ The platform is deployed as a **multi-tenant** system, with each state onboarded
 * Runs on any **Kubernetes** cluster — on-premises or any cloud provider
 * **PostgreSQL** for operational and analytics data (no proprietary extensions)
 * **Apache Kafka** in KRaft mode (no ZooKeeper) for asynchronous events
-* **S3-compatible** object storage (MinIO or any cloud equivalent) for images and reports
+* **S3-compatible** object storage, self-hosted or from any cloud provider, for images and reports
 
 ### 2.3 Accessibility
 

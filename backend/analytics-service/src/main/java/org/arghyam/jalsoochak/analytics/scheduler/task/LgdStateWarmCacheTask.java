@@ -22,9 +22,9 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
     private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
     private static final int STATE_LGD_LEVEL = 1;
     /**
-     * Warm-cache runs at midnight IST (the shared scheduler cron) and serves the same cached
-     * data until the next run. The date window is anchored to "yesterday" (IST) for a stable
-     * range that does not drift during the day.
+     * Warm-cache runs at midnight IST (the shared scheduler cron); today's counts also
+     * refresh hourly via the hourly aggregation task + 1h cache TTL. The warm window is
+     * anchored to "yesterday" (IST) for a stable range that does not drift during the day.
      *
      * Window size is inclusive of both start and end dates.
      */
@@ -86,7 +86,7 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
 
                 // lgd_id style APIs
                 // Warm-cache: periodic water quantity time series for this state (last 30 days).
-                schemeRegularityService.getPeriodicWaterQuantityByLgdId(lgdId, startDate, endDate, scale);
+                schemeRegularityService.getPeriodicWaterQuantityByLgdId(tenantId, lgdId, startDate, endDate, scale);
                 // Warm-cache: periodic scheme regularity time series for this state (last 30 days).
                 schemeRegularityService.getPeriodicSchemeRegularityByLgdId(tenantId, lgdId, startDate, endDate, scale);
                 // Warm-cache: periodic outage reason time series for this state (last 30 days).

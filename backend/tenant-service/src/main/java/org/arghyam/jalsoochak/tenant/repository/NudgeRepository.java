@@ -9,6 +9,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.PreparedStatement;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,43 +41,88 @@ import java.util.function.Consumer;
 @Slf4j
 public class NudgeRepository {
 
+    /** reading_date is the IST calendar day; audit timestamps are UTC. */
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+
     private final JdbcTemplate jdbcTemplate;
     private final PiiEncryptionService pii;
 
     /**
-     * Streams OPERATOR users who have an active scheme mapping but no flow reading for today,
-     * calling {@code consumer} once per row. Returns the total row count.
+     * Streams the PUMP_OPERATOR users to nudge today — <b>one row per operator</b> — calling
+     * {@code consumer} once per row. Returns the total row count.
+     *
+     * <p>An operator is nudged when at least one of their active schemes is still <em>pending</em>
+     * for {@code referenceDate} (the IST calendar day). A scheme stops being pending as soon as
+     * <em>any</em> operator on it records one of:</p>
+     * <ul>
+     *   <li>a completed reading — {@code confirmed_reading > 0}, telemetry's own definition, which
+     *       excludes the zero-value scheme-selection, location and rejected-reading rows;</li>
+     *   <li>a non-blank {@code issue_report_reason} or {@code meter_change_reason} on a reading row;</li>
+     *   <li>a NO_WATER_SUPPLY (6) or NO_SUBMISSION (9) anomaly, which some reason paths write
+     *       without any reading row. {@code anomaly_table.created_at} holds UTC, so the IST day is
+     *       matched as a UTC range.</li>
+     * </ul>
+     *
+     * <p>{@code quietWindowMinutes > 0} skips operators with chatbot activity (any reading row they
+     * touched) within that many minutes: the WhatsApp provider replaces a contact's active flow when a
+     * new one starts, so a nudge would cut short a submission in progress. {@code 0} disables the
+     * check.</p>
      *
      * <p>Uses a server-side cursor (fetchSize=500) to avoid materialising the full result set
      * into heap, preventing OOM on large tenants.</p>
      */
     @SuppressWarnings("java:S2077")
     @Transactional(readOnly = true)
-    public int streamUsersWithNoUploadToday(String schema, LocalDate referenceDate,
+    public int streamUsersWithNoUploadToday(String schema, LocalDate referenceDate, int quietWindowMinutes,
                                             Consumer<Map<String, Object>> consumer) {
         validateSchemaName(schema);
         String sql = String.format("""
-                SELECT u.id as user_id, u.title as name, u.phone_number, u.language_id,
-                       u.whatsapp_connection_id, usm.scheme_id
-                FROM %s.user_scheme_mapping_table usm
-                JOIN %s.user_table u ON u.id = usm.user_id
+                SELECT u.id AS user_id, u.title AS name, u.phone_number, u.language_id,
+                       u.whatsapp_connection_id,
+                       COUNT(DISTINCT usm.scheme_id) AS pending_scheme_count
+                FROM %1$s.user_scheme_mapping_table usm
+                JOIN %1$s.user_table u ON u.id = usm.user_id
                 JOIN common_schema.user_type_master_table ut ON ut.id = u.user_type
-                LEFT JOIN %s.flow_reading_table fr
-                    ON fr.scheme_id = usm.scheme_id
-                    AND fr.created_by = u.id
-                    AND fr.reading_date = ?
                 WHERE usm.status = 1
                   AND usm.deleted_at IS NULL
                   AND u.status = 1
                   AND u.deleted_at IS NULL
                   AND UPPER(ut.c_name) = 'PUMP_OPERATOR'
-                  AND fr.id IS NULL
-                """, schema, schema, schema);
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM %1$s.flow_reading_table fr
+                      WHERE fr.scheme_id = usm.scheme_id
+                        AND fr.reading_date = ?
+                        AND fr.deleted_at IS NULL
+                        AND (fr.confirmed_reading > 0
+                             OR NULLIF(TRIM(fr.issue_report_reason), '') IS NOT NULL
+                             OR NULLIF(TRIM(fr.meter_change_reason), '') IS NOT NULL))
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM %1$s.anomaly_table a
+                      WHERE a.scheme_id = usm.scheme_id
+                        AND a.type IN (6, 9)
+                        AND a.deleted_at IS NULL
+                        AND a.created_at >= ?
+                        AND a.created_at < ?)
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM %1$s.flow_reading_table recent
+                      WHERE ? > 0
+                        AND recent.created_by = u.id
+                        AND recent.updated_at > (NOW() AT TIME ZONE 'UTC') - make_interval(mins => ?))
+                GROUP BY u.id, u.title, u.phone_number, u.language_id, u.whatsapp_connection_id
+                """, schema);
+        LocalDateTime dayStartUtc = referenceDate.atStartOfDay(IST).withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
         log.debug("streamUsersWithNoUploadToday – schema={}", schema);
         int[] count = {0};
         jdbcTemplate.query(con -> {
             PreparedStatement ps = con.prepareStatement(sql);
             ps.setObject(1, referenceDate);
+            ps.setObject(2, dayStartUtc);
+            ps.setObject(3, dayStartUtc.plusDays(1));
+            ps.setInt(4, quietWindowMinutes);
+            ps.setInt(5, quietWindowMinutes);
             ps.setFetchSize(500);
             return ps;
         }, rs -> {
@@ -90,7 +138,7 @@ public class NudgeRepository {
             row.put("phone_number", phoneNumber);
             row.put("language_id", rs.getObject("language_id"));
             row.put("whatsapp_connection_id", rs.getObject("whatsapp_connection_id"));
-            row.put("scheme_id", rs.getObject("scheme_id"));
+            row.put("pending_scheme_count", rs.getObject("pending_scheme_count"));
             consumer.accept(row);
             count[0]++;
         });
@@ -341,7 +389,7 @@ public class NudgeRepository {
     }
 
     /**
-     * Persists the Glific contact ID for the given user.
+     * Persists the WhatsApp contact ID for the given user.
      * Called by the Kafka consumer when a {@code WHATSAPP_CONTACT_REGISTERED} event arrives.
      */
     @SuppressWarnings("java:S2077")

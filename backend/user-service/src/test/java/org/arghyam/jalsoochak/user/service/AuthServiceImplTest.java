@@ -41,6 +41,7 @@ import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.AccountTemporarilyLockedException;
 import org.arghyam.jalsoochak.user.exceptions.CaptchaVerificationException;
 import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -675,7 +676,35 @@ class AuthServiceImplTest {
 
             verify(userCommonRepository).insertToken(
                     eq("user@example.com"), eq("reset-hash"), eq("RESET"), eq(null), any(), eq(null));
-            verify(userNotificationEventPublisher).publishResetPasswordEmailAfterCommit(any(ResetPasswordEmailEvent.class));
+            ArgumentCaptor<ResetPasswordEmailEvent> captor =
+                    ArgumentCaptor.forClass(ResetPasswordEmailEvent.class);
+            verify(userNotificationEventPublisher).publishResetPasswordEmailAfterCommit(captor.capture());
+            // Super users belong to no tenant (tenantId 0), so the event carries none
+            assertNull(captor.getValue().getTenantId());
+            assertNull(captor.getValue().getTenantCode());
+        }
+
+        @Test
+        @DisplayName("Should carry the tenant id and code when the user belongs to a tenant")
+        void forgotPassword_tenantUser_eventCarriesTenant() {
+            when(userCommonRepository.findAdminUserByEmail("sa@example.com")).thenReturn(Optional.of(stateAdminRow()));
+            when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
+            when(tokenService.generateRawToken()).thenReturn("raw-reset-token");
+            when(tokenService.hash("raw-reset-token")).thenReturn("reset-hash");
+            when(passwordResetProperties.expiryMinutes()).thenReturn(30);
+            when(frontendProperties.baseUrl()).thenReturn("http://localhost:3000");
+            when(frontendProperties.resetPath()).thenReturn("/reset-password");
+
+            ForgotPasswordRequestDTO req = new ForgotPasswordRequestDTO();
+            req.setEmail("sa@example.com");
+
+            authService.forgotPassword(req);
+
+            ArgumentCaptor<ResetPasswordEmailEvent> captor =
+                    ArgumentCaptor.forClass(ResetPasswordEmailEvent.class);
+            verify(userNotificationEventPublisher).publishResetPasswordEmailAfterCommit(captor.capture());
+            assertEquals(1, captor.getValue().getTenantId());
+            assertEquals("MP", captor.getValue().getTenantCode());
         }
     }
 

@@ -28,6 +28,16 @@ class EscalationTypeTest {
         }
 
         @Test
+        @DisplayName("the location-mismatch anomaly is code 11")
+        void locationMismatchIsEleven() {
+            // Mirrors AnomalyConstants.TYPE_LOCATION_MISMATCH in telemetry-service and the "11" entry
+            // in message-service's AnomalyLabels.CODE_TO_NAME; neither is on this module's classpath,
+            // so all three are pinned to the literal.
+            assertThat(EscalationType.LOCATION_MISMATCH.code).isEqualTo(11);
+            assertThat(EscalationType.fromCode(11)).isEqualTo(EscalationType.LOCATION_MISMATCH);
+        }
+
+        @Test
         @DisplayName("codes are unique and contiguous from 1")
         void codesAreUniqueAndContiguous() {
             assertThat(Arrays.stream(EscalationType.values()).map(t -> t.code).toList())
@@ -40,7 +50,7 @@ class EscalationTypeTest {
         @EnumSource(EscalationType.class)
         @DisplayName("every label mirrors its constant name, since the label is what is persisted")
         void labelMirrorsName(EscalationType type) {
-            // FactServiceImpl.intCodeToVarchar writes the label into anomaly_table.type, so the label
+            // FactServiceImpl.intCodeToVarchar writes the label into fact_anomaly_table.type, so the label
             // is the stored value the daily-report PDF maps back to a friendly string.
             assertThat(type.label).isEqualTo(type.name());
         }
@@ -68,10 +78,30 @@ class EscalationTypeTest {
         void implausibleSupplyRaisesNoEscalation() {
             // FactServiceImpl writes fact_escalation_table only for WATER_ANOMALIES. Type 10 is
             // deliberately outside that set: the rejection is already answered to the caller and
-            // recorded on anomaly_table, and no one is meant to be escalated to. Moving it into
+            // recorded on fact_anomaly_table, and no one is meant to be escalated to. Moving it into
             // WATER_ANOMALIES would start creating escalation rows silently.
             assertThat(EscalationType.WATER_ANOMALIES)
                     .doesNotContain(EscalationType.IMPLAUSIBLE_WATER_SUPPLY);
+        }
+
+        @Test
+        @DisplayName("the location-mismatch anomaly is scoped to the operator who submitted it")
+        void locationMismatchIsAUserAnomaly() {
+            // WATER_ANOMALIES keying drops userId — one row per supply event regardless of who
+            // reported it. That would collapse two operators on a shared scheme into one row and
+            // destroy the only thing this anomaly says: which operator was where.
+            assertThat(EscalationType.USER_ANOMALIES).contains(EscalationType.LOCATION_MISMATCH);
+        }
+
+        @Test
+        @DisplayName("and raises no escalation, since the submitter was already warned")
+        void locationMismatchRaisesNoEscalation() {
+            // On the WhatsApp path the operator saw the boundary warning and chose to proceed; on the
+            // state-IT API the reading was accepted synchronously. Either way there is nobody left to
+            // escalate to, and moving this into WATER_ANOMALIES would start writing
+            // fact_escalation_table rows silently.
+            assertThat(EscalationType.WATER_ANOMALIES)
+                    .doesNotContain(EscalationType.LOCATION_MISMATCH);
         }
 
         @Test

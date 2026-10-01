@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The {@code reading_url} constraint, in the configuration production actually runs: http and https
  * both accepted, internal addresses refused, no host allowlist.
  *
- * <p>It shares its policy with the Glific media fetch, so the scheme rule matches that path rather
+ * <p>It shares its policy with the WhatsApp media fetch, so the scheme rule matches that path rather
  * than being tightened here — every host in the observed production traffic is public, which is what
  * the guard turns on.
  */
@@ -138,7 +138,7 @@ class ReadingUrlConstraintValidatorTest {
     @Test
     void passesEverythingThroughWhenOnlyThisPathIsDisabled() {
         // The per-path switch must stand down this rule while leaving the shared policy — and so the
-        // guard on the unauthenticated Glific webhook — fully armed.
+        // guard on the unauthenticated chatbot webhook — fully armed.
         ReadingUrlConstraintValidator off =
                 new ReadingUrlConstraintValidator(ReadingUrlTestValidation.policy(), false);
 

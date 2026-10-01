@@ -9,8 +9,8 @@ reading "didn't go through", or the daily report shows a gap nobody expected. It
 behaviour as shipped. The design rationale lives in the implementation plan; this is the operational
 half.
 
-**Scope.** `POST /api/v1/telemetry/readings` and `PUT /api/v1/telemetry/readings` only — the Assam
-API endpoints. The Glific/WhatsApp paths are untouched: a rejection inside a live WhatsApp
+**Scope.** `POST /api/v1/telemetry/readings` and `PUT /api/v1/telemetry/readings` only — the State-IT
+ingestion endpoints. The WhatsApp chatbot paths are untouched: a rejection inside a live WhatsApp
 conversation has no correction path, whereas an API caller gets a 400 and can resubmit.
 
 ---
@@ -20,7 +20,7 @@ conversation has no correction path, whereas an API caller gets a 400 and can re
 **A quarantined reading makes the scheme look non-reporting and the operator look absent for that
 day.** That is the intended consequence, not a pipeline fault.
 
-Withholding the row from Kafka means `fact_meter_reading_table`, `dim_operator_attendance` and
+Withholding the row from Kafka means `fact_meter_reading_table`, `fact_operator_attendance` and
 `fact_water_quantity` all get nothing for that scheme-day. So the gap surfaces first on the daily
 report or an attendance dashboard, usually to someone who has never heard of this check. Before
 chasing a consumer lag or a failed publish, check for a quarantined row:
@@ -165,7 +165,7 @@ The reason strings are exact constants with no numbers in them, so they can be c
 `GROUP BY`. The per-row numbers are in the structured columns: `overridden_reading` is the value that
 failed and `previous_reading` is the baseline it was measured against, so
 `(overridden_reading − previous_reading) × 1000` reproduces the litres from the row alone. Both
-anomaly stores carry them — `<tenant_schema>.anomaly_table` and `analytics_schema.anomaly_table` —
+anomaly stores carry them — `<tenant_schema>.anomaly_table` and `analytics_schema.fact_anomaly_table` —
 so either one answers the question.
 
 Rejected attempts accumulate — each one lands its own anomaly. The client may simply retry with a

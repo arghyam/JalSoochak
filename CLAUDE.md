@@ -64,6 +64,7 @@ docker run -d --name postgres -p 5432:5432 \
 ### Service Startup Order
 
 Services must start in this order:
+
 1. PostgreSQL (database)
 2. Kafka broker
 3. `service-discovery` (Eureka, port 8761) — all other services register here
@@ -74,6 +75,7 @@ Services must start in this order:
 ### Multi-Tenancy Model
 
 The system uses **schema-per-tenant** multi-tenancy in PostgreSQL:
+
 - `common_schema` — shared tenant metadata, admin users, and LGD (Local Government Directory) location types
 - `tenant_<state_code>` — dynamically created per tenant (e.g., `tenant_mp`, `tenant_up`) via a PL/pgSQL function in `database/V2__create_tenant_schema_function.sql`
 
@@ -115,13 +117,15 @@ src/main/java/com/example/<service>/
 ### Message Service
 
 The `message-service` (port 8085) is distinct from others: it uses **Spring WebFlux** (non-blocking) to call external notification APIs. It supports three channels configured in `application.yml`:
+
 - Webhook (generic)
 - Email via SendGrid
-- WhatsApp via Gliffic API
+- WhatsApp via the `WhatsAppSender` port (adapter: `GlificWhatsAppSender`)
 
 ### Configuration
 
 All services use `src/main/resources/application.yml`. Key environment variables that override defaults:
+
 - `SPRING_DATASOURCE_URL`
 - `SPRING_DATASOURCE_USERNAME`
 - `SPRING_DATASOURCE_PASSWORD`
@@ -135,44 +139,53 @@ Note: Several `application.yml` files contain hardcoded credentials (development
 Cron jobs in `tenant-service` publish Kafka events; `message-service` consumes and delivers via WhatsApp.
 
 ### Flow
-- 8 AM cron (`NudgeSchedulerService`): operators with no upload today → `NUDGE` Kafka event
+
+- 18:00 IST cron (`NudgeSchedulerService`, per-tenant `PUMP_OPERATOR_REMINDER_NUDGE_TIME`): **one** `NUDGE`
+  event per operator who still has a scheme with nothing recorded today by _any_ operator on it
 - 9 AM cron (`EscalationSchedulerService`): operators with missed days ≥ threshold → `ESCALATION` Kafka event
-- `message-service` (`NotificationEventRouter`): routes events → WhatsApp via Glific GraphQL HSM API
+- `message-service` (`NotificationEventRouter`): routes events → WhatsApp through the `WhatsAppSender` port (adapter: `GlificWhatsAppSender`, GraphQL HSM API)
 
 ### Language resolution
+
 Message text is fetched from `common_schema.tenant_config_master_table` using the pattern from
-`telemetry-service/GlificWebhookService`:
+`telemetry-service/ConversationLocalizationService`:
+
 - `user_table.language_id` (int) → `language_N` config key → language name → normalized key
 - Template keys: `nudge_message_{langKey}`, `escalation_message_{langKey}` (fallback: `_english` → generic)
 - Add per-tenant rows in `tenant_config_master_table` with these keys before running.
 
-### MinIO + Glific
-- Escalation PDFs are generated locally (PDFBox), uploaded to MinIO, then the MinIO URL is registered
-  with Glific via `createMessageMedia` to get a `mediaId`
-- Glific template for nudge: uses `sendHsmMessage`; body `{{1}}` = operator name, `{{2}}` = date
-- Glific template for escalation (two-step):
+### Object storage + WhatsApp provider
+
+- Escalation PDFs are generated locally (PDFBox), uploaded to the S3-compatible store through
+  `ObjectStorageService`, then the PDF's public URL is registered with the WhatsApp provider via
+  `createMessageMedia` to get a `mediaId`
+- Nudge: `WhatsAppSender.startNudgeFlow` starts the provider's nudge flow (`WHATSAPP_NUDGE_FLOW_ID`) with `{name, date}`;
+  the flow sends the HSM (`{{1}}` name, `{{2}}` date) and enters the main flow with `nudge_action`.
+  Retried only when the start certainly did not happen (`NudgeSendOutcome`) — a retry re-sends the HSM.
+- WhatsApp template for escalation (two-step):
   1. `createMessageMedia(url, source_url)` → `mediaId`
   2. `createAndSendMessage(templateId, mediaId, receiverId, parameters=[bodyText])` — the document
      header attachment is provided via `mediaId`; the body parameter is the localized text
-- Required env vars: `GLIFIC_API_URL`, `GLIFIC_API_KEY`, `GLIFIC_NUDGE_TEMPLATE_ID`,
-  `GLIFIC_ESCALATION_TEMPLATE_ID`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`,
-  `MINIO_BUCKET`, `MINIO_BASE_URL`
+- Required env vars: `WHATSAPP_API_URL`, `WHATSAPP_USERNAME`, `WHATSAPP_PASSWORD`,
+  `WHATSAPP_NUDGE_TEMPLATE_ID`, `WHATSAPP_ESCALATION_TEMPLATE_ID`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`,
+  `STORAGE_SECRET_KEY`, `STORAGE_BUCKET`, `STORAGE_PUBLIC_BASE_URL`
 
 ### Daily report delivery mode (DOCUMENT | LINK)
 
 `NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE` — both paths in
-`GlificWhatsAppService.sendDailyReportHsm`. `minio.base-url` must be public and anonymously
-readable either way.
+`GlificWhatsAppSender.sendDailyReportHsm`, behind the `WhatsAppSender` port. `storage.public-base-url`
+must be public and anonymously readable either way.
 
-- `DOCUMENT` (default) — two-step media send. Meta fetches `minio.base-url` itself, which the
-  India-only firewall in front of production MinIO blocks.
+- `DOCUMENT` (default) — two-step media send. Meta fetches `storage.public-base-url` itself, which
+  the India-only firewall in front of the production object store blocks.
 - `LINK` — one `sendHsmMessage` with a "View Report" button, no media step. `parameters =
 [officerName, reportDate (dd-MM-yyyy), urlSuffix]` — the URL suffix must come **last**. The
-  button's prefix is frozen at Meta approval and must equal `minio.base-url` + `/`, so each
-  environment needs its own approved template (`GLIFIC_DAILY_REPORT_SO_LINK_TEMPLATE_ID`); set
+  button's prefix is frozen at Meta approval and must equal `storage.public-base-url` + `/`, so each
+  environment needs its own approved template (`WHATSAPP_DAILY_REPORT_SO_LINK_TEMPLATE_ID`); set
   `DAILY_REPORT_LINK_BUTTON_BASE_URL` to have that checked at startup.
 
 ### Privacy rule
+
 Phone numbers are PII — log them only at `DEBUG` level. Never include raw phone numbers in
 `INFO`/`WARN`/`ERROR` log statements.
 
@@ -181,13 +194,14 @@ Phone numbers are PII — log them only at `DEBUG` level. Never include raw phon
 **Always follow Test-Driven Development (TDD)** for all new code in this repository.
 
 ### Rules
+
 1. **Write tests before or alongside implementation** — no production code ships without a corresponding test.
 2. **Integration tests use Testcontainers** — use `org.testcontainers:postgresql` for real database assertions;
    never mock the database in integration tests.
 3. **Unit tests use Mockito only** — no Spring context for pure business-logic tests
    (`@ExtendWith(MockitoExtension.class)`); fast and side-effect-free.
-4. **External HTTP APIs use WireMock** — use `spring-cloud-contract-wiremock` to stub Glific and any other
-   HTTP dependencies; never call real external services in tests.
+4. **External HTTP APIs use WireMock** — use `spring-cloud-contract-wiremock` to stub the WhatsApp
+   provider and any other HTTP dependencies; never call real external services in tests.
 5. **Disable infrastructure in test application.properties** — set `spring.flyway.enabled=false`,
    `eureka.client.enabled=false`, `spring.kafka.admin.fail-fast=false` and override datasource via
    `@DynamicPropertySource` from the Testcontainer.
@@ -197,6 +211,7 @@ Phone numbers are PII — log them only at `DEBUG` level. Never include raw phon
    do not log them at INFO level even in test helpers.
 
 ### Test structure per service
+
 ```text
 src/test/
 ├── java/com/example/<service>/
@@ -209,6 +224,7 @@ src/test/
 ```
 
 ### Running tests
+
 ```bash
 # Run all tests for a service (requires Docker for Testcontainers)
 cd backend/<service-name>

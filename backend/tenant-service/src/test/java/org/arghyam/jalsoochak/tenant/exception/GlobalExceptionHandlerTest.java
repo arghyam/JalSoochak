@@ -591,6 +591,42 @@ class GlobalExceptionHandlerTest {
             assertEquals(400, response.getBody().getStatus());
             assertEquals("Malformed or unreadable request body", response.getBody().getMessage());
         }
+
+        @Test
+        @DisplayName("Should echo the message when a settings DTO rejected its own input")
+        void testHandleMessageNotReadable_SettingsRejection() {
+            // Jackson wraps what a @JsonCreator or @JsonAnySetter throws, so the marker is only
+            // ever found down the cause chain, never as the direct cause.
+            Throwable wrapped = new RuntimeException("JSON mapping problem", new SettingsRejectedException(
+                    "Unknown property 'apiKey' in sendgrid settings."));
+            HttpMessageNotReadableException ex = mock(HttpMessageNotReadableException.class);
+            when(ex.getCause()).thenReturn(wrapped);
+
+            ResponseEntity<ApiErrorResponseDTO> response = handler.handleMessageNotReadable(ex);
+
+            assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+            assertNotNull(response.getBody());
+            assertEquals("Unknown property 'apiKey' in sendgrid settings.", response.getBody().getMessage());
+        }
+
+        @Test
+        @DisplayName("Should not echo an IllegalArgumentException that is not a settings rejection")
+        void testHandleMessageNotReadable_ForeignIllegalArgumentIsNotEchoed() {
+            // A JDK or third-party IllegalArgumentException raised inside binding quotes the input
+            // that produced it, and on the messaging endpoints that input sits next to a
+            // credential. Only the settings DTOs' own rejections are echoed.
+            Throwable wrapped = new RuntimeException("JSON mapping problem", new IllegalArgumentException(
+                    "Invalid URI: https://user:sup3r-s3cret@smtp.example.com/"));
+            HttpMessageNotReadableException ex = mock(HttpMessageNotReadableException.class);
+            when(ex.getCause()).thenReturn(wrapped);
+
+            ResponseEntity<ApiErrorResponseDTO> response = handler.handleMessageNotReadable(ex);
+
+            assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+            assertNotNull(response.getBody());
+            assertEquals("Malformed or unreadable request body", response.getBody().getMessage());
+            assertFalse(response.getBody().getMessage().contains("sup3r-s3cret"));
+        }
     }
 
     @Nested

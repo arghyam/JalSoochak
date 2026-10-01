@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -473,7 +474,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     "created_at", LocalDateTime.of(2026, 3, 1, 7, 30)));
 
             Optional<TelemetryConfirmedReadingSnapshot> snapshot =
-                    repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, null);
+                    repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, ReadingChannel.BFM, null);
 
             assertThat(snapshot).isPresent();
             assertThat(snapshot.get().confirmedReading()).isEqualByComparingTo("1234.50");
@@ -486,7 +487,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     row("confirmed_reading", new BigDecimal("10"), "created_at", null));
 
             Optional<TelemetryConfirmedReadingSnapshot> snapshot =
-                    repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, null);
+                    repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, ReadingChannel.BFM, null);
 
             assertThat(snapshot).isPresent();
             assertThat(snapshot.get().createdAt()).isNull();
@@ -497,7 +498,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             onQuery("confirmed_reading > 0",
                     row("confirmed_reading", new BigDecimal("10"), "created_at", null));
 
-            repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, 99L);
+            repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, ReadingChannel.BFM, 99L);
 
             assertThat(allQuerySql()).anySatisfy(sql -> assertThat(sql).contains("id <> ?"));
         }
@@ -507,14 +508,14 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             onQuery("confirmed_reading > 0", row(
                     "confirmed_reading", new BigDecimal("88.00"), "created_at", null));
 
-            assertThat(repository.findLastConfirmedReading(SCHEMA, 5L, null))
+            assertThat(repository.findLastConfirmedReading(SCHEMA, 5L, ReadingChannel.BFM, null))
                     .hasValueSatisfying(v -> assertThat(v).isEqualByComparingTo("88.00"));
         }
 
         @Test
         void findLatestConfirmedReadingSnapshotBeforeDateRequiresCutoff() {
             assertThatThrownBy(() ->
-                    repository.findLatestConfirmedReadingSnapshotBeforeDate(SCHEMA, 5L, null, null))
+                    repository.findLatestConfirmedReadingSnapshotBeforeDate(SCHEMA, 5L, ReadingChannel.BFM, null, null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("cutoffDateExclusive");
         }
@@ -526,7 +527,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     "created_at", LocalDateTime.of(2026, 2, 1, 6, 0)));
 
             assertThat(repository.findLatestConfirmedReadingSnapshotBeforeDate(
-                    SCHEMA, 5L, LocalDate.of(2026, 2, 2), 7L)).isPresent();
+                    SCHEMA, 5L, ReadingChannel.BFM, LocalDate.of(2026, 2, 2), 7L)).isPresent();
         }
 
         @Test
@@ -548,9 +549,9 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
 
         @Test
         void findRecentDailyConfirmedReadingsGuardsInvalidArguments() {
-            assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, null, null, 14)).isEmpty();
-            assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, null, 0)).isEmpty();
-            assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, null, -1)).isEmpty();
+            assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, null, ReadingChannel.BFM, null, 14)).isEmpty();
+            assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, ReadingChannel.BFM, null, 0)).isEmpty();
+            assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, ReadingChannel.BFM, null, -1)).isEmpty();
         }
 
         @Test
@@ -560,7 +561,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     row("reading_date", LocalDate.of(2026, 3, 1), "confirmed_reading", new BigDecimal("100")));
 
             List<DailyConfirmedReading> readings =
-                    repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, 9L, 16);
+                    repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, ReadingChannel.BFM, 9L, 16);
 
             assertThat(readings).hasSize(2);
             assertThat(readings.get(0).day()).isEqualTo(LocalDate.of(2026, 3, 2));
@@ -592,57 +593,41 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             assertThat(repository.supportsQuarantine(SCHEMA)).isFalse();
         }
 
-        /** Registers rows for each of the four baseline lookups and runs them all. */
+        /** Registers rows for each of the three baseline lookups and runs them all. */
         private void runEveryBaselineLookup() {
             onQuery("confirmed_reading > 0",
                     row("confirmed_reading", new BigDecimal("10"), "created_at", null));
             onQuery("DISTINCT ON (reading_date)",
                     row("reading_date", LocalDate.of(2026, 3, 1), "confirmed_reading", new BigDecimal("10")));
-            // Registered last so it wins over the "confirmed_reading > 0" rule, which the joined
-            // query's own "fr.confirmed_reading > 0" would otherwise match.
-            onQuery("JOIN tenant_as.flow_reading_table target",
-                    row("id", 5L, "correlation_id", "corr-1", "created_by", 2L,
-                            "reading_date", LocalDate.of(2026, 3, 1), "confirmed_reading", new BigDecimal("10")));
 
-            repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, null);
-            repository.findLatestConfirmedReadingSnapshotBeforeDate(SCHEMA, 5L, LocalDate.of(2026, 3, 2), null);
-            repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, null, 16);
-            repository.findPreviousFlowReadingForScheme(SCHEMA, 100L);
+            repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, ReadingChannel.BFM, null);
+            repository.findLatestConfirmedReadingSnapshotBeforeDate(
+                    SCHEMA, 5L, ReadingChannel.BFM, LocalDate.of(2026, 3, 2), null);
+            repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, ReadingChannel.BFM, null, 16);
         }
 
         @Test
         void baselineQueriesExcludeQuarantinedRowsOnAMigratedSchema() {
             // A quarantined row is stored but is not a reading: it must not become the baseline the
-            // next day's delta is measured against, in any of the four queries that produce one.
+            // next day's delta is measured against, in any of the three queries that produce one.
             onColumnsExisting("quarantine_reason");
 
             runEveryBaselineLookup();
 
             assertThat(allQuerySql())
                     .filteredOn(sql -> sql.contains("flow_reading_table"))
-                    .hasSize(4)
+                    .hasSize(3)
                     .allSatisfy(sql -> assertThat(sql).contains("quarantine_reason = 0"));
         }
 
         @Test
-        void findPreviousFlowReadingForSchemeFiltersTheBaselineSideOnly() {
-            // The joined lookup has two aliases. The candidate side is searched, so it takes the
-            // filter; the target is addressed by id and must stay reachable even when quarantined —
-            // a correction has to be able to resolve the very row it is releasing.
-            onColumnsExisting("quarantine_reason");
-            onQuery("JOIN tenant_as.flow_reading_table target",
-                    row("id", 5L, "correlation_id", "corr-1", "created_by", 2L,
-                            "reading_date", LocalDate.of(2026, 3, 1), "confirmed_reading", new BigDecimal("10")));
-
-            repository.findPreviousFlowReadingForScheme(SCHEMA, 100L);
+        void baselineQueriesCountARowWithNoChannelAsBfm() {
+            runEveryBaselineLookup();
 
             assertThat(allQuerySql())
                     .filteredOn(sql -> sql.contains("flow_reading_table"))
-                    .singleElement()
-                    .satisfies(sql -> {
-                        assertThat(sql).contains("fr.quarantine_reason = 0");
-                        assertThat(sql).doesNotContain("target.quarantine_reason");
-                    });
+                    .hasSize(3)
+                    .allSatisfy(sql -> assertThat(sql).contains("COALESCE(channel, 'BFM') = ?"));
         }
 
         @Test
@@ -708,8 +693,8 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
         }
 
         @Test
-        void findReadingByCorrelationIdAlsoMatchesFlowVisionIdWhenColumnExists() {
-            onColumnsExisting("flowvision_correlation_id");
+        void findReadingByCorrelationIdAlsoMatchesOcrCorrelationIdWhenColumnExists() {
+            onColumnsExisting("ocr_correlation_id");
             onQuery("flow_reading_table", row("id", 5L, "correlation_id", "corr-1", "created_by", 2L));
 
             Optional<TelemetryReadingRecord> record =
@@ -718,7 +703,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             assertThat(record).isPresent();
             assertThat(record.get().correlationId()).isEqualTo("corr-1");
             assertThat(allQuerySql())
-                    .anySatisfy(sql -> assertThat(sql).contains("flowvision_correlation_id = ?"));
+                    .anySatisfy(sql -> assertThat(sql).contains("ocr_correlation_id = ?"));
         }
 
         @Test
@@ -730,7 +715,18 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
 
             assertThat(allQuerySql())
                     .filteredOn(sql -> sql.contains("SELECT id, correlation_id, created_by"))
-                    .allSatisfy(sql -> assertThat(sql).doesNotContain("flowvision_correlation_id"));
+                    .allSatisfy(sql -> assertThat(sql).doesNotContain(" OR "));
+        }
+
+        @Test
+        void findFlowReadingDetailsByCorrelationIdAlsoMatchesOcrCorrelationIdWhenColumnExists() {
+            onColumnExists(true);
+            onQuery("AS reading_time", row("id", 5L, "correlation_id", "corr-1"));
+
+            repository.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1");
+
+            assertThat(allQuerySql())
+                    .anySatisfy(sql -> assertThat(sql).contains("OR ocr_correlation_id = ?"));
         }
 
         @Test
@@ -742,7 +738,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     "correlation_id", "corr-1",
                     "extracted_reading", new BigDecimal("10.5"),
                     "confirmed_reading", new BigDecimal("11.5"),
-                    "image_url", "https://minio/img.jpg",
+                    "image_url", "https://storage.example.org/img.jpg",
                     "reading_date", LocalDate.of(2026, 3, 1),
                     "reading_time", LocalDateTime.of(2026, 3, 1, 6, 15),
                     "channel", "BFM"));
@@ -757,7 +753,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             assertThat(value.createdBy()).isEqualTo(2L);
             assertThat(value.extractedReading()).isEqualByComparingTo("10.5");
             assertThat(value.confirmedReading()).isEqualByComparingTo("11.5");
-            assertThat(value.imageUrl()).isEqualTo("https://minio/img.jpg");
+            assertThat(value.imageUrl()).isEqualTo("https://storage.example.org/img.jpg");
             assertThat(value.readingDate()).isEqualTo(LocalDate.of(2026, 3, 1));
             assertThat(value.readingAt()).isEqualTo(LocalDateTime.of(2026, 3, 1, 6, 15));
             assertThat(value.channel()).isEqualTo("BFM");
@@ -809,12 +805,16 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
         void findLatestCompletedFlowReadingBeforeDateMapsProjection() {
             onQuery("reading_date < ?", row(
                     "id", 5L, "correlation_id", "c", "created_by", 2L,
-                    "reading_date", LocalDate.of(2026, 2, 28), "confirmed_reading", new BigDecimal("9")));
+                    "reading_date", LocalDate.of(2026, 2, 28), "confirmed_reading", new BigDecimal("9"),
+                    "channel", "PDU"));
 
+            // The channel comes with the row: the WhatsApp correction applies that channel's rules.
             assertThat(repository.findLatestCompletedFlowReadingBeforeDate(
                     SCHEMA, 7L, 2L, LocalDate.of(2026, 3, 1)))
-                    .hasValueSatisfying(r -> assertThat(r.readingDate())
-                            .isEqualTo(LocalDate.of(2026, 2, 28)));
+                    .hasValueSatisfying(r -> {
+                        assertThat(r.readingDate()).isEqualTo(LocalDate.of(2026, 2, 28));
+                        assertThat(r.channel()).isEqualTo("PDU");
+                    });
         }
 
         @Test

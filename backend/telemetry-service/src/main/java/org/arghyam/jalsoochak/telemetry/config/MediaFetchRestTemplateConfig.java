@@ -21,13 +21,13 @@ import org.springframework.web.client.RestTemplate;
 
 /**
  * The HTTP client used for one thing only: fetching a meter image from a URL supplied by the caller
- * of the Glific webhook.
+ * of the chatbot webhook.
  *
  * <p>It is deliberately a separate client from the shared {@link RestTemplateConfig#restTemplate()}.
- * The shared one talks to FlowVision, Glific and MinIO, any of which may legitimately sit on an
- * internal address depending on the environment; putting an address guard on it would break those
- * calls. Isolating the guard here means the only request path that changes behaviour is the one that
- * was actually exposed.
+ * The shared one talks to the OCR provider, the WhatsApp provider and object storage, any of which
+ * may legitimately sit on an internal address depending on the environment; putting an address
+ * guard on it would break those calls. Isolating the guard here means the only request path that
+ * changes behaviour is the one that was actually exposed.
  */
 @Configuration
 public class MediaFetchRestTemplateConfig {

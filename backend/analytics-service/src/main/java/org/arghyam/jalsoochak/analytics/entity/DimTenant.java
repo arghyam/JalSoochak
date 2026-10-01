@@ -48,6 +48,9 @@ public class DimTenant {
     @Column(name = "under_supply_range_percentage")
     private Integer underSupplyRangePercentage;
 
+    @Column(name = "person_count_per_household")
+    private Integer personCountPerHousehold;
+
     @JdbcTypeCode(SqlTypes.ARRAY)
     @Column(name = "included_work_statuses", columnDefinition = "integer[]")
     private List<Integer> includedWorkStatuses;

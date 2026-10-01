@@ -7,7 +7,7 @@
 It is a **multi-tenant** platform for state-level water-supply monitoring, featuring:
 
 * A **microservices** backend (Java 21 + Spring Boot)
-* **WhatsApp integration via Glific** for field operators, with AI-assisted meter-reading extraction
+* **WhatsApp integration** for field operators, with AI-assisted meter-reading extraction
 * **Schema-per-tenant** data isolation on PostgreSQL
 * **Cloud-neutral** deployment on any Kubernetes cluster
 
@@ -24,5 +24,6 @@ It is a **multi-tenant** platform for state-level water-supply monitoring, featu
 * **Database Design** — multi-tenant schema and analytics warehouse
 * **Non-functional Requirements** — security, scalability, performance, observability
 * **Future Work** — roadmap and known gaps
+* **Guides** — installation and onboarding a new tenant (State/UT)
 
 For implementation details, build instructions, and source code, see the main project repository.

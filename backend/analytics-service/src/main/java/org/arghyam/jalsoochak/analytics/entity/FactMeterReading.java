@@ -10,6 +10,9 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.arghyam.jalsoochak.analytics.dto.event.CalculationParameters;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -57,7 +60,7 @@ public class FactMeterReading {
     /**
      * ANOMALY-SUBMISSION-LINK (V48): the source row's {@code flow_reading_table.correlation_id}, so
      * an anomaly can be resolved to the fact row it was raised over. Not unique — the tenant column
-     * has no unique constraint and the Glific flows share one value across rows — so this is a
+     * has no unique constraint and the chatbot flows share one value across rows — so this is a
      * drill-down key, never a counting key.
      */
     @Column(name = "correlation_id")
@@ -79,4 +82,17 @@ public class FactMeterReading {
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
+
+    /** V56: the tenant's {@code flow_reading_table.id}; null on rows from older events. */
+    @Column(name = "source_reading_id")
+    private Long sourceReadingId;
+
+    /** V56: the source row's {@code updated_at}, the version this row holds. */
+    @Column(name = "source_updated_at")
+    private LocalDateTime sourceUpdatedAt;
+
+    /** V56: telemetry's pump and formula snapshot for ELM and PDU; null for BFM. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "calculation_parameters")
+    private CalculationParameters calculationParameters;
 }

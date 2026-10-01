@@ -13,7 +13,7 @@ import java.util.Optional;
  * Fetches localized nudge and escalation message templates from
  * {@code common_schema.tenant_config_master_table}.
  *
- * <p>Language resolution mirrors {@code GlificWebhookService.normalizeLanguageKey()}
+ * <p>Language resolution mirrors {@code ConversationLocalizationService.normalizeLanguageKey()}
  * in telemetry-service: {@code user_table.language_id} (int) → {@code language_N}
  * config key → language name → normalized key.</p>
  *
@@ -30,6 +30,9 @@ public class MessageTemplateService {
     /**
      * Returns the localized nudge message for the given tenant/user, with
      * {@code {name}} and {@code {scheme}} placeholders filled in.
+     *
+     * <p>Not used by the scheduled nudge, which starts the provider's nudge flow and so takes its text
+     * from the flow's template; kept for the text-message path.</p>
      */
     public String findNudgeMessage(int tenantId, int languageId,
                                    String operatorName, String schemeId) {
@@ -54,14 +57,10 @@ public class MessageTemplateService {
     }
 
     /**
-     * Returns the tenant-specific Glific welcome flow ID if configured.
-     *
-     * <p>Looks up the config keys in order:
-     * {@code glific_welcome_flow_id} → {@code welcome_flow_id}.</p>
+     * Returns the tenant-specific welcome flow ID from {@code welcome_flow_id}, if configured.
      */
     public Optional<String> findWelcomeFlowId(int tenantId) {
-        return findConfigValue(tenantId, "glific_welcome_flow_id")
-                .or(() -> findConfigValue(tenantId, "welcome_flow_id"))
+        return findConfigValue(tenantId, "welcome_flow_id")
                 .map(String::trim)
                 .filter(value -> !value.isBlank());
     }

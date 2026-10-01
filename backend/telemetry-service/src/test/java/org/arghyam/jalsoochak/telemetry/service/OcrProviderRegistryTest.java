@@ -1,20 +1,25 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class OcrProviderRegistryTest {
 
     private static final class FakeExtractor implements MeterReadingExtractor {
         private final String id;
+        private final ReadingChannel channel;
 
-        FakeExtractor(String id) {
+        FakeExtractor(String id, ReadingChannel channel) {
             this.id = id;
+            this.channel = channel;
         }
 
         @Override
@@ -23,63 +28,127 @@ class OcrProviderRegistryTest {
         }
 
         @Override
-        public FlowVisionResult extractReading(String imageUrl, OcrProviderSettings settings) {
+        public ReadingChannel channel() {
+            return channel;
+        }
+
+        @Override
+        public OcrReadingResult extractReading(String imageUrl, OcrProviderSettings settings) {
             return null;
         }
 
         @Override
-        public FlowVisionResult extractReadingOrThrow(String imageUrl, OcrProviderSettings settings) {
+        public OcrReadingResult extractReadingOrThrow(String imageUrl, OcrProviderSettings settings) {
             return null;
         }
     }
 
+    private static FakeExtractor bfm(String id) {
+        return new FakeExtractor(id, ReadingChannel.BFM);
+    }
+
+    private static FakeExtractor elm(String id) {
+        return new FakeExtractor(id, ReadingChannel.ELM);
+    }
+
     @Test
     void returnsExtractorMatchingProviderId() {
-        FakeExtractor flowvision = new FakeExtractor("flowvision");
-        FakeExtractor visionX = new FakeExtractor("vision-x");
-        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(flowvision, visionX), "flowvision");
+        FakeExtractor builtIn = bfm("flowvision");
+        FakeExtractor visionX = bfm("vision-x");
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(builtIn, visionX), "flowvision");
 
-        assertSame(visionX, registry.get("vision-x"));
-        assertSame(flowvision, registry.get("flowvision"));
+        assertThat(registry.get(ReadingChannel.BFM, "vision-x")).containsSame(visionX);
+        assertThat(registry.get(ReadingChannel.BFM, "flowvision")).containsSame(builtIn);
     }
 
     @Test
     void matchesProviderIdCaseInsensitively() {
-        FakeExtractor visionX = new FakeExtractor("Vision-X");
-        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(new FakeExtractor("flowvision"), visionX), "flowvision");
+        FakeExtractor visionX = bfm("Vision-X");
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(bfm("flowvision"), visionX), "flowvision");
 
-        assertSame(visionX, registry.get("vision-x"));
+        assertThat(registry.get(ReadingChannel.BFM, "vision-x")).containsSame(visionX);
     }
 
     @Test
-    void fallsBackToDefaultForUnknownProvider() {
-        FakeExtractor flowvision = new FakeExtractor("flowvision");
-        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(flowvision, new FakeExtractor("vision-x")), "flowvision");
+    void fallsBackToBfmDefaultForUnknownProvider() {
+        FakeExtractor builtIn = bfm("flowvision");
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(builtIn, bfm("vision-x")), "flowvision");
 
-        assertSame(flowvision, registry.get("does-not-exist"));
+        assertThat(registry.get(ReadingChannel.BFM, "does-not-exist")).containsSame(builtIn);
     }
 
     @Test
-    void fallsBackToDefaultForNullProvider() {
-        FakeExtractor flowvision = new FakeExtractor("flowvision");
-        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(flowvision), "flowvision");
+    void fallsBackToBfmDefaultForNullProvider() {
+        FakeExtractor builtIn = bfm("flowvision");
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(builtIn), "flowvision");
 
-        assertSame(flowvision, registry.get(null));
+        assertThat(registry.get(ReadingChannel.BFM, null)).containsSame(builtIn);
     }
 
     @Test
     void keepsFirstRegistrationOnDuplicateId() {
-        FakeExtractor first = new FakeExtractor("flowvision");
-        FakeExtractor second = new FakeExtractor("FlowVision");
+        FakeExtractor first = bfm("flowvision");
+        FakeExtractor second = bfm("FlowVision");
         OcrProviderRegistry registry = new OcrProviderRegistry(List.of(first, second), "flowvision");
 
-        assertSame(first, registry.get("flowvision"));
+        assertThat(registry.get(ReadingChannel.BFM, "flowvision")).containsSame(first);
     }
 
     @Test
-    void throwsWhenDefaultProviderMissing() {
-        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(new FakeExtractor("vision-x")), "flowvision");
+    void throwsWhenBfmDefaultProviderMissing() {
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(bfm("vision-x")), "flowvision");
 
-        assertThrows(IllegalStateException.class, () -> registry.get("unknown-provider"));
+        assertThrows(IllegalStateException.class, () -> registry.get(ReadingChannel.BFM, "unknown-provider"));
+    }
+
+    @Test
+    void returnsTheTenantsProviderForItsOwnChannel() {
+        FakeExtractor elmVision = elm("elm-vision");
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(bfm("flowvision"), elmVision), "flowvision");
+
+        assertThat(registry.get(ReadingChannel.ELM, "ELM-Vision")).containsSame(elmVision);
+    }
+
+    @Test
+    void neverServesAChannelWithAnotherChannelsProvider() {
+        FakeExtractor builtIn = bfm("flowvision");
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(builtIn, elm("elm-vision")), "flowvision");
+
+        assertThat(registry.get(ReadingChannel.ELM, "flowvision")).isEmpty();
+        assertThat(registry.get(ReadingChannel.BFM, "elm-vision")).containsSame(builtIn);
+    }
+
+    @Test
+    void aChannelWithNoDefaultProviderHasNothingForNoProvider() {
+        OcrProviderRegistry registry = new OcrProviderRegistry(
+                List.of(bfm("flowvision"), elm("elm-vision")), "flowvision");
+
+        assertThat(registry.get(ReadingChannel.ELM, null)).isEmpty();
+    }
+
+    @Test
+    void aChannelWithNoProviderHasNothingEvenForTheBfmDefaultId() {
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(bfm("flowvision")), "flowvision");
+
+        assertThat(registry.get(ReadingChannel.ELM, null)).isEmpty();
+        assertThat(registry.get(ReadingChannel.ELM, "flowvision")).isEmpty();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ReadingChannel.class, names = {"PDU", "IOT", "MAN"})
+    void ignoresAProviderForAChannelThatDoesNotReadPhotos(ReadingChannel channel) {
+        OcrProviderRegistry registry = new OcrProviderRegistry(
+                List.of(bfm("flowvision"), new FakeExtractor("typed-in", channel)), "flowvision");
+
+        assertThat(registry.get(channel, "typed-in")).isEmpty();
+    }
+
+    @Test
+    void ignoresAProviderThatDeclaresNoChannel() {
+        FakeExtractor builtIn = bfm("flowvision");
+        OcrProviderRegistry registry = new OcrProviderRegistry(
+                List.of(builtIn, new FakeExtractor("vision-x", null)), "flowvision");
+
+        assertThat(registry.get(ReadingChannel.BFM, "vision-x")).containsSame(builtIn);
     }
 }

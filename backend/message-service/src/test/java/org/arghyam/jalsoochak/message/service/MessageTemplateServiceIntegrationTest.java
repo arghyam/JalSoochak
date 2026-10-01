@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
-import org.arghyam.jalsoochak.message.channel.GlificAuthService;
-import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
+import org.arghyam.jalsoochak.message.channel.provider.glific.GlificAuthService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>Fallback chain: lang-specific → english → generic → hardcoded default</li>
  *   <li>Language resolution: languageId → {@code language_N} config key → name → normalized key</li>
  *   <li>Hindi and English language normalization</li>
+ *   <li>Welcome flow id: {@code welcome_flow_id}, trimmed, empty when absent or blank</li>
  * </ul>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -48,9 +49,9 @@ class MessageTemplateServiceIntegrationTest {
     @MockBean
     private GlificAuthService glificAuthService;
 
-    // Suppress GlificWhatsAppService @PostConstruct validateTemplates
+    // Suppress GlificWhatsAppSender @PostConstruct validateTemplates
     @MockBean
-    private GlificWhatsAppService glificWhatsAppService;
+    private WhatsAppSender whatsAppSender;
 
     @Autowired
     private MessageTemplateService messageTemplateService;
@@ -229,6 +230,34 @@ class MessageTemplateServiceIntegrationTest {
         String name = messageTemplateService.findStateName(TENANT_ID);
 
         assertThat(name).isEqualTo("Test State");
+    }
+
+    // ─────────────────────────── welcome flow id ───────────────────────────────
+
+    @Test
+    void findWelcomeFlowId_returnsConfiguredValue() {
+        insertConfig("welcome_flow_id", "tenant-flow");
+
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).contains("tenant-flow");
+    }
+
+    @Test
+    void findWelcomeFlowId_returnsEmpty_whenKeyAbsent() {
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).isEmpty();
+    }
+
+    @Test
+    void findWelcomeFlowId_trimsValue() {
+        insertConfig("welcome_flow_id", "  tenant-flow  ");
+
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).contains("tenant-flow");
+    }
+
+    @Test
+    void findWelcomeFlowId_returnsEmpty_whenValueIsBlank() {
+        insertConfig("welcome_flow_id", "   ");
+
+        assertThat(messageTemplateService.findWelcomeFlowId(TENANT_ID)).isEmpty();
     }
 
     // ────────────────────────────── helpers ────────────────────────────────────

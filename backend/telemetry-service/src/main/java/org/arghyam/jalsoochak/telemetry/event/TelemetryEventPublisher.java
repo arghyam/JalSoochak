@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.event;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.dto.event.AnomalyEvent;
+import org.arghyam.jalsoochak.telemetry.dto.event.CalculationParameters;
 import org.arghyam.jalsoochak.telemetry.dto.event.EscalationEvent;
 import org.arghyam.jalsoochak.telemetry.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.telemetry.dto.event.SubmissionRejectedEvent;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
@@ -35,33 +37,14 @@ public class TelemetryEventPublisher {
     public static final String EVENT_SUBMISSION_REJECTED = "SUBMISSION_REJECTED";
     public static final int NOT_SUBMITTED_STATUS = 0;
 
+    /**
+     * How long {@link #publishMeterReadingRecordedAndAwait} waits for Kafka: five of the producer's
+     * one-second request timeouts. A broker that is down then stops a run of publishes within seconds,
+     * rather than after the producer's own two-minute delivery timeout.
+     */
+    public static final Duration ACKNOWLEDGEMENT_TIMEOUT = Duration.ofSeconds(5);
+
     private final KafkaProducer kafkaProducer;
-
-    @Async("kafkaPublisherExecutor")
-    public void publishWaterQuantityRecorded(Integer tenantId,
-                                             Long schemeId,
-                                             Long userId,
-                                             LocalDate date,
-                                             BigDecimal waterQuantity,
-                                             Integer submissionStatus) {
-        WaterQuantityEvent event = WaterQuantityEvent.builder()
-                .eventType(EVENT_WATER_QUANTITY_RECORDED)
-                .tenantId(tenantId)
-                .schemeId(toInt(schemeId))
-                .userId(toInt(userId))
-                .waterQuantity(waterQuantity)
-                .submissionStatus(submissionStatus)
-                .outageReason(null)
-                .nonSubmissionReason(null)
-                .date((date != null ? date : ReadingTime.today()).toString())
-                .build();
-
-        boolean ok = kafkaProducer.publishJson(TOPIC, event);
-        if (!ok) {
-            log.warn("[telemetry-events] publish_failed water_quantity tenantId={} schemeId={} userId={} date={}",
-                    tenantId, schemeId, userId, date);
-        }
-    }
 
     @Async("kafkaPublisherExecutor")
     public void publishOutageOrNonSubmissionReason(Integer tenantId,
@@ -210,9 +193,64 @@ public class TelemetryEventPublisher {
                                             LocalDate readingDate,
                                             Integer submissionStatus,
                                             Integer readingType,
-                                            String correlationId) {
+                                            String correlationId,
+                                            Long sourceReadingId,
+                                            LocalDateTime sourceUpdatedAt,
+                                            CalculationParameters calculationParameters) {
+        sendMeterReadingRecorded(meterReadingRecordedEvent(tenantId, schemeId, userId, extractedReading,
+                confirmedReading, confidence, imageUrl, readingAt, channel, readingDate, submissionStatus,
+                readingType, correlationId, sourceReadingId, sourceUpdatedAt, calculationParameters));
+    }
+
+    /** Publishes an event built by {@link #meterReadingRecordedEvent}, as the method above does. */
+    @Async("kafkaPublisherExecutor")
+    public void publishMeterReadingRecorded(MeterReadingEvent event) {
+        sendMeterReadingRecorded(event);
+    }
+
+    /**
+     * Publishes on the calling thread and waits for Kafka to acknowledge the event, for a caller that
+     * publishes many events in a row. The methods above queue each event on the shared
+     * {@code kafkaPublisherExecutor}, whose queue is bounded: a long run of them could fill it, after
+     * which live submissions' events are rejected too.
+     *
+     * @return {@code false} when the event was not acknowledged within {@link #ACKNOWLEDGEMENT_TIMEOUT}
+     */
+    public boolean publishMeterReadingRecordedAndAwait(MeterReadingEvent event) {
+        boolean ok = kafkaProducer.publishJsonAndAwait(TOPIC, event, ACKNOWLEDGEMENT_TIMEOUT);
+        if (!ok) {
+            log.warn("[telemetry-events] publish_failed meter_reading tenantId={} schemeId={} sourceReadingId={}",
+                    event.getTenantId(), event.getSchemeId(), event.getSourceReadingId());
+        }
+        return ok;
+    }
+
+    private void sendMeterReadingRecorded(MeterReadingEvent event) {
+        boolean ok = kafkaProducer.publishJson(TOPIC, event);
+        if (!ok) {
+            log.warn("[telemetry-events] publish_failed meter_reading tenantId={} schemeId={} userId={}",
+                    event.getTenantId(), event.getSchemeId(), event.getUserId());
+        }
+    }
+
+    public static MeterReadingEvent meterReadingRecordedEvent(Integer tenantId,
+                                                              Long schemeId,
+                                                              Long userId,
+                                                              BigDecimal extractedReading,
+                                                              BigDecimal confirmedReading,
+                                                              BigDecimal confidence,
+                                                              String imageUrl,
+                                                              LocalDateTime readingAt,
+                                                              Integer channel,
+                                                              LocalDate readingDate,
+                                                              Integer submissionStatus,
+                                                              Integer readingType,
+                                                              String correlationId,
+                                                              Long sourceReadingId,
+                                                              LocalDateTime sourceUpdatedAt,
+                                                              CalculationParameters calculationParameters) {
         LocalDate effectiveDate = readingDate != null ? readingDate : (readingAt != null ? readingAt.toLocalDate() : null);
-        MeterReadingEvent event = MeterReadingEvent.builder()
+        return MeterReadingEvent.builder()
                 .eventType(EVENT_METER_READING_RECORDED)
                 .tenantId(tenantId)
                 .schemeId(toInt(schemeId))
@@ -229,13 +267,10 @@ public class TelemetryEventPublisher {
                 // ANOMALY-SUBMISSION-LINK: the warehouse counterpart an anomaly's
                 // submission_correlation_id joins against.
                 .correlationId(correlationId)
+                .sourceReadingId(sourceReadingId)
+                .sourceUpdatedAt(sourceUpdatedAt != null ? sourceUpdatedAt.toString() : null)
+                .calculationParameters(calculationParameters)
                 .build();
-
-        boolean ok = kafkaProducer.publishJson(TOPIC, event);
-        if (!ok) {
-            log.warn("[telemetry-events] publish_failed meter_reading tenantId={} schemeId={} userId={}",
-                    tenantId, schemeId, userId);
-        }
     }
 
     /**

@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.RolloverPosition;
 import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
 import org.junit.jupiter.api.Test;
@@ -35,7 +35,7 @@ class RolloverResolutionServiceTest {
     void highOrderFlipCorrectedByHistory() {
         // Steady ~10/day consumption, anchor 140. Model read "0250" (250, an implausible +110 jump);
         // the alternate digit at the hundreds place gives "0150" (150, a normal +10) → resolver overrides.
-        FlowVisionResult ocr = ocr("0250", "250", false,
+        OcrReadingResult ocr = ocr("0250", "250", false,
                 new RolloverPosition(2, 2, bd("0.55"), 1, bd("0.45")));
 
         RolloverResolutionService.ResolvedReading resolved = enabledService()
@@ -50,7 +50,7 @@ class RolloverResolutionServiceTest {
     void twoSignificantPositionsCartesianPicksBestCombination() {
         // Two ambiguous high-order positions → 4 candidates. Only the pos-2 alternate ("1040", +10)
         // clears monotonicity + the cap; the others overshoot far beyond it.
-        FlowVisionResult ocr = ocr("1140", "1140", false,
+        OcrReadingResult ocr = ocr("1140", "1140", false,
                 new RolloverPosition(1, 1, bd("0.9"), 2, bd("0.1")),
                 new RolloverPosition(2, 1, bd("0.6"), 0, bd("0.4")));
 
@@ -65,7 +65,7 @@ class RolloverResolutionServiceTest {
     void redLastDigitDecimalCandidateResolved() {
         // Decimal meter (red last digit): band ~1.0/day, anchor 53.0. Model "0640" → 64.0 (+11,
         // implausible); alternate "0540" → 54.0 (+1.0, normal) → override with the decimal shift applied.
-        FlowVisionResult ocr = ocr("0640", "64.0", true,
+        OcrReadingResult ocr = ocr("0640", "64.0", true,
                 new RolloverPosition(2, 6, bd("0.55"), 5, bd("0.45")));
 
         RolloverResolutionService.ResolvedReading resolved = enabledService()
@@ -80,7 +80,7 @@ class RolloverResolutionServiceTest {
         // A negative daily delta (meter replacement / correction) at 1020 → 1005 is dropped from the band,
         // leaving a clean ~10/day band that still resolves "1260" (+210) down to "1060" (+10).
         List<DailyConfirmedReading> history = history(1000, 1010, 1020, 1005, 1030, 1040, 1050);
-        FlowVisionResult ocr = ocr("1260", "1260", false,
+        OcrReadingResult ocr = ocr("1260", "1260", false,
                 new RolloverPosition(2, 2, bd("0.55"), 0, bd("0.45")));
 
         RolloverResolutionService.ResolvedReading resolved = enabledService()
@@ -96,7 +96,7 @@ class RolloverResolutionServiceTest {
     void nearTieKeepsModelValue() {
         // Both siblings ("0140" and "0150") are plausible (deltas 0 and 10, both ≤ μ) so the domain
         // penalty is zero for each and only the tiny confidence gap separates them (< margin) → keep model.
-        FlowVisionResult ocr = ocr("0140", "140", false,
+        OcrReadingResult ocr = ocr("0140", "140", false,
                 new RolloverPosition(3, 4, bd("0.5"), 5, bd("0.55")));
 
         RolloverResolutionService.ResolvedReading resolved = enabledService()
@@ -111,7 +111,7 @@ class RolloverResolutionServiceTest {
     void lowOrderPositionBelowSignificanceKeepsModelValue() {
         // A units-place flip on a scheme consuming ~100/day swings the reading by 1 (< significance) →
         // no significant position → model value.
-        FlowVisionResult ocr = ocr("1400", "1400", false,
+        OcrReadingResult ocr = ocr("1400", "1400", false,
                 new RolloverPosition(4, 0, bd("0.6"), 1, bd("0.4")));
 
         RolloverResolutionService.ResolvedReading resolved = enabledService()
@@ -125,7 +125,7 @@ class RolloverResolutionServiceTest {
     void allCandidatesFailMonotonicityKeepsModelValue() {
         // Both siblings ("0200"/"0100") sit far below the anchor (950) → all fail monotonicity → never
         // invent, keep the model value.
-        FlowVisionResult ocr = ocr("0200", "200", false,
+        OcrReadingResult ocr = ocr("0200", "200", false,
                 new RolloverPosition(2, 2, bd("0.55"), 1, bd("0.45")));
 
         RolloverResolutionService.ResolvedReading resolved = enabledService()
@@ -138,7 +138,7 @@ class RolloverResolutionServiceTest {
     @Test
     void tooFewValidDeltasKeepsModelValue() {
         // A single historical day yields zero deltas (< MIN_DELTAS) → new-scheme fallback → model value.
-        FlowVisionResult ocr = ocr("0250", "250", false,
+        OcrReadingResult ocr = ocr("0250", "250", false,
                 new RolloverPosition(2, 2, bd("0.55"), 1, bd("0.45")));
 
         RolloverResolutionService.ResolvedReading resolved = enabledService()
@@ -150,7 +150,7 @@ class RolloverResolutionServiceTest {
 
     @Test
     void meterReplacedKeepsModelValue() {
-        FlowVisionResult ocr = ocr("0250", "250", false,
+        OcrReadingResult ocr = ocr("0250", "250", false,
                 new RolloverPosition(2, 2, bd("0.55"), 1, bd("0.45")));
 
         RolloverResolutionService.ResolvedReading resolved = enabledService()
@@ -162,7 +162,7 @@ class RolloverResolutionServiceTest {
 
     @Test
     void firstEverReadingKeepsModelValue() {
-        FlowVisionResult ocr = ocr("0250", "250", false,
+        OcrReadingResult ocr = ocr("0250", "250", false,
                 new RolloverPosition(2, 2, bd("0.55"), 1, bd("0.45")));
 
         RolloverResolutionService.ResolvedReading resolved = enabledService()
@@ -174,7 +174,7 @@ class RolloverResolutionServiceTest {
 
     @Test
     void noRolloverKeepsModelValue() {
-        FlowVisionResult ocr = FlowVisionResult.builder()
+        OcrReadingResult ocr = OcrReadingResult.builder()
                 .adjustedReading(bd("250"))
                 .rawMeterReading("0250")
                 .redLastDigit(false)
@@ -193,7 +193,7 @@ class RolloverResolutionServiceTest {
     void killSwitchOffKeepsModelValue() {
         RolloverResolutionService disabled = new RolloverResolutionService(false, MAPPER);
         assertTrue(!disabled.isEnabled());
-        FlowVisionResult ocr = ocr("0250", "250", false,
+        OcrReadingResult ocr = ocr("0250", "250", false,
                 new RolloverPosition(2, 2, bd("0.55"), 1, bd("0.45")));
 
         RolloverResolutionService.ResolvedReading resolved = disabled
@@ -208,7 +208,7 @@ class RolloverResolutionServiceTest {
         // Two entries target the same raw position — malformed metadata. Rather than let both choice bits
         // write digit index 2 (which would collapse candidates and double-count confidence), the resolver
         // falls back to the model value. Without the guard this same input resolves to 150.
-        FlowVisionResult ocr = ocr("0250", "250", false,
+        OcrReadingResult ocr = ocr("0250", "250", false,
                 new RolloverPosition(2, 2, bd("0.55"), 1, bd("0.45")),
                 new RolloverPosition(2, 2, bd("0.55"), 1, bd("0.45")));
 
@@ -223,7 +223,7 @@ class RolloverResolutionServiceTest {
     void selectedDigitInconsistentWithRawReadingKeepsModelValue() {
         // The selected digit (7) disagrees with the raw string digit at position 2 ('2') — inconsistent
         // metadata, so the resolver declines to reason positionally and keeps the model value.
-        FlowVisionResult ocr = ocr("0250", "250", false,
+        OcrReadingResult ocr = ocr("0250", "250", false,
                 new RolloverPosition(2, 7, bd("0.55"), 1, bd("0.45")));
 
         RolloverResolutionService.ResolvedReading resolved = enabledService()
@@ -235,9 +235,9 @@ class RolloverResolutionServiceTest {
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────
 
-    private static FlowVisionResult ocr(String rawReading, String adjusted, boolean redLastDigit,
+    private static OcrReadingResult ocr(String rawReading, String adjusted, boolean redLastDigit,
                                         RolloverPosition... positions) {
-        return FlowVisionResult.builder()
+        return OcrReadingResult.builder()
                 .adjustedReading(bd(adjusted))
                 .rawMeterReading(rawReading)
                 .redLastDigit(redLastDigit)
