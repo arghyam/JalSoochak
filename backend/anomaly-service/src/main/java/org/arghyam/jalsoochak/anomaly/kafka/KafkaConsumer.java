@@ -37,22 +37,6 @@ public class KafkaConsumer {
         }
     }
 
-    @KafkaListener(topics = "scheme-service-topic", groupId = "${spring.kafka.consumer.group-id}")
-    public void consumeSchemeEvents(String message) {
-        log.info("[anomaly-service] Received message from scheme-service-topic");
-        try {
-            JsonNode node = objectMapper.readTree(message);
-            String eventType = node.path("eventType").asText("UNKNOWN");
-            switch (eventType) {
-                case "SCHEME_CREATED", "SCHEME_UPDATED" -> analyticsDimensionSyncService.upsertScheme(node);
-                default -> log.debug("[anomaly-service] Ignoring scheme event type: {}", eventType);
-            }
-        } catch (Exception e) {
-            log.error("Failed to process scheme event: {}", e.getMessage(), e);
-            throw new RuntimeException(e.getMessage(), e);
-        }
-    }
-
     @KafkaListener(topics = "telemetry-service-topic", groupId = "${spring.kafka.consumer.group-id}")
     public void consumeTelemetryEvents(String message) {
         log.info("[anomaly-service] Received message from telemetry-service-topic");
