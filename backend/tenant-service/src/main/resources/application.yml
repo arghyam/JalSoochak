@@ -101,16 +101,12 @@ management:
     health:
       show-details: when-authorized
 
-# ────────────────────────────────────────────────────────────── # Nudge & Escalation Scheduler Configuration # ──────────────────────────────────────────────────────────────
-# Fallback defaults used when a tenant has no row in tenant_config_master_table
-nudge:
-  schedule:
-    hour: 18
-    minute: 00
+# ─────────────────────────────────────────────────────────────────────────────
+# Job execution defaults — used by TenantConfigService when a tenant has no
+# row in tenant_config_master_table. Schedule timing (hour/minute/day-of-week)
+# has moved to K8s CronJob manifests in build/k8s/cronjobs/.
+# ─────────────────────────────────────────────────────────────────────────────
 escalation:
-  schedule:
-    hour: 18
-    minute: 00
   level1:
     threshold:
       days: 3 # Days of missed uploads before level-1 officer is notified
@@ -121,34 +117,20 @@ escalation:
       days: 7 # Days before level-2 officer is notified
     officer:
       user_type: DISTRICT_OFFICER
-# Daily Water Service Situation Report — per-tenant daily cron (IST).
-#
-# The report covers TODAY from 00:00 up to this time, so the schedule IS the window: moving it to
-# 17:00 makes the report cover 00:00-17:00. The PDF's "Reporting Period" line is rendered from this
-# value, so it stays truthful. Section Officers only — SDOs receive the weekly report instead.
+# Daily Water Service Situation Report — officer roles that receive it.
+# The schedule (when the K8s CronJob fires) is set in tenant-service-daily-report-cronjob.yaml.
 # Overridable per tenant via common_schema.tenant_config_master_table key DAILY_SITUATION_REPORT_TIME.
 daily-report:
-  schedule:
-    hour: ${DAILY_REPORT_SCHEDULE_HOUR:16}
-    minute: ${DAILY_REPORT_SCHEDULE_MINUTE:00}
   officer:
     user-types: ${DAILY_REPORT_OFFICER_USER_TYPES:SECTION_OFFICER}
-# Weekly Water Service Situation Report — per-tenant weekly cron (IST), for both SO and SDO.
+# Weekly Water Service Situation Report — officer roles and window config.
+# The schedule (when the K8s CronJob fires) is set in tenant-service-weekly-report-cronjob.yaml.
 #
-# Two independent settings, both in the cron convention 0-7 where both 0 and 7 are Sunday, 1 is Monday:
-#   schedule.day-of-week  — WHEN the job fires.
-#   week-start-day        — WHICH seven days it reports on. The window is always the last COMPLETE week
-#                           beginning on this day, so 1 gives Monday-Sunday and 4 gives Thursday-Wednesday.
-#                           It never includes a day that has not finished.
-# Setting the two to different days is legal (report a Thu-Wed week, deliver it on Friday) but usually
-# unintended, so the scheduler logs a WARN: the further the firing day is past the end of the window,
-# the staler the data is when it arrives.
+# week-start-day — WHICH seven days the report covers. The window is always the last COMPLETE
+#   week beginning on this day, so 1 gives Monday-Sunday and 4 gives Thursday-Wednesday.
+#   It never includes a day that has not finished. Both 0 and 7 are Sunday (cron convention).
 # Overridable per tenant via common_schema.tenant_config_master_table key WEEKLY_SITUATION_REPORT_TIME.
 weekly-report:
-  schedule:
-    day-of-week: ${WEEKLY_REPORT_SCHEDULE_DAY_OF_WEEK:1}
-    hour: ${WEEKLY_REPORT_SCHEDULE_HOUR:09}
-    minute: ${WEEKLY_REPORT_SCHEDULE_MINUTE:00}
   week-start-day: ${WEEKLY_REPORT_WEEK_START_DAY:1}
   officer:
     user-types: ${WEEKLY_REPORT_OFFICER_USER_TYPES:SECTION_OFFICER,SUB_DIVISIONAL_OFFICER}

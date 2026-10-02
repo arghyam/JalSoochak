@@ -1,8 +1,6 @@
 package org.arghyam.jalsoochak.tenant.config;
 
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /**
  * DataSource configuration.
@@ -27,12 +25,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 public class DataSourceConfig {
     // DataSource, JdbcTemplate, and TransactionManager are auto-configured
     // via spring.datasource.* properties in application.yml.
-
-    @Bean
-    public ThreadPoolTaskScheduler taskScheduler() {
-        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(10);
-        scheduler.setThreadNamePrefix("tenant-scheduler-");
-        return scheduler;
-    }
+    //
+    // ThreadPoolTaskScheduler was removed when per-tenant cron scheduling moved
+    // to K8s CronJobs (see JobTriggerController + build/k8s/cronjobs/).
 }
+

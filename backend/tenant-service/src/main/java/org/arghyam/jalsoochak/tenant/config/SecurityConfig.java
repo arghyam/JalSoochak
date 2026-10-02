@@ -36,6 +36,9 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers("/error", "/actuator/health/**", "/actuator/info").permitAll();
+                    // /internal/** is secured by InternalJobSecurityFilter (token guard) which runs
+                    // before this chain; permit here so Spring Security does not demand a JWT on top.
+                    auth.requestMatchers("/internal/**").permitAll();
                     auth.requestMatchers(HttpMethod.GET,
                             "/api/v1/tenants",
                             "/api/v1/tenants/*/config/public",
