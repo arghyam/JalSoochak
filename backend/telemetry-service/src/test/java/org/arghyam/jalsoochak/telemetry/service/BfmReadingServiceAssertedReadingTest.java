@@ -16,6 +16,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.ManualReadingMaxValues;
 import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
@@ -31,6 +32,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
+import static org.mockito.Mockito.mock;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -104,7 +106,7 @@ class BfmReadingServiceAssertedReadingTest {
                         null,
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
-                new SubmittedValueCapture(),
+                new SubmittedValueCapture(mock(ManualReadingMaxValues.class)),
                 pduDayLimit,
                 calculationParametersSnapshotter,
                 null);

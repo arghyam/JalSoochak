@@ -34,6 +34,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.LanguageListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
+import org.arghyam.jalsoochak.tenant.dto.internal.ManualReadingMaxValueConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
@@ -392,6 +393,15 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                     throw new InvalidConfigValueException("ELM_WATER_QUANTITY_FORMULA must not be null");
                 }
                 ((ElmFormulaConfigDTO) dto).validatedFormula();
+            }
+
+            if (key == TenantConfigKeyEnum.TENANT_MANUAL_READING_MAX_VALUE) {
+                // null and {} bind without error; stored, they would read as "no limit" without saying so.
+                if (dto == null) {
+                    throw new InvalidConfigValueException("TENANT_MANUAL_READING_MAX_VALUE must not be null");
+                }
+                ManualReadingMaxValueConfigDTO maxValuesDto = (ManualReadingMaxValueConfigDTO) dto;
+                maxValuesDto.setMaxValues(maxValuesDto.validatedMaxValues());
             }
 
             if (key.getType() == ConfigType.GENERIC) {

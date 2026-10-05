@@ -1853,7 +1853,7 @@ public class MeterReadingConversationService {
             // would. WhatsApp has no unit field, so the value is in that channel's standard unit.
             ReadingChannel channel = ReadingChannel.fromCode(targetDayRecord.channel());
             CapturedReading captured;
-            switch (submittedValueCapture.captureCorrection(channel, readingValue, null)) {
+            switch (submittedValueCapture.captureCorrection(tenantId, channel, readingValue, null)) {
                 case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
                 case CaptureOutcome.Rejected rejected -> {
                     return rejectedManualReading(rejected.message(), languageKey, request.getContactId(), readingValue);

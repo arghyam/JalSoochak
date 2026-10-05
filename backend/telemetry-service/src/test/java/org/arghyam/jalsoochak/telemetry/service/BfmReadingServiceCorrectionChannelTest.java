@@ -12,6 +12,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.ManualReadingMaxValues;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimitFixtures;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
@@ -61,6 +62,9 @@ class BfmReadingServiceCorrectionChannelTest {
     private PduDayLimit pduDayLimit;
 
     @Mock
+    private ManualReadingMaxValues manualReadingMaxValues;
+
+    @Mock
     private CalculationParametersSnapshotter calculationParametersSnapshotter;
 
     @Mock
@@ -96,7 +100,7 @@ class BfmReadingServiceCorrectionChannelTest {
                 new RolloverResolutionService(false, new ObjectMapper()),
                 supplyPlausibilityGuard,
                 null,
-                new SubmittedValueCapture(),
+                new SubmittedValueCapture(manualReadingMaxValues),
                 pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
@@ -186,6 +190,21 @@ class BfmReadingServiceCorrectionChannelTest {
         assertThat(response.isSuccess()).isFalse();
         assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);
         assertThat(response.getMessage()).isEqualTo(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE);
+        verifyNothingWritten();
+    }
+
+    @Test
+    @DisplayName("a correction above the channel's configured maximum is refused, and nothing is written")
+    void correctionAboveTheConfiguredMaximumIsRefused() {
+        correcting(ReadingChannel.ELM, "4000");
+        when(manualReadingMaxValues.maxFor(TENANT_ID, ReadingChannel.ELM)).thenReturn(Optional.of(new BigDecimal("5000")));
+
+        CreateReadingResponse response = correct("5000.5", null);
+
+        assertThat(response.isSuccess()).isFalse();
+        assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);
+        assertThat(response.getMessage()).isEqualTo("Reading can't be more than 5000 kWh.");
+        assertThat(response.getCorrelationId()).isEqualTo("corr-1");
         verifyNothingWritten();
     }
 

@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.ManualReadingMaxValues;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+import static org.mockito.Mockito.mock;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -70,7 +72,7 @@ class BfmReadingServiceMeterReplacedTest {
 
     // Declared so @InjectMocks supplies the real capture step: every submission here sends a value.
     @Spy
-    private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture();
+    private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture(mock(ManualReadingMaxValues.class));
 
     @Mock
     private CalculationParametersSnapshotter calculationParametersSnapshotter;

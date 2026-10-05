@@ -23,6 +23,7 @@ import static org.mockito.Mockito.when;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -36,6 +37,7 @@ import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ElmFormulaConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.ManualReadingMaxValueConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
@@ -1126,6 +1128,56 @@ class TenantManagementServiceImplTest {
             when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
 
             // There is no default formula, so a value that names none must not be stored.
+            assertThrows(InvalidConfigValueException.class,
+                    () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("TENANT_MANUAL_READING_MAX_VALUE stores the limits with upper-case channel codes")
+        void testSetTenantConfigs_manualReadingMaxValue_storesUpperCaseChannels() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.TENANT_MANUAL_READING_MAX_VALUE,
+                    objectMapper.readTree("{\"maxValues\":{\"bfm\":\"50000\",\"PDU\":720}}"));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            ArgumentCaptor<String> serialized = ArgumentCaptor.forClass(String.class);
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.TENANT_MANUAL_READING_MAX_VALUE.name()), serialized.capture(), eq(100)))
+                    .thenAnswer(inv -> Optional.of(ConfigDTO.builder()
+                            .configKey(TenantConfigKeyEnum.TENANT_MANUAL_READING_MAX_VALUE.name())
+                            .configValue(inv.getArgument(2))
+                            .build()));
+
+            TenantConfigResponseDTO result = tenantManagementService.setTenantConfigs(tenantId, request);
+
+            assertEquals("{\"maxValues\":{\"BFM\":50000,\"PDU\":720}}", serialized.getValue());
+            assertEquals(new BigDecimal("50000"), ((ManualReadingMaxValueConfigDTO) result.getConfigs()
+                    .get(TenantConfigKeyEnum.TENANT_MANUAL_READING_MAX_VALUE)).getMaxValues().get("BFM"));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"null", "{}", "{\"maxValues\":{\"XYZ\":10}}",
+                "{\"maxValues\":{\"BFM\":0}}", "{\"maxValues\":{\"PDU\":1441}}"})
+        @DisplayName("TENANT_MANUAL_READING_MAX_VALUE rejects a missing map, unknown channel or bad value before it reaches the database")
+        void testSetTenantConfigs_manualReadingMaxValue_rejectsInvalidValue(String value) throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.TENANT_MANUAL_READING_MAX_VALUE, objectMapper.readTree(value));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
             assertThrows(InvalidConfigValueException.class,
                     () -> tenantManagementService.setTenantConfigs(tenantId, request));
             verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());

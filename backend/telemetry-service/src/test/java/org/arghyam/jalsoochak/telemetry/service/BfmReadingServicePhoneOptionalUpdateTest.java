@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.service.capture.ManualReadingMaxValues;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -28,6 +29,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
+import static org.mockito.Mockito.mock;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -77,7 +79,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
 
     // Declared so @InjectMocks supplies the real capture step, which checks the corrected value.
     @Spy
-    private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture();
+    private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture(mock(ManualReadingMaxValues.class));
 
     @InjectMocks
     private BfmReadingService service;

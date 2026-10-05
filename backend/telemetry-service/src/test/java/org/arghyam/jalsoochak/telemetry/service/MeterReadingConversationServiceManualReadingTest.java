@@ -14,6 +14,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryPendingMeterChangeRe
 import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.ManualReadingMaxValues;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimitFixtures;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
@@ -36,6 +37,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import static org.mockito.Mockito.mock;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.any;
@@ -90,8 +92,11 @@ class MeterReadingConversationServiceManualReadingTest {
     @Mock
     private ReadingRepublisher readingRepublisher;
 
+    /** Unstubbed, it returns no maximum for any channel. */
+    private final ManualReadingMaxValues manualReadingMaxValues = mock(ManualReadingMaxValues.class);
+
     @Spy
-    private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture();
+    private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture(manualReadingMaxValues);
 
     @Mock
     private PduDayLimit pduDayLimit;
@@ -901,6 +906,56 @@ class MeterReadingConversationServiceManualReadingTest {
                 any(), any(), any(), any());
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(anyString(), any());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
+    }
+
+    @Test
+    void manualReadingAboveTheChannelsMaximumIsRejectedWithoutWritingAnything() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.BFM);
+        when(manualReadingMaxValues.maxFor(1, ReadingChannel.BFM)).thenReturn(Optional.of(new BigDecimal("50000")));
+        String message = "Reading can't be more than 50000 m³.";
+        when(localizationService.localizeMessage(message, "english")).thenReturn(message);
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("500000")
+                .build());
+
+        assertEquals(false, resp.isSuccess());
+        assertEquals("REJECTED", resp.getQualityStatus());
+        assertEquals(message, resp.getMessage());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
+        verify(telemetryTenantRepository, never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
+                any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
+                any(), any(), any(), any());
+        verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
+    }
+
+    @Test
+    void manualReadingAtTheChannelsMaximumIsAccepted() {
+        stubAcceptedManualReading();
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.of(new TelemetryPendingMeterChangeRecord(
+                        88L, "mc-1", 1L, new BigDecimal("140"))));
+        when(manualReadingMaxValues.maxFor(ArgumentMatchers.eq(1), any())).thenReturn(Optional.of(new BigDecimal("150")));
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("150")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 88L, new BigDecimal("150"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
     }
 
     @Test

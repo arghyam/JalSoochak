@@ -2,12 +2,15 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.UpdateYesterdayFinalReadingBySchemeResponse;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.CaptureOutcome;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -23,6 +26,7 @@ public class TelemetrySchemeReadingService {
 
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final ReadingRepublisher readingRepublisher;
+    private final SubmittedValueCapture submittedValueCapture;
 
     /**
      * Falls back to the schema in {@link TenantContext}, i.e. the unauthenticated
@@ -101,6 +105,13 @@ public class TelemetrySchemeReadingService {
 
             log.info("[update-yesterday-final-reading] targetDayRecord id={} date={} createdBy={}",
                     targetDayRecord.id(), targetDayRecord.readingDate(), targetDayRecord.createdBy());
+
+            // A correction can't store what a submission on the same channel would have been refused.
+            // The target is always a BFM row in m3, as below.
+            if (submittedValueCapture.captureCorrection(tenantId, ReadingChannel.BFM, finalReading, null)
+                    instanceof CaptureOutcome.Rejected rejected) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, rejected.message());
+            }
 
             // Always treat this as a "confirmed correction": keep extracted_reading untouched (or 0 for created rows).
             // The officer's number is a manual override, so the row must also stop claiming its
