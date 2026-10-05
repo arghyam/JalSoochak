@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
@@ -348,7 +349,7 @@ class TelemetrySchemeReadingServiceTest {
                         assertThat(e.getReason()).isEqualTo("Reading can't be more than 550 m³.");
                     });
             verify(telemetryTenantRepository, never())
-                    .updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+                    .updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
             verify(readingRepublisher, never()).republish(any(), any(), any());
         }
 
@@ -360,7 +361,7 @@ class TelemetrySchemeReadingServiceTest {
             service.updateYesterdayFinalReadingBySchemeId(SCHEME_ID, PHONE, new BigDecimal("600"), null);
 
             verify(telemetryTenantRepository).updateConfirmedReading(SCHEMA, 100L, new BigDecimal("600"), 11L,
-                    RolloverResolutionService.SOURCE_MANUAL, "m3");
+                    RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.API);
         }
 
         @Test

@@ -180,7 +180,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         assertEquals(false, resp.isSuccess());
         assertEquals("REJECTED", resp.getQualityStatus());
         assertEquals(message, resp.getMessage());
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
 
@@ -193,7 +193,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
 
         assertEquals(true, resp.isSuccess());
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("50000"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
     }
 
     @Test
