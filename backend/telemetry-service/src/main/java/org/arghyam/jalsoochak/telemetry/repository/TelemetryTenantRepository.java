@@ -1024,7 +1024,7 @@ public class TelemetryTenantRepository {
         String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
         boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
         boolean hasSubmittedUnit = columnExists(schemaName, "flow_reading_table", SUBMITTED_UNIT_COLUMN);
-        boolean hasReportedVia = columnExists(schemaName, "flow_reading_table", REPORTED_VIA_COLUMN);
+        boolean hasReportedVia = hasReportedViaColumn(schemaName);
 
         StringBuilder columns = new StringBuilder(
                 "scheme_id, " + timeColumn + ", reading_date, extracted_reading, confirmed_reading");
@@ -1118,7 +1118,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
-        boolean hasReportedVia = columnExists(schemaName, "flow_reading_table", REPORTED_VIA_COLUMN);
+        boolean hasReportedVia = hasReportedViaColumn(schemaName);
         String sql = String.format("""
                 INSERT INTO %s.flow_reading_table
                     (scheme_id, %s, reading_date, extracted_reading, confirmed_reading%s,
@@ -2422,7 +2422,7 @@ public class TelemetryTenantRepository {
         boolean writeUnit = submittedUnit != null
                 && columnExists(schemaName, "flow_reading_table", SUBMITTED_UNIT_COLUMN);
         boolean writeReportedVia = reportedVia != null
-                && columnExists(schemaName, "flow_reading_table", REPORTED_VIA_COLUMN);
+                && hasReportedViaColumn(schemaName);
         String markerAssignments = (writeSource ? ", confirmed_reading_source = ?" : "")
                 + (writeUnit ? ", " + SUBMITTED_UNIT_COLUMN + " = ?" : "")
                 + (writeReportedVia ? ", " + REPORTED_VIA_COLUMN + " = ?" : "");
@@ -2560,7 +2560,7 @@ public class TelemetryTenantRepository {
         String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
         boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
         boolean hasSubmittedUnit = columnExists(schemaName, "flow_reading_table", SUBMITTED_UNIT_COLUMN);
-        boolean hasReportedVia = columnExists(schemaName, "flow_reading_table", REPORTED_VIA_COLUMN);
+        boolean hasReportedVia = hasReportedViaColumn(schemaName);
 
         List<Object> params = new ArrayList<>(List.of(
                 readingAt, LocalDate.from(readingAt), extractedReading, confirmedReading));
@@ -2820,7 +2820,20 @@ public class TelemetryTenantRepository {
         }
     }
 
+    /**
+     * Whether this tenant schema has {@code reported_via_id} (V61). Only its presence is cached: V61 is
+     * applied by tenant-service while this service runs, and a cached absence would drop the channel
+     * from every write until it expired, with nothing to backfill it.
+     */
+    private boolean hasReportedViaColumn(String schemaName) {
+        return columnExists(schemaName, "flow_reading_table", REPORTED_VIA_COLUMN, false);
+    }
+
     private boolean columnExists(String schemaName, String tableName, String columnName) {
+        return columnExists(schemaName, tableName, columnName, true);
+    }
+
+    private boolean columnExists(String schemaName, String tableName, String columnName, boolean cacheAbsence) {
         if (!metadataCacheEnabled || columnExistsCacheTtlMs <= 0L) {
             return queryColumnExists(schemaName, tableName, columnName);
         }
@@ -2831,7 +2844,9 @@ public class TelemetryTenantRepository {
             return cached.value();
         }
         boolean exists = queryColumnExists(schemaName, tableName, columnName);
-        columnExistsCache.put(cacheKey, new TimedCacheValue<>(exists, now + columnExistsCacheTtlMs));
+        if (exists || cacheAbsence) {
+            columnExistsCache.put(cacheKey, new TimedCacheValue<>(exists, now + columnExistsCacheTtlMs));
+        }
         return exists;
     }
 
