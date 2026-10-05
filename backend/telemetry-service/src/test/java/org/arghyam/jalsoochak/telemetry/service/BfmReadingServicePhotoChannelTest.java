@@ -167,7 +167,7 @@ class BfmReadingServicePhotoChannelTest {
                 any(LocalDate.class))).thenReturn(Optional.empty());
         when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(99L, null));
         CreateReadingRequest request = CreateReadingRequest.builder()
                 .schemeId(SCHEME_ID)
@@ -183,7 +183,7 @@ class BfmReadingServicePhotoChannelTest {
         assertThat(response.isSuccess()).isTrue();
         verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                eq(IMAGE_URL), any(), anyInt(), any(), any(), any(), any(), any(), eq(ReadingChannel.PDU), eq("min"));
+                eq(IMAGE_URL), any(), anyInt(), any(), any(), any(), any(), any(), eq(ReadingChannel.PDU), eq("min"), any());
         verify(bfmOcrExtractor, never()).extractReading(anyString(), any());
         verify(tenantConfigRepository, never()).findConfigValue(any(), startsWith("ocr"));
     }
@@ -191,9 +191,9 @@ class BfmReadingServicePhotoChannelTest {
     private void verifyNothingStoredOrPublished() {
         verify(repo, never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any());
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(repo, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any());
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any(), any());
         verify(repo, never()).createTenantAnomalyRecord(anyString(), any());
         verifyNoInteractions(telemetryEventPublisher);
     }

@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -69,7 +70,7 @@ public class ReadingRejectionService {
             }
 
             // Scoped to the operator's own tenant, so the vendor route's cross-tenant guard holds too.
-            bfmReadingService.resetLatestConfirmedReadingByPhone(contactId, tenantId);
+            bfmReadingService.resetLatestConfirmedReadingByPhone(contactId, tenantId, ReportingChannel.WHATSAPP);
             return IntroResponse.builder()
                     .success(true)
                     .message(localizationService.localizeMessage(REJECTED_MESSAGE, languageKey))

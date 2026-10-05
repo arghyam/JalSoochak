@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
@@ -109,7 +110,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         assertEquals("corr-2", resp.getCorrelationId());
         InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
         order.verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1000"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
         order.verify(readingRepublisher).republish("tenant_test", 1, 22L);
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verifyNoInteractions(telemetryEventPublisher);
@@ -122,7 +123,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         CreateReadingResponse resp = update("1100");
 
         assertEquals(true, resp.isSuccess());
-        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1100"), 1L, null, "m3");
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1100"), 1L, null, "m3", ReportingChannel.WHATSAPP);
     }
 
     @Test
@@ -132,7 +133,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         update("1110");
 
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1110"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
     }
 
     @Test
@@ -143,7 +144,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
 
         assertEquals(true, resp.isSuccess());
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1440"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "min");
+                RolloverResolutionService.SOURCE_MANUAL, "min", ReportingChannel.WHATSAPP);
         verify(readingRepublisher).republish("tenant_test", 1, 22L);
     }
 
@@ -158,7 +159,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         assertEquals(false, resp.isSuccess());
         assertEquals("REJECTED", resp.getQualityStatus());
         assertEquals(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE, resp.getMessage());
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
 
@@ -180,7 +181,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         verify(pduDayLimit).writeWithinLimit(eq("tenant_test"), eq(10L), eq(TARGET_DATE), eq(new BigDecimal("600")),
                 replaced.capture(), any());
         assertEquals(22L, replaced.getValue().get());
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
 

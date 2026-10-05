@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
@@ -294,7 +295,8 @@ public class MeterReadingConversationService {
                     schemeId,
                     operatorWithSchema.operator().id(),
                     ReadingTime.now(),
-                    selectedReason
+                    selectedReason,
+                    ReportingChannel.WHATSAPP
             );
 
             String prompt = tenantConfigRepository.findTakeMeterReadingPrompt(tenantId, languageKey)
@@ -555,7 +557,8 @@ public class MeterReadingConversationService {
                     schemeId,
                     operatorWithSchema.operator().id(),
                     ReadingTime.now(),
-                    selectedReason
+                    selectedReason,
+                    ReportingChannel.WHATSAPP
             );
 
             telemetryEventPublisher.publishMeterChangeReason(
@@ -720,7 +723,8 @@ public class MeterReadingConversationService {
                         operatorWithSchema.operator().id(),
                         ReadingTime.now(),
                         correlationId,
-                        resolvedIssueReason
+                        resolvedIssueReason,
+                        ReportingChannel.WHATSAPP
                 );
             }
 
@@ -909,7 +913,8 @@ public class MeterReadingConversationService {
                     schemeId,
                     operatorWithSchema.operator().id(),
                     ReadingTime.now(),
-                    resolvedIssueReason
+                    resolvedIssueReason,
+                    ReportingChannel.WHATSAPP
             );
             int anomalyType = AnomalyConstants.TYPE_NO_WATER_SUPPLY;
             for (Long recipientUserId : analyticsUserIds) {
@@ -1090,7 +1095,8 @@ public class MeterReadingConversationService {
                     value,
                     operatorWithSchema.operator().id(),
                     RolloverResolutionService.SOURCE_MANUAL,
-                    captured.submittedUnitCode()
+                    captured.submittedUnitCode(),
+                    ReportingChannel.WHATSAPP
             );
             telemetryTenantRepository.updateFlowReadingChannel(
                     operatorWithSchema.schemaName(), pendingId, channel);
@@ -1123,7 +1129,8 @@ public class MeterReadingConversationService {
                     value,
                     operatorWithSchema.operator().id(),
                     RolloverResolutionService.manualConfirmSource(value, todaysFlow.confirmedReading()),
-                    captured.submittedUnitCode()
+                    captured.submittedUnitCode(),
+                    ReportingChannel.WHATSAPP
             );
             telemetryTenantRepository.updateFlowReadingChannel(
                     operatorWithSchema.schemaName(), todaysFlow.id(), channel);
@@ -1171,7 +1178,8 @@ public class MeterReadingConversationService {
                 RolloverResolutionService.SOURCE_MANUAL,
                 null,
                 channel,
-                captured.submittedUnitCode()
+                captured.submittedUnitCode(),
+                ReportingChannel.WHATSAPP
         ).id();
         return new ManualReadingRow(newRowId, newRowCorrelationId);
     }
@@ -1711,9 +1719,13 @@ public class MeterReadingConversationService {
                         BigDecimal.ZERO,
                         BigDecimal.ZERO,
                         correlationId,
+                        null,
                         "",
-                        null
-                );
+                        null,
+                        null,
+                        null,
+                        ReportingChannel.WHATSAPP
+                ).id();
             }
 
             telemetryTenantRepository.updateReadingLocation(
@@ -1864,7 +1876,8 @@ public class MeterReadingConversationService {
                         operatorId,
                         RolloverResolutionService.manualConfirmSource(
                                 correctedReading, targetDayRecord.confirmedReading()),
-                        captured.submittedUnitCode()
+                        captured.submittedUnitCode(),
+                        ReportingChannel.WHATSAPP
                 );
                 return targetDayRecord.id();
             };

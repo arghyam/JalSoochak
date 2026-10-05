@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.repository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
@@ -34,6 +35,7 @@ public class TelemetryTenantRepository {
     private static final String SCHEME_SELECTION_CORRELATION_PREFIX = "scheme-selection-";
     private static final String OCR_CORRELATION_COLUMN = "ocr_correlation_id";
     private static final String SUBMITTED_UNIT_COLUMN = "submitted_unit";
+    private static final String REPORTED_VIA_COLUMN = "reported_via_id";
     private static final int OPERATOR_LOOKUP_CACHE_SIZE = 10_000;
     /** Mirrors {@code IngestionSource.NORMAL} — the column default, so it needs no tracking UPDATE. */
     private static final int NORMAL_INGESTION_SOURCE = 0;
@@ -346,7 +348,8 @@ public class TelemetryTenantRepository {
     public String upsertPendingSchemeSelectionRecord(String schemaName,
                                                      Long schemeId,
                                                      Long operatorId,
-                                                     LocalDateTime readingAt) {
+                                                     LocalDateTime readingAt,
+                                                     ReportingChannel reportedVia) {
         validateSchemaName(schemaName);
         LocalDate readingDate = LocalDate.from(readingAt);
         Optional<TelemetrySchemeSelectionRecord> existing = findLatestPendingSchemeSelectionForDate(
@@ -378,8 +381,12 @@ public class TelemetryTenantRepository {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 correlationId,
+                null,
                 "",
-                null
+                null,
+                null,
+                null,
+                reportedVia
         );
         return correlationId;
     }
@@ -696,6 +703,10 @@ public class TelemetryTenantRepository {
         return (value == null || value.isBlank()) ? null : value.trim();
     }
 
+    private static Integer codeOf(ReportingChannel reportedVia) {
+        return reportedVia != null ? reportedVia.getCode() : null;
+    }
+
     /**
      * ROLLOVER-RESOLVE: records confirmed-reading provenance on an already-inserted flow_reading row.
      * A post-insert guarded UPDATE (same style as {@link #applyIngestionTracking}) so the battle-tested
@@ -855,13 +866,13 @@ public class TelemetryTenantRepository {
         return persistFlowReadingWithTracking(schemaName, existingReadingId, schemeId, operatorId, readingAt,
                 extractedReading, confirmedReading, correlationId, ocrCorrelationId, imageUrl,
                 meterChangeReason, ingestionSource, submittedStateSchemeId, submittedCentreSchemeId,
-                submittedPhoneHash, confirmedReadingSource, quarantineReason, null, null).id();
+                submittedPhoneHash, confirmedReadingSource, quarantineReason, null, null, null).id();
     }
 
     /**
-     * As above, plus the reading's {@code channel} and {@code submittedUnit} written by the insert or
-     * placeholder update itself. Returns the version that write gave the row: the markers written
-     * after it move {@code updated_at} on, but do not change what is published.
+     * As above, plus the reading's {@code channel}, {@code submittedUnit} and {@code reportedVia}
+     * written by the insert or placeholder update itself. Returns the version that write gave the row:
+     * the markers written after it move {@code updated_at} on, but do not change what is published.
      */
     @org.springframework.transaction.annotation.Transactional
     public FlowReadingVersion persistFlowReadingWithTracking(String schemaName,
@@ -882,16 +893,17 @@ public class TelemetryTenantRepository {
                                                              Integer confirmedReadingSource,
                                                              Integer quarantineReason,
                                                              ReadingChannel channel,
-                                                             String submittedUnit) {
+                                                             String submittedUnit,
+                                                             ReportingChannel reportedVia) {
         FlowReadingVersion version;
         if (existingReadingId != null) {
             version = updateFlowReadingFromIngestion(schemaName, existingReadingId, readingAt, extractedReading,
                     confirmedReading, correlationId, ocrCorrelationId, imageUrl, meterChangeReason, operatorId,
-                    channel, submittedUnit);
+                    channel, submittedUnit, reportedVia);
         } else {
             version = createFlowReading(schemaName, schemeId, operatorId, readingAt, extractedReading,
                     confirmedReading, correlationId, ocrCorrelationId, imageUrl, meterChangeReason,
-                    channel, submittedUnit);
+                    channel, submittedUnit, reportedVia);
         }
         Long readingId = version.id();
         // A NORMAL ingestion source carries no submitted-id metadata and matches the column defaults, so
@@ -986,38 +998,12 @@ public class TelemetryTenantRepository {
         return jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("user_id")), schemeId, userType);
     }
 
-    public Long createFlowReading(String schemaName,
-                                  Long schemeId,
-                                  Long operatorId,
-                                  LocalDateTime readingAt,
-                                  BigDecimal extractedReading,
-                                  BigDecimal confirmedReading,
-                                  String correlationId,
-                                  String imageUrl,
-                                  String meterChangeReason) {
-        return createFlowReading(schemaName, schemeId, operatorId, readingAt, extractedReading, confirmedReading,
-                correlationId, null, imageUrl, meterChangeReason);
-    }
-
-    public Long createFlowReading(String schemaName,
-                                  Long schemeId,
-                                  Long operatorId,
-                                  LocalDateTime readingAt,
-                                  BigDecimal extractedReading,
-                                  BigDecimal confirmedReading,
-                                  String correlationId,
-                                  String ocrCorrelationId,
-                                  String imageUrl,
-                                  String meterChangeReason) {
-        return createFlowReading(schemaName, schemeId, operatorId, readingAt, extractedReading, confirmedReading,
-                correlationId, ocrCorrelationId, imageUrl, meterChangeReason, null, null).id();
-    }
-
     /**
-     * Inserts a reading with its {@code channel} and {@code submittedUnit} in the same statement, and
-     * returns the row's id and the {@code updated_at} that statement wrote. {@code null} for either
-     * leaves the column NULL, which is how rows that hold no reading are stored. {@code submittedUnit}
-     * is dropped on a pre-V56 schema that has no column for it.
+     * Inserts a reading with its {@code channel}, {@code submittedUnit} and {@code reportedVia} in the
+     * same statement, and returns the row's id and the {@code updated_at} that statement wrote.
+     * {@code null} for {@code channel} or {@code submittedUnit} leaves the column NULL, which is how
+     * rows that hold no reading are stored. {@code submittedUnit} is dropped on a pre-V56 schema, and
+     * {@code reportedVia} on a pre-V61 schema, that has no column for it.
      */
     public FlowReadingVersion createFlowReading(String schemaName,
                                                 Long schemeId,
@@ -1030,13 +1016,15 @@ public class TelemetryTenantRepository {
                                                 String imageUrl,
                                                 String meterChangeReason,
                                                 ReadingChannel channel,
-                                                String submittedUnit) {
+                                                String submittedUnit,
+                                                ReportingChannel reportedVia) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
         String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
         boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
         boolean hasSubmittedUnit = columnExists(schemaName, "flow_reading_table", SUBMITTED_UNIT_COLUMN);
+        boolean hasReportedVia = columnExists(schemaName, "flow_reading_table", REPORTED_VIA_COLUMN);
 
         StringBuilder columns = new StringBuilder(
                 "scheme_id, " + timeColumn + ", reading_date, extracted_reading, confirmed_reading");
@@ -1064,6 +1052,11 @@ public class TelemetryTenantRepository {
             columns.append(", ").append(SUBMITTED_UNIT_COLUMN);
             values.append(", ?");
             params.add(submittedUnit);
+        }
+        if (hasReportedVia) {
+            columns.append(", ").append(REPORTED_VIA_COLUMN);
+            values.append(", ?");
+            params.add(codeOf(reportedVia));
         }
         columns.append(", meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at");
         values.append(", ?, NULL, ?, ?, NOW(), ?, clock_timestamp()");
@@ -1104,46 +1097,70 @@ public class TelemetryTenantRepository {
                                               Long operatorId,
                                               LocalDateTime readingAt,
                                               String correlationId,
-                                              String reason) {
+                                              String reason,
+                                              ReportingChannel reportedVia) {
+        return insertReasonRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason, null,
+                reportedVia);
+    }
+
+    /**
+     * Inserts a row that holds no reading, only a meter-change or an issue-report reason, with how it was
+     * reported. {@code reportedVia} is dropped on a pre-V61 schema that has no column for it.
+     */
+    private Long insertReasonRecord(String schemaName,
+                                    Long schemeId,
+                                    Long operatorId,
+                                    LocalDateTime readingAt,
+                                    String correlationId,
+                                    String meterChangeReason,
+                                    String issueReportReason,
+                                    ReportingChannel reportedVia) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
-        String sql = hasPayloadJson
-                ? String.format("""
-                        INSERT INTO %s.flow_reading_table
-                            (scheme_id, %s, reading_date, extracted_reading, confirmed_reading, payload_json,
-                             correlation_id, quantity, channel_id, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
-                        VALUES (?, ?, ?, 0, 0, jsonb_build_object('confirmed_reading', 0, 'extracted_reading', 0), ?, 0, NULL, ?, NULL, '', ?, NOW(), ?, clock_timestamp())
-                        RETURNING id
-                        """, schemaName, timeColumn)
-                : String.format("""
-                        INSERT INTO %s.flow_reading_table
-                            (scheme_id, %s, reading_date, extracted_reading, confirmed_reading,
-                             correlation_id, quantity, channel_id, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
-                        VALUES (?, ?, ?, 0, 0, ?, 0, NULL, ?, NULL, '', ?, NOW(), ?, clock_timestamp())
-                        RETURNING id
-                        """, schemaName, timeColumn);
+        boolean hasReportedVia = columnExists(schemaName, "flow_reading_table", REPORTED_VIA_COLUMN);
+        String sql = String.format("""
+                INSERT INTO %s.flow_reading_table
+                    (scheme_id, %s, reading_date, extracted_reading, confirmed_reading%s,
+                     correlation_id, quantity, channel_id, meter_change_reason, issue_report_reason, image_url%s, created_by, created_at, updated_by, updated_at)
+                VALUES (?, ?, ?, 0, 0%s, ?, 0, NULL, ?, ?, ''%s, ?, NOW(), ?, clock_timestamp())
+                RETURNING id
+                """,
+                schemaName,
+                timeColumn,
+                hasPayloadJson ? ", payload_json" : "",
+                hasReportedVia ? ", " + REPORTED_VIA_COLUMN : "",
+                hasPayloadJson ? ", jsonb_build_object('confirmed_reading', 0, 'extracted_reading', 0)" : "",
+                hasReportedVia ? ", ?" : "");
 
-        Number id = jdbcTemplate.queryForObject(
-                sql,
-                Number.class,
-                schemeId,
-                readingAt,
-                LocalDate.from(readingAt),
-                correlationId,
-                reason,
-                operatorId,
-                operatorId
-        );
+        List<Object> params = new ArrayList<>();
+        params.add(schemeId);
+        params.add(readingAt);
+        params.add(LocalDate.from(readingAt));
+        params.add(correlationId);
+        params.add(meterChangeReason);
+        params.add(issueReportReason);
+        if (hasReportedVia) {
+            params.add(codeOf(reportedVia));
+        }
+        params.add(operatorId);
+        params.add(operatorId);
+        Number id = jdbcTemplate.queryForObject(sql, Number.class, params.toArray());
         return id != null ? id.longValue() : null;
     }
 
+    /**
+     * Records an issue report on the operator's latest row for the scheme today, else on a new row. The
+     * reason is added to an existing row without replacing its reading, so the row keeps how its reading
+     * was reported; {@code reportedVia} is written only on a new row.
+     */
     public Long createIssueReportRecord(String schemaName,
                                         Long schemeId,
                                         Long operatorId,
                                         LocalDateTime readingAt,
                                         String correlationId,
-                                        String issueReason) {
+                                        String issueReason,
+                                        ReportingChannel reportedVia) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         LocalDate readingDate = LocalDate.from(readingAt);
@@ -1179,35 +1196,8 @@ public class TelemetryTenantRepository {
             return existingId.get();
         }
 
-        boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
-        String insertSql = hasPayloadJson
-                ? String.format("""
-                        INSERT INTO %s.flow_reading_table
-                            (scheme_id, %s, reading_date, extracted_reading, confirmed_reading, payload_json,
-                             correlation_id, quantity, channel_id, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
-                        VALUES (?, ?, ?, 0, 0, jsonb_build_object('confirmed_reading', 0, 'extracted_reading', 0), ?, 0, NULL, NULL, ?, '', ?, NOW(), ?, clock_timestamp())
-                        RETURNING id
-                        """, schemaName, timeColumn)
-                : String.format("""
-                        INSERT INTO %s.flow_reading_table
-                            (scheme_id, %s, reading_date, extracted_reading, confirmed_reading,
-                             correlation_id, quantity, channel_id, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
-                        VALUES (?, ?, ?, 0, 0, ?, 0, NULL, NULL, ?, '', ?, NOW(), ?, clock_timestamp())
-                        RETURNING id
-                        """, schemaName, timeColumn);
-
-        Number createdId = jdbcTemplate.queryForObject(
-                insertSql,
-                Number.class,
-                schemeId,
-                readingAt,
-                readingDate,
-                correlationId,
-                issueReason,
-                operatorId,
-                operatorId
-        );
-        return createdId != null ? createdId.longValue() : null;
+        return insertReasonRecord(schemaName, schemeId, operatorId, readingAt, correlationId, null, issueReason,
+                reportedVia);
     }
 
     /**
@@ -1355,7 +1345,8 @@ public class TelemetryTenantRepository {
                                                  Long schemeId,
                                                  Long operatorId,
                                                  LocalDateTime readingAt,
-                                                 String reason) {
+                                                 String reason,
+                                                 ReportingChannel reportedVia) {
         LocalDate readingDate = LocalDate.from(readingAt);
         Optional<TelemetryPendingMeterChangeRecord> pending =
                 findLatestPendingMeterChangeRecordForDate(schemaName, schemeId, operatorId, readingDate);
@@ -1376,7 +1367,8 @@ public class TelemetryTenantRepository {
         }
 
         String correlationId = "meter-change-" + UUID.randomUUID();
-        Long createdId = createMeterChangeReasonRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason);
+        Long createdId = createMeterChangeReasonRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason,
+                reportedVia);
         cleanupOtherPendingMeterChangeRecords(schemaName, schemeId, operatorId, readingDate, createdId, operatorId);
         return correlationId;
     }
@@ -1385,7 +1377,8 @@ public class TelemetryTenantRepository {
                                                  Long schemeId,
                                                  Long operatorId,
                                                  LocalDateTime readingAt,
-                                                 String reason) {
+                                                 String reason,
+                                                 ReportingChannel reportedVia) {
         Optional<TelemetryPendingIssueReportRecord> pending =
                 findLatestPendingIssueReportRecord(schemaName, schemeId, operatorId, LocalDate.from(readingAt));
         if (pending.isPresent()) {
@@ -1404,7 +1397,7 @@ public class TelemetryTenantRepository {
         }
 
         String correlationId = "issue-report-" + UUID.randomUUID();
-        createIssueReportRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason);
+        createIssueReportRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason, reportedVia);
         return correlationId;
     }
 
@@ -2408,25 +2401,31 @@ public class TelemetryTenantRepository {
      */
     public void updateConfirmedReading(String schemaName, Long readingId, BigDecimal confirmedReading,
                                        Long updatedBy, Integer confirmedReadingSource) {
-        updateConfirmedReading(schemaName, readingId, confirmedReading, updatedBy, confirmedReadingSource, null);
+        updateConfirmedReading(schemaName, readingId, confirmedReading, updatedBy, confirmedReadingSource, null,
+                null);
     }
 
     /**
      * As {@link #updateConfirmedReading(String, Long, BigDecimal, Long, Integer)}, and also sets
-     * {@code submitted_unit}, the unit the corrected value arrived in, in the same UPDATE.
-     * {@code confirmedReading} is already in the channel's standard unit. A {@code null} unit leaves the
-     * column as it is, and it is dropped on a pre-V56 schema that has no column for it.
+     * {@code submitted_unit}, the unit the corrected value arrived in, and {@code reported_via_id}, the
+     * channel the correction came through, in the same UPDATE. {@code confirmedReading} is already in
+     * the channel's standard unit. A {@code null} unit or channel leaves the column as it is, and each is
+     * dropped on a schema that has no column for it (pre-V56 and pre-V61).
      */
     public void updateConfirmedReading(String schemaName, Long readingId, BigDecimal confirmedReading,
-                                       Long updatedBy, Integer confirmedReadingSource, String submittedUnit) {
+                                       Long updatedBy, Integer confirmedReadingSource, String submittedUnit,
+                                       ReportingChannel reportedVia) {
         validateSchemaName(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
         boolean writeSource = confirmedReadingSource != null
                 && columnExists(schemaName, "flow_reading_table", "confirmed_reading_source");
         boolean writeUnit = submittedUnit != null
                 && columnExists(schemaName, "flow_reading_table", SUBMITTED_UNIT_COLUMN);
+        boolean writeReportedVia = reportedVia != null
+                && columnExists(schemaName, "flow_reading_table", REPORTED_VIA_COLUMN);
         String markerAssignments = (writeSource ? ", confirmed_reading_source = ?" : "")
-                + (writeUnit ? ", " + SUBMITTED_UNIT_COLUMN + " = ?" : "");
+                + (writeUnit ? ", " + SUBMITTED_UNIT_COLUMN + " = ?" : "")
+                + (writeReportedVia ? ", " + REPORTED_VIA_COLUMN + " = ?" : "");
         String sql = hasPayloadJson
                 ? String.format("""
                         UPDATE %s.flow_reading_table
@@ -2451,6 +2450,9 @@ public class TelemetryTenantRepository {
         }
         if (writeUnit) {
             params.add(submittedUnit);
+        }
+        if (writeReportedVia) {
+            params.add(reportedVia.getCode());
         }
         params.add(updatedBy);
         params.add(readingId);
@@ -2530,14 +2532,14 @@ public class TelemetryTenantRepository {
                                                String meterChangeReason,
                                                Long updatedBy) {
         updateFlowReadingFromIngestion(schemaName, readingId, readingAt, extractedReading, confirmedReading,
-                correlationId, ocrCorrelationId, imageUrl, meterChangeReason, updatedBy, null, null);
+                correlationId, ocrCorrelationId, imageUrl, meterChangeReason, updatedBy, null, null, null);
     }
 
     /**
-     * Writes a reading onto an existing placeholder row, with its {@code channel} and
-     * {@code submittedUnit}, and returns the {@code updated_at} this statement wrote. {@code null} for
-     * either leaves the column as it is. {@code submittedUnit} is dropped on a pre-V56 schema that has
-     * no column for it.
+     * Writes a reading onto an existing placeholder row, with its {@code channel}, {@code submittedUnit}
+     * and {@code reportedVia}, and returns the {@code updated_at} this statement wrote. {@code null} for
+     * any of them leaves the column as it is. {@code submittedUnit} is dropped on a pre-V56 schema, and
+     * {@code reportedVia} on a pre-V61 schema, that has no column for it.
      */
     public FlowReadingVersion updateFlowReadingFromIngestion(String schemaName,
                                                              Long readingId,
@@ -2550,13 +2552,15 @@ public class TelemetryTenantRepository {
                                                              String meterChangeReason,
                                                              Long updatedBy,
                                                              ReadingChannel channel,
-                                                             String submittedUnit) {
+                                                             String submittedUnit,
+                                                             ReportingChannel reportedVia) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
         String ocrCorrelationColumn = resolveOcrCorrelationColumn(schemaName);
         boolean hasOcrCorrelationId = ocrCorrelationColumn != null;
         boolean hasSubmittedUnit = columnExists(schemaName, "flow_reading_table", SUBMITTED_UNIT_COLUMN);
+        boolean hasReportedVia = columnExists(schemaName, "flow_reading_table", REPORTED_VIA_COLUMN);
 
         List<Object> params = new ArrayList<>(List.of(
                 readingAt, LocalDate.from(readingAt), extractedReading, confirmedReading));
@@ -2590,6 +2594,10 @@ public class TelemetryTenantRepository {
         if (hasSubmittedUnit) {
             assignments.append(String.format("%1$s = COALESCE(?, %1$s),\n", SUBMITTED_UNIT_COLUMN));
             params.add(submittedUnit);
+        }
+        if (hasReportedVia) {
+            assignments.append(String.format("%1$s = COALESCE(?, %1$s),\n", REPORTED_VIA_COLUMN));
+            params.add(codeOf(reportedVia));
         }
         assignments.append("""
                 image_url = ?,
