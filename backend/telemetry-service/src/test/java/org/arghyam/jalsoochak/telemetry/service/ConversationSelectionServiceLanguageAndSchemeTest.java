@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
@@ -370,7 +371,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
                     new TelemetrySchemeOption(5L, "Scheme A"),
                     new TelemetrySchemeOption(6L, "Scheme B")));
             when(telemetryTenantRepository.upsertPendingSchemeSelectionRecord(
-                    anyString(), anyLong(), anyLong(), any(LocalDateTime.class)))
+                    anyString(), anyLong(), anyLong(), any(LocalDateTime.class), any()))
                     .thenReturn("scheme-selection-abc");
         }
 
@@ -396,7 +397,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
             assertThat(response.getCorrelationId()).isEqualTo("scheme-selection-abc");
             assertThat(response.getMessage()).isEqualTo("Scheme selected: Scheme A");
             verify(telemetryTenantRepository).upsertPendingSchemeSelectionRecord(
-                    eq(SCHEMA), eq(5L), eq(11L), any(LocalDateTime.class));
+                    eq(SCHEMA), eq(5L), eq(11L), any(LocalDateTime.class), eq(ReportingChannel.WHATSAPP));
         }
 
         @Test
@@ -423,7 +424,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
                     .isEqualTo("Invalid scheme selection");
 
             verify(telemetryTenantRepository, never()).upsertPendingSchemeSelectionRecord(
-                    anyString(), anyLong(), anyLong(), any(LocalDateTime.class));
+                    anyString(), anyLong(), anyLong(), any(LocalDateTime.class), any());
         }
 
         @Test
@@ -437,7 +438,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
         @Test
         void failsGracefullyWhenRecordingTheSelectionThrows() {
             when(telemetryTenantRepository.upsertPendingSchemeSelectionRecord(
-                    anyString(), anyLong(), anyLong(), any(LocalDateTime.class)))
+                    anyString(), anyLong(), anyLong(), any(LocalDateTime.class), any()))
                     .thenThrow(new IllegalStateException("insert failed"));
 
             assertThat(service.selectedSchemeMessage(schemeRequest(CONTACT, "1")).isSuccess()).isFalse();

@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.controller.ingest;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ResetLatestReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
@@ -481,6 +482,7 @@ class ReadingIngestControllerUnitTest {
         assertEquals("Latest reading reset successfully", response.getBody().getData().getMessage());
         assertEquals("CONFIRMED", response.getBody().getData().getQualityStatus());
         assertEquals(22, bfmReadingService.lastResetTenantId);
+        assertEquals(ReportingChannel.API, bfmReadingService.lastResetReportedVia);
     }
 
     @Test
@@ -1110,7 +1112,8 @@ class ReadingIngestControllerUnitTest {
     void resetLatestReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
         BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null, null, null) {
             @Override
-            public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber, Integer tenantId) {
+            public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber, Integer tenantId,
+                                                                            ReportingChannel reportedVia) {
                 throw new IllegalStateException("boom");
             }
         };
@@ -1218,6 +1221,7 @@ class ReadingIngestControllerUnitTest {
         private Integer lastTenantId;
         private boolean resetCalled;
         private Integer lastResetTenantId;
+        private ReportingChannel lastResetReportedVia;
 
         private StubBfmReadingService(boolean throwError) {
             this(throwError, null);
@@ -1275,9 +1279,11 @@ class ReadingIngestControllerUnitTest {
         }
 
         @Override
-        public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber, Integer tenantId) {
+        public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber, Integer tenantId,
+                                                                        ReportingChannel reportedVia) {
             this.resetCalled = true;
             this.lastResetTenantId = tenantId;
+            this.lastResetReportedVia = reportedVia;
             if (throwError) {
                 throw rejection();
             }

@@ -110,10 +110,10 @@ class BfmReadingServiceImplausibleSupplyTest {
                 eq(SCHEMA), eq(SCHEME_ID), eq(OPERATOR_ID), any(LocalDate.class))).thenReturn(Optional.empty());
         lenient().when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(READING_ID, null));
         lenient().when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(READING_ID, null));
     }
 
@@ -180,7 +180,7 @@ class BfmReadingServiceImplausibleSupplyTest {
                     any(LocalDateTime.class), any(BigDecimal.class), eq(new BigDecimal("1100")), anyString(),
                     isNull(), isNull(), isNull(), eq(IngestionSource.NORMAL), isNull(), isNull(), isNull(),
                     eq(RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED),
-                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), any(), any());
+                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), any(), any(), any());
         }
 
         @Test
@@ -206,7 +206,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
                     any(), any(), any(), anyInt(), any(), any(), any(), any(),
-                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), eq(ReadingChannel.BFM), eq("m3"));
+                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), eq(ReadingChannel.BFM), eq("m3"), any());
         }
 
         @Test
@@ -296,7 +296,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             assertThat(response.isSuccess()).isTrue();
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), eq(new BigDecimal("950")), anyString(),
-                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull(), any(), any());
+                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull(), any(), any(), any());
             verify(repo, never()).createTenantAnomalyRecord(anyString(), any());
         }
 
@@ -326,10 +326,10 @@ class BfmReadingServiceImplausibleSupplyTest {
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
                     any(), any(), any(), anyInt(), any(), any(), any(), any(),
-                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), any(), any());
+                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), any(), any(), any());
             verify(repo, never()).createFlowReading(anyString(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                    any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any());
         }
     }
 
@@ -359,7 +359,7 @@ class BfmReadingServiceImplausibleSupplyTest {
                     any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull(), any(), any());
+                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull(), any(), any(), any());
         }
 
         @Test

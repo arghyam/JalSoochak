@@ -158,7 +158,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
     private void verifyNoWrite() {
         verify(repo, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
         verify(repo, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any());
-        verify(repo, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(repo, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
         verify(repo, never()).applyQuarantineReason(anyString(), anyLong(), anyInt());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
@@ -192,7 +192,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.ENFORCE, PLAUSIBLE);
 
-            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(PLAUSIBLE), eq(OPERATOR_ID), any(), eq("m3"));
+            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(PLAUSIBLE), eq(OPERATOR_ID), any(), eq("m3"), any());
             verify(repo).applyQuarantineReason(SCHEMA, READING_ID, QuarantineReason.NONE);
             verify(readingRepublisher).republish(SCHEMA, TENANT_ID, READING_ID);
             assertThat(response.isSuccess()).isTrue();
@@ -207,7 +207,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.ENFORCE, PLAUSIBLE);
 
-            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(PLAUSIBLE), eq(OPERATOR_ID), any(), eq("m3"));
+            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(PLAUSIBLE), eq(OPERATOR_ID), any(), eq("m3"), any());
             verify(repo).applyQuarantineReason(SCHEMA, READING_ID, QuarantineReason.NONE);
             verify(readingRepublisher).republish(SCHEMA, TENANT_ID, READING_ID);
             assertThat(response.isSuccess()).isTrue();
@@ -398,7 +398,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.AUDIT, IMPLAUSIBLE);
 
-            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(IMPLAUSIBLE), eq(OPERATOR_ID), any(), eq("m3"));
+            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(IMPLAUSIBLE), eq(OPERATOR_ID), any(), eq("m3"), any());
             verify(repo, never()).createTenantAnomalyRecord(any(), any());
             assertThat(response.isSuccess()).isTrue();
         }

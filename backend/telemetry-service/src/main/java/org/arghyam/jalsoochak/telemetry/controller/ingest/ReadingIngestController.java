@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.controller.ingest;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.config.OpenApiConfig;
 import org.arghyam.jalsoochak.telemetry.config.TelemetryApiKeyAuthFilter;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
@@ -499,7 +500,8 @@ public class ReadingIngestController {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "contactId must be provided");
             }
 
-            CreateReadingResponse response = bfmReadingService.resetLatestConfirmedReadingByPhone(contactId, tenantId);
+            CreateReadingResponse response = bfmReadingService.resetLatestConfirmedReadingByPhone(
+                    contactId, tenantId, ReportingChannel.API);
             logReadingReset(contactId, tenantId, "SUCCESS", response, null);
             return ResponseEntity.ok(
                     ReadingsApiResponse.builder()

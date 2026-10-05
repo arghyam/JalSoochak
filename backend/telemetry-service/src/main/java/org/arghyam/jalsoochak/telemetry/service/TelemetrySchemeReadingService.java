@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.UpdateYesterdayFinalReadingBySchemeResponse;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
@@ -109,7 +110,7 @@ public class TelemetrySchemeReadingService {
             // The target is always a BFM row and the request has no unit field, so the value is in m3.
             telemetryTenantRepository.updateConfirmedReading(schemaName, targetDayRecord.id(), finalReading, updaterUserId,
                     RolloverResolutionService.manualConfirmSource(finalReading, targetDayRecord.confirmedReading()),
-                    ReadingUnit.CUBIC_METRE.code());
+                    ReadingUnit.CUBIC_METRE.code(), ReportingChannel.API);
             log.info("[update-yesterday-final-reading] updated readingId={} newFinalReading={}",
                     targetDayRecord.id(), finalReading);
 
