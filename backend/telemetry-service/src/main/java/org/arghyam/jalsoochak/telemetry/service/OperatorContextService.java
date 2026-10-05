@@ -126,7 +126,7 @@ public class OperatorContextService {
             String contactId = operatorWithSchema.operator().phoneNumber();
             if (contactId != null && !contactId.isBlank()) {
                 String preferredLanguage = userLanguagePreferenceRepository
-                        .findLanguage(tenantId, contactId)
+                        .findLanguage(operatorWithSchema.schemaName(), contactId)
                         .orElse(null);
                 if (preferredLanguage != null && !preferredLanguage.isBlank()) {
                     return preferredLanguage;

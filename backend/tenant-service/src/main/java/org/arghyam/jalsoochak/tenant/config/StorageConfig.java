@@ -14,7 +14,6 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.S3ClientBuilder;
 import software.amazon.awssdk.services.s3.S3Configuration;
 
 import java.io.InputStream;
@@ -27,12 +26,17 @@ public class StorageConfig {
 
     /**
      * S3Client bean — created only when {@code storage.access-key} is configured.
-     * Setting {@code storage.endpoint} activates path-style access for the
-     * S3-compatible stores that require it.
+     * Talks to {@code storage.endpoint} with path-style access, which most S3-compatible stores other
+     * than AWS require. The endpoint is required: there is no implicit AWS default, so a deployment
+     * that misses it stops at startup instead of uploading to AWS.
      */
     @Bean
     @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")
     public S3Client s3Client(StorageProperties props) {
+        if (props.getEndpoint() == null || props.getEndpoint().isBlank()) {
+            throw new IllegalStateException(
+                    "[Storage] storage.endpoint must be provided when storage.enabled=true");
+        }
         if (props.getAccessKey() == null || props.getAccessKey().isBlank()) {
             throw new IllegalStateException(
                     "[Storage] storage.access-key is set but blank — provide a valid access key.");
@@ -41,20 +45,16 @@ public class StorageConfig {
             throw new IllegalStateException(
                     "[Storage] storage.secret-key is set but blank — provide a valid secret key.");
         }
-        S3ClientBuilder builder = S3Client.builder()
+        log.info("[Storage] Using endpoint: {} (path-style enabled)", props.getEndpoint());
+        return S3Client.builder()
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create(props.getAccessKey(), props.getSecretKey())))
-                .region(Region.of(props.getRegion()));
-
-        if (props.getEndpoint() != null && !props.getEndpoint().isBlank()) {
-            log.info("[Storage] Using custom endpoint: {} (path-style enabled)", props.getEndpoint());
-            builder.endpointOverride(URI.create(props.getEndpoint()))
-                    .serviceConfiguration(S3Configuration.builder()
-                            .pathStyleAccessEnabled(true)
-                            .build());
-        }
-
-        return builder.build();
+                .region(Region.of(props.getRegion()))
+                .endpointOverride(URI.create(props.getEndpoint()))
+                .serviceConfiguration(S3Configuration.builder()
+                        .pathStyleAccessEnabled(true)
+                        .build())
+                .build();
     }
 
     /**
@@ -65,7 +65,7 @@ public class StorageConfig {
     @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")
     public ObjectStorageService s3CompatibleStorageService(S3Client s3Client, StorageProperties props) {
         log.info("[Storage] Activating S3-compatible storage service [bucket={}, endpoint={}]",
-                props.getBucket(), props.getEndpoint() != null ? props.getEndpoint() : "AWS default");
+                props.getBucket(), props.getEndpoint());
         return new S3CompatibleStorageService(s3Client, props);
     }
 

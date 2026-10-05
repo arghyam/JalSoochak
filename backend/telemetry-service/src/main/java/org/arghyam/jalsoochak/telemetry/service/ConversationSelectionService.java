@@ -175,7 +175,7 @@ public class ConversationSelectionService {
                     operatorWithSchema.operator().id(),
                     selectedLanguageId
             );
-            userLanguagePreferenceRepository.upsert(tenantId, request.getContactId(), selectedLanguage);
+            userLanguagePreferenceRepository.upsert(operatorWithSchema.schemaName(), request.getContactId(), selectedLanguage);
             whatsAppContactDirectory.syncContactLanguageAsync(request.getContactId(), selectedLanguage);
 
             String confirmationTemplate = templatesService
@@ -283,7 +283,7 @@ public class ConversationSelectionService {
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
             telemetryTenantRepository.updateSchemeChannel(operatorWithSchema.schemaName(), schemeId, selectedChannelId);
-            userChannelPreferenceRepository.upsert(tenantId, request.getContactId(), selectedChannel);
+            userChannelPreferenceRepository.upsert(operatorWithSchema.schemaName(), request.getContactId(), selectedChannel);
 
             String confirmationTemplate = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "CHANNEL_SELECTION", languageKey)

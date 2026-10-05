@@ -129,18 +129,18 @@ class BfmReadingServiceDeclaredChannelTest {
     @Test
     @DisplayName("without a declared channel the operator's stored preference still decides")
     void noDeclaredChannelFallsBackToThePreference() {
-        when(readingChannelResolver.resolve(TENANT_ID, CONTACT)).thenReturn(ReadingChannel.MAN);
+        when(readingChannelResolver.resolve(SCHEMA, CONTACT)).thenReturn(ReadingChannel.MAN);
 
         service.createReading(requestWithChannel(null), SCHEMA, operator, CONTACT, false);
 
-        verify(readingChannelResolver).resolve(TENANT_ID, CONTACT);
+        verify(readingChannelResolver).resolve(SCHEMA, CONTACT);
         verify(repo).updateFlowReadingChannel(SCHEMA, READING_ID, "MAN");
     }
 
     @Test
     @DisplayName("without a declared channel and with no preference on record the reading stays BFM")
     void noDeclaredChannelAndNoPreferenceStaysBfm() {
-        when(readingChannelResolver.resolve(TENANT_ID, CONTACT)).thenReturn(ReadingChannel.BFM);
+        when(readingChannelResolver.resolve(SCHEMA, CONTACT)).thenReturn(ReadingChannel.BFM);
 
         service.createReading(requestWithChannel(null), SCHEMA, operator, CONTACT, false);
 

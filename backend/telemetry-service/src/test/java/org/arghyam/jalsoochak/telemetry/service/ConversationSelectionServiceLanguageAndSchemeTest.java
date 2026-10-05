@@ -220,7 +220,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
 
             assertThat(response.isSuccess()).isTrue();
             verify(telemetryTenantRepository).updateUserLanguageId(SCHEMA, 11L, 2);
-            verify(userLanguagePreferenceRepository).upsert(TENANT, CONTACT, "Hindi");
+            verify(userLanguagePreferenceRepository).upsert(SCHEMA, CONTACT, "Hindi");
             verify(whatsAppContactDirectory).syncContactLanguageAsync(CONTACT, "Hindi");
         }
 
@@ -258,7 +258,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
             service.selectedLanguageMessage(languageRequest(CONTACT, "2"));
 
             // The canonical (English) label is stored so downstream normalization keeps working.
-            verify(userLanguagePreferenceRepository).upsert(TENANT, CONTACT, "Hindi");
+            verify(userLanguagePreferenceRepository).upsert(SCHEMA, CONTACT, "Hindi");
             verify(telemetryTenantRepository).updateUserLanguageId(SCHEMA, 11L, 2);
         }
 

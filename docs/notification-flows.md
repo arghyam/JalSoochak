@@ -239,12 +239,9 @@ Published by `user-service` (`UserEventPublisher.publishPumpOperatorOnboardedAft
   "tenantCode": "mp",
   "tenantId": 42,
   "whatsappLanguageId": "3",
-  "glificLanguageId": "3",
   "pumpOperatorPhones": ["919876543210", "919876543211"]
 }
 ```
-
-`glificLanguageId` is the deprecated spelling of `whatsappLanguageId`, emitted alongside it for one release. message-service reads `whatsappLanguageId` and falls back to `glificLanguageId` only when it is absent.
 
 ### message-service: handleSendWelcomeMessage
 
@@ -305,7 +302,7 @@ Any upstream service publishes a `SEND_LOGIN_OTP` event to `common-topic`. The e
 }
 ```
 
-Either `whatsapp_contact_id` or `officerPhoneNumber` must be present. If both are provided, `whatsapp_contact_id` takes priority. The deprecated spelling `glific_id` is still accepted for one release, and is read only when `whatsapp_contact_id` is absent.
+Either `whatsapp_contact_id` or `officerPhoneNumber` must be present. If both are provided, `whatsapp_contact_id` takes priority.
 
 ### message-service: handleSendLoginOtp
 
@@ -363,7 +360,7 @@ All WhatsApp provider and storage properties can be overridden via environment v
 | `whatsapp.template.escalation-id`                     | `WHATSAPP_ESCALATION_TEMPLATE_ID`                     | Yes                               | Provider HSM template ID for escalation document                                                                                                                                                                                                                                                                                                                  |
 | `whatsapp.template.login-otp-id`                      | `WHATSAPP_LOGIN_OTP_TEMPLATE_ID`                      | Yes                               | Provider HSM template ID for login OTP                                                                                                                                                                                                                                                                                                                            |
 | `whatsapp.request-interval-ms`                        | `WHATSAPP_REQUEST_INTERVAL_MS`                        | No                                | Min ms between provider API calls (default: 500)                                                                                                                                                                                                                                                                                                                  |
-| `storage.endpoint`                                    | `STORAGE_ENDPOINT`                                    | Yes, unless AWS S3                | **Internal** URL of the S3-compatible store this service uploads to. Blank means AWS S3                                                                                                                                                                                                                                                                           |
+| `storage.endpoint`                                    | `STORAGE_ENDPOINT`                                    | Yes                               | **Internal** URL of the S3-compatible store this service uploads to; startup fails when blank                                                                                                                                                                                                                                                                     |
 | `storage.access-key`                                  | `STORAGE_ACCESS_KEY`                                  | Yes                               | Store access key; startup fails when blank                                                                                                                                                                                                                                                                                                                        |
 | `storage.secret-key`                                  | `STORAGE_SECRET_KEY`                                  | Yes                               | Store secret key; startup fails when blank                                                                                                                                                                                                                                                                                                                        |
 | `storage.region`                                      | `STORAGE_REGION`                                      | No                                | Signing region (default: `us-east-1`)                                                                                                                                                                                                                                                                                                                             |

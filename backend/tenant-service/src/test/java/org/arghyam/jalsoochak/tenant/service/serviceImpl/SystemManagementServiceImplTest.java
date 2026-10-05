@@ -26,7 +26,6 @@ import org.arghyam.jalsoochak.tenant.dto.request.SetSystemConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.SystemConfigResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.SystemConfigKeyEnum;
 import org.arghyam.jalsoochak.tenant.event.IncludedWorkStatusesUpdatedEvent;
-import org.arghyam.jalsoochak.tenant.exception.InvalidConfigKeyException;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 import org.arghyam.jalsoochak.tenant.exception.ResourceNotFoundException;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
@@ -134,16 +133,27 @@ class SystemManagementServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw InvalidConfigKeyException for unknown key in DB")
-        void getSystemConfigs_InvalidKeyInDB_ThrowsInvalidConfigKeyException() {
+        @DisplayName("Should skip a stored key that is not UI-managed instead of failing the request")
+        void getSystemConfigs_UnknownStoredKeyIsSkipped() {
+            // The system tenant's rows live in the same shared tenant_config_master_table as the runtime
+            // keys other services read directly, so an unrecognised key is expected data — it must not
+            // take down the whole endpoint the way it did for a tenant's ocr_* rows.
             List<ConfigDTO> configs = List.of(
                     ConfigDTO.builder()
-                            .configKey("INVALID_KEY")
-                            .configValue("{\"value\": \"x\"}")
+                            .configKey("ocr_url")
+                            .configValue("https://flowvision.example/v1/extract-reading")
+                            .build(),
+                    ConfigDTO.builder()
+                            .configKey(SystemConfigKeyEnum.WATER_QUANTITY_SUPPLY_THRESHOLD.name())
+                            .configValue("{\"undersupplyThresholdPercent\": 20.0, \"oversupplyThresholdPercent\": 30.0}")
                             .build());
             when(tenantCommonRepository.findConfigsByTenantId(0)).thenReturn(configs);
 
-            assertThrows(InvalidConfigKeyException.class, () -> systemManagementService.getSystemConfigs(null));
+            SystemConfigResponseDTO result = systemManagementService.getSystemConfigs(null);
+
+            assertNotNull(result);
+            assertEquals(1, result.getConfigs().size());
+            assertTrue(result.getConfigs().containsKey(SystemConfigKeyEnum.WATER_QUANTITY_SUPPLY_THRESHOLD));
         }
 
         @Test

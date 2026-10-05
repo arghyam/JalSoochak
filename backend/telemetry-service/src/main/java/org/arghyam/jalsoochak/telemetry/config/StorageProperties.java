@@ -8,9 +8,8 @@ import org.springframework.validation.annotation.Validated;
 /**
  * Object storage settings, bound from {@code storage.*}.
  *
- * <p>Setting {@code storage.endpoint} to a non-blank URL activates path-style
- * access and endpoint override, required by most non-AWS S3-compatible
- * stores. Leave it blank to use real AWS S3.
+ * <p>{@code storage.endpoint} is required while storage is enabled, and is
+ * reached with path-style access. There is no implicit AWS default.
  */
 @ConfigurationProperties(prefix = "storage")
 @Data
@@ -20,7 +19,7 @@ public class StorageProperties {
     /** Set to {@code true} to activate object storage. */
     private boolean enabled = false;
 
-    /** Custom endpoint URL of a non-AWS S3-compatible store. Leave blank for real AWS S3. */
+    /** URL of the S3-compatible store. Required while storage is enabled, or startup fails. */
     private String endpoint;
 
     /** Signing region (a placeholder like {@code us-east-1} for a store that ignores it). */
@@ -33,9 +32,11 @@ public class StorageProperties {
     /** Secret key / secret access key. */
     private String secretKey;
 
-    /** Bucket holding inbound meter images. */
-    @NotBlank
-    private String bucket = "jalsoochak";
+    /**
+     * Bucket holding inbound meter images. Required while storage is enabled, or startup fails. There is
+     * no default, so a deployment that misses the variable stops rather than writing to the wrong bucket.
+     */
+    private String bucket;
 
     /**
      * Base URL of the anonymously readable address that

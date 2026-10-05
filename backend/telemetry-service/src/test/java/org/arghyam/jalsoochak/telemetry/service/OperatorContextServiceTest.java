@@ -216,7 +216,7 @@ class OperatorContextServiceTest {
 
         @Test
         void prefersTheContactsExplicitlyStoredLanguage() {
-            when(userLanguagePreferenceRepository.findLanguage(3, PHONE))
+            when(userLanguagePreferenceRepository.findLanguage(SCHEMA, PHONE))
                     .thenReturn(Optional.of("Assamese"));
 
             assertThat(service.resolveOperatorLanguage(operator(2), 3)).isEqualTo("Assamese");
@@ -225,7 +225,7 @@ class OperatorContextServiceTest {
 
         @Test
         void ignoresABlankStoredLanguage() {
-            when(userLanguagePreferenceRepository.findLanguage(3, PHONE)).thenReturn(Optional.of("  "));
+            when(userLanguagePreferenceRepository.findLanguage(SCHEMA, PHONE)).thenReturn(Optional.of("  "));
             when(tenantConfigRepository.findLanguageOptions(3)).thenReturn(List.of("English", "Hindi"));
 
             assertThat(service.resolveOperatorLanguage(operator(2), 3)).isEqualTo("Hindi");
@@ -233,7 +233,7 @@ class OperatorContextServiceTest {
 
         @Test
         void fallsBackToTheTenantLanguageListIndexedByLanguageId() {
-            when(userLanguagePreferenceRepository.findLanguage(eq(3), anyString())).thenReturn(Optional.empty());
+            when(userLanguagePreferenceRepository.findLanguage(eq(SCHEMA), anyString())).thenReturn(Optional.empty());
             when(tenantConfigRepository.findLanguageOptions(3))
                     .thenReturn(List.of("English", "Hindi", "Assamese"));
 
@@ -242,7 +242,7 @@ class OperatorContextServiceTest {
 
         @Test
         void defaultsToEnglishWhenLanguageIdIsMissingOrNonPositive() {
-            when(userLanguagePreferenceRepository.findLanguage(eq(3), anyString())).thenReturn(Optional.empty());
+            when(userLanguagePreferenceRepository.findLanguage(eq(SCHEMA), anyString())).thenReturn(Optional.empty());
 
             assertThat(service.resolveOperatorLanguage(operator(null), 3)).isEqualTo("English");
             assertThat(service.resolveOperatorLanguage(operator(0), 3)).isEqualTo("English");
@@ -251,7 +251,7 @@ class OperatorContextServiceTest {
 
         @Test
         void defaultsToEnglishWhenLanguageIdIsOutOfRangeForTheTenant() {
-            when(userLanguagePreferenceRepository.findLanguage(eq(3), anyString())).thenReturn(Optional.empty());
+            when(userLanguagePreferenceRepository.findLanguage(eq(SCHEMA), anyString())).thenReturn(Optional.empty());
             when(tenantConfigRepository.findLanguageOptions(3)).thenReturn(List.of("English", "Hindi"));
 
             assertThat(service.resolveOperatorLanguage(operator(9), 3)).isEqualTo("English");
@@ -259,7 +259,7 @@ class OperatorContextServiceTest {
 
         @Test
         void defaultsToEnglishWhenTheTenantHasNoConfiguredLanguages() {
-            when(userLanguagePreferenceRepository.findLanguage(eq(3), anyString())).thenReturn(Optional.empty());
+            when(userLanguagePreferenceRepository.findLanguage(eq(SCHEMA), anyString())).thenReturn(Optional.empty());
             when(tenantConfigRepository.findLanguageOptions(3)).thenReturn(List.of());
 
             assertThat(service.resolveOperatorLanguage(operator(1), 3)).isEqualTo("English");

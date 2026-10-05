@@ -480,7 +480,7 @@ smscountry:
 # internal value is the mistake to avoid:
 #
 #   endpoint        → where THIS SERVICE uploads to. Internal is correct
-#                     (cluster IP, container name, localhost). Blank means AWS S3.
+#                     (cluster IP, container name, localhost). Required; startup fails when blank.
 #   public-base-url → the prefix of the URL handed to the WhatsApp provider, which registers it and
 #                     META DOWNLOADS IT FROM THE PUBLIC INTERNET. Must be publicly
 #                     reachable AND anonymously readable.
@@ -506,7 +506,7 @@ smscountry:
 
 storage:
   enabled: ${STORAGE_ENABLED:true}
-  endpoint: ${STORAGE_ENDPOINT:} # blank = real AWS S3; set to the URL of any other S3-compatible store
+  endpoint: ${STORAGE_ENDPOINT:} # required; URL of the S3-compatible store
   region: ${STORAGE_REGION:us-east-1}
   access-key: ${STORAGE_ACCESS_KEY:}
   secret-key: ${STORAGE_SECRET_KEY:}

@@ -9,7 +9,7 @@ import java.util.stream.Collectors;
  * Reading-submission channel (a.k.a. communication / meter channel) that a user
  * submits readings through. The short code (enum name) mirrors the allowed channel
  * codes validated in tenant-service ({@code ChannelValidator}: BFM, ELM, PDU, IOT, MAN)
- * and stored in {@code common_schema.user_channel_preference.channel_value}.
+ * and stored in {@code <tenant schema>.user_channel_preference.channel_value}.
  *
  * <p>The numeric {@link #getCode() code} is an app-level constant attached to
  * {@code MeterReadingEvent.channel} and shared by convention with analytics-service,

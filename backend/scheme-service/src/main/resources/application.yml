@@ -70,7 +70,7 @@ logging:
 
 storage:
   enabled: ${STORAGE_ENABLED:true}
-  endpoint: ${STORAGE_ENDPOINT:} # blank = real AWS S3; set to the URL of any other S3-compatible store
+  endpoint: ${STORAGE_ENDPOINT:} # required; URL of the S3-compatible store
   region: ${STORAGE_REGION:us-east-1}
   access-key: ${STORAGE_ACCESS_KEY:}
   secret-key: ${STORAGE_SECRET_KEY:}

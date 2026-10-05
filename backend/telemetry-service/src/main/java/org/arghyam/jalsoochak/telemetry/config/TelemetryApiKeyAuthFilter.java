@@ -71,7 +71,6 @@ public class TelemetryApiKeyAuthFilter extends OncePerRequestFilter {
      */
     private static final Set<String> UNAUTHENTICATED_WEBHOOK_PATHS = Set.of(
             READINGS_PREFIX + "/whatsapp",
-            READINGS_PREFIX + "/glific",
             SCHEMES_PREFIX
     );
 

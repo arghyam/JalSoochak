@@ -177,7 +177,6 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             assertThat(capturedUpdateSql())
                     .contains("payload_json")
                     .contains("ocr_correlation_id = COALESCE(?, ocr_correlation_id)")
-                    .doesNotContain("flowvision_correlation_id")
                     .contains("observation_time");
             assertThat(capturedUpdateArgs()).containsExactly(
                     READING_AT, DAY, new BigDecimal("10"), new BigDecimal("11"),
@@ -221,18 +220,6 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
 
             assertThat(capturedUpdateSql()).contains("ocr_correlation_id").doesNotContain("payload_json");
             assertThat(capturedUpdateArgs()).hasSize(10);
-        }
-
-        @Test
-        void writesTheOcrCorrelationIdToThePreV46ColumnUntilItIsRenamed() {
-            onColumnsExisting("flowvision_correlation_id");
-
-            repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
-                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason", 2L);
-
-            assertThat(capturedUpdateSql())
-                    .contains("flowvision_correlation_id = COALESCE(?, flowvision_correlation_id)");
-            assertThat(capturedUpdateArgs()).hasSize(10).contains("ocr-1");
         }
 
         @Test

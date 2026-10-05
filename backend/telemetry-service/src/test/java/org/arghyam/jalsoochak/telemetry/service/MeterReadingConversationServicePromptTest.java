@@ -8,7 +8,6 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
-import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -61,8 +60,6 @@ class MeterReadingConversationServicePromptTest {
     private ConversationTemplateService templatesService;
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
-    @Mock
-    private UserChannelPreferenceRepository userChannelPreferenceRepository;
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
     @Spy

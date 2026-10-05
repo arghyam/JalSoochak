@@ -116,7 +116,7 @@ class BfmReadingServicePlaceholderRowTest {
                 1L,
                 ReadingTime.today()
         )).thenReturn(Optional.of(99L));
-        when(readingChannelResolver.resolve(1, "919999999999")).thenReturn(ReadingChannel.BFM);
+        when(readingChannelResolver.resolve(schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 

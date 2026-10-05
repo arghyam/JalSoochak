@@ -434,7 +434,7 @@ public class BfmReadingService {
         // declared, which keeps the preference lookup — and so every existing caller — unchanged.
         ReadingChannel resolvedChannel = request.getDeclaredChannel() != null
                 ? request.getDeclaredChannel()
-                : readingChannelResolver.resolve(tenantId, contactId);
+                : readingChannelResolver.resolve(schemaName, contactId);
         Integer channel = resolvedChannel.getCode();
 
         // A pre-V40 tenant is skipped entirely rather than checked: storing a quarantined row it has
