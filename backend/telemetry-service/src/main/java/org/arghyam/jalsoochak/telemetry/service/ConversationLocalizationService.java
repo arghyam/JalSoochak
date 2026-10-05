@@ -18,6 +18,10 @@ public class ConversationLocalizationService {
     private static final Pattern EXTRACTED_READING_PATTERN = Pattern.compile(
             "(?i)extracted\\s+reading:\\s*([^\\.]+)"
     );
+    /** {@code SubmittedValueCapture.aboveMaximumMessage}: the maximum, then the unit if the channel has one. */
+    private static final Pattern ABOVE_MAXIMUM_PATTERN = Pattern.compile(
+            "(?i)reading can't be more than\\s+(\\d+(?:\\.\\d+)?)\\s*([^.]*?)\\.?\\s*$"
+    );
 
     private final OperatorContextService operatorContextService;
 
@@ -385,6 +389,16 @@ public class ConversationLocalizationService {
         }
         if (normalized.contains("meter photos are not supported for your reading channel")) {
             return "आपके रीडिंग चैनल के लिए मीटर की फ़ोटो समर्थित नहीं है।";
+        }
+        if (normalized.startsWith("reading can't be more than")) {
+            Matcher matcher = ABOVE_MAXIMUM_PATTERN.matcher(message.trim());
+            if (matcher.find()) {
+                String unit = matcher.group(2).trim();
+                String hindiUnit = "minutes".equalsIgnoreCase(unit) ? "मिनट" : unit;
+                return "रीडिंग " + matcher.group(1) + (hindiUnit.isEmpty() ? "" : " " + hindiUnit)
+                        + " से अधिक नहीं हो सकती।";
+            }
+            return "रीडिंग तय सीमा से अधिक नहीं हो सकती।";
         }
         if (normalized.contains("total pump running time for the day can't be more than 24 hours")) {
             return "दिन का कुल पंप चलने का समय 24 घंटे (1440 मिनट) से अधिक नहीं हो सकता।";

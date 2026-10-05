@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
+import org.arghyam.jalsoochak.telemetry.service.capture.ManualReadingMaxValues;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,6 +36,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
+import static org.mockito.Mockito.mock;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -123,7 +125,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
                 null,
-                new SubmittedValueCapture(),
+                new SubmittedValueCapture(mock(ManualReadingMaxValues.class)),
                 pduDayLimit,
                 calculationParametersSnapshotter,
                 null);

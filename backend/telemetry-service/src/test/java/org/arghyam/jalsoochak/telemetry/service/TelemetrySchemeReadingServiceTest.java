@@ -1,8 +1,11 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.ManualReadingMaxValues;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -10,7 +13,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -54,8 +56,9 @@ class TelemetrySchemeReadingServiceTest {
     private TelemetryTenantRepository telemetryTenantRepository;
     @Mock
     private ReadingRepublisher readingRepublisher;
+    @Mock
+    private ManualReadingMaxValues manualReadingMaxValues;
 
-    @InjectMocks
     private TelemetrySchemeReadingService service;
 
     private static TelemetryCompletedFlowReading reading(Long id, LocalDate day, String confirmed, Long createdBy) {
@@ -65,6 +68,8 @@ class TelemetrySchemeReadingServiceTest {
 
     @BeforeEach
     void setUp() {
+        service = new TelemetrySchemeReadingService(telemetryTenantRepository, readingRepublisher,
+                new SubmittedValueCapture(manualReadingMaxValues));
         TenantContext.setSchema(SCHEMA);
         when(telemetryTenantRepository.findUserIdByPhone(SCHEMA, PHONE)).thenReturn(Optional.of(11L));
         when(telemetryTenantRepository.findTenantIdBySchemaName(SCHEMA)).thenReturn(17);
@@ -329,6 +334,33 @@ class TelemetrySchemeReadingServiceTest {
                     .updateConfirmedReading(SCHEMA, 100L, new BigDecimal("600"), 11L,
                             RolloverResolutionService.SOURCE_MANUAL, "m3");
             order.verify(readingRepublisher).republish(SCHEMA, 17, 100L);
+        }
+
+        @Test
+        @DisplayName("a reading above the tenant's BFM maximum is refused and nothing is written")
+        void rejectsAReadingAboveTheMaximum() {
+            when(manualReadingMaxValues.maxFor(17, ReadingChannel.BFM)).thenReturn(Optional.of(new BigDecimal("550")));
+
+            assertThatThrownBy(() -> service.updateYesterdayFinalReadingBySchemeId(
+                    SCHEME_ID, PHONE, new BigDecimal("600"), null))
+                    .isInstanceOfSatisfying(ResponseStatusException.class, e -> {
+                        assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                        assertThat(e.getReason()).isEqualTo("Reading can't be more than 550 m³.");
+                    });
+            verify(telemetryTenantRepository, never())
+                    .updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+            verify(readingRepublisher, never()).republish(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a reading at the tenant's BFM maximum is written")
+        void acceptsAReadingAtTheMaximum() {
+            when(manualReadingMaxValues.maxFor(17, ReadingChannel.BFM)).thenReturn(Optional.of(new BigDecimal("600")));
+
+            service.updateYesterdayFinalReadingBySchemeId(SCHEME_ID, PHONE, new BigDecimal("600"), null);
+
+            verify(telemetryTenantRepository).updateConfirmedReading(SCHEMA, 100L, new BigDecimal("600"), 11L,
+                    RolloverResolutionService.SOURCE_MANUAL, "m3");
         }
 
         @Test

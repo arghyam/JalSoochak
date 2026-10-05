@@ -7,6 +7,7 @@ import java.util.EnumSet;
 import java.util.List;
 
 import org.arghyam.jalsoochak.tenant.dto.internal.ElmFormulaConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.ManualReadingMaxValueConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.EmailProviderConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SmsProviderConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WhatsAppMessagesConfigDTO;
@@ -146,6 +147,19 @@ class TenantConfigKeyEnumTest {
             assertThat(key.getDtoClass()).isEqualTo(ElmFormulaConfigDTO.class);
             assertThat(key.isPublic()).isFalse();
             // Optional: a tenant without ELM schemes never needs a formula.
+            assertThat(key.isMandatory()).isFalse();
+            assertThat(key.isManagedValue()).isFalse();
+        }
+
+        @Test
+        @DisplayName("TENANT_MANUAL_READING_MAX_VALUE is generic, private, optional and writable through PUT /config")
+        void tenantManualReadingMaxValue_hasExpectedFlags() {
+            TenantConfigKeyEnum key = TenantConfigKeyEnum.TENANT_MANUAL_READING_MAX_VALUE;
+
+            assertThat(key.getType()).isEqualTo(TenantConfigKeyEnum.ConfigType.GENERIC);
+            assertThat(key.getDtoClass()).isEqualTo(ManualReadingMaxValueConfigDTO.class);
+            assertThat(key.isPublic()).isFalse();
+            // Optional: an unset channel has no limit, so existing tenants stay CONFIGURED.
             assertThat(key.isMandatory()).isFalse();
             assertThat(key.isManagedValue()).isFalse();
         }

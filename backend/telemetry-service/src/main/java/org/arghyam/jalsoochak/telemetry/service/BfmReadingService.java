@@ -931,7 +931,7 @@ public class BfmReadingService {
         // refused unit, PDU run or PDU day writes nothing, and no anomaly: it is the request that is
         // wrong, not the reading.
         CapturedReading captured;
-        switch (submittedValueCapture.captureCorrection(channel, submittedReading, readingUnit)) {
+        switch (submittedValueCapture.captureCorrection(eventTenantId, channel, submittedReading, readingUnit)) {
             case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
             case CaptureOutcome.Rejected(TelemetryErrorCode errorCode, String rejection) -> {
                 return rejectedCorrection(reading, errorCode, rejection);

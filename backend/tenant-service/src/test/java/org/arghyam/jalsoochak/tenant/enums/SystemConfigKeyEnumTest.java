@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.tenant.enums;
 
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.ManualReadingMaxValueConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.MessagingAllowedHostsConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
@@ -42,6 +43,13 @@ class SystemConfigKeyEnumTest {
                 .isEqualTo(SimpleConfigValueDTO.class);
     }
 
+    @Test
+    @DisplayName("MANUAL_READING_MAX_VALUE has ManualReadingMaxValueConfigDTO class")
+    void manualReadingMaxValue_hasDtoClass() {
+        assertThat(SystemConfigKeyEnum.MANUAL_READING_MAX_VALUE.getDtoClass())
+                .isEqualTo(ManualReadingMaxValueConfigDTO.class);
+    }
+
     @ParameterizedTest(name = "{0} implements ConfigKey sealed interface")
     @EnumSource(SystemConfigKeyEnum.class)
     @DisplayName("every key implements the ConfigKey sealed interface")
@@ -64,8 +72,8 @@ class SystemConfigKeyEnumTest {
     }
 
     @Test
-    @DisplayName("enum has exactly 7 values")
-    void enumHasSevenValues() {
-        assertThat(SystemConfigKeyEnum.values()).hasSize(7);
+    @DisplayName("enum has exactly 8 values")
+    void enumHasEightValues() {
+        assertThat(SystemConfigKeyEnum.values()).hasSize(8);
     }
 }
