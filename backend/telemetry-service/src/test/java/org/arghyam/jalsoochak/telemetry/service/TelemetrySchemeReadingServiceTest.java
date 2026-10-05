@@ -1,6 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
-import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -214,7 +214,7 @@ class TelemetrySchemeReadingServiceTest {
                             .isEqualTo(HttpStatus.FORBIDDEN));
 
             verify(telemetryTenantRepository, never())
-                    .updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+                    .updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
             verify(readingRepublisher, never()).republish(any(), any(), any());
         }
     }
@@ -290,7 +290,7 @@ class TelemetrySchemeReadingServiceTest {
             // The target is always a BFM row and the request has no unit, so the value is in m3.
             verify(telemetryTenantRepository)
                     .updateConfirmedReading(SCHEMA, 100L, new BigDecimal("600"), 11L,
-                            RolloverResolutionService.SOURCE_MANUAL, "m3");
+                            RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.API);
         }
 
         @Test
@@ -300,7 +300,7 @@ class TelemetrySchemeReadingServiceTest {
             // Re-submitting the value already on the row changes nothing, so a ROLLOVER_RESOLVED or
             // EXTERNALLY_ASSERTED marker must survive it.
             verify(telemetryTenantRepository)
-                    .updateConfirmedReading(SCHEMA, 100L, new BigDecimal("500"), 11L, null, "m3");
+                    .updateConfirmedReading(SCHEMA, 100L, new BigDecimal("500"), 11L, null, "m3", ReportingChannel.API);
         }
 
         @Test
@@ -332,7 +332,7 @@ class TelemetrySchemeReadingServiceTest {
             InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
             order.verify(telemetryTenantRepository)
                     .updateConfirmedReading(SCHEMA, 100L, new BigDecimal("600"), 11L,
-                            RolloverResolutionService.SOURCE_MANUAL, "m3");
+                            RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.API);
             order.verify(readingRepublisher).republish(SCHEMA, 17, 100L);
         }
 

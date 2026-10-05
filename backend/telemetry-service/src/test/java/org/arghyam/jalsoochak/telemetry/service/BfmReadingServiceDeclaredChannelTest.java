@@ -108,7 +108,7 @@ class BfmReadingServiceDeclaredChannelTest {
                 any(LocalDate.class))).thenReturn(Optional.empty());
         lenient().when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(READING_ID, UPDATED_AT));
     }
 
@@ -116,7 +116,7 @@ class BfmReadingServiceDeclaredChannelTest {
     private void verifyStoredWith(ReadingChannel channel, String submittedUnit) {
         verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any(), eq(channel), eq(submittedUnit));
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), eq(channel), eq(submittedUnit), any());
         verify(repo, never()).updateFlowReadingChannel(any(), any(), any());
     }
 

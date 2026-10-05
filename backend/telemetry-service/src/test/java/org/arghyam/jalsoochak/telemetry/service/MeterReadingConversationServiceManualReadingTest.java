@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ManualReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
@@ -156,9 +157,9 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals("bfm-1", resp.getCorrelationId());
 
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("123"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
-        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
     }
 
     @Test
@@ -208,9 +209,9 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals("bfm-2", resp.getCorrelationId());
 
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 77L, new BigDecimal("123"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
-        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
     }
 
     @Test
@@ -258,7 +259,7 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals(true, resp.isSuccess());
         // Same value as the stored resolved reading → provenance left untouched (null source), so the row
         // keeps SOURCE_ROLLOVER_RESOLVED rather than being overwritten to MANUAL.
-        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("150"), 1L, null, "m3");
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("150"), 1L, null, "m3", ReportingChannel.WHATSAPP);
     }
 
     @Test
@@ -299,9 +300,9 @@ class MeterReadingConversationServiceManualReadingTest {
 
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("100"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
         verify(telemetryTenantRepository, never()).updateMeterChangeReason(anyString(), anyLong(), anyString(), anyLong());
-        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 anyString(),
                 argThat(anomaly -> anomaly != null && anomaly.type() == AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS)
@@ -385,8 +386,8 @@ class MeterReadingConversationServiceManualReadingTest {
         );
 
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 55L, new BigDecimal("40"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
-        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
+        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
     }
 
     @Test
@@ -427,8 +428,8 @@ class MeterReadingConversationServiceManualReadingTest {
                 argThat(anomaly -> anomaly != null && anomaly.type() == AnomalyConstants.TYPE_OVER_WATER_SUPPLY)
         );
 
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
-        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
+        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
         verify(telemetryTenantRepository, never()).updateFlowReadingChannel(anyString(), anyLong(), any());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
@@ -455,7 +456,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
-                any(), any(), any()))
+                any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(4242L, null));
 
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
@@ -487,10 +488,10 @@ class MeterReadingConversationServiceManualReadingTest {
                 ArgumentMatchers.isNull(), ArgumentMatchers.isNull(),
                 ArgumentMatchers.eq(RolloverResolutionService.SOURCE_MANUAL), ArgumentMatchers.isNull(),
                 // The operator's channel, and its standard unit: a typed-in value is never converted.
-                ArgumentMatchers.eq(ReadingChannel.BFM), ArgumentMatchers.eq("m3"));
+                ArgumentMatchers.eq(ReadingChannel.BFM), ArgumentMatchers.eq("m3"), ArgumentMatchers.eq(ReportingChannel.WHATSAPP));
         // The two-statement route is what allowed a row to commit unmarked if the second write failed.
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(),
-                any(), any(), anyString(), anyString(), any());
+                any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
         verify(telemetryTenantRepository, never()).applyConfirmedReadingSource(anyString(), anyLong(), anyInt(), any());
     }
 
@@ -517,7 +518,7 @@ class MeterReadingConversationServiceManualReadingTest {
         // and surfaces here as one failed call — never as a committed row missing its marker.
         when(telemetryTenantRepository.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
-                any(), any(), any()))
+                any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("confirmed_reading_source write failed"));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
@@ -588,7 +589,7 @@ class MeterReadingConversationServiceManualReadingTest {
         verify(telemetryTenantRepository).findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, ReadingChannel.BFM, ReadingTime.today(), null);
         verify(telemetryTenantRepository, never()).findLatestConfirmedReadingSnapshot("tenant_test", 10L, ReadingChannel.BFM, null);
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("1000"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
     }
 
     @Test
@@ -639,9 +640,9 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals("bfm-55", resp.getCorrelationId());
 
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 55L, new BigDecimal("100"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
         verify(telemetryTenantRepository).updateMeterChangeReason("tenant_test", 55L, "METER_REPLACED", 1L);
-        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
     }
 
     @Test
@@ -815,7 +816,7 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals(true, resp.isSuccess());
         InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
         order.verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 88L, new BigDecimal("150"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
         order.verify(telemetryTenantRepository).updateFlowReadingChannel("tenant_test", 88L, ReadingChannel.BFM);
         order.verify(readingRepublisher).republish("tenant_test", 1, 88L);
         verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());
@@ -841,7 +842,7 @@ class MeterReadingConversationServiceManualReadingTest {
         InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
         // A typed-in value is in the channel's standard unit.
         order.verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("123"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "kW.h");
+                RolloverResolutionService.SOURCE_MANUAL, "kW.h", ReportingChannel.WHATSAPP);
         order.verify(telemetryTenantRepository).updateFlowReadingChannel("tenant_test", 99L, ReadingChannel.ELM);
         order.verify(readingRepublisher).republish("tenant_test", 1, 99L);
         verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());
@@ -856,7 +857,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
-                any(), any(), any()))
+                any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(4242L, null));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
@@ -869,7 +870,7 @@ class MeterReadingConversationServiceManualReadingTest {
         // The channel goes in with the insert, so no separate channel write follows it.
         order.verify(telemetryTenantRepository).persistFlowReadingWithTracking(anyString(), any(), anyLong(),
                 anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(),
-                any(), any(), any(), ArgumentMatchers.eq(ReadingChannel.BFM), ArgumentMatchers.eq("m3"));
+                any(), any(), any(), ArgumentMatchers.eq(ReadingChannel.BFM), ArgumentMatchers.eq("m3"), ArgumentMatchers.eq(ReportingChannel.WHATSAPP));
         order.verify(readingRepublisher).republish("tenant_test", 1, 4242L);
         verify(telemetryTenantRepository, never()).updateFlowReadingChannel(any(), any(), any());
         verify(readingRepublisher, times(1)).republish(anyString(), any(), anyLong());
@@ -899,10 +900,10 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals(false, resp.isSuccess());
         assertEquals("REJECTED", resp.getQualityStatus());
         assertEquals("localised", resp.getMessage());
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
         verify(telemetryTenantRepository, never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
-                any(), any(), any());
+                any(), any(), any(), any());
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(anyString(), any());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
@@ -992,10 +993,10 @@ class MeterReadingConversationServiceManualReadingTest {
                 ArgumentMatchers.eq(ReadingTime.today()), ArgumentMatchers.eq(new BigDecimal("600")),
                 replaced.capture(), any());
         assertEquals(99L, replaced.getValue().get());
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
         verify(telemetryTenantRepository, never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
-                any(), any(), any());
+                any(), any(), any(), any());
         verify(readingRepublisher, never()).republish(anyString(), any(), anyLong());
     }
 
@@ -1021,7 +1022,7 @@ class MeterReadingConversationServiceManualReadingTest {
         // The maximum is a water volume measured against a meter total, so its config isn't even read.
         verify(tenantConfigRepository, never()).findConfigValue(anyInt(), ArgumentMatchers.eq("WATER_NORM"));
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("1440"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "min");
+                RolloverResolutionService.SOURCE_MANUAL, "min", ReportingChannel.WHATSAPP);
         verify(readingRepublisher).republish("tenant_test", 1, 99L);
     }
 
@@ -1051,7 +1052,7 @@ class MeterReadingConversationServiceManualReadingTest {
                         && anomaly.type() == AnomalyConstants.TYPE_MANUAL_OVERRIDE
                         && new BigDecimal("4800").equals(anomaly.previousReading())));
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("4821.5"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "kW.h");
+                RolloverResolutionService.SOURCE_MANUAL, "kW.h", ReportingChannel.WHATSAPP);
     }
 
     /** Everything an accepted manual reading needs apart from the row it lands on. */

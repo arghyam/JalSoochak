@@ -116,7 +116,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(),
                 any(),
                 any(),
-                any()
+                any(), any()
         )).thenReturn(new FlowReadingVersion(99L, null));
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
@@ -138,7 +138,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(),
                 any(),
                 any(),
-                any()
+                any(), any()
         );
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 anyString(),
@@ -201,7 +201,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(),
                 any(),
                 any(),
-                any()
+                any(), any()
         )).thenReturn(new FlowReadingVersion(101L, null));
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
@@ -223,7 +223,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(),
                 any(),
                 any(),
-                any()
+                any(), any()
         );
     }
 
@@ -263,7 +263,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(),
                 any(),
                 any(),
-                any()
+                any(), any()
         )).thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", true);
@@ -285,7 +285,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(),
                 any(),
                 any(),
-                any()
+                any(), any()
         );
     }
 }

@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
@@ -121,7 +122,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
         assertEquals(true, response.isSuccess());
         assertEquals("corr-1", response.getCorrelationId());
         verify(telemetryTenantRepository).updateConfirmedReading(
-                API_KEY_SCHEMA, 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL, "m3");
+                API_KEY_SCHEMA, 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.API);
         verify(readingRepublisher).republish(API_KEY_SCHEMA, API_KEY_TENANT_ID, 99L);
     }
 
@@ -142,7 +143,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
         service.updateConfirmedReading("corr-1", null, new BigDecimal("123"), API_KEY_TENANT_ID);
 
         verify(telemetryTenantRepository).updateConfirmedReading(
-                API_KEY_SCHEMA, 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL, "m3");
+                API_KEY_SCHEMA, 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.API);
     }
 
     /** Callers with no authenticated tenant (the correlationId-only overload) keep the header path. */
@@ -157,7 +158,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
         service.updateConfirmedReading("corr-1", null, new BigDecimal("123"), null);
 
         verify(telemetryTenantRepository).updateConfirmedReading(
-                "tenant_test", 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL, "m3");
+                "tenant_test", 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.API);
     }
 
     @Test
@@ -172,7 +173,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
         service.updateConfirmedReading("corr-1", null, new BigDecimal("123"), 404);
 
         verify(telemetryTenantRepository).updateConfirmedReading(
-                "tenant_test", 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL, "m3");
+                "tenant_test", 99L, new BigDecimal("123"), 1L, RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.API);
     }
 
     /**

@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
@@ -122,7 +123,7 @@ class BfmReadingServiceCorrectionChannelTest {
     }
 
     private void verifyNothingWritten() {
-        verify(repo, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(repo, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
         verify(repo, never()).applyQuarantineReason(anyString(), anyLong(), anyInt());
         verifyNoInteractions(readingRepublisher);
     }
@@ -137,7 +138,7 @@ class BfmReadingServiceCorrectionChannelTest {
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.getMeterReading()).isEqualByComparingTo("1.5");
         verify(repo).updateConfirmedReading(SCHEMA, READING_ID, new BigDecimal("1.500"), OPERATOR_ID,
-                RolloverResolutionService.SOURCE_MANUAL, "L");
+                RolloverResolutionService.SOURCE_MANUAL, "L", ReportingChannel.API);
         verify(readingRepublisher).republish(SCHEMA, TENANT_ID, READING_ID);
     }
 
@@ -149,7 +150,7 @@ class BfmReadingServiceCorrectionChannelTest {
         correct("1.5", null);
 
         verify(repo).updateConfirmedReading(SCHEMA, READING_ID, new BigDecimal("1.5"), OPERATOR_ID,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.API);
     }
 
     @Test
@@ -175,7 +176,7 @@ class BfmReadingServiceCorrectionChannelTest {
 
         assertThat(response.isSuccess()).isTrue();
         verify(repo).updateConfirmedReading(SCHEMA, READING_ID, new BigDecimal("120"), OPERATOR_ID,
-                RolloverResolutionService.SOURCE_MANUAL, "h");
+                RolloverResolutionService.SOURCE_MANUAL, "h", ReportingChannel.API);
         verify(supplyPlausibilityGuard, never()).assess(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
@@ -236,8 +237,8 @@ class BfmReadingServiceCorrectionChannelTest {
                 .thenReturn(new TelemetryOperatorWithSchema(SCHEMA, operator));
         when(repo.findLatestFlowReadingByOperator(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(row(ReadingChannel.PDU, "90")));
 
-        service.resetLatestConfirmedReadingByPhone(CONTACT, TENANT_ID);
+        service.resetLatestConfirmedReadingByPhone(CONTACT, TENANT_ID, ReportingChannel.API);
 
-        verify(repo).updateConfirmedReading(SCHEMA, READING_ID, BigDecimal.ZERO, OPERATOR_ID, null, "min");
+        verify(repo).updateConfirmedReading(SCHEMA, READING_ID, BigDecimal.ZERO, OPERATOR_ID, null, "min", ReportingChannel.API);
     }
 }

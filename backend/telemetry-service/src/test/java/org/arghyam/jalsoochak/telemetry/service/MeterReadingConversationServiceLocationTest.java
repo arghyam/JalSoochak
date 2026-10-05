@@ -1,9 +1,11 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryFlowReadingDetails;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
@@ -32,6 +34,8 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -96,8 +100,8 @@ class MeterReadingConversationServiceLocationTest {
         when(telemetryTenantRepository.findLatestFlowReadingForDate(anyString(), anyLong(), anyLong(), any()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.createFlowReading(
-                anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any()))
-                .thenReturn(READING);
+                anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(READING, null));
         when(templatesService.resolveScreenMessage(anyInt(), anyString(), anyString()))
                 .thenReturn(Optional.empty());
         when(tenantConfigRepository.findConfigValue(anyInt(), anyString())).thenReturn(Optional.empty());
@@ -272,7 +276,20 @@ class MeterReadingConversationServiceLocationTest {
         verify(locationAffinityService).assess(eq(SCHEMA), eq(TENANT), eq(selectedScheme), eq(LAT), eq(LNG),
                 eq(LocationAffinityService.Path.LOCATION_WEBHOOK));
         verify(telemetryTenantRepository, never()).createFlowReading(
-                anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+                anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a location shared before anything is recorded today opens a row reported via WhatsApp")
+    void opensARowReportedViaWhatsApp() {
+        verdict(new LocationVerdict.Within(10.0d, 500.0d));
+
+        post();
+
+        verify(telemetryTenantRepository).createFlowReading(eq(SCHEMA), eq(SCHEME), eq(OPERATOR), any(),
+                eq(BigDecimal.ZERO), eq(BigDecimal.ZERO), startsWith("location-"), isNull(), eq(""), isNull(),
+                isNull(), isNull(), eq(ReportingChannel.WHATSAPP));
+        verify(telemetryTenantRepository).updateReadingLocation(SCHEMA, READING, LAT, LNG, OPERATOR);
     }
 
     @Test

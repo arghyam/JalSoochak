@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -109,7 +110,7 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
         void writesTheSubmittedUnitInTheSameStatement() {
             onColumnsExisting("payload_json", "confirmed_reading_source", "submitted_unit");
 
-            repository.updateConfirmedReading(SCHEMA, 5L, new BigDecimal("1.5"), 2L, 3, "L");
+            repository.updateConfirmedReading(SCHEMA, 5L, new BigDecimal("1.5"), 2L, 3, "L", ReportingChannel.WHATSAPP);
 
             assertThat(allUpdateSql()).hasSize(1);
             assertThat(capturedUpdateSql()).contains("confirmed_reading_source = ?, submitted_unit = ?");
@@ -121,7 +122,7 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
         void leavesTheSubmittedUnitUntouchedWhenNoneIsGiven() {
             onColumnsExisting("payload_json", "submitted_unit");
 
-            repository.updateConfirmedReading(SCHEMA, 5L, new BigDecimal("1234"), 2L, null, null);
+            repository.updateConfirmedReading(SCHEMA, 5L, new BigDecimal("1234"), 2L, null, null, ReportingChannel.WHATSAPP);
 
             assertThat(capturedUpdateSql()).doesNotContain("submitted_unit");
         }
@@ -130,9 +131,42 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
         void dropsTheSubmittedUnitOnAPreV56Schema() {
             onColumnsExisting("payload_json");
 
-            repository.updateConfirmedReading(SCHEMA, 5L, new BigDecimal("1234"), 2L, null, "m3");
+            repository.updateConfirmedReading(SCHEMA, 5L, new BigDecimal("1234"), 2L, null, "m3", ReportingChannel.WHATSAPP);
 
             assertThat(capturedUpdateSql()).doesNotContain("submitted_unit");
+            assertThat(capturedUpdateArgs())
+                    .containsExactly(new BigDecimal("1234"), new BigDecimal("1234"), 2L, 5L);
+        }
+
+        /** The correction replaces the reading, so the row now records the channel it came through. */
+        @Test
+        void writesHowTheCorrectionWasReportedInTheSameStatement() {
+            onColumnsExisting("payload_json", "submitted_unit", "reported_via_id");
+
+            repository.updateConfirmedReading(SCHEMA, 5L, new BigDecimal("1.5"), 2L, null, "L", ReportingChannel.API);
+
+            assertThat(allUpdateSql()).hasSize(1);
+            assertThat(capturedUpdateSql()).contains("submitted_unit = ?, reported_via_id = ?");
+            assertThat(capturedUpdateArgs())
+                    .containsExactly(new BigDecimal("1.5"), new BigDecimal("1.5"), "L", 7, 2L, 5L);
+        }
+
+        @Test
+        void leavesHowTheRowWasReportedUntouchedWhenNoChannelIsGiven() {
+            onColumnExists(true);
+
+            repository.updateConfirmedReading(SCHEMA, 5L, new BigDecimal("1234"), 2L, null);
+
+            assertThat(capturedUpdateSql()).doesNotContain("reported_via_id");
+        }
+
+        @Test
+        void dropsHowTheCorrectionWasReportedOnAPreV61Schema() {
+            onColumnsExisting("payload_json");
+
+            repository.updateConfirmedReading(SCHEMA, 5L, new BigDecimal("1234"), 2L, null, null, ReportingChannel.API);
+
+            assertThat(capturedUpdateSql()).doesNotContain("reported_via_id");
             assertThat(capturedUpdateArgs())
                     .containsExactly(new BigDecimal("1234"), new BigDecimal("1234"), 2L, 5L);
         }
@@ -203,11 +237,12 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
                     .contains("observation_time")
                     .contains("updated_at = clock_timestamp()")
                     .contains("RETURNING updated_at");
-            // The legacy overload passes no channel or unit, which leaves both columns as they are.
+            // The legacy overload passes no channel, unit or reporting channel, which leaves the three
+            // columns as they are.
             assertThat(lastQueryArgs()).containsExactly(
                     READING_AT, DAY, new BigDecimal("10"), new BigDecimal("11"),
                     new BigDecimal("11"), new BigDecimal("10"), "corr-1", "ocr-1",
-                    null, null, "img", "reason", 2L, 5L);
+                    null, null, null, "img", "reason", 2L, 5L);
         }
 
         @Test
@@ -283,13 +318,28 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             onQuery("RETURNING updated_at", row("updated_at", updatedAt));
 
             FlowReadingVersion version = repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
-                    BigDecimal.ZERO, new BigDecimal("90"), "corr-1", null, "", null, 2L, ReadingChannel.PDU, "min");
+                    BigDecimal.ZERO, new BigDecimal("90"), "corr-1", null, "", null, 2L, ReadingChannel.PDU, "min", ReportingChannel.WHATSAPP);
 
             assertThat(version).isEqualTo(new FlowReadingVersion(5L, updatedAt));
             assertThat(allQuerySql().get(0))
                     .contains("channel_id = COALESCE(?, channel_id)")
-                    .contains("submitted_unit = COALESCE(?, submitted_unit)");
-            assertThat(lastQueryArgs()).containsSequence(3, "min");
+                    .contains("submitted_unit = COALESCE(?, submitted_unit)")
+                    .contains("reported_via_id = COALESCE(?, reported_via_id)");
+            assertThat(lastQueryArgs()).containsSequence(3, "min", 6);
+        }
+
+        /** A pre-V61 schema has no reported_via_id column: how the row was reported is dropped. */
+        @Test
+        void dropsHowTheRowWasReportedOnAPreV61Schema() {
+            onColumnsExisting("payload_json", "submitted_unit");
+            onQuery("RETURNING updated_at", row("updated_at", LocalDateTime.of(2026, 3, 1, 6, 30)));
+
+            repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
+                    BigDecimal.ZERO, new BigDecimal("90"), "corr-1", null, "", null, 2L, ReadingChannel.BFM, "m3",
+                    ReportingChannel.API);
+
+            assertThat(allQuerySql().get(0)).doesNotContain("reported_via_id").contains("submitted_unit");
+            assertThat(lastQueryArgs()).doesNotContain(ReportingChannel.API.getCode());
         }
 
         /** The row vanished between the placeholder lookup and this write: no version to publish. */
@@ -298,7 +348,7 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             onColumnExists(true);
 
             FlowReadingVersion version = repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
-                    BigDecimal.ZERO, new BigDecimal("90"), "corr-1", null, "", null, 2L, ReadingChannel.BFM, "m3");
+                    BigDecimal.ZERO, new BigDecimal("90"), "corr-1", null, "", null, 2L, ReadingChannel.BFM, "m3", ReportingChannel.WHATSAPP);
 
             assertThat(version).isEqualTo(new FlowReadingVersion(5L, null));
         }

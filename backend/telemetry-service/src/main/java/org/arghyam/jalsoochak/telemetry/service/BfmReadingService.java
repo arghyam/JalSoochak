@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -447,7 +448,8 @@ public class BfmReadingService {
                         // insert, so the row cannot land without it.
                         storeQuarantined ? QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY : null,
                         resolvedChannel,
-                        submittedUnit);
+                        submittedUnit,
+                        request.getReportedVia());
             }
             if (placeholderIdOpt.isPresent()) {
                 return telemetryTenantRepository.updateFlowReadingFromIngestion(
@@ -462,7 +464,8 @@ public class BfmReadingService {
                         request.getMeterChangeReason(),
                         operatorInRequest.id(),
                         resolvedChannel,
-                        submittedUnit
+                        submittedUnit,
+                        request.getReportedVia()
                 );
             }
             return telemetryTenantRepository.createFlowReading(
@@ -477,7 +480,8 @@ public class BfmReadingService {
                     request.getReadingUrl(),
                     request.getMeterChangeReason(),
                     resolvedChannel,
-                    submittedUnit
+                    submittedUnit,
+                    request.getReportedVia()
             );
         };
         FlowReadingVersion storedReading;
@@ -981,7 +985,9 @@ public class BfmReadingService {
                     confirmedReading,
                     updatedBy,
                     RolloverResolutionService.manualConfirmSource(confirmedReading, reading.confirmedReading()),
-                    captured.submittedUnitCode()
+                    captured.submittedUnitCode(),
+                    // Reached only from PUT /readings (see above).
+                    ReportingChannel.API
             );
             return reading.id();
         };
@@ -1133,9 +1139,13 @@ public class BfmReadingService {
      * endpoint cannot be used to test whether a phone number is registered in some other tenant. The
      * previous value is carried back on {@code lastConfirmedReading} so the caller and the audit log
      * both retain what the reset destroyed.
+     *
+     * @param reportedVia the channel the reset came through, recorded on the row as the writer of its 0
      */
     @Transactional
-    public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber, Integer tenantId) {
+    public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber,
+                                                                    Integer tenantId,
+                                                                    ReportingChannel reportedVia) {
         if (phoneNumber == null || phoneNumber.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "phoneNumber must be provided");
         }
@@ -1161,7 +1171,8 @@ public class BfmReadingService {
                 null,
                 ReadingChannel.fromCode(latestReading.channel()).standardUnit()
                         .map(ReadingUnit::code)
-                        .orElse(null)
+                        .orElse(null),
+                reportedVia
         );
         // SUPPLY-PLAUSIBILITY: the marker described the value the reset has just destroyed, so it
         // cannot outlive it — 0 is not an implausible supply. Leaving it behind is not cosmetic:

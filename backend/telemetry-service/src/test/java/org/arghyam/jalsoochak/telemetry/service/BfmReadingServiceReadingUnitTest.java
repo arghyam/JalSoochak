@@ -128,10 +128,10 @@ class BfmReadingServiceReadingUnitTest {
                 any(LocalDate.class))).thenReturn(Optional.empty());
         lenient().when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(99L, null));
         lenient().when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(99L, null));
     }
 
@@ -323,7 +323,7 @@ class BfmReadingServiceReadingUnitTest {
     private void verifyStored(String value, ReadingChannel channel, String submittedUnit) {
         verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), argThat(sameValue(value)), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any(), eq(channel), eq(submittedUnit));
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), eq(channel), eq(submittedUnit), any());
     }
 
     private void verifyPublished(String value) {
@@ -334,9 +334,9 @@ class BfmReadingServiceReadingUnitTest {
     private void verifyNothingStoredOrPublished() {
         verify(repo, never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any());
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(repo, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any());
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any(), any());
         verifyNoInteractions(telemetryEventPublisher);
     }
 
