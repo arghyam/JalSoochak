@@ -31,7 +31,7 @@ public enum TelemetryErrorCode {
     UNREADABLE_IMAGE("UNREADABLE_IMAGE"),
 
     /**
-     * The OCR provider found no meter in the photo (FlowVision {@code NOMETER}): the image is rotated,
+     * The OCR provider found no meter in the photo (the provider's no-meter status): the image is rotated,
      * unrelated or random. Distinct from {@link #UNREADABLE_IMAGE}, where a meter was seen but its
      * digits could not be read, so a caller can ask for a photo <em>of the meter</em> rather than a
      * clearer one.
