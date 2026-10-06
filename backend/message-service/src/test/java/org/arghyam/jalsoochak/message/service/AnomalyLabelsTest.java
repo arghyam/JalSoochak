@@ -22,7 +22,8 @@ class AnomalyLabelsTest {
             "NO_WATER_SUPPLY,No Water Supply",
             "NO_SUBMISSION,No Submission",
             "IMPLAUSIBLE_WATER_SUPPLY,Implausible Water Supply",
-            "LOCATION_MISMATCH,Location Mismatch"
+            "LOCATION_MISMATCH,Location Mismatch",
+            "NO_METER_DETECTED,No Meter In Photo"
     })
     void mapsTheEnumName(String type, String expected) {
         assertThat(AnomalyLabels.label(type)).isEqualTo(expected);
@@ -36,7 +37,8 @@ class AnomalyLabelsTest {
             "6,No Water Supply",
             "9,No Submission",
             "10,Implausible Water Supply",
-            "11,Location Mismatch"
+            "11,Location Mismatch",
+            "12,No Meter In Photo"
     })
     void mapsTheLegacyNumericCode(String code, String expected) {
         assertThat(AnomalyLabels.label(code)).isEqualTo(expected);

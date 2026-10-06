@@ -52,6 +52,13 @@ class TelemetryErrorCodeTest {
     }
 
     @Test
+    @DisplayName("NO_METER_DETECTED serializes to its stable wire value")
+    void noMeterDetectedSerializes() throws Exception {
+        assertThat(objectMapper.writeValueAsString(TelemetryErrorCode.NO_METER_DETECTED))
+                .isEqualTo("\"NO_METER_DETECTED\"");
+    }
+
+    @Test
     @DisplayName("CHANNEL_NOT_SUPPORTED serializes to its stable wire value")
     void channelNotSupportedSerializes() throws Exception {
         assertThat(objectMapper.writeValueAsString(TelemetryErrorCode.CHANNEL_NOT_SUPPORTED))

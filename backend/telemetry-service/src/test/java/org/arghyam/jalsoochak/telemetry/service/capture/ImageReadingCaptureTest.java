@@ -228,6 +228,61 @@ class ImageReadingCaptureTest {
     }
 
     @Test
+    @DisplayName("a photo with no meter in it is rejected as NO_METER_DETECTED and recorded as its own anomaly")
+    void noMeterPhotoIsRejectedSeparately() {
+        bfmPhotosGoToTheDefaultProvider();
+        when(bfmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(noMeter());
+
+        CaptureOutcome outcome = capture.capture(input(ReadingChannel.BFM, null, OcrRetryMode.NONE));
+
+        assertThat(outcome).isEqualTo(new CaptureOutcome.Rejected(
+                TelemetryErrorCode.NO_METER_DETECTED,
+                "No meter found in the photo. Please send a straight, clear photo of the water meter."));
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(eq(SCHEMA), argThat(anomaly ->
+                anomaly.userId() == OPERATOR_ID
+                        && anomaly.schemeId() == SCHEME_ID
+                        && anomaly.type() == AnomalyConstants.TYPE_NO_METER_DETECTED
+                        && anomaly.status() == AnomalyConstants.STATUS_OPEN
+                        && anomaly.retries() == 1
+                        && anomaly.flowReadingId() == null
+                        && AnomalyConstants.REASON_NO_METER_DETECTED.equals(anomaly.reason())));
+        verify(telemetryEventPublisher).publishAnomalyRecorded(
+                eq(TENANT_ID), eq(AnomalyConstants.TYPE_NO_METER_DETECTED), eq(OPERATOR_ID), eq(SCHEME_ID),
+                isNull(), isNull(), isNull(), eq(1), isNull(), isNull(), eq(0),
+                eq(AnomalyConstants.REASON_NO_METER_DETECTED),
+                eq(AnomalyConstants.STATUS_OPEN), anyString(), isNull());
+    }
+
+    @Test
+    @DisplayName("a no-meter photo is never recorded as an unreadable image")
+    void noMeterPhotoIsNotAnUnreadableImage() {
+        bfmPhotosGoToTheDefaultProvider();
+        when(bfmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(noMeter());
+
+        capture.capture(input(ReadingChannel.BFM, null, OcrRetryMode.NONE));
+
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(eq(SCHEMA),
+                argThat(anomaly -> anomaly.type() == AnomalyConstants.TYPE_UNREADABLE_IMAGE));
+    }
+
+    @Test
+    @DisplayName("a no-meter verdict wins over any digits the provider returned with it")
+    void noMeterWinsOverAReading() {
+        bfmPhotosGoToTheDefaultProvider();
+        OcrReadingResult ocr = OcrReadingResult.builder()
+                .noMeter(true)
+                .adjustedReading(new BigDecimal("123"))
+                .qualityStatus("NOMETER")
+                .build();
+        when(bfmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(ocr);
+
+        CaptureOutcome outcome = capture.capture(input(ReadingChannel.BFM, null, OcrRetryMode.NONE));
+
+        assertThat(outcome).isInstanceOf(CaptureOutcome.Rejected.class);
+        assertThat(((CaptureOutcome.Rejected) outcome).errorCode()).isEqualTo(TelemetryErrorCode.NO_METER_DETECTED);
+    }
+
+    @Test
     @DisplayName("an OCR failure is rejected and recorded as an unreadable-image anomaly")
     void ocrFailureIsRejected() {
         bfmPhotosGoToTheDefaultProvider();
@@ -304,6 +359,14 @@ class ImageReadingCaptureTest {
                 .adjustedReading(new BigDecimal(reading))
                 .qualityConfidence(new BigDecimal(confidence))
                 .qualityStatus("GOOD")
+                .correlationId("ocr-correlation")
+                .build();
+    }
+
+    private static OcrReadingResult noMeter() {
+        return OcrReadingResult.builder()
+                .noMeter(true)
+                .qualityStatus("NOMETER")
                 .correlationId("ocr-correlation")
                 .build();
     }

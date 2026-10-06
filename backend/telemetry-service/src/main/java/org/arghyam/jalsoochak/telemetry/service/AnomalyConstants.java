@@ -40,6 +40,14 @@ public final class AnomalyConstants {
      */
     public static final int TYPE_LOCATION_MISMATCH = 11;
 
+    /**
+     * NO-METER: the OCR provider found no meter in the photo (FlowVision {@code NOMETER} — a rotated,
+     * unrelated or random image). Kept apart from {@link #TYPE_UNREADABLE_IMAGE} (1), which means a
+     * meter was photographed but its digits could not be read: the two call for different follow-up
+     * with the operator. Like type 1 the submission is rejected and no reading row is written.
+     */
+    public static final int TYPE_NO_METER_DETECTED = 12;
+
     public static final int STATUS_OPEN = 1;
 
     /*
@@ -84,4 +92,8 @@ public final class AnomalyConstants {
      */
     public static final String REASON_LOCATION_MISMATCH =
             "Reading submitted outside the scheme boundary.";
+
+    /** NO-METER. Fixed text so {@code anomaly_table.reason} stays groupable. */
+    public static final String REASON_NO_METER_DETECTED =
+            "No meter detected in the submitted photo.";
 }

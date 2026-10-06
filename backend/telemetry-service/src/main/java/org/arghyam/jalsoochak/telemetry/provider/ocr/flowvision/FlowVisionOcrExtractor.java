@@ -34,6 +34,8 @@ import java.util.UUID;
 public class FlowVisionOcrExtractor implements MeterReadingExtractor {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    /** Status FlowVision returns when the photo holds no meter at all (rotated, unrelated, random). */
+    static final String NO_METER_STATUS = "NOMETER";
 
     private final RestTemplate restTemplate;
     /** Global-default settings used when a caller supplies none (the legacy single-endpoint path). */
@@ -151,6 +153,21 @@ public class FlowVisionOcrExtractor implements MeterReadingExtractor {
         Map<String, Object> resultMap =
                 (Map<String, Object>) responseBody.get("result");
 
+        // Checked ahead of the SUCCESS gate. A NOMETER response still carries a data block, but its
+        // meterReading is free text ("No digits detected in the image") and its qualityStatus says
+        // nothing about the meter, so none of it may be parsed as a reading.
+        if (isNoMeter(resultMap)) {
+            log.warn("FlowVision found no meter imageUrlHash={} correlationId={}",
+                    imageUrlHash(readingUrl), sanitizeLogValue(extractCorrelationId(resultMap)));
+            return OcrReadingResult.builder()
+                    .noMeter(true)
+                    .qualityStatus(NO_METER_STATUS)
+                    .rejectionReason(extractRejectionReason(resultMap))
+                    .requestId(extractRequestId(responseBody, resultMap, requestId))
+                    .correlationId(extractCorrelationId(resultMap))
+                    .build();
+        }
+
         if (resultMap == null || !"SUCCESS".equals(resultMap.get("status"))) {
             log.warn("FlowVision OCR not successful: {}", resultMap);
             String responseRequestId = extractRequestId(responseBody, resultMap, requestId);
@@ -206,6 +223,12 @@ public class FlowVisionOcrExtractor implements MeterReadingExtractor {
                 imageUrlHash(readingUrl),
                 summarizeFlowVisionResult(result));
         return result;
+    }
+
+    /** Whether FlowVision reported {@code result.status = NOMETER}: the photo contains no meter. */
+    private static boolean isNoMeter(Map<String, Object> resultMap) {
+        Object status = resultMap == null ? null : resultMap.get("status");
+        return status != null && NO_METER_STATUS.equalsIgnoreCase(status.toString().trim());
     }
 
     private OcrReadingResult handleFlowVisionErrorResponse(RestClientResponseException ex, String readingUrl, String requestId) {
