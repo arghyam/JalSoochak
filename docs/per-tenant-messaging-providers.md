@@ -598,6 +598,13 @@ services. The ones worth knowing about:
 ## 12. Known limitations
 
 - **WhatsApp is not covered.** Every tenant shares one WhatsApp provider account.
+- **Delivery status for a tenant's own account** ([notification-delivery-ledger.md](notification-delivery-ledger.md)).
+  The status sweep asks each pending row's provider through the sender the tenant uses *now*, so a
+  tenant's own SMSCountry account answers for its own messages with its own credentials. Pushed reports
+  are verified against platform-level settings, not per-tenant secrets: a tenant's SendGrid account
+  points its Event Webhook at the same URL and its public key is added to
+  `NOTIFICATIONS_EMAIL_WEBHOOK_VERIFICATION_KEYS`; a tenant's SMSCountry account is asked for reports at
+  `NOTIFICATIONS_SMS_DELIVERY_REPORT_URL`.
 - **`TenantSecrets` values are `String`s and are not zeroised.** Every consumer — a SendGrid
   `Authorization` header, `JavaMailSenderImpl.setPassword`, SMSCountry's basic-auth pair — takes a
   `String`, so a `char[]` would be converted at the first use site and leave an identical copy on

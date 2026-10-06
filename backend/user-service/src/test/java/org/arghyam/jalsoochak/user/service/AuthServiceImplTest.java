@@ -706,6 +706,65 @@ class AuthServiceImplTest {
             assertEquals(1, captor.getValue().getTenantId());
             assertEquals("MP", captor.getValue().getTenantCode());
         }
+
+        @Test
+        @DisplayName("Should carry the admin user row id of the recipient")
+        void forgotPassword_eventCarriesAdminUserId() {
+            when(userCommonRepository.findAdminUserByEmail("sa@example.com")).thenReturn(Optional.of(stateAdminRow()));
+            when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
+            when(tokenService.generateRawToken()).thenReturn("raw-reset-token");
+            when(tokenService.hash("raw-reset-token")).thenReturn("reset-hash");
+            when(passwordResetProperties.expiryMinutes()).thenReturn(30);
+            when(frontendProperties.baseUrl()).thenReturn("http://localhost:3000");
+            when(frontendProperties.resetPath()).thenReturn("/reset-password");
+
+            ForgotPasswordRequestDTO req = new ForgotPasswordRequestDTO();
+            req.setEmail("sa@example.com");
+
+            authService.forgotPassword(req);
+
+            ArgumentCaptor<ResetPasswordEmailEvent> captor =
+                    ArgumentCaptor.forClass(ResetPasswordEmailEvent.class);
+            verify(userNotificationEventPublisher).publishResetPasswordEmailAfterCommit(captor.capture());
+            assertEquals(2L, captor.getValue().getAdminUserId());
+        }
+
+        @Test
+        @DisplayName("Should carry the admin user row id but no tenant for a super user (tenantId 0)")
+        void forgotPassword_superUser_eventCarriesAdminUserIdAndNoTenant() {
+            when(userCommonRepository.findAdminUserByEmail("user@example.com")).thenReturn(Optional.of(superUserRow()));
+            when(tokenService.generateRawToken()).thenReturn("raw-reset-token");
+            when(tokenService.hash("raw-reset-token")).thenReturn("reset-hash");
+            when(passwordResetProperties.expiryMinutes()).thenReturn(30);
+            when(frontendProperties.baseUrl()).thenReturn("http://localhost:3000");
+            when(frontendProperties.resetPath()).thenReturn("/reset-password");
+
+            ForgotPasswordRequestDTO req = new ForgotPasswordRequestDTO();
+            req.setEmail("user@example.com");
+
+            authService.forgotPassword(req);
+
+            ArgumentCaptor<ResetPasswordEmailEvent> captor =
+                    ArgumentCaptor.forClass(ResetPasswordEmailEvent.class);
+            verify(userNotificationEventPublisher).publishResetPasswordEmailAfterCommit(captor.capture());
+            assertEquals(1L, captor.getValue().getAdminUserId());
+            assertNull(captor.getValue().getTenantId());
+        }
+
+        @Test
+        @DisplayName("Should return silently (OWASP) and publish nothing for a PENDING user")
+        void forgotPassword_pendingUser_returnsQuietly() {
+            AdminUserRow pending = new AdminUserRow(5L, "placeholder-uuid", "invited@example.com", "91XXXXXXXXXX",
+                    1, 2, "STATE_ADMIN", AdminUserStatus.PENDING, 0, null);
+            when(userCommonRepository.findAdminUserByEmail("invited@example.com")).thenReturn(Optional.of(pending));
+
+            ForgotPasswordRequestDTO req = new ForgotPasswordRequestDTO();
+            req.setEmail("invited@example.com");
+
+            authService.forgotPassword(req); // no exception
+
+            verify(userNotificationEventPublisher, never()).publishResetPasswordEmailAfterCommit(any(ResetPasswordEmailEvent.class));
+        }
     }
 
     // ── resetPassword ─────────────────────────────────────────────────────────────

@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
+import org.arghyam.jalsoochak.message.ledger.WhatsAppLedgerStatusSync;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -65,6 +67,10 @@ class WhatsAppDeliveryReconciliationServiceTest {
 
     @Mock
     private JdbcTemplate jdbcTemplate;
+
+    /** Inactive unless a test says otherwise, as while the delivery ledger is switched off. */
+    @Mock
+    private WhatsAppLedgerStatusSync ledgerSync;
 
     @InjectMocks
     private WhatsAppDeliveryReconciliationService service;
@@ -127,6 +133,73 @@ class WhatsAppDeliveryReconciliationServiceTest {
 
         verifyNoInteractions(deliveryStatusReader);
         assertThat(logLines()).anyMatch(l -> l.contains("No report template ids configured"));
+    }
+
+    // ───────────────────────────── delivery ledger ─────────────────────────────
+
+    @Nested
+    class DeliveryLedger {
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void everyOutboundTemplateMessageReachesTheLedger_notOnlyTheReports() {
+            stubTenants(tenant(74, "MH"));
+            stubOfficers(Map.of(6530736L, officer(16714L, SO)));
+            stubStatus("DELIVERED",
+                    delivered("241952654", 6530736L),
+                    withTemplate(delivered("241952700", 6530799L), NUDGE_TEMPLATE));
+            when(ledgerSync.isActive()).thenReturn(true);
+            when(ledgerSync.apply(any())).thenReturn(new WhatsAppLedgerStatusSync.SyncStats(2, 2, 0));
+
+            service.reconcile(from, to);
+
+            ArgumentCaptor<java.util.Collection<WhatsAppMessageStatus>> applied =
+                    ArgumentCaptor.forClass(java.util.Collection.class);
+            verify(ledgerSync).apply(applied.capture());
+            assertThat(applied.getValue()).extracting(WhatsAppMessageStatus::messageId)
+                    .containsExactlyInAnyOrder("241952654", "241952700");
+            verify(ledgerSync).syncIncremental(to);
+            verify(ledgerSync).sweep();
+            assertThat(logLines()).anyMatch(l -> l.contains("ledger window: seen=2 applied=2 notInLedger=0"));
+        }
+
+        @Test
+        void aMessageReadUnderTwoStatusesInOnePassIsCountedOnce() {
+            stubTenants(tenant(74, "MH"));
+            stubOfficers(Map.of(6530736L, officer(16714L, SO)));
+            stubStatus("SENT", message("241952654", "SENT", 6530736L, WhatsAppDeliveryOutcome.PENDING, null, null));
+            stubStatus("DELIVERED", delivered("241952654", 6530736L));
+
+            service.reconcile(from, to);
+
+            assertThat(summaryTotal()).contains("matched=1").contains("pending=0");
+        }
+
+        @Test
+        void aLedgerFailureNeverCostsTheSummaries() {
+            stubTenants(tenant(74, "MH"));
+            stubOfficers(Map.of(6530736L, officer(16714L, SO)));
+            stubStatus("DELIVERED", delivered("241952654", 6530736L));
+            when(ledgerSync.isActive()).thenReturn(true);
+            when(ledgerSync.apply(any())).thenThrow(new IllegalStateException("db down"));
+
+            service.reconcile(from, to);
+
+            assertThat(summaryTotal()).contains("matched=1");
+            assertThat(logLines()).anyMatch(l -> l.contains("ledger sync failed"));
+        }
+
+        @Test
+        void theLedgerIsStillSyncedWhenNoReportTemplateIsConfigured() {
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "");
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "");
+            when(ledgerSync.isActive()).thenReturn(true);
+
+            service.reconcile(from, to);
+
+            verify(ledgerSync).syncIncremental(to);
+            verify(ledgerSync).sweep();
+        }
     }
 
     // ───────────────────────── goals 1, 2 and 3 ────────────────────────────────

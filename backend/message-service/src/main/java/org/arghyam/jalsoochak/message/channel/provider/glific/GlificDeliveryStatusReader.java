@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Reads back what Gupshup and Meta told Glific about the messages we sent.
@@ -65,6 +66,32 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
               }
             }""";
 
+    private static final String MESSAGE_QUERY = """
+            query message($id: ID!) {
+              message(id: $id) {
+                message {
+                  id
+                  bspMessageId
+                  bspStatus
+                  errors
+                  templateId
+                  isHsm
+                  flow
+                  insertedAt
+                  updatedAt
+                  receiver { id }
+                }
+                errors { key message }
+              }
+            }""";
+
+    /**
+     * Glific's hard server-side cap on {@code opts.limit}. Asking for more returns 50 rows, not an
+     * error — so a page of 50 against a requested 250 looked like the last page, and every pass read
+     * only the newest 50 messages of each status. Pages are sized and judged against this instead.
+     */
+    static final int MAX_PAGE_SIZE = 50;
+
     private static final String COUNT_QUERY = """
             query countMessages($filter: MessageFilter) {
               countMessages(filter: $filter)
@@ -95,16 +122,46 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
     }
 
     @Override
+    public int maxPageSize() {
+        return MAX_PAGE_SIZE;
+    }
+
+    @Override
+    public String providerId() {
+        return GlificWhatsAppSender.PROVIDER_ID;
+    }
+
+    @Override
+    public Optional<WhatsAppMessageStatus> fetchMessage(String messageId) {
+        if (messageId == null || messageId.isBlank()) {
+            return Optional.empty();
+        }
+        JsonNode response = client.execute(MESSAGE_QUERY, Map.of("id", messageId));
+        JsonNode node = response.path("message").path("message");
+        if (node.isMissingNode() || node.isNull() || node.path("id").isMissingNode()) {
+            return Optional.empty();
+        }
+        return Optional.of(toStatus(node));
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Pages hold at most {@link #MAX_PAGE_SIZE}, whatever {@code pageSize} asks for, and a page is the
+     * last only when it is shorter than that.</p>
+     */
+    @Override
     public List<WhatsAppMessageStatus> fetchMessages(Instant from, Instant to, String bspStatus,
                                                      String dateColumn, int pageSize, int maxPages) {
         List<WhatsAppMessageStatus> all = new ArrayList<>();
         Map<String, Object> filter = buildFilter(from, to, bspStatus, dateColumn);
+        int effectivePageSize = Math.max(1, Math.min(pageSize, MAX_PAGE_SIZE));
         for (int page = 0; page < maxPages; page++) {
-            int offset = page * pageSize;
+            int offset = page * effectivePageSize;
             JsonNode response = client.execute(MESSAGES_QUERY, Map.of(
                     "filter", filter,
                     "opts", Map.of(
-                            "limit", pageSize,
+                            "limit", effectivePageSize,
                             "offset", offset,
                             "order", "DESC",
                             "orderWith", dateColumn)));
@@ -115,7 +172,7 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
             for (JsonNode node : messages) {
                 all.add(toStatus(node));
             }
-            if (messages.size() < pageSize) {
+            if (messages.size() < effectivePageSize) {
                 return all;
             }
         }

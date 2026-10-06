@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppDeliveryStatusReader;
 import org.arghyam.jalsoochak.message.dto.WhatsAppDeliveryOutcome;
 import org.arghyam.jalsoochak.message.dto.WhatsAppMessageStatus;
+import org.arghyam.jalsoochak.message.ledger.WhatsAppLedgerStatusSync;
 import org.arghyam.jalsoochak.message.util.PhoneRedactor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -69,9 +70,11 @@ public class WhatsAppDeliveryReconciliationService {
      * The statuses worth pulling. Every outbound state the provider can report is here: omitting one would
      * silently drop those messages from the counts rather than showing them as anything.
      * {@code RECEIVED} and {@code DELETED} are excluded — inbound and removed, neither is a delivery.
+     *
+     * <p>Read in the order a message moves through them, so one that advances while the pass runs lands
+     * in a status still to be read, never in one already read.</p>
      */
-    private static final List<String> STATUSES_TO_CHECK = List.of(
-            "ERROR", "CONTACT_OPT_OUT", "DELIVERED", "READ", "SEEN", "PLAYED", "SENT", "ENQUEUED");
+    private static final List<String> STATUSES_TO_CHECK = WhatsAppLedgerStatusSync.STATUSES_IN_PROGRESSION;
 
     private static final String SCHEMA_PATTERN = "^[a-z0-9_]+$";
     private static final String UNKNOWN_ROLE = "UNKNOWN";
@@ -90,6 +93,7 @@ public class WhatsAppDeliveryReconciliationService {
 
     private final WhatsAppDeliveryStatusReader deliveryStatusReader;
     private final JdbcTemplate jdbcTemplate;
+    private final WhatsAppLedgerStatusSync ledgerSync;
 
     @Value("${whatsapp.status.reconcile.enabled:false}")
     private boolean enabled;
@@ -102,6 +106,14 @@ public class WhatsAppDeliveryReconciliationService {
 
     @Value("${whatsapp.status.reconcile.max-pages:40}")
     private int maxPages;
+
+    /**
+     * The most pages read for one status. Each status's page budget is sized from the provider's own
+     * count of it — {@code max-pages} is the floor — so a busy window is read to the end instead of
+     * stopping at a fixed page.
+     */
+    @Value("${whatsapp.status.reconcile.max-pages-cap:400}")
+    private int maxPagesCap;
 
     @Value("${whatsapp.status.reconcile.date-column:inserted_at}")
     private String dateColumn;
@@ -170,6 +182,7 @@ public class WhatsAppDeliveryReconciliationService {
                             + " Fix the whatsapp.template.daily-report-* / whatsapp.template.weekly-report-*"
                             + " properties so each id names one report. Skipping this pass.",
                     templates.conflicts());
+            syncLedger(null, to);
             return;
         }
         Map<Integer, ReportKind> templateKinds = templates.kinds();
@@ -178,6 +191,7 @@ public class WhatsAppDeliveryReconciliationService {
                     + " would be discarded. Set WHATSAPP_STATUS_RECONCILE_TEMPLATE_IDS or the"
                     + " whatsapp.template.daily-report-* / whatsapp.template.weekly-report-* properties."
                     + " Skipping this pass.");
+            syncLedger(null, to);
             return;
         }
 
@@ -214,6 +228,29 @@ public class WhatsAppDeliveryReconciliationService {
         logTotal(from, to, byTenant.size(), total, scan, unmappedContacts,
                 (System.nanoTime() - startNanos) / 1_000_000L);
         reportAccountLevelFailures(scan);
+        syncLedger(scan, to);
+    }
+
+    /**
+     * Brings the delivery ledger up to date: every outbound template message this pass read, not only
+     * the reports, then the passes that catch what a send-time window misses. Runs after the log
+     * summaries so a ledger problem can never cost them.
+     */
+    private void syncLedger(WindowScan scan, Instant now) {
+        if (ledgerSync == null || !ledgerSync.isActive()) {
+            return;
+        }
+        try {
+            if (scan != null) {
+                WhatsAppLedgerStatusSync.SyncStats window = ledgerSync.apply(scan.outbound());
+                log.info("[WhatsAppStatus] ledger window: seen={} applied={} notInLedger={}",
+                        window.seen(), window.applied(), window.notInLedger());
+            }
+            ledgerSync.syncIncremental(now);
+            ledgerSync.sweep();
+        } catch (Exception e) {
+            log.warn("[WhatsAppStatus] ledger sync failed: {}", e.getMessage(), e);
+        }
     }
 
     // ── Window scan ────────────────────────────────────────────────────────────
@@ -238,10 +275,14 @@ public class WhatsAppDeliveryReconciliationService {
      */
     private record WindowScan(List<WhatsAppMessageStatus> matched, int windowScanned, int discardedInbound,
                               int discardedOtherTemplates, int discardedAccountLevel,
-                              Map<String, Integer> accountLevelFailures) {}
+                              Map<String, Integer> accountLevelFailures,
+                              List<WhatsAppMessageStatus> outbound) {}
 
     private WindowScan scanWindow(Instant from, Instant to, Map<Integer, ReportKind> templateKinds) {
-        List<WhatsAppMessageStatus> matched = new ArrayList<>();
+        // Keyed by message id: a message that advanced while the pass ran is read under two statuses,
+        // and the later — more advanced — one is kept.
+        Map<String, WhatsAppMessageStatus> matchedById = new LinkedHashMap<>();
+        List<WhatsAppMessageStatus> outbound = new ArrayList<>();
         Map<String, Integer> accountLevel = new TreeMap<>();
         Set<String> accountLevelCodes = csvToSet(accountLevelErrorCodesCsv);
         int windowScanned = 0;
@@ -250,14 +291,13 @@ public class WhatsAppDeliveryReconciliationService {
         int discardedAccountLevel = 0;
 
         for (String status : STATUSES_TO_CHECK) {
-            int count = deliveryStatusReader.countMessages(from, to, status, dateColumn);
-            if (count == 0) {
-                continue;
-            }
-            List<WhatsAppMessageStatus> page =
-                    deliveryStatusReader.fetchMessages(from, to, status, dateColumn, pageSize, maxPages);
+            List<WhatsAppMessageStatus> page = WhatsAppLedgerStatusSync.fetchAll(deliveryStatusReader, from, to,
+                    status, dateColumn, pageSize, Math.max(maxPages, maxPagesCap));
             windowScanned += page.size();
             for (WhatsAppMessageStatus message : page) {
+                if (message.isOutboundHsm()) {
+                    outbound.add(message);
+                }
                 if (isAccountLevel(message, accountLevelCodes)) {
                     accountLevel.merge(message.failureKey(), 1, Integer::sum);
                     // Counted on the ACCOUNT-LEVEL FAILURE line and nowhere else. Letting it fall through
@@ -272,12 +312,14 @@ public class WhatsAppDeliveryReconciliationService {
                 } else if (message.templateId() == null || !templateKinds.containsKey(message.templateId())) {
                     discardedOtherTemplates++;
                 } else {
-                    matched.add(message);
+                    String key = message.messageId() != null ? message.messageId() : "#" + matchedById.size();
+                    matchedById.remove(key);
+                    matchedById.put(key, message);
                 }
             }
         }
-        return new WindowScan(matched, windowScanned, discardedInbound, discardedOtherTemplates,
-                discardedAccountLevel, accountLevel);
+        return new WindowScan(new ArrayList<>(matchedById.values()), windowScanned, discardedInbound,
+                discardedOtherTemplates, discardedAccountLevel, accountLevel, outbound);
     }
 
     private static boolean isAccountLevel(WhatsAppMessageStatus message, Set<String> accountLevelCodes) {

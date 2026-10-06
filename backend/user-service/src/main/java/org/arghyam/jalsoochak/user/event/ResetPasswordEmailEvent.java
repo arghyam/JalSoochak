@@ -24,4 +24,11 @@ public class ResetPasswordEmailEvent {
     /** State code of {@link #tenantId} (e.g. {@code "MP"}). Optional, see {@link #tenantId}. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String tenantCode;
+
+    /**
+     * Id of the recipient's row in {@code common_schema.tenant_admin_user_master_table}.
+     * Optional and additive — omitted from JSON when null.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long adminUserId;
 }

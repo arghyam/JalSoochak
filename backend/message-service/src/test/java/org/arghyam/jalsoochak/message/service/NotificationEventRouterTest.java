@@ -59,6 +59,16 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.message.ledger.NotificationLedger;
+import java.util.Set;
+import org.arghyam.jalsoochak.message.ledger.NotificationType;
+import org.arghyam.jalsoochak.message.ledger.LedgerRef;
+import org.arghyam.jalsoochak.message.ledger.LedgerOutcome;
+import org.arghyam.jalsoochak.message.ledger.LedgerEntry;
+import org.arghyam.jalsoochak.message.ledger.LedgerChannel;
+import org.arghyam.jalsoochak.message.ledger.DispatchStatus;
+import org.arghyam.jalsoochak.message.channel.provider.SmsSendResult;
+import org.arghyam.jalsoochak.message.channel.provider.ProviderAcceptance;
 
 /**
  * Unit tests for {@link NotificationEventRouter}.
@@ -120,11 +130,28 @@ class NotificationEventRouterTest {
     @Mock
     private TenantRefResolver tenantRefResolver;
 
+    /** The delivery ledger. Never throws by contract, so a mock that records nothing stands in for it. */
+    @Mock
+    private NotificationLedger ledger;
+
     @InjectMocks
     private NotificationEventRouter router;
 
     @TempDir
     Path tempDir;
+
+    /** A send the provider accepted, with a message id for the delivery ledger to follow up. */
+    private static final ReportSendOutcome ACCEPTED_SEND =
+            ReportSendOutcome.accepted(new WhatsAppSendResult("msg-1", "tpl-1", null));
+
+    /** A send the provider rejected at the send stage. */
+    private static final ReportSendOutcome FAILED_SEND =
+            ReportSendOutcome.failed(WhatsAppSendStage.SEND, "error", "rejected");
+
+    private static final SmsSendResult SMS_ACCEPTED =
+            SmsSendResult.accepted(ProviderAcceptance.of("sms-uuid-1", "queued"));
+
+    private static final SmsSendResult SMS_REJECTED = SmsSendResult.rejected("400", "rejected");
 
     /** Bytes of the stand-in PDF the stubbed PDF services leave on disk. */
     private static final byte[] PDF_BYTES = "%PDF-1.4 test".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
@@ -251,7 +278,7 @@ class NotificationEventRouterTest {
     void route_generatesAndSendsEscalation_usingStoredContactId_whenPresent() throws Exception {
         when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenAnswer(inv -> escalationPdf("report.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/report.pdf"));
-        when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
+        when(whatsAppChannel.sendDocumentForOutcome(anyLong(), anyString())).thenReturn(ACCEPTED_SEND);
 
         router.route("""
                 {"eventType":"ESCALATION","officerPhone":"919876500000","officerName":"DO Singh",
@@ -269,7 +296,7 @@ class NotificationEventRouterTest {
         verify(objectStorageService).upload(eq("escalation-reports"), eq("report.pdf"), any(InputStream.class),
                 eq((long) PDF_BYTES.length), eq("application/pdf"));
         verify(objectStorageService, never()).ensureBucket(anyString());
-        verify(whatsAppChannel).sendDocument(eq(77L), eq("https://storage.example.org/report.pdf"));
+        verify(whatsAppChannel).sendDocumentForOutcome(eq(77L), eq("https://storage.example.org/report.pdf"));
         verify(whatsAppSender, never()).optIn(anyString());
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
@@ -278,7 +305,7 @@ class NotificationEventRouterTest {
     void route_passesEmptyOfficerUserType_toGeneratePdf_whenFieldAbsentInPayload() throws Exception {
         when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenAnswer(inv -> escalationPdf("report.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/report.pdf"));
-        when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
+        when(whatsAppChannel.sendDocumentForOutcome(anyLong(), anyString())).thenReturn(ACCEPTED_SEND);
 
         router.route("""
                 {"eventType":"ESCALATION","officerPhone":"919876500000","officerName":"DO Singh",
@@ -297,7 +324,7 @@ class NotificationEventRouterTest {
     void route_passesEmptyCorrelationId_toGeneratePdf_whenFieldAbsentInPayload() throws Exception {
         when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq(""))).thenAnswer(inv -> escalationPdf("report.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/report.pdf"));
-        when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
+        when(whatsAppChannel.sendDocumentForOutcome(anyLong(), anyString())).thenReturn(ACCEPTED_SEND);
 
         router.route("""
                 {"eventType":"ESCALATION","officerPhone":"919876500000","officerName":"DO Singh",
@@ -317,7 +344,7 @@ class NotificationEventRouterTest {
         when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenAnswer(inv -> escalationPdf("r.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/r.pdf"));
         when(whatsAppSender.optIn("919876500000")).thenReturn(88L);
-        when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
+        when(whatsAppChannel.sendDocumentForOutcome(anyLong(), anyString())).thenReturn(ACCEPTED_SEND);
 
         router.route("""
                 {"eventType":"ESCALATION","officerPhone":"919876500000","officerName":"DO Singh",
@@ -329,7 +356,7 @@ class NotificationEventRouterTest {
                 """);
 
         verify(whatsAppSender).optIn("919876500000");
-        verify(whatsAppChannel).sendDocument(eq(88L), anyString());
+        verify(whatsAppChannel).sendDocumentForOutcome(eq(88L), anyString());
         verify(kafkaProducer).publishJson(eq("common-topic"), argThat(event -> {
             String s = event.toString();
             return s.contains("WHATSAPP_CONTACT_REGISTERED") && s.contains("88");
@@ -363,7 +390,7 @@ class NotificationEventRouterTest {
         when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq("corr-case"))).thenAnswer(inv -> escalationPdf("r.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/r.pdf"));
         when(whatsAppSender.optIn(anyString())).thenReturn(11L);
-        when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
+        when(whatsAppChannel.sendDocumentForOutcome(anyLong(), anyString())).thenReturn(ACCEPTED_SEND);
 
         router.route("""
                 {"eventType":"escalation","officerPhone":"919876500002","officerName":"DO",
@@ -372,7 +399,7 @@ class NotificationEventRouterTest {
                                "soName":"SO","consecutiveDaysMissed":4,"lastRecordedBfmDate":"2024-01-01"}]}
                 """);
 
-        verify(whatsAppChannel).sendDocument(anyLong(), anyString());
+        verify(whatsAppChannel).sendDocumentForOutcome(anyLong(), anyString());
     }
 
     // ───────────────────────────── error handling ──────────────────────────────
@@ -580,9 +607,9 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://app.jalsoochak.in/activate?token=abc","expiryHours":24}
                 """);
 
-        verify(accountEmailService).sendInviteEmail(TenantRef.NONE,
-                "op@tenant.in", "Mohan", "NEW_ROLE",
-                "https://app.jalsoochak.in/activate?token=abc", 24);
+        verify(accountEmailService).sendInviteEmail(eq(TenantRef.NONE),
+                eq("op@tenant.in"), eq("Mohan"), eq("NEW_ROLE"),
+                eq("https://app.jalsoochak.in/activate?token=abc"), eq(24), any());
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
 
@@ -593,7 +620,7 @@ class NotificationEventRouterTest {
                  "role":"FIELD_OFFICER","inviteLink":"https://link","expiryHours":12}
                 """);
 
-        verify(accountEmailService).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt(), any());
     }
 
     @Test
@@ -627,7 +654,7 @@ class NotificationEventRouterTest {
     @Test
     void route_routesToDlt_whenInviteEmailSmtpFails() {
         doThrow(new RuntimeException("SMTP down"))
-                .when(accountEmailService).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
+                .when(accountEmailService).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt(), any());
 
         router.route("""
                 {"eventType":"SEND_INVITE_EMAIL","to":"op@tenant.in","name":"Dev",
@@ -649,9 +676,9 @@ class NotificationEventRouterTest {
                  "name":"Sunita","inviteLink":"https://app.jalsoochak.in/activate?token=re","expiryHours":72}
                 """);
 
-        verify(accountEmailService).sendReinviteEmail(TenantRef.NONE,
-                "op@tenant.in", "Sunita",
-                "https://app.jalsoochak.in/activate?token=re", 72);
+        verify(accountEmailService).sendReinviteEmail(eq(TenantRef.NONE),
+                eq("op@tenant.in"), eq("Sunita"),
+                eq("https://app.jalsoochak.in/activate?token=re"), eq(72), any());
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
 
@@ -686,7 +713,7 @@ class NotificationEventRouterTest {
     @Test
     void route_routesToDlt_whenReinviteEmailSmtpFails() {
         doThrow(new RuntimeException("SMTP down"))
-                .when(accountEmailService).sendReinviteEmail(any(), anyString(), anyString(), anyString(), anyInt());
+                .when(accountEmailService).sendReinviteEmail(any(), anyString(), anyString(), anyString(), anyInt(), any());
 
         router.route("""
                 {"eventType":"SEND_REINVITE_EMAIL","to":"op@tenant.in","name":"Sunita",
@@ -708,8 +735,8 @@ class NotificationEventRouterTest {
                  "resetLink":"https://app.jalsoochak.in/reset?token=r1","expiryMinutes":30}
                 """);
 
-        verify(accountEmailService).sendPasswordResetEmail(TenantRef.NONE,
-                "user@example.com", "https://app.jalsoochak.in/reset?token=r1", 30);
+        verify(accountEmailService).sendPasswordResetEmail(eq(TenantRef.NONE),
+                eq("user@example.com"), eq("https://app.jalsoochak.in/reset?token=r1"), eq(30), any());
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
 
@@ -720,7 +747,7 @@ class NotificationEventRouterTest {
                  "resetLink":"https://link","expiryMinutes":15}
                 """);
 
-        verify(accountEmailService).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
+        verify(accountEmailService).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt(), any());
     }
 
     @Test
@@ -753,7 +780,7 @@ class NotificationEventRouterTest {
     @Test
     void route_routesToDlt_whenPasswordResetEmailSmtpFails() {
         doThrow(new RuntimeException("SMTP down"))
-                .when(accountEmailService).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
+                .when(accountEmailService).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt(), any());
 
         router.route("""
                 {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"user@example.com",
@@ -771,7 +798,7 @@ class NotificationEventRouterTest {
         // SMTP fails triggering DLT publish, but DLT publish itself also throws.
         // The handler must swallow the DLT failure and complete normally (no rethrow → no Kafka retry).
         doThrow(new RuntimeException("SMTP down"))
-                .when(accountEmailService).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
+                .when(accountEmailService).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt(), any());
         doThrow(new RuntimeException("Kafka unavailable"))
                 .when(kafkaProducer).publishJson(anyString(), any());
 
@@ -788,21 +815,21 @@ class NotificationEventRouterTest {
 
     @Test
     void route_sendsLoginOtp_usingStoredContactId() {
-        when(whatsAppChannel.sendLoginOtp(42L, "654321")).thenReturn(true);
+        when(whatsAppChannel.sendLoginOtpForOutcome(42L, "654321")).thenReturn(ACCEPTED_SEND);
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","officerName":"SO Singh",
                  "OTP":"654321","deliveryChannel":"WHATSAPP","whatsapp_contact_id":42}
                 """);
 
-        verify(whatsAppChannel).sendLoginOtp(42L, "654321");
+        verify(whatsAppChannel).sendLoginOtpForOutcome(42L, "654321");
         verify(whatsAppSender, never()).optIn(anyString());
     }
 
     @Test
     void route_sendsLoginOtp_usingOptIn_whenContactIdBlank() {
         when(whatsAppSender.optIn("919876500010")).thenReturn(77L);
-        when(whatsAppChannel.sendLoginOtp(77L, "654321")).thenReturn(true);
+        when(whatsAppChannel.sendLoginOtpForOutcome(77L, "654321")).thenReturn(ACCEPTED_SEND);
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","officerName":"SO Singh",
@@ -810,13 +837,13 @@ class NotificationEventRouterTest {
                 """);
 
         verify(whatsAppSender).optIn("919876500010");
-        verify(whatsAppChannel).sendLoginOtp(77L, "654321");
+        verify(whatsAppChannel).sendLoginOtpForOutcome(77L, "654321");
     }
 
     @Test
     void route_sendsLoginOtp_usingOptIn_whenContactIdAbsent() {
         when(whatsAppSender.optIn("91XXXXXXXXX1")).thenReturn(77L);
-        when(whatsAppChannel.sendLoginOtp(77L, "654321")).thenReturn(true);
+        when(whatsAppChannel.sendLoginOtpForOutcome(77L, "654321")).thenReturn(ACCEPTED_SEND);
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","OTP":"654321","deliveryChannel":"WHATSAPP",
@@ -824,7 +851,7 @@ class NotificationEventRouterTest {
                 """);
 
         verify(whatsAppSender).optIn("91XXXXXXXXX1");
-        verify(whatsAppChannel).sendLoginOtp(77L, "654321");
+        verify(whatsAppChannel).sendLoginOtpForOutcome(77L, "654321");
     }
 
     @Test
@@ -859,8 +886,8 @@ class NotificationEventRouterTest {
     @Test
     void route_rethrowsException_whenLoginOtpDeliveryFails() {
         when(whatsAppSender.optIn(anyString())).thenReturn(55L);
-        when(whatsAppChannel.sendLoginOtp(anyLong(), anyString()))
-                .thenReturn(false);
+        when(whatsAppChannel.sendLoginOtpForOutcome(anyLong(), anyString()))
+                .thenReturn(FAILED_SEND);
 
         assertThatThrownBy(() -> router.route("""
                 {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"222222",
@@ -1093,10 +1120,10 @@ class NotificationEventRouterTest {
     @Test
     void route_sendsLoginOtp_viaSms_whenDeliveryChannelIsSms() {
         final boolean[] subscribed = {false};
-        when(smsSender.sendOtp("919876500020", "123456", 5))
+        when(smsSender.sendOtpForResult(eq("919876500020"), eq("123456"), eq(5), any()))
                 .thenReturn(Mono.defer(() -> {
                     subscribed[0] = true;
-                    return Mono.just(true);
+                    return Mono.just(SMS_ACCEPTED);
                 }));
 
         router.route("""
@@ -1104,7 +1131,7 @@ class NotificationEventRouterTest {
                  "deliveryChannel":"SMS","officerPhoneNumber":"919876500020","expiryMinutes":5}
                 """);
 
-        verify(smsSender).sendOtp("919876500020", "123456", 5);
+        verify(smsSender).sendOtpForResult(eq("919876500020"), eq("123456"), eq(5), any());
         assertThat(subscribed[0]).as("sendOtp Mono should be subscribed").isTrue();
         verifyNoInteractions(whatsAppChannel);
     }
@@ -1112,10 +1139,10 @@ class NotificationEventRouterTest {
     @Test
     void route_sendsLoginOtp_viaSms_defaultsExpiryToFive_whenExpiryMinutesIsZero() {
         final boolean[] subscribed = {false};
-        when(smsSender.sendOtp("919876500021", "654321", 5))
+        when(smsSender.sendOtpForResult(eq("919876500021"), eq("654321"), eq(5), any()))
                 .thenReturn(Mono.defer(() -> {
                     subscribed[0] = true;
-                    return Mono.just(true);
+                    return Mono.just(SMS_ACCEPTED);
                 }));
 
         router.route("""
@@ -1123,17 +1150,17 @@ class NotificationEventRouterTest {
                  "deliveryChannel":"SMS","officerPhoneNumber":"919876500021","expiryMinutes":0}
                 """);
 
-        verify(smsSender).sendOtp("919876500021", "654321", 5);
+        verify(smsSender).sendOtpForResult(eq("919876500021"), eq("654321"), eq(5), any());
         assertThat(subscribed[0]).as("sendOtp Mono should be subscribed").isTrue();
     }
 
     @Test
     void route_sendsLoginOtp_viaSms_defaultsExpiryToFive_whenExpiryMinutesIsNegative() {
         final boolean[] subscribed = {false};
-        when(smsSender.sendOtp("919876500022", "111222", 5))
+        when(smsSender.sendOtpForResult(eq("919876500022"), eq("111222"), eq(5), any()))
                 .thenReturn(Mono.defer(() -> {
                     subscribed[0] = true;
-                    return Mono.just(true);
+                    return Mono.just(SMS_ACCEPTED);
                 }));
 
         router.route("""
@@ -1141,7 +1168,7 @@ class NotificationEventRouterTest {
                  "deliveryChannel":"SMS","officerPhoneNumber":"919876500022","expiryMinutes":-1}
                 """);
 
-        verify(smsSender).sendOtp("919876500022", "111222", 5);
+        verify(smsSender).sendOtpForResult(eq("919876500022"), eq("111222"), eq(5), any());
         assertThat(subscribed[0]).as("sendOtp Mono should be subscribed").isTrue();
     }
 
@@ -1186,9 +1213,9 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://app.jalsoochak.in/activate?token=sa1","expiryHours":24}
                 """);
 
-        verify(accountEmailService).sendStateAdminInviteEmail(TenantRef.NONE,
-                "sa@mp.gov.in", "Priya Sharma", "Madhya Pradesh",
-                "https://app.jalsoochak.in/activate?token=sa1", 24);
+        verify(accountEmailService).sendStateAdminInviteEmail(eq(TenantRef.NONE),
+                eq("sa@mp.gov.in"), eq("Priya Sharma"), eq("Madhya Pradesh"),
+                eq("https://app.jalsoochak.in/activate?token=sa1"), eq(24), any());
         verify(accountEmailService, never()).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
@@ -1227,8 +1254,8 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://link","expiryHours":24}
                 """);
 
-        verify(accountEmailService).sendInviteEmail(TenantRef.NONE,
-                "sa@mp.gov.in", "Priya Sharma", "STATE_ADMIN", "https://link", 24);
+        verify(accountEmailService).sendInviteEmail(eq(TenantRef.NONE),
+                eq("sa@mp.gov.in"), eq("Priya Sharma"), eq("STATE_ADMIN"), eq("https://link"), eq(24), any());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
     }
 
@@ -2018,7 +2045,7 @@ class NotificationEventRouterTest {
 
         verify(tenantRefResolver).resolve(null, "MP");
         verify(accountEmailService).sendInviteEmail(eq(new TenantRef(1, "MP")),
-                anyString(), anyString(), anyString(), anyString(), anyInt());
+                anyString(), anyString(), anyString(), anyString(), anyInt(), any());
     }
 
     @Test
@@ -2030,7 +2057,7 @@ class NotificationEventRouterTest {
 
         verify(tenantRefResolver).resolve(null, null);
         verify(accountEmailService).sendInviteEmail(eq(TenantRef.NONE),
-                anyString(), anyString(), anyString(), anyString(), anyInt());
+                anyString(), anyString(), anyString(), anyString(), anyInt(), any());
     }
 
     @Test
@@ -2044,7 +2071,7 @@ class NotificationEventRouterTest {
 
         verify(tenantRefResolver).resolve(null, "MP");
         verify(accountEmailService).sendReinviteEmail(eq(new TenantRef(1, "MP")),
-                anyString(), anyString(), anyString(), anyInt());
+                anyString(), anyString(), anyString(), anyInt(), any());
     }
 
     @Test
@@ -2056,7 +2083,7 @@ class NotificationEventRouterTest {
 
         verify(tenantRefResolver).resolve(null, null);
         verify(accountEmailService).sendReinviteEmail(eq(TenantRef.NONE),
-                anyString(), anyString(), anyString(), anyInt());
+                anyString(), anyString(), anyString(), anyInt(), any());
     }
 
     @Test
@@ -2070,7 +2097,7 @@ class NotificationEventRouterTest {
 
         verify(tenantRefResolver).resolve(1, "MP");
         verify(accountEmailService).sendPasswordResetEmail(eq(new TenantRef(1, "MP")),
-                anyString(), anyString(), anyInt());
+                anyString(), anyString(), anyInt(), any());
     }
 
     @Test
@@ -2082,7 +2109,7 @@ class NotificationEventRouterTest {
 
         verify(tenantRefResolver).resolve(null, null);
         verify(accountEmailService).sendPasswordResetEmail(eq(TenantRef.NONE),
-                anyString(), anyString(), anyInt());
+                anyString(), anyString(), anyInt(), any());
     }
 
     @Test
@@ -2093,7 +2120,7 @@ class NotificationEventRouterTest {
         TenantRef tenant = new TenantRef(7, "TR");
         when(tenantRefResolver.resolve(7, "TR")).thenReturn(tenant);
         when(channelProviders.smsFor(tenant)).thenReturn(tenantSender);
-        when(tenantSender.sendOtp("919876500033", "192837", 5)).thenReturn(Mono.just(true));
+        when(tenantSender.sendOtpForResult(eq("919876500033"), eq("192837"), eq(5), any())).thenReturn(Mono.just(SMS_ACCEPTED));
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","OTP":"192837","deliveryChannel":"SMS",
@@ -2101,13 +2128,13 @@ class NotificationEventRouterTest {
                 """);
 
         verify(channelProviders).smsFor(tenant);
-        verify(tenantSender).sendOtp("919876500033", "192837", 5);
+        verify(tenantSender).sendOtpForResult(eq("919876500033"), eq("192837"), eq(5), any());
         verifyNoInteractions(smsSender);
     }
 
     @Test
     void route_loginOtpViaSms_resolvesTheSenderPerEvent_soSettingsChangesNeedNoRestart() {
-        when(smsSender.sendOtp(anyString(), anyString(), anyInt())).thenReturn(Mono.just(true));
+        when(smsSender.sendOtpForResult(anyString(), anyString(), anyInt(), any())).thenReturn(Mono.just(SMS_ACCEPTED));
 
         String event = """
                 {"eventType":"SEND_LOGIN_OTP","OTP":"111111","deliveryChannel":"SMS",
@@ -2121,7 +2148,7 @@ class NotificationEventRouterTest {
 
     @Test
     void route_normalisesLoginOtpTenant_fromBothHalves_onTheSmsBranch() {
-        when(smsSender.sendOtp("919876500030", "123456", 5)).thenReturn(Mono.just(true));
+        when(smsSender.sendOtpForResult(eq("919876500030"), eq("123456"), eq(5), any())).thenReturn(Mono.just(SMS_ACCEPTED));
         when(tenantRefResolver.resolve(1, "MP")).thenReturn(new TenantRef(1, "MP"));
 
         router.route("""
@@ -2130,12 +2157,12 @@ class NotificationEventRouterTest {
                 """);
 
         verify(tenantRefResolver).resolve(1, "MP");
-        verify(smsSender).sendOtp("919876500030", "123456", 5);
+        verify(smsSender).sendOtpForResult(eq("919876500030"), eq("123456"), eq(5), any());
     }
 
     @Test
     void route_normalisesLoginOtpTenant_toNone_whenEventCarriesNoTenant() {
-        when(smsSender.sendOtp("919876500031", "654321", 5)).thenReturn(Mono.just(true));
+        when(smsSender.sendOtpForResult(eq("919876500031"), eq("654321"), eq(5), any())).thenReturn(Mono.just(SMS_ACCEPTED));
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","OTP":"654321","deliveryChannel":"SMS",
@@ -2143,12 +2170,12 @@ class NotificationEventRouterTest {
                 """);
 
         verify(tenantRefResolver).resolve(null, null);
-        verify(smsSender).sendOtp("919876500031", "654321", 5);
+        verify(smsSender).sendOtpForResult(eq("919876500031"), eq("654321"), eq(5), any());
     }
 
     @Test
     void route_readsJsonNullTenantFieldsAsAbsent_neverAsTheTextNull() {
-        when(smsSender.sendOtp("919876500032", "777888", 5)).thenReturn(Mono.just(true));
+        when(smsSender.sendOtpForResult(eq("919876500032"), eq("777888"), eq(5), any())).thenReturn(Mono.just(SMS_ACCEPTED));
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","OTP":"777888","deliveryChannel":"SMS",
@@ -2195,5 +2222,176 @@ class NotificationEventRouterTest {
     /** Writes a stand-in water-report PDF and returns its path, as the report PDF services do. */
     private Path reportPdf(String filename) throws IOException {
         return Files.write(tempDir.resolve(filename), PDF_BYTES);
+    }
+
+    // ── delivery ledger ──────────────────────────────────────────────────────────────────────────
+
+    private static final LedgerRef LEDGER_REF =
+            new LedgerRef("tenant_mp", "7d0f6c0a-1111-2222-3333-444455556666", 1, true, System.nanoTime());
+
+    /**
+     * Every event the router handles either sends something — and must record it in the ledger — or is
+     * listed here as sending nothing. A new {@code case} in {@code route()} fails this test until it is
+     * classified, so a send path cannot be added without its ledger record by accident.
+     */
+    private static final Set<String> RECORDED_EVENTS = Set.of(
+            "NUDGE", "ESCALATION", "DAILY_REPORT_KPIS", "WEEKLY_REPORT_KPIS", "SEND_WELCOME_MESSAGE",
+            "SEND_WELCOME_MESSAGE_ADMIN", "SEND_LOGIN_OTP", "SEND_INVITE_EMAIL", "SEND_REINVITE_EMAIL",
+            "SEND_PASSWORD_RESET_EMAIL");
+    private static final Set<String> NON_DELIVERY_EVENTS = Set.of("STAFF_SYNC_COMPLETED", "UPDATE_USER_LANGUAGE");
+
+    @Test
+    void ledger_everyRoutedEventIsEitherRecordedOrDeclaredNonDelivery() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/org/arghyam/jalsoochak/message/service/NotificationEventRouter.java"));
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("case \"([A-Z_]+)\" ->").matcher(source);
+        Set<String> routed = new java.util.TreeSet<>();
+        while (m.find()) {
+            routed.add(m.group(1));
+        }
+        Set<String> classified = new java.util.TreeSet<>(RECORDED_EVENTS);
+        classified.addAll(NON_DELIVERY_EVENTS);
+
+        assertThat(routed).isEqualTo(classified);
+    }
+
+    @Test
+    void ledger_aDeliveredDailyReportIsOpenedBeforeTheSend_andClosedWithTheProvidersMessageId() throws Exception {
+        when(ledger.open(any())).thenReturn(LEDGER_REF);
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any())).thenReturn(acceptedSend());
+
+        router.route(DAILY_REPORT_JSON);
+
+        ArgumentCaptor<LedgerEntry> entry = ArgumentCaptor.forClass(LedgerEntry.class);
+        ArgumentCaptor<LedgerOutcome> outcome = ArgumentCaptor.forClass(LedgerOutcome.class);
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(ledger, whatsAppChannel);
+        order.verify(ledger).open(entry.capture());
+        order.verify(whatsAppChannel).sendDailyReport(anyLong(), anyString(), anyString(), any(), any());
+        order.verify(ledger).close(eq(LEDGER_REF), outcome.capture());
+
+        assertThat(entry.getValue().type()).isEqualTo(NotificationType.DAILY_REPORT);
+        assertThat(entry.getValue().channel()).isEqualTo(LedgerChannel.WHATSAPP);
+        assertThat(entry.getValue().tenantSchema()).isEqualTo("tenant_mp");
+        assertThat(entry.getValue().tenantId()).isEqualTo(1);
+        assertThat(entry.getValue().userId()).isEqualTo(500L);
+        assertThat(entry.getValue().userType()).isEqualTo("SECTION_OFFICER");
+        assertThat(entry.getValue().contactRef()).isEqualTo("12345");
+        assertThat(entry.getValue().subjectDate()).isEqualTo(LocalDate.of(2026, 7, 7));
+        assertThat(outcome.getValue().status()).isEqualTo(DispatchStatus.ACCEPTED);
+        assertThat(outcome.getValue().acceptance().providerMessageId()).isEqualTo("241952654");
+        assertThat(outcome.getValue().templateRef()).isEqualTo("880557");
+    }
+
+    @Test
+    void ledger_aDailyReportWithNoContactIsRecordedAsSkipped() {
+        stubOfficerContact(null, null, null);
+        when(piiEncryptionService.safeDecrypt(any())).thenReturn(null);
+
+        router.route(DAILY_REPORT_JSON);
+
+        ArgumentCaptor<LedgerOutcome> outcome = ArgumentCaptor.forClass(LedgerOutcome.class);
+        verify(ledger).recordOutcome(argThat(e -> e.type() == NotificationType.DAILY_REPORT && e.userId() == 500L),
+                outcome.capture());
+        assertThat(outcome.getValue().status()).isEqualTo(DispatchStatus.SKIPPED_NO_CONTACT);
+        verify(ledger, never()).open(any());
+    }
+
+    @Test
+    void ledger_aReportThatFailsToBuildIsClosedAsAGenerationFailure() throws Exception {
+        when(ledger.open(any())).thenReturn(LEDGER_REF);
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), anyLong(), anyString(), anyString(), anyList(), anyList()))
+                .thenThrow(new IllegalStateException("font missing"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> router.route(DAILY_REPORT_JSON))
+                .isInstanceOf(RuntimeException.class);
+
+        verify(ledger).close(eq(LEDGER_REF), argThat(o -> o.status() == DispatchStatus.FAILED_GENERATION));
+    }
+
+    @Test
+    void ledger_aRejectedReportIsClosedWithTheStageAndTheProvidersKey() throws Exception {
+        when(ledger.open(any())).thenReturn(LEDGER_REF);
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), anyLong(), anyString(), anyString(), anyList(), anyList()))
+                .thenAnswer(inv -> reportPdf("daily_report_y.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/y.pdf"));
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(ReportSendOutcome.failed(WhatsAppSendStage.TIMEOUT, null, "timed out"));
+
+        router.route(DAILY_REPORT_JSON);
+
+        verify(ledger).close(eq(LEDGER_REF), argThat(o -> o.status() == DispatchStatus.DELIVERY_UNCONFIRMED
+                && "TIMEOUT".equals(o.failureStage())));
+    }
+
+    @Test
+    void ledger_anSmsOtpIsClosedWithTheProvidersMessageId_offTheEventLoop() {
+        when(ledger.open(any())).thenReturn(LEDGER_REF);
+        when(ledger.schemaFor(any())).thenReturn("tenant_mp");
+        when(smsSender.providerId()).thenReturn("sms-provider");
+        when(smsSender.sendOtpForResult(anyString(), anyString(), anyInt(), any())).thenReturn(Mono.just(SMS_ACCEPTED));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456","deliveryChannel":"SMS",
+                 "officerPhoneNumber":"919876500040","tenantId":1,"tenantCode":"MP","userId":44}
+                """);
+
+        ArgumentCaptor<LedgerEntry> entry = ArgumentCaptor.forClass(LedgerEntry.class);
+        verify(ledger).open(entry.capture());
+        assertThat(entry.getValue().type()).isEqualTo(NotificationType.LOGIN_OTP);
+        assertThat(entry.getValue().channel()).isEqualTo(LedgerChannel.SMS);
+        assertThat(entry.getValue().provider()).isEqualTo("sms-provider");
+        assertThat(entry.getValue().userId()).isEqualTo(44L);
+        assertThat(entry.getValue().metadata()).doesNotContainValue("123456");
+        verify(smsSender).sendOtpForResult("919876500040", "123456", 5, LEDGER_REF.trackingRef());
+        verify(ledger, org.mockito.Mockito.timeout(2000)).close(eq(LEDGER_REF),
+                argThat(o -> o.status() == DispatchStatus.ACCEPTED
+                        && "sms-uuid-1".equals(o.acceptance().providerMessageId())));
+    }
+
+    @Test
+    void ledger_anInviteCarriesItsTypeAndAdminUserToTheEmailService() {
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","to":"op@tenant.in","name":"Mohan","role":"STATE_ADMIN",
+                 "inviteLink":"https://link","expiryHours":24,"tenantId":1,"tenantCode":"MP","adminUserId":9}
+                """);
+
+        verify(accountEmailService).sendInviteEmail(eq(new TenantRef(1, "MP")), anyString(), anyString(),
+                anyString(), anyString(), anyInt(),
+                argThat(e -> e.type() == NotificationType.INVITE && e.adminUserId() == 9L
+                        && "STATE_ADMIN".equals(e.userType())));
+    }
+
+    @Test
+    void ledger_aNudgeWithNoWayToReachTheOperatorIsRecordedWithoutTouchingTheProvider() {
+        router.route("""
+                {"eventType":"NUDGE","recipientPhone":"","operatorName":"Ramesh","tenantId":1,
+                 "userId":10,"tenantSchema":"tenant_mp","nudgeDate":"2026-10-05"}
+                """);
+
+        verify(ledger).recordOutcome(argThat(e -> e.type() == NotificationType.NUDGE
+                        && LocalDate.of(2026, 10, 5).equals(e.subjectDate())),
+                argThat(o -> o.status() == DispatchStatus.SKIPPED_NO_CONTACT));
+        verifyNoInteractions(whatsAppSender, whatsAppChannel);
+    }
+
+    @Test
+    void ledger_aLanguageUpdateSendsNothingAndRecordsNothing() {
+        stubUserLookup("mp", "919876543210", List.of(42L));
+
+        router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp","whatsappLanguageId":3,
+                 "pumpOperatorPhones":["919876543210"]}
+                """);
+
+        verifyNoInteractions(ledger);
     }
 }

@@ -4,6 +4,7 @@ import org.arghyam.jalsoochak.message.dto.WhatsAppMessageStatus;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Port for reading back what the WhatsApp Business Solution Provider (BSP) learned about the messages
@@ -44,4 +45,25 @@ public interface WhatsAppDeliveryStatusReader {
      */
     List<WhatsAppMessageStatus> fetchMessages(Instant from, Instant to, String bspStatus,
                                               String dateColumn, int pageSize, int maxPages);
+
+    /**
+     * The most messages one page can hold, whatever page size is asked for. A provider that silently
+     * caps its page size returns short pages that look like the last one; a caller sizing
+     * {@code maxPages} from a count needs the real figure.
+     */
+    default int maxPageSize() {
+        return Integer.MAX_VALUE;
+    }
+
+    /**
+     * One message by the provider's id, for a message whose status the window scans have not settled.
+     *
+     * @return the message, or empty when the provider has no such message or cannot be asked
+     */
+    default Optional<WhatsAppMessageStatus> fetchMessage(String messageId) {
+        return Optional.empty();
+    }
+
+    /** The provider this reader asks — the same identifier its sender records in the delivery ledger. */
+    String providerId();
 }

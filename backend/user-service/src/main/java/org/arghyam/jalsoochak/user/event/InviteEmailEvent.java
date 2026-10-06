@@ -26,4 +26,15 @@ public class InviteEmailEvent {
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String tenantCode;
+
+    /** Tenant id matching {@link #tenantCode}. Null for super users (tenant 0). Optional, see {@link #tenantCode}. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer tenantId;
+
+    /**
+     * Id of the invitee's row in {@code common_schema.tenant_admin_user_master_table}, when one
+     * exists at send time. Optional and additive — omitted from JSON when null.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long adminUserId;
 }

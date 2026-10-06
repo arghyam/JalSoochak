@@ -410,6 +410,7 @@ public class AuthServiceImpl implements AuthService {
                 .expiryMinutes(passwordResetProperties.expiryMinutes())
                 .tenantId(tenantId)
                 .tenantCode(tenantCode)
+                .adminUserId(userOpt.get().id())
                 .build());
     }
 

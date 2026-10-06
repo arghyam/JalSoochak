@@ -528,7 +528,13 @@ class TenantChannelProvidersTest {
             private final CountDownLatch closed = new CountDownLatch(1);
 
             @Override
-            public void send(org.arghyam.jalsoochak.message.dto.MailRequest request) {
+            public ProviderAcceptance send(org.arghyam.jalsoochak.message.dto.MailRequest request) {
+                return ProviderAcceptance.untracked(null);
+            }
+
+            @Override
+            public String providerId() {
+                return "closeable";
             }
 
             @Override

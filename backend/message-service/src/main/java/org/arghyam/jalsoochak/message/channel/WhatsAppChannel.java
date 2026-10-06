@@ -164,14 +164,22 @@ public class WhatsAppChannel implements NotificationChannel {
      * @return {@code true} if the message was accepted by the WhatsApp provider
      */
     public boolean sendLoginOtp(long contactId, String otp) {
+        return sendLoginOtpForOutcome(contactId, otp).accepted();
+    }
+
+    /**
+     * As {@link #sendLoginOtp}, keeping what the provider said: its message id on acceptance, the
+     * {@link WhatsAppSendStage} on a failure. Never throws.
+     */
+    public ReportSendOutcome sendLoginOtpForOutcome(long contactId, String otp) {
         try {
-            whatsAppSender.sendLoginOtpHsm(contactId, otp);
+            WhatsAppSendResult result = whatsAppSender.sendLoginOtpHsm(contactId, otp);
             log.info("[WHATSAPP] Login OTP HSM sent");
             log.debug("[WHATSAPP] Login OTP HSM sent to contactId={}", contactId);
-            return true;
+            return ReportSendOutcome.accepted(result);
         } catch (Exception ex) {
             log.error("[WHATSAPP] Failed login OTP delivery: {}", ex.getMessage(), ex);
-            return false;
+            return failedOutcome(ex);
         }
     }
 
@@ -184,15 +192,25 @@ public class WhatsAppChannel implements NotificationChannel {
      * @return {@code true} if the message was accepted by the WhatsApp provider
      */
     public boolean sendDocument(long contactId, String documentUrl) {
+        return sendDocumentForOutcome(contactId, documentUrl).accepted();
+    }
+
+    /** As {@link #sendDocument}, keeping what the provider said. Never throws. */
+    public ReportSendOutcome sendDocumentForOutcome(long contactId, String documentUrl) {
         try {
-            whatsAppSender.sendEscalationHsm(contactId, documentUrl);
+            WhatsAppSendResult result = whatsAppSender.sendEscalationHsm(contactId, documentUrl);
             log.info("[WHATSAPP] Escalation HSM sent");
             log.debug("[WHATSAPP] Escalation HSM sent to contactId={}", contactId);
-            return true;
+            return ReportSendOutcome.accepted(result);
         } catch (Exception ex) {
             log.error("[WHATSAPP] Failed escalation delivery: {}", ex.getMessage(), ex);
-            return false;
+            return failedOutcome(ex);
         }
+    }
+
+    private static ReportSendOutcome failedOutcome(Exception ex) {
+        String errorKey = (ex instanceof WhatsAppSendException wse) ? wse.getErrorKey() : null;
+        return ReportSendOutcome.failed(stageOf(ex), errorKey, ex.getMessage());
     }
 
     /**
