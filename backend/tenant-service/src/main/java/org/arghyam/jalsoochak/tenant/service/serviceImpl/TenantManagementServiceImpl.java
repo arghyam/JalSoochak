@@ -26,7 +26,9 @@ import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.DailyReportTimingConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ElmFormulaConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.EscalationRulesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageConfigDTO;
@@ -35,6 +37,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.LocationConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
 import org.arghyam.jalsoochak.tenant.dto.internal.ManualReadingMaxValueConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.NudgeTimingConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
@@ -370,12 +373,33 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 }
             }
 
+            // Schedule keys: enforced validation for JsonNode-bound configs (bean validation does not run
+            // on treeToValue). Checked before the upsert: an out-of-range value that reached the DB would
+            // be accepted with a 200, then silently run on the default schedule.
+            if (key == TenantConfigKeyEnum.PUMP_OPERATOR_REMINDER_NUDGE_TIME) {
+                if (dto == null) {
+                    throw new InvalidConfigValueException("PUMP_OPERATOR_REMINDER_NUDGE_TIME must not be null");
+                }
+                ((NudgeTimingConfigDTO) dto).validateSchedule();
+            }
+
+            if (key == TenantConfigKeyEnum.FIELD_STAFF_ESCALATION_RULES) {
+                if (dto == null) {
+                    throw new InvalidConfigValueException("FIELD_STAFF_ESCALATION_RULES must not be null");
+                }
+                ((EscalationRulesConfigDTO) dto).validateSchedule();
+            }
+
+            if (key == TenantConfigKeyEnum.DAILY_SITUATION_REPORT_TIME) {
+                if (dto == null) {
+                    throw new InvalidConfigValueException("DAILY_SITUATION_REPORT_TIME must not be null");
+                }
+                ((DailyReportTimingConfigDTO) dto).validateSchedule();
+            }
+
             if (key == TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME) {
-                // Enforced validation for JsonNode-bound configs (bean validation does not run on
-                // treeToValue). Checked before the upsert: an out-of-range value that reached the DB would
-                // make the post-commit reschedule throw, leaving persisted config that unschedules every
-                // job for this tenant on the next startup. The cron fields carry the same risk as
-                // weekStartDay — validateScheduleConfig rejects all four alike — so both are checked.
+                // Same as the schedule keys above, plus weekStartDay: out of range, it would silently
+                // report on the default week.
                 WeeklyReportTimingConfigDTO weeklyDto = (WeeklyReportTimingConfigDTO) dto;
                 if (weeklyDto == null) {
                     throw new InvalidConfigValueException("WEEKLY_SITUATION_REPORT_TIME must not be null");

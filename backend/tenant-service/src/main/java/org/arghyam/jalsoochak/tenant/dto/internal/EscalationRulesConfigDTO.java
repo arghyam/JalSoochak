@@ -8,6 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 
 /**
  * DTO for field staff escalation rules configuration.
@@ -22,7 +23,20 @@ public final class EscalationRulesConfigDTO implements ConfigValueDTO {
     @NotNull(message = "Escalation configuration is required")
     @Valid
     private Escalation escalation;
-    
+
+    /**
+     * Range-checks the schedule via {@link ScheduleConfigDTO#validateRanges(String)}. Null-tolerant:
+     * an absent {@code escalation}, {@code schedule} or field means "use the application default".
+     *
+     * @throws InvalidConfigValueException if an explicitly supplied field is out of range
+     */
+    public void validateSchedule() {
+        ScheduleConfigDTO schedule = escalation == null ? null : escalation.getSchedule();
+        if (schedule != null) {
+            schedule.validateRanges("FIELD_STAFF_ESCALATION_RULES");
+        }
+    }
+
     @Data
     @Builder
     @AllArgsConstructor

@@ -88,6 +88,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -984,7 +985,7 @@ class TenantManagementServiceImplTest {
             when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
 
             // Bean validation does not run on treeToValue, so this must be caught explicitly — and
-            // before the upsert, or the persisted value would unschedule the tenant on next startup.
+            // before the upsert, or the stored value would silently report on the default week.
             assertThrows(InvalidConfigValueException.class,
                     () -> tenantManagementService.setTenantConfigs(tenantId, request));
             verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
@@ -1005,8 +1006,8 @@ class TenantManagementServiceImplTest {
             when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
             when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
 
-            // The cron fields carry the same risk as weekStartDay: validateScheduleConfig rejects an
-            // out-of-range hour, so a persisted one leaves the tenant with no jobs from next startup.
+            // The cron fields carry the same risk as weekStartDay: a stored out-of-range hour would
+            // silently run the report on the default schedule.
             assertThrows(InvalidConfigValueException.class,
                     () -> tenantManagementService.setTenantConfigs(tenantId, request));
             verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
@@ -1077,6 +1078,73 @@ class TenantManagementServiceImplTest {
 
             verify(tenantCommonRepository).upsertConfig(eq(tenantId),
                     eq(TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME.name()), anyString(), eq(100));
+        }
+
+        @ParameterizedTest
+        @CsvSource(delimiter = '|', textBlock = """
+                PUMP_OPERATOR_REMINDER_NUDGE_TIME | null                                                | PUMP_OPERATOR_REMINDER_NUDGE_TIME must not be null
+                PUMP_OPERATOR_REMINDER_NUDGE_TIME | {"nudge":{"schedule":{"hour":24,"minute":0}}}       | Invalid hour '24' in PUMP_OPERATOR_REMINDER_NUDGE_TIME (must be between 0 and 23)
+                PUMP_OPERATOR_REMINDER_NUDGE_TIME | {"nudge":{"schedule":{"hour":18,"minute":60}}}      | Invalid minute '60' in PUMP_OPERATOR_REMINDER_NUDGE_TIME (must be between 0 and 59)
+                FIELD_STAFF_ESCALATION_RULES      | null                                                | FIELD_STAFF_ESCALATION_RULES must not be null
+                FIELD_STAFF_ESCALATION_RULES      | {"escalation":{"schedule":{"hour":-1,"minute":0}}}  | Invalid hour '-1' in FIELD_STAFF_ESCALATION_RULES (must be between 0 and 23)
+                FIELD_STAFF_ESCALATION_RULES      | {"escalation":{"schedule":{"hour":9,"minute":-5}}}  | Invalid minute '-5' in FIELD_STAFF_ESCALATION_RULES (must be between 0 and 59)
+                DAILY_SITUATION_REPORT_TIME       | null                                                | DAILY_SITUATION_REPORT_TIME must not be null
+                DAILY_SITUATION_REPORT_TIME       | {"dailyReport":{"schedule":{"hour":31,"minute":0}}} | Invalid hour '31' in DAILY_SITUATION_REPORT_TIME (must be between 0 and 23)
+                DAILY_SITUATION_REPORT_TIME       | {"dailyReport":{"schedule":{"hour":16,"minute":99}}} | Invalid minute '99' in DAILY_SITUATION_REPORT_TIME (must be between 0 and 59)
+                """)
+        @DisplayName("Schedule keys reject a null value or an out-of-range hour or minute before it reaches the database")
+        void testSetTenantConfigs_scheduleKeys_rejectInvalidValue(
+                TenantConfigKeyEnum key, String value, String expectedMessage) throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(key, objectMapper.readTree(value));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+            // Stored, an out-of-range value would be accepted with a 200 and then silently run on the
+            // default schedule.
+            InvalidConfigValueException ex = assertThrows(InvalidConfigValueException.class,
+                    () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            assertEquals(expectedMessage, ex.getMessage());
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
+        }
+
+        @ParameterizedTest
+        @CsvSource(delimiter = '|', textBlock = """
+                PUMP_OPERATOR_REMINDER_NUDGE_TIME | {"nudge":{"schedule":{"hour":23,"minute":59}}}
+                PUMP_OPERATOR_REMINDER_NUDGE_TIME | {"nudge":{}}
+                FIELD_STAFF_ESCALATION_RULES      | {"escalation":{"schedule":{"hour":0,"minute":0}}}
+                FIELD_STAFF_ESCALATION_RULES      | {"escalation":{"schedule":{"hour":9}}}
+                DAILY_SITUATION_REPORT_TIME       | {"dailyReport":{"schedule":{"hour":16,"minute":0}}}
+                DAILY_SITUATION_REPORT_TIME       | {}
+                """)
+        @DisplayName("Schedule keys write an in-range value; missing fields mean the application default")
+        void testSetTenantConfigs_scheduleKeys_upsertValidValue(TenantConfigKeyEnum key, String value)
+                throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(key, objectMapper.readTree(value));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId), eq(key.name()), anyString(), eq(100)))
+                    .thenAnswer(inv -> Optional.of(ConfigDTO.builder()
+                            .configKey(key.name())
+                            .configValue(inv.getArgument(2))
+                            .build()));
+
+            tenantManagementService.setTenantConfigs(tenantId, request);
+
+            verify(tenantCommonRepository).upsertConfig(eq(tenantId), eq(key.name()), anyString(), eq(100));
         }
 
         @Test
