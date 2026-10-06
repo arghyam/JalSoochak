@@ -60,7 +60,6 @@ class TenantCommonRepositoryIntegrationTest {
     @SuppressWarnings("rawtypes")
     private KafkaTemplate kafkaTemplate;
 
-
     /** Suppress PII encryption startup — PiiEncryptionService requires env vars that are absent in tests. */
     @MockBean
     private PiiEncryptionService piiEncryptionService;

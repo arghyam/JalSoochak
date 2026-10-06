@@ -11,7 +11,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +27,7 @@ import static org.mockito.Mockito.*;
  * Unit tests for {@link NudgeSchedulerService} business logic.
  *
  * <p>Each test calls {@code processNudgesForTenant} directly; tenant iteration
- * is handled by the external CronJob and is not exercised here.</p>
+ * is handled by {@link NotificationJobScheduler} and is not exercised here.</p>
  */
 @ExtendWith(MockitoExtension.class)
 class NudgeSchedulerServiceTest {
@@ -44,6 +43,8 @@ class NudgeSchedulerServiceTest {
 
     private static final String SCHEMA = "tenant_mp";
     private static final int TENANT_ID = 1;
+    /** Fixed and in the past, so nothing can pass by reading the clock instead of the run date. */
+    private static final LocalDate RUN_DATE = LocalDate.of(2026, 9, 30);
 
 
     @Test
@@ -56,7 +57,7 @@ class NudgeSchedulerServiceTest {
                 "language_id", 1
         ));
 
-        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID);
+        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         ArgumentCaptor<NudgeEvent> eventCaptor = ArgumentCaptor.forClass(NudgeEvent.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), eq("1:77"), eventCaptor.capture());
@@ -69,16 +70,14 @@ class NudgeSchedulerServiceTest {
         assertThat(event.getPendingSchemeCount()).isEqualTo(3);
         assertThat(event.getTenantId()).isEqualTo(TENANT_ID);
         assertThat(event.getLanguageId()).isEqualTo(1);
-        assertThat(event.getNudgeDate()).isEqualTo(LocalDate.now(ZoneId.of("Asia/Kolkata")).toString());
+        assertThat(event.getNudgeDate()).isEqualTo("2026-09-30");
     }
 
     @Test
-    void processNudgesForTenant_queriesTheIstCalendarDay() {
-        LocalDate istToday = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+    void processNudgesForTenant_queriesTheRunDate() {
+        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
-        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID);
-
-        verify(nudgeRepository).streamUsersWithNoUploadToday(eq(SCHEMA), eq(istToday), anyInt(), any());
+        verify(nudgeRepository).streamUsersWithNoUploadToday(eq(SCHEMA), eq(RUN_DATE), anyInt(), any());
     }
 
     @Test
@@ -92,7 +91,7 @@ class NudgeSchedulerServiceTest {
 
         stubStream(SCHEMA, row);
 
-        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID);
+        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         verifyNoInteractions(kafkaProducer);
     }
@@ -108,7 +107,7 @@ class NudgeSchedulerServiceTest {
 
         stubStream(SCHEMA, row);
 
-        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID);
+        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         verifyNoInteractions(kafkaProducer);
     }
@@ -124,7 +123,7 @@ class NudgeSchedulerServiceTest {
 
         stubStream(SCHEMA, row);
 
-        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID);
+        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         ArgumentCaptor<NudgeEvent> captor = ArgumentCaptor.forClass(NudgeEvent.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), anyString(), captor.capture());
@@ -138,7 +137,7 @@ class NudgeSchedulerServiceTest {
                 Map.of("phone_number", "912222222222", "name", "Op B", "user_id", 2, "language_id", 0)
         );
 
-        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID);
+        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         verify(kafkaProducer, times(2)).publishJson(eq("common-topic"), anyString(), any(NudgeEvent.class));
     }
@@ -153,7 +152,7 @@ class NudgeSchedulerServiceTest {
 
         stubStream(SCHEMA, rowNullLang);
 
-        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID);
+        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         ArgumentCaptor<NudgeEvent> captor = ArgumentCaptor.forClass(NudgeEvent.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), anyString(), captor.capture());
@@ -166,7 +165,7 @@ class NudgeSchedulerServiceTest {
     void processNudgesForTenant_queriesOnlyItsOwnSchema() {
         stubStream(SCHEMA, Map.of("phone_number", "919876543210", "name", "Ramesh", "user_id", 1, "language_id", 0));
 
-        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID);
+        nudgeSchedulerService.processNudgesForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         // Repository must be called with exactly the given schema — no other schema
         verify(nudgeRepository).streamUsersWithNoUploadToday(eq(SCHEMA), any(LocalDate.class), anyInt(), any());
@@ -183,8 +182,8 @@ class NudgeSchedulerServiceTest {
         stubStream(schemaA, Map.of("phone_number", "911111111111", "name", "Op A", "user_id", 1, "language_id", 0));
         stubStream(schemaB, Map.of("phone_number", "912222222222", "name", "Op B", "user_id", 2, "language_id", 0));
 
-        nudgeSchedulerService.processNudgesForTenant(schemaA, tenantA);
-        nudgeSchedulerService.processNudgesForTenant(schemaB, tenantB);
+        nudgeSchedulerService.processNudgesForTenant(schemaA, tenantA, RUN_DATE);
+        nudgeSchedulerService.processNudgesForTenant(schemaB, tenantB, RUN_DATE);
 
         ArgumentCaptor<NudgeEvent> captor = ArgumentCaptor.forClass(NudgeEvent.class);
         verify(kafkaProducer, times(2)).publishJson(eq("common-topic"), anyString(), captor.capture());

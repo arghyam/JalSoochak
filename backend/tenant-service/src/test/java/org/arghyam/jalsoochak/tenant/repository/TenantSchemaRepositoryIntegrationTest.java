@@ -61,7 +61,6 @@ class TenantSchemaRepositoryIntegrationTest {
     @SuppressWarnings("rawtypes")
     private KafkaTemplate kafkaTemplate;
 
-
     @MockBean
     private PiiEncryptionService piiEncryptionService;
 

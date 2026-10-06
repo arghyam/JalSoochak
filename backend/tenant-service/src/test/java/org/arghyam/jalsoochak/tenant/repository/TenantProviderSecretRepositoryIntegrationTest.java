@@ -104,7 +104,6 @@ class TenantProviderSecretRepositoryIntegrationTest {
     @SuppressWarnings("rawtypes")
     private KafkaTemplate kafkaTemplate;
 
-
     /** PiiEncryptionService needs key env vars that tests do not provide. */
     @MockBean
     private PiiEncryptionService piiEncryptionService;

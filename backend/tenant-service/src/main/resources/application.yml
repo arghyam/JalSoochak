@@ -55,6 +55,13 @@ spring:
       password: ${REDIS_PASSWORD:}
       database: ${REDIS_DATABASE:0}
 
+  task:
+    scheduling:
+      shutdown:
+        # Let an in-flight notification job finish on SIGTERM rather than interrupting it mid-send.
+        await-termination: true
+        await-termination-period: 20s # inside Kubernetes' default 30 s termination grace
+
   kafka:
     bootstrap-servers: localhost:9092
     consumer:
@@ -101,6 +108,13 @@ management:
     health:
       show-details: when-authorized
 
+# ────────────────────────────────────────────────────────────── # Notification Job Scheduler # ──────────────────────────────────────────────────────────────
+# Every pod checks once a minute (IST) which tenant jobs below are due; a row in
+# common_schema.scheduled_job_run_table lets exactly one pod run each job once per period.
+notification-scheduler:
+  enabled: ${NOTIFICATION_SCHEDULER_ENABLED:true} # kill switch for all four jobs on this pod
+  grace: ${NOTIFICATION_SCHEDULER_GRACE:15m} # a job may still start this long after its slot; later, it is skipped for the day
+
 # ────────────────────────────────────────────────────────────── # Nudge & Escalation Scheduler Configuration # ──────────────────────────────────────────────────────────────
 # Fallback defaults used when a tenant has no row in tenant_config_master_table
 nudge:
@@ -110,8 +124,11 @@ nudge:
   # Operators who used the chatbot within this many minutes are not nudged: the WhatsApp provider
   # replaces a contact's active flow when the nudge flow starts, which would cut a submission short.
   # 0 = off.
-  quiet-window-minutes: ${NUDGE_QUIET_WINDOW_MINUTES:0}  
+  quiet-window-minutes: ${NUDGE_QUIET_WINDOW_MINUTES:0}
 escalation:
+  schedule:
+    hour: 18
+    minute: 00
   level1:
     threshold:
       days: 3 # Days of missed uploads before level-1 officer is notified
@@ -122,12 +139,34 @@ escalation:
       days: 7 # Days before level-2 officer is notified
     officer:
       user_type: DISTRICT_OFFICER
-# Daily report recipients remain configurable by environment.
+# Daily Water Service Situation Report — per-tenant daily cron (IST).
+#
+# The report covers TODAY from 00:00 up to this time, so the schedule IS the window: moving it to
+# 17:00 makes the report cover 00:00-17:00. The PDF's "Reporting Period" line is rendered from this
+# value, so it stays truthful. Section Officers only — SDOs receive the weekly report instead.
+# Overridable per tenant via common_schema.tenant_config_master_table key DAILY_SITUATION_REPORT_TIME.
 daily-report:
+  schedule:
+    hour: ${DAILY_REPORT_SCHEDULE_HOUR:16}
+    minute: ${DAILY_REPORT_SCHEDULE_MINUTE:00}
   officer:
     user-types: ${DAILY_REPORT_OFFICER_USER_TYPES:SECTION_OFFICER}
-# Weekly report window and recipients remain configurable; firing time is owned by the K8s CronJob.
+# Weekly Water Service Situation Report — per-tenant weekly cron (IST), for both SO and SDO.
+#
+# Two independent settings, both in the cron convention 0-7 where both 0 and 7 are Sunday, 1 is Monday:
+#   schedule.day-of-week  — WHEN the job fires.
+#   week-start-day        — WHICH seven days it reports on. The window is always the last COMPLETE week
+#                           beginning on this day, so 1 gives Monday-Sunday and 4 gives Thursday-Wednesday.
+#                           It never includes a day that has not finished.
+# Setting the two to different days is legal (report a Thu-Wed week, deliver it on Friday) but usually
+# unintended, so the scheduler logs a WARN: the further the firing day is past the end of the window,
+# the staler the data is when it arrives.
+# Overridable per tenant via common_schema.tenant_config_master_table key WEEKLY_SITUATION_REPORT_TIME.
 weekly-report:
+  schedule:
+    day-of-week: ${WEEKLY_REPORT_SCHEDULE_DAY_OF_WEEK:1}
+    hour: ${WEEKLY_REPORT_SCHEDULE_HOUR:09}
+    minute: ${WEEKLY_REPORT_SCHEDULE_MINUTE:00}
   week-start-day: ${WEEKLY_REPORT_WEEK_START_DAY:1}
   officer:
     user-types: ${WEEKLY_REPORT_OFFICER_USER_TYPES:SECTION_OFFICER,SUB_DIVISIONAL_OFFICER}
