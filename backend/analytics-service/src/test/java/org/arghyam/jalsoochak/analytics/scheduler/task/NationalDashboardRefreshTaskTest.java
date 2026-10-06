@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.analytics.scheduler.task;
 
+import org.arghyam.jalsoochak.analytics.scheduler.ScheduledTaskClaim;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -12,6 +13,8 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class NationalDashboardRefreshTaskTest {
@@ -20,12 +23,15 @@ class NationalDashboardRefreshTaskTest {
 
     @Mock
     private SchemeRegularityService schemeRegularityService;
+    @Mock
+    private ScheduledTaskClaim scheduledTaskClaim;
 
     @InjectMocks
     private NationalDashboardRefreshTask nationalDashboardRefreshTask;
 
     @Test
     void runTask_refreshesNationalDashboardForConfiguredWindow() {
+        when(scheduledTaskClaim.claimToday("national-dashboard-refresh")).thenReturn(true);
         ReflectionTestUtils.setField(nationalDashboardRefreshTask, "lookbackDays", 29);
         // Task anchors the end date to "yesterday" (IST) to keep the window stable until next run.
         LocalDate expectedEndDate = LocalDate.now(IST_ZONE).minusDays(1);
@@ -40,6 +46,7 @@ class NationalDashboardRefreshTaskTest {
 
     @Test
     void runTask_negativeLookbackDays_usesSingleDayWindow() {
+        when(scheduledTaskClaim.claimToday("national-dashboard-refresh")).thenReturn(true);
         ReflectionTestUtils.setField(nationalDashboardRefreshTask, "lookbackDays", -7);
         // Negative lookback days are sanitized to 0, which becomes a single-day window anchored to yesterday.
         LocalDate expectedEndDate = LocalDate.now(IST_ZONE).minusDays(1);
@@ -48,5 +55,14 @@ class NationalDashboardRefreshTaskTest {
 
         verify(schemeRegularityService).refreshNationalDashboard(expectedEndDate, expectedEndDate);
         verify(schemeRegularityService).getNationalDashboardLevel2MetricsForApi(expectedEndDate, expectedEndDate);
+    }
+
+    @Test
+    void runTask_skipsWhenAnotherInstanceClaimedTheRun() {
+        when(scheduledTaskClaim.claimToday("national-dashboard-refresh")).thenReturn(false);
+
+        nationalDashboardRefreshTask.runTask();
+
+        verifyNoInteractions(schemeRegularityService);
     }
 }

@@ -1,7 +1,6 @@
 package org.arghyam.jalsoochak.tenant.repository;
 
 import org.arghyam.jalsoochak.tenant.service.PiiEncryptionService;
-import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,10 +59,6 @@ class NudgeRepositoryIntegrationTest {
     @MockBean
     @SuppressWarnings("rawtypes")
     private KafkaTemplate kafkaTemplate;
-
-    /** Suppress @PostConstruct scheduling – not under test here. */
-    @MockBean
-    private TenantSchedulerManager tenantSchedulerManager;
 
     /** Suppress PII encryption startup – not under test here; decrypt returns input as-is. */
     @MockBean

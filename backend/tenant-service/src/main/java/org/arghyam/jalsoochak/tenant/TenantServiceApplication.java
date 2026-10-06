@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.tenant;
 import org.arghyam.jalsoochak.tenant.config.properties.AppProperties;
 import org.arghyam.jalsoochak.tenant.config.properties.MessagingProviderProperties;
 import org.arghyam.jalsoochak.tenant.config.properties.MessagingSecretProperties;
+import org.arghyam.jalsoochak.tenant.config.properties.NotificationSchedulerProperties;
 import org.arghyam.jalsoochak.tenant.config.properties.TenantDefaultsProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -14,7 +15,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableDiscoveryClient
 @EnableScheduling
 @EnableConfigurationProperties({AppProperties.class, TenantDefaultsProperties.class,
-        MessagingSecretProperties.class, MessagingProviderProperties.class})
+        MessagingSecretProperties.class, MessagingProviderProperties.class,
+        NotificationSchedulerProperties.class})
 public class TenantServiceApplication {
 
     public static void main(String[] args) {

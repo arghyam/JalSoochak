@@ -22,6 +22,10 @@ public class NudgeScheduleConfig {
         public Builder hour(int hour) { this.hour = hour; return this; }
         public Builder minute(int minute) { this.minute = minute; return this; }
 
-        public NudgeScheduleConfig build() { return new NudgeScheduleConfig(this); }
+        public NudgeScheduleConfig build() {
+            ScheduleRanges.checkHour(hour);
+            ScheduleRanges.checkMinute(minute);
+            return new NudgeScheduleConfig(this);
+        }
     }
 }

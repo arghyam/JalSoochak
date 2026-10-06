@@ -13,10 +13,12 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,7 +30,7 @@ import static org.mockito.Mockito.*;
  * Unit tests for {@link EscalationSchedulerService} business logic.
  *
  * <p>Each test calls {@code processEscalationsForTenant} directly; tenant iteration
- * is handled by {@link TenantSchedulerManager} and is not exercised here.</p>
+ * is handled by {@link NotificationJobScheduler} and is not exercised here.</p>
  */
 @ExtendWith(MockitoExtension.class)
 class EscalationSchedulerServiceTest {
@@ -47,6 +49,8 @@ class EscalationSchedulerServiceTest {
 
     private static final String SCHEMA = "tenant_mp";
     private static final int TENANT_ID = 1;
+    /** Fixed and in the past, so nothing can pass by reading the clock instead of the run date. */
+    private static final LocalDate RUN_DATE = LocalDate.of(2026, 9, 30);
 
     @BeforeEach
     void setUp() {
@@ -61,7 +65,7 @@ class EscalationSchedulerServiceTest {
         Map<String, Object> soRow = officerRow("SO Singh", "919001001001", 1);
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of(1, soRow));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
@@ -84,7 +88,7 @@ class EscalationSchedulerServiceTest {
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER"))
                 .thenReturn(Map.of(1, officerRow("SO Ref", "910000000001", 0)));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
@@ -110,7 +114,7 @@ class EscalationSchedulerServiceTest {
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER"))
                 .thenReturn(Map.of(1, officerRow("SO Ref", "910000000002", 0)));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
@@ -130,7 +134,7 @@ class EscalationSchedulerServiceTest {
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER"))
                 .thenReturn(Map.of(1, soRow));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
         verify(kafkaProducer, times(1)).publishJson(eq("common-topic"), captor.capture());
@@ -149,7 +153,7 @@ class EscalationSchedulerServiceTest {
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "DISTRICT_OFFICER"))
                 .thenReturn(Map.of(1, officerRow("DO Y", "919200000001", 0)));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         verify(kafkaProducer, times(2)).publishJson(eq("common-topic"), any(EscalationEvent.class));
     }
@@ -159,7 +163,7 @@ class EscalationSchedulerServiceTest {
         stubStream(SCHEMA, 3, operatorRow("Op Orphan", "913000000001", 1, 4));
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of());
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         verifyNoInteractions(kafkaProducer);
     }
@@ -174,7 +178,7 @@ class EscalationSchedulerServiceTest {
         soRow.put("language_id", 2);
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of(1, soRow));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
@@ -182,10 +186,27 @@ class EscalationSchedulerServiceTest {
     }
 
     @Test
+    void processEscalationsForTenant_countsMissedDaysBackFromTheRunDate() {
+        stubStream(SCHEMA, 3, operatorRow("Op Dated", "911007007007", 1, 5));
+        when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER"))
+                .thenReturn(Map.of(1, officerRow("SO Dated", "919007007007", 0)));
+
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
+
+        verify(nudgeRepository).streamUsersWithMissedDays(eq(SCHEMA), eq(3), eq(RUN_DATE), any());
+        ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
+        verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
+        // The streak began 5 days before the run date, and the operator's correlation id is keyed on it.
+        String streakKey = SCHEMA + ":1:911007007007:NO_SUBMISSION:2026-09-25";
+        assertThat(captor.getValue().getOperators().get(0).getCorrelationId())
+                .isEqualTo(UUID.nameUUIDFromBytes(streakKey.getBytes(StandardCharsets.UTF_8)).toString());
+    }
+
+    @Test
     void processEscalationsForTenant_fetchesConfigWithCorrectTenantId() {
         stubStream(SCHEMA, 3);
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         verify(tenantConfigService).getEscalationConfig(TENANT_ID);
     }
@@ -201,8 +222,8 @@ class EscalationSchedulerServiceTest {
         stubStream(SCHEMA, 3);
         stubStream("tenant_up", 5);
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
-        escalationSchedulerService.processEscalationsForTenant("tenant_up", tenantId2);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
+        escalationSchedulerService.processEscalationsForTenant("tenant_up", tenantId2, RUN_DATE);
 
         verify(nudgeRepository).streamUsersWithMissedDays(eq(SCHEMA), eq(3), any(LocalDate.class), any());
         verify(nudgeRepository).streamUsersWithMissedDays(eq("tenant_up"), eq(5), any(LocalDate.class), any());
@@ -216,7 +237,7 @@ class EscalationSchedulerServiceTest {
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER"))
                 .thenReturn(Map.of(1, officerRow("SO X", "919001001001", 0)));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         // Operator stream and both officer lookups must all use the given schema only
         verify(nudgeRepository).streamUsersWithMissedDays(eq(SCHEMA), anyInt(), any(LocalDate.class), any());
@@ -242,8 +263,8 @@ class EscalationSchedulerServiceTest {
         when(nudgeRepository.findAllOfficersByUserType(schemaB, "DISTRICT_OFFICER"))
                 .thenReturn(Map.of());
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
-        escalationSchedulerService.processEscalationsForTenant(schemaB, tenantIdB);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
+        escalationSchedulerService.processEscalationsForTenant(schemaB, tenantIdB, RUN_DATE);
 
         ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
         verify(kafkaProducer, times(2)).publishJson(eq("common-topic"), captor.capture());
@@ -276,7 +297,7 @@ class EscalationSchedulerServiceTest {
         when(tenantConfigService.getEscalationConfig(TENANT_ID)).thenReturn(cfg);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID))
+                escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Invalid escalation thresholds");
     }
@@ -291,7 +312,7 @@ class EscalationSchedulerServiceTest {
         when(tenantConfigService.getEscalationConfig(TENANT_ID)).thenReturn(cfg);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID))
+                escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Invalid escalation thresholds");
     }
@@ -306,7 +327,7 @@ class EscalationSchedulerServiceTest {
         when(tenantConfigService.getEscalationConfig(TENANT_ID)).thenReturn(cfg);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID))
+                escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Officer types must be configured");
     }
@@ -321,7 +342,7 @@ class EscalationSchedulerServiceTest {
         when(tenantConfigService.getEscalationConfig(TENANT_ID)).thenReturn(cfg);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID))
+                escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Officer types must be configured");
     }
@@ -337,7 +358,7 @@ class EscalationSchedulerServiceTest {
         soRow.put("language_id", 0);
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of(1, soRow));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         verifyNoInteractions(kafkaProducer);
     }
@@ -351,7 +372,7 @@ class EscalationSchedulerServiceTest {
         Map<String, Object> soRow = officerRow("SO Y", "919002002002", 0);
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of(1, soRow));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
@@ -375,7 +396,7 @@ class EscalationSchedulerServiceTest {
         Map<String, Object> soRow = officerRow("SO Z", "919003003003", 0);
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of(1, soRow));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
@@ -400,7 +421,7 @@ class EscalationSchedulerServiceTest {
         soRow.put("whatsapp_connection_id", 99L);
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of(1, soRow));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
@@ -417,7 +438,7 @@ class EscalationSchedulerServiceTest {
         Map<String, Object> soRow = officerRow("SO Confirmed", "919005005005", 0);
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of(1, soRow));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
@@ -432,7 +453,7 @@ class EscalationSchedulerServiceTest {
         Map<String, Object> doRow = officerRow("DO NoSO", "919006006006", 0);
         when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "DISTRICT_OFFICER")).thenReturn(Map.of(1, doRow));
 
-        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID, RUN_DATE);
 
         verify(kafkaProducer).publishJson(eq("common-topic"), any(EscalationEvent.class));
     }

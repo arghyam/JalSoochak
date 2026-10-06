@@ -28,8 +28,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link DailySituationReportSchedulerService}. Verifies officer enumeration by role
- * and one {@code DAILY_REPORT_REQUEST} per officer, covering the current IST day up to the run
- * instant.
+ * and one {@code DAILY_REPORT_REQUEST} per officer, covering the run day up to the run instant.
  */
 @ExtendWith(MockitoExtension.class)
 class DailySituationReportSchedulerServiceTest {
@@ -45,6 +44,8 @@ class DailySituationReportSchedulerServiceTest {
 
     private static final String SCHEMA = "tenant_mp";
     private static final int TENANT = 1;
+    /** Fixed and in the past, so nothing can pass by reading the clock instead of the run date. */
+    private static final LocalDate RUN_DATE = LocalDate.of(2026, 9, 30);
 
     @BeforeEach
     void setUp() {
@@ -60,14 +61,14 @@ class DailySituationReportSchedulerServiceTest {
         // Only the SDO (20L) resolves subordinate Section Officers.
         when(nudgeRepository.findSubordinateSectionOfficerIds(SCHEMA, 20L)).thenReturn(List.of(11L, 12L));
 
-        service.processDailyReportsForTenant(SCHEMA, TENANT);
+        service.processDailyReportsForTenant(SCHEMA, TENANT, RUN_DATE);
 
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(kafkaProducer, org.mockito.Mockito.times(3)).publishJson(eq("common-topic"), captor.capture());
 
         List<Object> events = captor.getAllValues();
-        // The report covers TODAY so far, not yesterday — officers act on it the same afternoon.
-        String expectedDate = LocalDate.now(ZoneId.of("Asia/Kolkata")).toString();
+        // The report covers the run day so far, not the day before — officers act on it the same afternoon.
+        String expectedDate = "2026-09-30";
 
         assertThat(events).allSatisfy(e -> {
             DailyReportRequestEvent event = (DailyReportRequestEvent) e;
@@ -109,7 +110,7 @@ class DailySituationReportSchedulerServiceTest {
         appender.start();
         logger.addAppender(appender);
         try {
-            service.processDailyReportsForTenant(SCHEMA, TENANT);
+            service.processDailyReportsForTenant(SCHEMA, TENANT, RUN_DATE);
         } finally {
             logger.detachAppender(appender);
             appender.stop();
@@ -122,23 +123,24 @@ class DailySituationReportSchedulerServiceTest {
     }
 
     @Test
-    void carriesACutoffOnTheReportDateSoAReplayReproducesTheNumbers() {
+    void carriesTheRunInstantAsCutoffSoAReplayReproducesTheNumbers() {
         when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
                 .thenReturn(List.of(11L));
         when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER"))
                 .thenReturn(List.of());
 
-        service.processDailyReportsForTenant(SCHEMA, TENANT);
+        LocalDateTime before = LocalDateTime.now(ZoneId.of("Asia/Kolkata"));
+        service.processDailyReportsForTenant(SCHEMA, TENANT, RUN_DATE);
+        LocalDateTime after = LocalDateTime.now(ZoneId.of("Asia/Kolkata"));
 
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
         DailyReportRequestEvent event = (DailyReportRequestEvent) captor.getValue();
 
-        assertThat(event.getCutoffIst()).isNotNull();
-        LocalDateTime cutoff = LocalDateTime.parse(event.getCutoffIst());
-        // The cut-off closes the window the report date opens, so it must land on that same IST day.
-        assertThat(cutoff.toLocalDate()).isEqualTo(LocalDate.parse(event.getReportDate()));
-        assertThat(cutoff).isBeforeOrEqualTo(LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
+        // The date comes from the caller, the cut-off from the clock: a run that reaches this job
+        // just after midnight still reports the day it was due on, up to the moment it ran.
+        assertThat(event.getReportDate()).isEqualTo("2026-09-30");
+        assertThat(LocalDateTime.parse(event.getCutoffIst())).isBetween(before, after);
     }
 
     @Test
@@ -159,7 +161,7 @@ class DailySituationReportSchedulerServiceTest {
         when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER"))
                 .thenReturn(List.of());
 
-        service.processDailyReportsForTenant(SCHEMA, TENANT);
+        service.processDailyReportsForTenant(SCHEMA, TENANT, RUN_DATE);
 
         verifyNoInteractions(kafkaProducer);
     }
