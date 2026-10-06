@@ -6,12 +6,15 @@ import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.WeeklyReportScheduleConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+
+import java.util.function.Supplier;
 
 /**
  * Reads per-tenant configuration from {@code common_schema.tenant_config_master_table}.
@@ -24,6 +27,9 @@ import org.springframework.stereotype.Service;
  * <p>A failed read is not a fallback case: the exception propagates. {@code NotificationJobScheduler}
  * re-reads config every minute, so turning a brief database error into the defaults would run a
  * tenant with a custom time at the default time and claim its day.</p>
+ *
+ * <p>The defaults themselves have no fallback, so they are checked at startup: an unusable one stops
+ * the service from starting (see {@link #validateDefaults()}).</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -81,6 +87,46 @@ public class TenantConfigService {
     /** Day the reported week begins on, same cron convention. 1 = Monday, i.e. a Monday–Sunday week. */
     @Value("${weekly-report.week-start-day:1}")
     private int defaultWeeklyReportWeekStartDay;
+
+    /**
+     * Refuses to start on an unusable default. Every tenant without its own config runs on the
+     * defaults, so a bad one would otherwise fail that job for each such tenant on every tick.
+     *
+     * <p>Package-private so unit tests can invoke it directly, as
+     * {@code SingleTenantModeStartupValidator} does.</p>
+     *
+     * @throws IllegalStateException naming the property group that holds the unusable default
+     */
+    @PostConstruct
+    void validateDefaults() {
+        NudgeScheduleConfig nudge = requireValidDefault("nudge.schedule", this::defaultNudgeConfig);
+        EscalationScheduleConfig escalation = requireValidDefault("escalation", this::defaultEscalationConfig);
+        DailyReportScheduleConfig dailyReport =
+                requireValidDefault("daily-report.schedule", this::defaultDailyReportConfig);
+        WeeklyReportScheduleConfig weeklyReport = requireValidDefault("weekly-report", this::defaultWeeklyReportConfig);
+        log.info("[TenantConfig] Schedule defaults (IST): nudge {}, escalation {}, daily report {},"
+                        + " weekly report {} {} for the week starting {}",
+                hourMinute(nudge.getHour(), nudge.getMinute()),
+                hourMinute(escalation.getHour(), escalation.getMinute()),
+                hourMinute(dailyReport.getHour(), dailyReport.getMinute()),
+                WeeklyReportScheduleConfig.toDayOfWeek(weeklyReport.getDayOfWeek()),
+                hourMinute(weeklyReport.getHour(), weeklyReport.getMinute()),
+                weeklyReport.getWeekStartDayOfWeek());
+    }
+
+    private static <T> T requireValidDefault(String propertyGroup, Supplier<T> defaults) {
+        try {
+            return defaults.get();
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("Invalid default in " + propertyGroup + ".*: " + e.getMessage()
+                    + ". Every tenant without its own config runs on these defaults; fix the value or the"
+                    + " environment variable that sets it.", e);
+        }
+    }
+
+    private static String hourMinute(int hour, int minute) {
+        return String.format("%02d:%02d", hour, minute);
+    }
 
     public NudgeScheduleConfig getNudgeConfig(int tenantId) {
         String json = fetchConfigValue(tenantId, NUDGE_KEY);
