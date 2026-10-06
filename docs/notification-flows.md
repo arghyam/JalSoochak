@@ -47,13 +47,16 @@ Sends a WhatsApp nudge to every pump operator who has not submitted a flow readi
 
 ### Trigger
 
-`TenantSchedulerManager` starts on service startup (`@PostConstruct`), reads all active tenants from `common_schema`, and schedules one nudge cron job per tenant using the hour and minute read from `common_schema.tenant_config_master_table`. Missing config falls back to application defaults. The cron expression runs in the **Asia/Kolkata** timezone.
+`NotificationJobScheduler` ticks once a minute in the **Asia/Kolkata** timezone on every tenant-service pod. Each tick re-reads the nudge hour and minute (`PUMP_OPERATOR_REMINDER_NUDGE_TIME` in `common_schema.tenant_config_master_table`) for every tenant except INACTIVE, SUSPENDED, ARCHIVED and REGISTERED ones. A missing row or an out-of-range value falls back to the application default (18:00 IST).
 
-Calling `TenantSchedulerManager.rescheduleForTenant(tenantId, stateCode)` after updating a tenant's config applies the new schedule immediately without a restart.
+- **Due window.** The job is due from its slot on today's IST date until the slot plus `notification-scheduler.grace` (default 15 minutes), which covers a restart or a rolling deploy. A slot missed by more than the grace is skipped for the day.
+- **Once per period.** A due job is claimed with an `INSERT … ON CONFLICT DO NOTHING` into `common_schema.scheduled_job_run_table`, keyed on job type, tenant and period (the IST date). Only the pod whose insert lands runs the job, and it records `SUCCEEDED` or `FAILED` on the row. A failed run, or one left `RUNNING` by a pod that died, is not retried.
+- **Config changes** reach every pod within a minute, without a restart. A failed config read skips the job for that tick without claiming it; the next tick in the window retries.
+- **Kill switch.** `NOTIFICATION_SCHEDULER_ENABLED=false` stops all four scheduled jobs (nudge, escalation, daily and weekly report) on that pod.
 
 ### tenant-service: NudgeSchedulerService
 
-`processNudgesForTenant(schema, tenantId)` is called by the scheduler.
+`processNudgesForTenant(schema, tenantId, runDate)` is called by the scheduler with the slot's IST date.
 
 **Database query** (`NudgeRepository.streamUsersWithNoUploadToday`):
 
@@ -155,11 +158,11 @@ Both thresholds and officer role names are read from tenant config at job execut
 
 ### Trigger
 
-Same `TenantSchedulerManager` as nudges, but a separate cron schedule (`escalation` config key). Runs in **Asia/Kolkata** timezone.
+Same `NotificationJobScheduler`, due window and run table as nudges (§1, Trigger), with its own slot from the `FIELD_STAFF_ESCALATION_RULES` config key (default 18:00 IST).
 
 ### tenant-service: EscalationSchedulerService
 
-`processEscalationsForTenant(schema, tenantId)` runs the following steps:
+`processEscalationsForTenant(schema, tenantId, runDate)` runs the following steps:
 
 1. Loads escalation config from `TenantConfigService` (`level1Days`, `level2Days`, `level1OfficerType`, `level2OfficerType`).
 2. Pre-loads officer rows for both levels in two bulk queries (`NudgeRepository.findAllOfficersByUserType`) to avoid N+1 lookups inside the operator stream.
