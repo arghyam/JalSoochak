@@ -8,14 +8,26 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.time.Duration;
 import java.time.LocalDate;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 @DataJpaTest
 @Testcontainers
@@ -56,9 +68,13 @@ class AnalyticsJpaRepositoriesIntegrationTest {
     private DimDepartmentLocationRepository dimDepartmentLocationRepository;
     @Autowired
     private SchemePerformanceSchedulerRepository schedulerRepository;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     private static final LocalDate D1 = LocalDate.of(2026, 1, 1);
     private static final LocalDate D2 = LocalDate.of(2026, 1, 2);
+    // No seeded performance rows, so every scheme (1, 2 and 3) is eligible.
+    private static final LocalDate D3 = LocalDate.of(2026, 1, 3);
 
     @BeforeEach
     void setUp() {
@@ -142,6 +158,57 @@ class AnalyticsJpaRepositoriesIntegrationTest {
                 """, java.math.BigDecimal.class, D1);
 
         assertThat(score).isEqualByComparingTo("0.0");
+    }
+
+    @Test
+    void insertDailySchemePerformanceScores_repeatForTheSameDayInsertsNothing() {
+        assertThat(schedulerRepository.insertDailySchemePerformanceScores(D3)).isEqualTo(3);
+
+        assertThat(schedulerRepository.insertDailySchemePerformanceScores(D3)).isZero();
+        assertThat(countScores(D3)).isEqualTo(3);
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void insertDailySchemePerformanceScores_overlappingRunsWriteOneRowPerScheme() throws Exception {
+        // Two pods scoring the same day at midnight. Each run needs its own transaction that really
+        // commits, so this test opts out of the test-managed one.
+        TransactionTemplate newTransaction = new TransactionTemplate(transactionManager);
+        ExecutorService otherPod = Executors.newSingleThreadExecutor();
+        TransactionStatus firstRun = transactionManager.getTransaction(TransactionDefinition.withDefaults());
+        try {
+            int firstInserted = schedulerRepository.insertDailySchemePerformanceScores(D3);
+            Future<Integer> secondRun = otherPod.submit(() ->
+                    newTransaction.execute(status -> schedulerRepository.insertDailySchemePerformanceScores(D3)));
+            // Without the unique key the second run never waits: it cannot see the first one's rows
+            // and finishes, inserting its own.
+            await().atMost(Duration.ofSeconds(10)).until(() -> secondRun.isDone() || anyLockWaiting());
+            transactionManager.commit(firstRun);
+
+            assertThat(firstInserted).isEqualTo(3);
+            assertThat(secondRun.get(10, TimeUnit.SECONDS)).isZero();
+            assertThat(countScores(D3)).isEqualTo(3);
+        } finally {
+            if (!firstRun.isCompleted()) {
+                transactionManager.rollback(firstRun);
+            }
+            otherPod.shutdownNow();
+        }
+    }
+
+    // pg_locks reads the lock manager on every call; pg_stat_activity would be frozen for the transaction.
+    private boolean anyLockWaiting() {
+        Integer waiting = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM pg_locks WHERE NOT granted", Integer.class);
+        return waiting != null && waiting > 0;
+    }
+
+    private int countScores(LocalDate date) {
+        Integer rows = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM analytics_schema.fact_scheme_performance_table
+                WHERE last_water_supply_date = ?
+                """, Integer.class, date);
+        return rows == null ? 0 : rows;
     }
 
     private void seedDimensions() {
