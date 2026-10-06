@@ -407,6 +407,8 @@ class ConversationLocalizationServiceTest {
                     Arguments.of("Invalid reading value", "रीडिंग मान्य नहीं है।"),
                     Arguments.of("Could not read meter value from image",
                             "इमेज से मीटर रीडिंग नहीं पढ़ी जा सकी। कृपया स्पष्ट फोटो भेजें।"),
+                    Arguments.of("No meter found in the photo. Please send a straight, clear photo of the water meter.",
+                            "फोटो में मीटर नहीं मिला। कृपया पानी के मीटर की सीधी और साफ़ फोटो भेजें।"),
                     Arguments.of("Meter photos are not supported for your reading channel.",
                             "आपके रीडिंग चैनल के लिए मीटर की फ़ोटो समर्थित नहीं है।"),
                     Arguments.of("Total pump running time for the day can't be more than 24 hours (1440 minutes).",

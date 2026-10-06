@@ -38,9 +38,9 @@ public final class WeeklyReportTimingConfigDTO implements ConfigValueDTO {
      * Range-checks {@code weekStartDay} explicitly.
      *
      * <p>The bean-validation annotations below do not run on this key's write path, which binds with
-     * {@code ObjectMapper.treeToValue}. Without this the value would commit, and the reschedule that
-     * follows the commit would then fail — persisting config that unschedules the tenant on next
-     * startup. Mirrors {@code RegularityThresholdConfigDTO.validatedThresholdPercent()}.</p>
+     * {@code ObjectMapper.treeToValue}. Without this an out-of-range value would be stored, and
+     * {@code TenantConfigService} would then silently run the report on the default schedule.
+     * Mirrors {@code RegularityThresholdConfigDTO.validatedThresholdPercent()}.</p>
      *
      * @return the configured value, or null to mean "use the application default"
      * @throws InvalidConfigValueException if the value is outside 0–7
@@ -56,13 +56,8 @@ public final class WeeklyReportTimingConfigDTO implements ConfigValueDTO {
     }
 
     /**
-     * Range-checks the three cron fields the weekly schedule actually uses, for the same reason as
-     * {@link #validatedWeekStartDay()}.
-     *
-     * <p>{@code TenantSchedulerManager.validateScheduleConfig} rejects an out-of-range hour, minute or
-     * dayOfWeek exactly as it rejects an out-of-range weekStartDay — so a value that commits here
-     * survives the write, then throws on every later {@code scheduleForTenant}, leaving the tenant with
-     * no nudge, escalation, daily-report or weekly-report job from the next startup onwards.</p>
+     * Range-checks the three cron fields the weekly schedule uses, via
+     * {@link ScheduleConfigDTO#validateRanges(String)}.
      *
      * <p>Null-tolerant throughout: an absent {@code weeklyReport}, {@code schedule} or individual field
      * means "use the application default" and is left for {@code TenantConfigService} to fill in.</p>
@@ -71,19 +66,8 @@ public final class WeeklyReportTimingConfigDTO implements ConfigValueDTO {
      */
     public void validateSchedule() {
         ScheduleConfigDTO schedule = weeklyReport == null ? null : weeklyReport.getSchedule();
-        if (schedule == null) {
-            return;
-        }
-        checkRange(schedule.getDayOfWeek(), 0, 7,
-                "dayOfWeek", "(must be between 0 and 7, where both 0 and 7 mean Sunday)");
-        checkRange(schedule.getHour(), 0, 23, "hour", "(must be between 0 and 23)");
-        checkRange(schedule.getMinute(), 0, 59, "minute", "(must be between 0 and 59)");
-    }
-
-    private static void checkRange(Integer value, int min, int max, String field, String bounds) {
-        if (value != null && (value < min || value > max)) {
-            throw new InvalidConfigValueException(
-                    "Invalid " + field + " '" + value + "' in WEEKLY_SITUATION_REPORT_TIME " + bounds);
+        if (schedule != null) {
+            schedule.validateRanges("WEEKLY_SITUATION_REPORT_TIME");
         }
     }
 

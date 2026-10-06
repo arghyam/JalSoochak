@@ -384,9 +384,9 @@ public class WhatsAppDeliveryReconciliationService {
     private record OfficerRow(long contactId, long userId, String role) {}
 
     /**
-     * Active tenants, using the same status filter as {@code TenantSchedulerManager}: everything except
-     * INACTIVE(0), SUSPENDED(4), ARCHIVED(6) and REGISTERED(7). A REGISTERED tenant has no schema at
-     * all, so querying it would throw.
+     * Active tenants, using the same status filter as tenant-service's {@code NotificationJobScheduler}:
+     * everything except INACTIVE(0), SUSPENDED(4), ARCHIVED(6) and REGISTERED(7). A REGISTERED tenant
+     * has no schema at all, so querying it would throw.
      */
     private List<TenantSchemaRef> activeTenants() {
         return jdbcTemplate.query(

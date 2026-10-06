@@ -9,10 +9,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
-import java.time.ZoneId;
 
 /**
- * Processes nudges for a single tenant. Called by {@link TenantSchedulerManager}
+ * Processes nudges for a single tenant. Called by {@link NotificationJobScheduler}
  * on each tenant's individual schedule.
  *
  * <p>Sends one WhatsApp nudge per operator who still has a scheme with nothing recorded today
@@ -24,8 +23,6 @@ import java.time.ZoneId;
 public class NudgeSchedulerService {
 
     private static final String COMMON_TOPIC = "common-topic";
-    /** reading_date is stored on the IST calendar day, so "today" must be evaluated in IST. */
-    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
     private final NudgeRepository nudgeRepository;
     private final KafkaProducer kafkaProducer;
@@ -34,9 +31,11 @@ public class NudgeSchedulerService {
     @Value("${nudge.quiet-window-minutes:15}")
     private int quietWindowMinutes;
 
-    public void processNudgesForTenant(String schema, int tenantId) {
-        LocalDate today = LocalDate.now(IST);
-        int total = nudgeRepository.streamUsersWithNoUploadToday(schema, today, quietWindowMinutes, row -> {
+    /**
+     * @param runDate the IST day the run is for; operators with nothing recorded on it are nudged
+     */
+    public void processNudgesForTenant(String schema, int tenantId, LocalDate runDate) {
+        int total = nudgeRepository.streamUsersWithNoUploadToday(schema, runDate, quietWindowMinutes, row -> {
             String phone = (String) row.get("phone_number");
             long whatsappId = row.get("whatsapp_connection_id") != null
                     ? ((Number) row.get("whatsapp_connection_id")).longValue() : 0L;
@@ -51,7 +50,7 @@ public class NudgeSchedulerService {
                     .userId(userId)
                     .whatsappConnectionId(whatsappId)
                     .tenantSchema(schema)
-                    .nudgeDate(today.toString())
+                    .nudgeDate(runDate.toString())
                     .pendingSchemeCount(row.get("pending_scheme_count") != null
                             ? ((Number) row.get("pending_scheme_count")).intValue() : null)
                     .build();
@@ -59,6 +58,6 @@ public class NudgeSchedulerService {
             log.debug("[NudgeJob] Published NudgeEvent for userId={} pendingSchemes={}",
                     userId, row.get("pending_scheme_count"));
         });
-        log.info("[NudgeJob] schema={} → {} operators nudged for {}", schema, total, today);
+        log.info("[NudgeJob] schema={} → {} operators nudged for {}", schema, total, runDate);
     }
 }

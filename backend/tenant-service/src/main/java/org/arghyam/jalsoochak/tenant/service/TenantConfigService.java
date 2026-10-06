@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.WeeklyReportScheduleConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,10 +14,22 @@ import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.function.Supplier;
+
 /**
  * Reads per-tenant configuration from {@code common_schema.tenant_config_master_table}.
  * Config values are stored as JSON blobs under well-known keys.
- * Falls back to application-level defaults if the row is absent or parsing fails.
+ *
+ * <p>Falls back to the application-level defaults when the row is absent, its value does not
+ * parse, or a field is out of range (the schedule-config builders reject it), so a tenant with bad
+ * config still runs on the default schedule.</p>
+ *
+ * <p>A failed read is not a fallback case: the exception propagates. {@code NotificationJobScheduler}
+ * re-reads config every minute, so turning a brief database error into the defaults would run a
+ * tenant with a custom time at the default time and claim its day.</p>
+ *
+ * <p>The defaults themselves have no fallback, so they are checked at startup: an unusable one stops
+ * the service from starting (see {@link #validateDefaults()}).</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -75,6 +88,46 @@ public class TenantConfigService {
     @Value("${weekly-report.week-start-day:1}")
     private int defaultWeeklyReportWeekStartDay;
 
+    /**
+     * Refuses to start on an unusable default. Every tenant without its own config runs on the
+     * defaults, so a bad one would otherwise fail that job for each such tenant on every tick.
+     *
+     * <p>Package-private so unit tests can invoke it directly, as
+     * {@code SingleTenantModeStartupValidator} does.</p>
+     *
+     * @throws IllegalStateException naming the property group that holds the unusable default
+     */
+    @PostConstruct
+    void validateDefaults() {
+        NudgeScheduleConfig nudge = requireValidDefault("nudge.schedule", this::defaultNudgeConfig);
+        EscalationScheduleConfig escalation = requireValidDefault("escalation", this::defaultEscalationConfig);
+        DailyReportScheduleConfig dailyReport =
+                requireValidDefault("daily-report.schedule", this::defaultDailyReportConfig);
+        WeeklyReportScheduleConfig weeklyReport = requireValidDefault("weekly-report", this::defaultWeeklyReportConfig);
+        log.info("[TenantConfig] Schedule defaults (IST): nudge {}, escalation {}, daily report {},"
+                        + " weekly report {} {} for the week starting {}",
+                hourMinute(nudge.getHour(), nudge.getMinute()),
+                hourMinute(escalation.getHour(), escalation.getMinute()),
+                hourMinute(dailyReport.getHour(), dailyReport.getMinute()),
+                WeeklyReportScheduleConfig.toDayOfWeek(weeklyReport.getDayOfWeek()),
+                hourMinute(weeklyReport.getHour(), weeklyReport.getMinute()),
+                weeklyReport.getWeekStartDayOfWeek());
+    }
+
+    private static <T> T requireValidDefault(String propertyGroup, Supplier<T> defaults) {
+        try {
+            return defaults.get();
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("Invalid default in " + propertyGroup + ".*: " + e.getMessage()
+                    + ". Every tenant without its own config runs on these defaults; fix the value or the"
+                    + " environment variable that sets it.", e);
+        }
+    }
+
+    private static String hourMinute(int hour, int minute) {
+        return String.format("%02d:%02d", hour, minute);
+    }
+
     public NudgeScheduleConfig getNudgeConfig(int tenantId) {
         String json = fetchConfigValue(tenantId, NUDGE_KEY);
         if (json == null) return defaultNudgeConfig();
@@ -86,7 +139,7 @@ public class TenantConfigService {
                     .minute(sched.path("minute").asInt(defaultNudgeMinute))
                     .build();
         } catch (Exception e) {
-            log.warn("[TenantConfig] Failed to parse nudge config for tenant={}: {}", tenantId, e.getMessage());
+            log.warn("[TenantConfig] Unusable nudge config for tenant={}, using the default: {}", tenantId, e.getMessage());
             return defaultNudgeConfig();
         }
     }
@@ -109,7 +162,7 @@ public class TenantConfigService {
                     .level2OfficerType(officerType(l2.path("officer"), defaultLevel2OfficerType))
                     .build();
         } catch (Exception e) {
-            log.warn("[TenantConfig] Failed to parse escalation config for tenant={}: {}", tenantId, e.getMessage());
+            log.warn("[TenantConfig] Unusable escalation config for tenant={}, using the default: {}", tenantId, e.getMessage());
             return defaultEscalationConfig();
         }
     }
@@ -124,7 +177,7 @@ public class TenantConfigService {
                     .minute(sched.path("minute").asInt(defaultDailyReportMinute))
                     .build();
         } catch (Exception e) {
-            log.warn("[TenantConfig] Failed to parse daily-report config for tenant={}: {}", tenantId, e.getMessage());
+            log.warn("[TenantConfig] Unusable daily-report config for tenant={}, using the default: {}", tenantId, e.getMessage());
             return defaultDailyReportConfig();
         }
     }
@@ -144,9 +197,9 @@ public class TenantConfigService {
      * <p>{@code schedule} says when the job fires; {@code weekStartDay} — a sibling of it, not a cron
      * field — says which seven days the report covers. Both use the cron convention 0–7.</p>
      *
-     * <p>A missing row or an unparseable value degrades to the application defaults rather than
-     * throwing — a tenant with bad config still gets its report on the default schedule instead of
-     * silently getting none. Per-field too: an absent or {@code null} {@code weekStartDay} falls back
+     * <p>A missing row, an unparseable value or an out-of-range field degrades to the application
+     * defaults rather than throwing — a tenant with bad config still gets its report on the default
+     * schedule instead of silently getting none. Per-field too: an absent or {@code null} {@code weekStartDay} falls back
      * to the default, while an explicit {@code 0} is honoured as Sunday.</p>
      */
     public WeeklyReportScheduleConfig getWeeklyReportConfig(int tenantId) {
@@ -162,7 +215,7 @@ public class TenantConfigService {
                     .weekStartDay(weekly.path("weekStartDay").asInt(defaultWeeklyReportWeekStartDay))
                     .build();
         } catch (Exception e) {
-            log.warn("[TenantConfig] Failed to parse weekly-report config for tenant={}: {}", tenantId, e.getMessage());
+            log.warn("[TenantConfig] Unusable weekly-report config for tenant={}, using the default: {}", tenantId, e.getMessage());
             return defaultWeeklyReportConfig();
         }
     }
@@ -184,9 +237,6 @@ public class TenantConfigService {
             return jdbcTemplate.queryForObject(sql, String.class, tenantId, key);
         } catch (EmptyResultDataAccessException e) {
             log.debug("[TenantConfig] Key '{}' not found for tenant={}", key, tenantId);
-            return null;
-        } catch (Exception e) {
-            log.warn("[TenantConfig] Error reading key '{}' for tenant={}: {}", key, tenantId, e.getMessage());
             return null;
         }
     }

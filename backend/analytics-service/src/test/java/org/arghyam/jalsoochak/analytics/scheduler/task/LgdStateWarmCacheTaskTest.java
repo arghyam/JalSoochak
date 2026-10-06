@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.scheduler.task;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
+import org.arghyam.jalsoochak.analytics.scheduler.ScheduledTaskClaim;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.junit.jupiter.api.Test;
 
@@ -19,7 +20,8 @@ class LgdStateWarmCacheTaskTest {
     void runTask_warmsCachesForStateLgds() {
         DimLgdLocationRepository dimLgdLocationRepository = mock(DimLgdLocationRepository.class);
         SchemeRegularityService schemeRegularityService = mock(SchemeRegularityService.class);
-        LgdStateWarmCacheTask task = new LgdStateWarmCacheTask(dimLgdLocationRepository, schemeRegularityService);
+        LgdStateWarmCacheTask task = new LgdStateWarmCacheTask(
+                dimLgdLocationRepository, schemeRegularityService, claimReturning(true));
 
         DimLgdLocation state = DimLgdLocation.builder()
                 .lgdId(889100)
@@ -77,7 +79,8 @@ class LgdStateWarmCacheTaskTest {
     void runTask_skipsRowsMissingIds() {
         DimLgdLocationRepository dimLgdLocationRepository = mock(DimLgdLocationRepository.class);
         SchemeRegularityService schemeRegularityService = mock(SchemeRegularityService.class);
-        LgdStateWarmCacheTask task = new LgdStateWarmCacheTask(dimLgdLocationRepository, schemeRegularityService);
+        LgdStateWarmCacheTask task = new LgdStateWarmCacheTask(
+                dimLgdLocationRepository, schemeRegularityService, claimReturning(true));
 
         DimLgdLocation missingTenant = DimLgdLocation.builder().lgdId(1).tenantId(null).lgdLevel(1).build();
         DimLgdLocation missingLgd = DimLgdLocation.builder().lgdId(null).tenantId(1).lgdLevel(1).build();
@@ -87,5 +90,23 @@ class LgdStateWarmCacheTaskTest {
 
         verify(dimLgdLocationRepository, times(1)).findByLgdLevel(1);
         verifyNoInteractions(schemeRegularityService);
+    }
+
+    @Test
+    void runTask_skipsWhenAnotherInstanceClaimedTheRun() {
+        DimLgdLocationRepository dimLgdLocationRepository = mock(DimLgdLocationRepository.class);
+        SchemeRegularityService schemeRegularityService = mock(SchemeRegularityService.class);
+        LgdStateWarmCacheTask task = new LgdStateWarmCacheTask(
+                dimLgdLocationRepository, schemeRegularityService, claimReturning(false));
+
+        task.runTask();
+
+        verifyNoInteractions(dimLgdLocationRepository, schemeRegularityService);
+    }
+
+    private static ScheduledTaskClaim claimReturning(boolean won) {
+        ScheduledTaskClaim claim = mock(ScheduledTaskClaim.class);
+        when(claim.claimToday("lgd-state-warm-cache")).thenReturn(won);
+        return claim;
     }
 }

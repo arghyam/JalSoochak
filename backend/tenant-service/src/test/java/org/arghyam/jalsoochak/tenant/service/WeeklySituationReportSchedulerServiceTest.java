@@ -11,13 +11,13 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 
@@ -48,7 +48,8 @@ class WeeklySituationReportSchedulerServiceTest {
 
     private static final String SCHEMA = "tenant_mp";
     private static final int TENANT = 1;
-    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+    /** A Thursday, fixed and in the past, so nothing can pass by reading the clock instead of the run date. */
+    private static final LocalDate RUN_DATE = LocalDate.of(2026, 10, 1);
 
     @BeforeEach
     void setUp() {
@@ -64,7 +65,7 @@ class WeeklySituationReportSchedulerServiceTest {
                 .thenReturn(List.of(20L));
         when(nudgeRepository.findSubordinateSectionOfficerIds(SCHEMA, 20L)).thenReturn(List.of(11L, 12L));
 
-        service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY);
+        service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY, RUN_DATE);
 
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(kafkaProducer, times(3)).publishJson(eq("common-topic"), captor.capture());
@@ -101,7 +102,7 @@ class WeeklySituationReportSchedulerServiceTest {
                 .thenReturn(List.of(20L));
         when(nudgeRepository.findSubordinateSectionOfficerIds(SCHEMA, 20L)).thenReturn(List.of(11L));
 
-        service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY);
+        service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY, RUN_DATE);
 
         // Two events, not three: a duplicate would mean a second PDF and a second WhatsApp message
         // landing on a real officer.
@@ -127,7 +128,7 @@ class WeeklySituationReportSchedulerServiceTest {
         assertThat(weekStart.plusDays(6)).isEqualTo(weekEnd);
         // The window must be closed: a report covering a day that has not finished would under-count
         // every scheme that supplies later that day.
-        assertThat(weekEnd).isBefore(LocalDate.now(IST));
+        assertThat(weekEnd).isBefore(RUN_DATE);
     }
 
     @Test
@@ -136,7 +137,7 @@ class WeeklySituationReportSchedulerServiceTest {
         WeeklyReportRequestEvent event = publishOneAndCapture(DayOfWeek.MONDAY);
 
         // Pins the no-op-on-deploy guarantee against the pre-change implementation.
-        LocalDate expectedEnd = LocalDate.now(IST).with(TemporalAdjusters.previous(DayOfWeek.SUNDAY));
+        LocalDate expectedEnd = RUN_DATE.with(TemporalAdjusters.previous(DayOfWeek.SUNDAY));
         assertThat(LocalDate.parse(event.getWeekEnd())).isEqualTo(expectedEnd);
         assertThat(LocalDate.parse(event.getWeekStart())).isEqualTo(expectedEnd.minusDays(6));
     }
@@ -154,7 +155,21 @@ class WeeklySituationReportSchedulerServiceTest {
         assertThat(weekEnd.getDayOfWeek()).isEqualTo(weekStartDay.minus(1));
         assertThat(weekStart.plusDays(6)).isEqualTo(weekEnd);
         // Holds for every start day: the window never reaches into a day still in progress.
-        assertThat(weekEnd).isBefore(LocalDate.now(IST));
+        assertThat(weekEnd).isBefore(RUN_DATE);
+        // The scheduler claims the run under this same date, so the claim names the reported week.
+        assertThat(weekStart).isEqualTo(WeeklySituationReportSchedulerService.reportedWeekStart(RUN_DATE, weekStartDay));
+    }
+
+    @ParameterizedTest(name = "run on {0} with a {1} start reports the week from {2}")
+    @CsvSource({
+            "2026-09-28, MONDAY, 2026-09-21",   // run on the start day: the week that just closed
+            "2026-10-01, MONDAY, 2026-09-21",   // later in the week: still the last closed week
+            "2026-10-01, THURSDAY, 2026-09-24"  // run on a Thursday start: today's week is still open
+    })
+    @DisplayName("reportedWeekStart is the first day of the last complete week before the run date")
+    void reportedWeekStartOnFixedDates(LocalDate runDate, DayOfWeek weekStartDay, LocalDate expected) {
+        assertThat(WeeklySituationReportSchedulerService.reportedWeekStart(runDate, weekStartDay))
+                .isEqualTo(expected);
     }
 
     @ParameterizedTest
@@ -177,13 +192,13 @@ class WeeklySituationReportSchedulerServiceTest {
     @DisplayName("running on the day the week closes still reports the week before, never a partial one")
     void runningOnTheWeekEndDayReportsThePriorWeek() {
         // A week starting the day after today ends today, which has not finished yet.
-        DayOfWeek weekStartDay = LocalDate.now(IST).getDayOfWeek().plus(1);
+        DayOfWeek weekStartDay = RUN_DATE.getDayOfWeek().plus(1);
 
         WeeklyReportRequestEvent event = publishOneAndCapture(weekStartDay);
 
         LocalDate weekEnd = LocalDate.parse(event.getWeekEnd());
-        assertThat(weekEnd).isEqualTo(LocalDate.now(IST).minusDays(7));
-        assertThat(weekEnd).isBefore(LocalDate.now(IST));
+        assertThat(weekEnd).isEqualTo(RUN_DATE.minusDays(7));
+        assertThat(weekEnd).isBefore(RUN_DATE);
     }
 
     @Test
@@ -200,7 +215,7 @@ class WeeklySituationReportSchedulerServiceTest {
         appender.start();
         logger.addAppender(appender);
         try {
-            service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY);
+            service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY, RUN_DATE);
         } finally {
             logger.detachAppender(appender);
             appender.stop();
@@ -221,7 +236,7 @@ class WeeklySituationReportSchedulerServiceTest {
         when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER"))
                 .thenReturn(List.of());
 
-        service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY);
+        service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY, RUN_DATE);
 
         verifyNoInteractions(kafkaProducer);
     }
@@ -232,7 +247,7 @@ class WeeklySituationReportSchedulerServiceTest {
         when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
                 .thenReturn(List.of(11L));
 
-        service.processWeeklyReportsForTenant(SCHEMA, TENANT, weekStartDay);
+        service.processWeeklyReportsForTenant(SCHEMA, TENANT, weekStartDay, RUN_DATE);
 
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());

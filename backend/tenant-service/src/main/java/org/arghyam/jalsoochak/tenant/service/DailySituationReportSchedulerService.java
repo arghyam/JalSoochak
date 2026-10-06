@@ -22,7 +22,7 @@ import java.util.UUID;
  * officer to {@code common-topic}, asking analytics-service to compute that officer's Daily Water
  * Service Situation Report KPIs (which message-service then renders and delivers).
  *
- * <p>Called by {@link TenantSchedulerManager} on each tenant's individual daily schedule. This
+ * <p>Called by {@link NotificationJobScheduler} on each tenant's individual daily schedule. This
  * service reads only officer <em>user ids</em> (no PII); PII is resolved by message-service at
  * delivery time.</p>
  */
@@ -32,7 +32,7 @@ import java.util.UUID;
 public class DailySituationReportSchedulerService {
 
     private static final String COMMON_TOPIC = "common-topic";
-    /** reading_date is stored on the IST calendar day, so "today" must be evaluated in IST. */
+    /** The cut-off is the run instant on the IST clock. */
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
     private final NudgeRepository nudgeRepository;
@@ -47,9 +47,11 @@ public class DailySituationReportSchedulerService {
 
     private static final String SDO_ROLE = "SUB_DIVISIONAL_OFFICER";
 
-    public void processDailyReportsForTenant(String schema, int tenantId) {
-        // The report covers today so far, not yesterday: the officer acts on it the same afternoon.
-        LocalDate reportDate = LocalDate.now(IST);
+    /**
+     * @param reportDate the IST day the report covers, from midnight up to the run instant — the run
+     *                   day itself, not yesterday: the officer acts on it the same afternoon
+     */
+    public void processDailyReportsForTenant(String schema, int tenantId, LocalDate reportDate) {
         // The cut-off is the run instant. Queries bound by it wherever a timestamp column exists, so a
         // replay reproduces the delivered numbers; fact_water_quantity_table has only a date column,
         // so its cut stays implicit in when the job ran.

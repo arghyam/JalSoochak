@@ -48,6 +48,16 @@ class AnomalyConstantsTest {
         }
 
         @Test
+        @DisplayName("the no-meter-detected anomaly is type 12, distinct from an unreadable image")
+        void noMeterDetectedIsTwelve() {
+            // Mirrored by EscalationType.NO_METER_DETECTED in analytics-service and the "12" entry in
+            // message-service's AnomalyLabels.CODE_TO_NAME; all three are pinned to the literal.
+            assertThat(AnomalyConstants.TYPE_NO_METER_DETECTED).isEqualTo(12);
+            assertThat(AnomalyConstants.TYPE_NO_METER_DETECTED)
+                    .isNotEqualTo(AnomalyConstants.TYPE_UNREADABLE_IMAGE);
+        }
+
+        @Test
         @DisplayName("codes are unique and contiguous from 1")
         void codesAreUniqueAndContiguous() {
             List<Integer> codes = intConstants("TYPE_");
@@ -77,7 +87,8 @@ class AnomalyConstantsTest {
         static Stream<String> allReasons() {
             return Stream.concat(
                     supplyReasons(),
-                    Stream.of(AnomalyConstants.REASON_LOCATION_MISMATCH));
+                    Stream.of(AnomalyConstants.REASON_LOCATION_MISMATCH,
+                            AnomalyConstants.REASON_NO_METER_DETECTED));
         }
 
         @Test
@@ -85,6 +96,13 @@ class AnomalyConstantsTest {
         void locationMismatch() {
             assertThat(AnomalyConstants.REASON_LOCATION_MISMATCH)
                     .isEqualTo("Reading submitted outside the scheme boundary.");
+        }
+
+        @Test
+        @DisplayName("the no-meter reason names the condition")
+        void noMeterDetected() {
+            assertThat(AnomalyConstants.REASON_NO_METER_DETECTED)
+                    .isEqualTo("No meter detected in the submitted photo.");
         }
 
         @Test

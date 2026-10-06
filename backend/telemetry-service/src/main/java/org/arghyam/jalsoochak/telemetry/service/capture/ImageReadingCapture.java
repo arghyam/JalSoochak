@@ -33,7 +33,8 @@ import java.util.UUID;
  * happens before any OCR setting is read.
  *
  * <p>A photo that can't be read is rejected and recorded as an unreadable-image anomaly, once per
- * attempt; a temporary OCR outage asks the submitter to retry. OCR reads the meter in the channel's
+ * attempt. A photo with no meter in it at all (the provider's no-meter verdict) is rejected as
+ * {@code NO_METER_DETECTED} and recorded as its own anomaly type instead; a temporary OCR outage asks the submitter to retry. OCR reads the meter in the channel's
  * standard unit, so a {@code reading_unit} other than that one is rejected before any OCR setting is
  * read: it would describe a {@code confirmed_reading} that wasn't sent.
  */
@@ -44,6 +45,9 @@ public class ImageReadingCapture implements ReadingCapture {
 
     private static final String UNREADABLE_IMAGE_MESSAGE =
             "Could not read meter value from image. Please retry with a clearer photo.";
+    /** Also sent to WhatsApp operators; {@code ConversationLocalizationService} translates it. */
+    private static final String NO_METER_MESSAGE =
+            "No meter found in the photo. Please send a straight, clear photo of the water meter.";
     /** Also sent to WhatsApp operators; {@code ConversationLocalizationService} translates it. */
     private static final String IMAGE_NOT_SUPPORTED_MESSAGE =
             "Meter photos are not supported for your reading channel.";
@@ -78,6 +82,11 @@ public class ImageReadingCapture implements ReadingCapture {
                     input.schemeId(),
                     imageUrlHash(input.readingUrl()),
                     summarizeOcrResult(ocrResult));
+            if (ocrResult != null && ocrResult.isNoMeter()) {
+                recordImageAnomaly(input, AnomalyConstants.TYPE_NO_METER_DETECTED,
+                        AnomalyConstants.REASON_NO_METER_DETECTED);
+                return new CaptureOutcome.Rejected(TelemetryErrorCode.NO_METER_DETECTED, NO_METER_MESSAGE);
+            }
             if (ocrResult == null || ocrResult.getAdjustedReading() == null) {
                 recordUnreadableImage(input, "Unreadable image. OCR could not extract a valid meter reading.");
                 return new CaptureOutcome.Rejected(TelemetryErrorCode.UNREADABLE_IMAGE, unreadableImageMessage(ocrResult));
@@ -160,19 +169,24 @@ public class ImageReadingCapture implements ReadingCapture {
     }
 
     private void recordUnreadableImage(CaptureInput input, String reason) {
+        recordImageAnomaly(input, AnomalyConstants.TYPE_UNREADABLE_IMAGE, reason);
+    }
+
+    /** A rejected photo: no reading row is written, so the anomaly has no submission to point at. */
+    private void recordImageAnomaly(CaptureInput input, int anomalyType, String reason) {
         telemetryTenantRepository.createTenantAnomalyRecord(
                 input.schemaName(),
                 TenantAnomalyRecord.builder()
                         .userId(input.operatorId())
                         .schemeId(input.schemeId())
-                        .type(AnomalyConstants.TYPE_UNREADABLE_IMAGE)
+                        .type(anomalyType)
                         .reason(reason)
                         .status(AnomalyConstants.STATUS_OPEN)
                         .retries(1)
                         .build());
         telemetryEventPublisher.publishAnomalyRecorded(
                 input.tenantId(),
-                AnomalyConstants.TYPE_UNREADABLE_IMAGE,
+                anomalyType,
                 input.operatorId(),
                 input.schemeId(),
                 null,
@@ -184,16 +198,16 @@ public class ImageReadingCapture implements ReadingCapture {
                 0,
                 reason,
                 AnomalyConstants.STATUS_OPEN,
-                unreadableImageCorrelationId(input),
+                imageAnomalyCorrelationId(input, anomalyType),
                 // ANOMALY-SUBMISSION-LINK: the submission is rejected here, before any
                 // flow_reading_table row is written, so there is nothing to point at.
                 null);
     }
 
     /** The same photo gives the same id on every attempt, so analytics keeps one anomaly for it. */
-    private static String unreadableImageCorrelationId(CaptureInput input) {
+    private static String imageAnomalyCorrelationId(CaptureInput input, int anomalyType) {
         String normalizedUrl = input.readingUrl() == null ? "" : input.readingUrl().trim();
-        String key = AnomalyConstants.TYPE_UNREADABLE_IMAGE + ":" + input.operatorId() + ":"
+        String key = anomalyType + ":" + input.operatorId() + ":"
                 + input.schemeId() + ":" + normalizedUrl;
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
     }
