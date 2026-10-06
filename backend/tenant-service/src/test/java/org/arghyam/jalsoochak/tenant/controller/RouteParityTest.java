@@ -67,6 +67,11 @@ class RouteParityTest {
             // Messaging secrets
             "POST /api/v1/system/messaging-secrets/rewrap",
             "POST /api/v1/system/messaging-secrets/tenants/{tenantId}/rotate",
+            // Internal CronJob triggers
+            "POST /internal/jobs/nudge",
+            "POST /internal/jobs/escalation",
+            "POST /internal/jobs/daily-report",
+            "POST /internal/jobs/weekly-report",
             // System configuration
             "GET /api/v1/system/config",
             "PUT /api/v1/system/config",

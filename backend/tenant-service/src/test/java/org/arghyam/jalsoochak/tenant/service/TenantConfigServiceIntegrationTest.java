@@ -43,10 +43,6 @@ class TenantConfigServiceIntegrationTest {
     @SuppressWarnings("rawtypes")
     private KafkaTemplate kafkaTemplate;
 
-    /** Suppress @PostConstruct scheduling — not under test here. */
-    @MockBean
-    private TenantSchedulerManager tenantSchedulerManager;
-
     /** Suppress PII encryption startup — not under test here. */
     @MockBean
     private PiiEncryptionService piiEncryptionService;

@@ -18,7 +18,6 @@ import org.arghyam.jalsoochak.tenant.dto.internal.TenantProviderSecretDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TenantSecretKeyDTO;
 import org.arghyam.jalsoochak.tenant.enums.MessagingChannel;
 import org.arghyam.jalsoochak.tenant.service.PiiEncryptionService;
-import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -105,8 +104,6 @@ class TenantProviderSecretRepositoryIntegrationTest {
     @SuppressWarnings("rawtypes")
     private KafkaTemplate kafkaTemplate;
 
-    @MockBean
-    private TenantSchedulerManager tenantSchedulerManager;
 
     /** PiiEncryptionService needs key env vars that tests do not provide. */
     @MockBean

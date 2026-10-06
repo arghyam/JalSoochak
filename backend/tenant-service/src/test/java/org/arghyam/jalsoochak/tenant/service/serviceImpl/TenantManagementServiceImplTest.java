@@ -78,7 +78,6 @@ import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
 import org.arghyam.jalsoochak.tenant.service.ApiKeyService;
 import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
-import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
 import org.arghyam.jalsoochak.tenant.util.TenantConstants;
@@ -127,9 +126,6 @@ class TenantManagementServiceImplTest {
     private ApplicationEventPublisher eventPublisher;
 
     @Mock
-    private TenantSchedulerManager schedulerManager;
-
-    @Mock
     private ObjectStorageService objectStorageService;
 
     @Mock
@@ -165,7 +161,6 @@ class TenantManagementServiceImplTest {
             appProperties,
             tenantDefaults,
             eventPublisher,
-            schedulerManager,
             objectStorageService,
             systemManagementService,
             apiKeyService
@@ -1223,8 +1218,8 @@ class TenantManagementServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should call rescheduleForTenant after persisting a GENERIC schedule config")
-        void testSetTenantConfigs_TriggersReschedule() throws Exception {
+        @DisplayName("Should persist a GENERIC schedule config")
+        void testSetTenantConfigs_PersistsScheduleConfig() throws Exception {
             // Arrange
             Integer tenantId = 1;
             TenantResponseDTO tenant = TenantResponseDTO.builder()
@@ -1256,7 +1251,11 @@ class TenantManagementServiceImplTest {
             tenantManagementService.setTenantConfigs(tenantId, request);
 
             // Assert
-            verify(schedulerManager).rescheduleForTenant(tenantId, "MP");
+            verify(tenantCommonRepository).upsertConfig(
+                    eq(tenantId),
+                    eq(TenantConfigKeyEnum.PUMP_OPERATOR_REMINDER_NUDGE_TIME.name()),
+                    anyString(),
+                    eq(100));
         }
 
         @Test

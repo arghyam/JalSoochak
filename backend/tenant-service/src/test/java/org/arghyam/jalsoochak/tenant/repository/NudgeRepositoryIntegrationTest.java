@@ -1,7 +1,6 @@
 package org.arghyam.jalsoochak.tenant.repository;
 
 import org.arghyam.jalsoochak.tenant.service.PiiEncryptionService;
-import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,6 +13,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.mockito.ArgumentMatchers.anyString;
@@ -61,9 +61,6 @@ class NudgeRepositoryIntegrationTest {
     @SuppressWarnings("rawtypes")
     private KafkaTemplate kafkaTemplate;
 
-    /** Suppress @PostConstruct scheduling – not under test here. */
-    @MockBean
-    private TenantSchedulerManager tenantSchedulerManager;
 
     /** Suppress PII encryption startup – not under test here; decrypt returns input as-is. */
     @MockBean
