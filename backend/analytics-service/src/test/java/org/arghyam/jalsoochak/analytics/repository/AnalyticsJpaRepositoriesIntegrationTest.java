@@ -21,6 +21,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -178,11 +179,15 @@ class AnalyticsJpaRepositoriesIntegrationTest {
         TransactionStatus firstRun = transactionManager.getTransaction(TransactionDefinition.withDefaults());
         try {
             int firstInserted = schedulerRepository.insertDailySchemePerformanceScores(D3);
-            Future<Integer> secondRun = otherPod.submit(() ->
-                    newTransaction.execute(status -> schedulerRepository.insertDailySchemePerformanceScores(D3)));
+            CompletableFuture<Integer> secondRunPid = new CompletableFuture<>();
+            Future<Integer> secondRun = otherPod.submit(() -> newTransaction.execute(status -> {
+                secondRunPid.complete(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                return schedulerRepository.insertDailySchemePerformanceScores(D3);
+            }));
+            int pid = secondRunPid.get(10, TimeUnit.SECONDS);
             // Without the unique key the second run never waits: it cannot see the first one's rows
             // and finishes, inserting its own.
-            await().atMost(Duration.ofSeconds(10)).until(() -> secondRun.isDone() || anyLockWaiting());
+            await().atMost(Duration.ofSeconds(10)).until(() -> secondRun.isDone() || isWaitingOnLock(pid));
             transactionManager.commit(firstRun);
 
             assertThat(firstInserted).isEqualTo(3);
@@ -197,8 +202,9 @@ class AnalyticsJpaRepositoriesIntegrationTest {
     }
 
     // pg_locks reads the lock manager on every call; pg_stat_activity would be frozen for the transaction.
-    private boolean anyLockWaiting() {
-        Integer waiting = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM pg_locks WHERE NOT granted", Integer.class);
+    private boolean isWaitingOnLock(int pid) {
+        Integer waiting = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM pg_locks WHERE pid = ? AND NOT granted", Integer.class, pid);
         return waiting != null && waiting > 0;
     }
 

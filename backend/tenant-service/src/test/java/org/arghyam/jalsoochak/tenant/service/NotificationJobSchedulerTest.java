@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.tenant.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -240,6 +241,19 @@ class NotificationJobSchedulerTest {
             assertThat(error.getValue())
                     .hasSize(NotificationJobScheduler.ERROR_MESSAGE_MAX_LENGTH)
                     .startsWith("java.lang.IllegalStateException: xxx");
+        }
+
+        @Test
+        @DisplayName("a job that throws an Error is marked FAILED, and the Error still propagates")
+        void errorIsRecordedThenRethrown() {
+            StackOverflowError error = new StackOverflowError("deep");
+            doThrow(error).when(dailyReportService).processDailyReportsForTenant("tenant_mp", 1, MON);
+            givenTenants(tenant(1, "MP", TenantStatusEnum.ACTIVE));
+
+            assertThatThrownBy(() -> scheduler.runDueJobs(MON.atTime(16, 0))).isSameAs(error);
+
+            verify(runRepository).markFailed(RUN_ID, "java.lang.StackOverflowError: deep");
+            verify(runRepository, never()).markSucceeded(anyLong());
         }
 
         @Test

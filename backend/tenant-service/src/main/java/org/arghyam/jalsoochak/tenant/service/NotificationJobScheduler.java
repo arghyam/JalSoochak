@@ -161,10 +161,14 @@ public class NotificationJobScheduler {
                 jobType, tenantId, run.periodKey(), run.slot(), instanceId);
         try {
             run.job().run();
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
             log.error("[NotificationScheduler] {} tenant={} period={} FAILED; not retried",
                     jobType, tenantId, run.periodKey(), e);
             scheduledJobRunRepository.markFailed(runId, errorMessage(e));
+            if (e instanceof Error error) {
+                // Recorded so the run is not left RUNNING like a dead pod's; the Error is not ours to swallow.
+                throw error;
+            }
             return;
         }
         scheduledJobRunRepository.markSucceeded(runId);
