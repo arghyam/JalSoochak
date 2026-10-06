@@ -3392,7 +3392,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
-                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
                       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 
@@ -3472,7 +3472,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
-                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
                       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 
@@ -3548,7 +3548,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_anomaly_table a
                     JOIN user_schemes us ON us.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
-                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
                       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 
@@ -3629,7 +3629,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
-                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
                       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 
@@ -3724,7 +3724,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_anomaly_table a
                     JOIN user_schemes us ON us.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
-                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
                       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 
@@ -3815,7 +3815,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
-                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
                       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 

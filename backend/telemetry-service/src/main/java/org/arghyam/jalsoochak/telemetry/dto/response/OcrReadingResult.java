@@ -23,6 +23,13 @@ public class OcrReadingResult {
     private String rejectionReason;
 
     /**
+     * {@code true} when the provider found no meter in the photo at all (the provider's no-meter status:
+     * a rotated, unrelated or random image). Distinct from an unreadable meter: the photo has to be
+     * retaken of the meter, not just made clearer. Any digits returned alongside are ignored.
+     */
+    private boolean noMeter;
+
+    /**
      * Raw {@code data.meterReading} string (built from the OCR provider's {@code selectedDigit}s), before the
      * red-last-digit decimal shift. Preserves digit count and leading zeros for rollover candidate
      * enumeration. {@code null} when the reading could not be parsed.

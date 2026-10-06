@@ -26,7 +26,8 @@ public final class AnomalyLabels {
             Map.entry("OVER_WATER_SUPPLY", "Over Water Supply"),
             Map.entry("NO_SUBMISSION", "No Submission"),
             Map.entry("IMPLAUSIBLE_WATER_SUPPLY", "Implausible Water Supply"),
-            Map.entry("LOCATION_MISMATCH", "Location Mismatch"));
+            Map.entry("LOCATION_MISMATCH", "Location Mismatch"),
+            Map.entry("NO_METER_DETECTED", "No Meter In Photo"));
 
     /** Legacy pre-V29 rows store the numeric code as a string. */
     private static final Map<String, String> CODE_TO_NAME = Map.ofEntries(
@@ -35,7 +36,7 @@ public final class AnomalyLabels {
             Map.entry("5", "READING_LESS_THAN_PREVIOUS"), Map.entry("6", "NO_WATER_SUPPLY"),
             Map.entry("7", "LOW_WATER_SUPPLY"), Map.entry("8", "OVER_WATER_SUPPLY"),
             Map.entry("9", "NO_SUBMISSION"), Map.entry("10", "IMPLAUSIBLE_WATER_SUPPLY"),
-            Map.entry("11", "LOCATION_MISMATCH"));
+            Map.entry("11", "LOCATION_MISMATCH"), Map.entry("12", "NO_METER_DETECTED"));
 
     private AnomalyLabels() {
     }

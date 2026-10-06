@@ -384,6 +384,9 @@ public class ConversationLocalizationService {
         if (normalized.contains("invalid reading value")) {
             return "रीडिंग मान्य नहीं है।";
         }
+        if (normalized.contains("no meter found in the photo")) {
+            return "फोटो में मीटर नहीं मिला। कृपया पानी के मीटर की सीधी और साफ़ फोटो भेजें।";
+        }
         if (normalized.contains("could not read meter value from image")) {
             return "इमेज से मीटर रीडिंग नहीं पढ़ी जा सकी। कृपया स्पष्ट फोटो भेजें।";
         }
