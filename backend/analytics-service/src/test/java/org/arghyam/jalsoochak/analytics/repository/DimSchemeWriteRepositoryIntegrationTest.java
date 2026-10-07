@@ -14,6 +14,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.IllegalTransactionStateException;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -22,8 +25,10 @@ import org.testcontainers.utility.DockerImageName;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Pins how a scheme reaches {@code dim_scheme_table}. Its details are written to every row of the scheme,
@@ -361,6 +366,52 @@ class DimSchemeWriteRepositoryIntegrationTest {
         assertThat(schemeRegularityRepository.getSchemeCountByLgdInScope(TENANT, 101)).isZero();
         assertThat(schemeRegularityRepository.getSchemeCountByLgdInScope(TENANT, 102)).isEqualTo(1);
         assertThat(schemeRegularityRepository.getSchemeCountByLgdInScope(TENANT, PARENT_LGD)).isEqualTo(1);
+    }
+
+    @Test
+    void upsertDetails_holdsTheSchemesLock() {
+        repository.upsertDetails(details(TENANT, SCHEME, COMPLETED, NON_OPERATIVE, null, null, null));
+
+        assertThat(schemeLockHeld(TENANT, SCHEME)).isTrue();
+        assertThat(schemeLockHeld(TENANT, OTHER_SCHEME)).isFalse();
+    }
+
+    @Test
+    void replaceMappings_holdsTheSchemesLock() {
+        repository.replaceMappings(mappings(TENANT, SCHEME, List.of(village(101)), List.of(subDivision(201))));
+
+        assertThat(schemeLockHeld(TENANT, SCHEME)).isTrue();
+        assertThat(schemeLockHeld(TENANT, OTHER_SCHEME)).isFalse();
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void upsertDetails_outsideATransactionFailsRatherThanLockingNothing() {
+        assertThatThrownBy(() -> repository.upsertDetails(
+                details(TENANT, SCHEME, COMPLETED, NON_OPERATIVE, null, null, null)))
+                .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void replaceMappings_outsideATransactionFailsRatherThanLockingNothing() {
+        assertThatThrownBy(() -> repository.replaceMappings(
+                mappings(TENANT, SCHEME, List.of(village(101)), List.of(subDivision(201)))))
+                .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    private boolean schemeLockHeld(int tenantId, int schemeId) {
+        // A two-int advisory lock shows in pg_locks as classid = first key, objid = second key,
+        // objsubid = 2; both columns are oid, so compare them as unsigned.
+        Integer held = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM pg_locks
+                WHERE locktype = 'advisory' AND objsubid = 2 AND granted
+                  AND pid = pg_backend_pid()
+                  AND classid::bigint = ? AND objid::bigint = ?
+                """, Integer.class,
+                Integer.toUnsignedLong(DimSchemeWriteRepository.SCHEME_LOCK_NAMESPACE),
+                Integer.toUnsignedLong(Objects.hash(tenantId, schemeId)));
+        return held == 1;
     }
 
     private static SchemeEvent details(int tenantId, int schemeId, Integer workStatus, Integer operatingStatus,

@@ -6,17 +6,20 @@ import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent.Location;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
  * Writes to {@code dim_scheme_table} that Spring Data cannot express. A scheme has one row per
  * village and sub-division pair, and its details (name, ids, coordinates, statuses, FHTC counts)
- * belong on every one of them, so they are written to all of a scheme's rows at once. It joins the
- * caller's transaction.
+ * belong on every one of them, so they are written to all of a scheme's rows at once. Every write runs
+ * in the caller's transaction and holds the scheme's advisory lock until that transaction ends.
  *
  * <p>A scheme with no villages sits under its state: the tenant's level-1 location (the lowest id if
  * there are several, as the national dashboard picks it). When the tenant's locations are not loaded
@@ -26,6 +29,12 @@ import java.util.Set;
 @Repository
 @RequiredArgsConstructor
 public class DimSchemeWriteRepository {
+
+    /**
+     * Advisory-lock namespace for a scheme's rows. The number itself is arbitrary; it only has to keep
+     * these keys apart from the other two-int advisory locks taken in the shared database.
+     */
+    static final int SCHEME_LOCK_NAMESPACE = "analytics_schema.dim_scheme_table".hashCode();
 
     private static final String STATE_ID_SQL = """
             SELECT MIN(lgd_id) AS lgd_id
@@ -109,7 +118,9 @@ public class DimSchemeWriteRepository {
      *
      * @return the number of rows written
      */
+    @Transactional(propagation = Propagation.MANDATORY)
     public int upsertDetails(SchemeEvent details) {
+        lockScheme(details.getTenantId(), details.getSchemeId());
         jdbcTemplate.update(INSERT_PLACEHOLDER_SQL,
                 details.getTenantId(),
                 details.getTenantId(), details.getSchemeId(),
@@ -127,9 +138,11 @@ public class DimSchemeWriteRepository {
      *
      * @return the number of rows the scheme now has
      */
+    @Transactional(propagation = Propagation.MANDATORY)
     public int replaceMappings(SchemeMappingsReplacedEvent mappings) {
         Integer tenantId = mappings.getTenantId();
         Integer schemeId = mappings.getSchemeId();
+        lockScheme(tenantId, schemeId);
         List<Location> villages = mappings.getVillages().isEmpty()
                 ? List.of(state(tenantId)) : mappings.getVillages();
         // A location with every id null stands in for the sub-division of a scheme that has none.
@@ -164,6 +177,22 @@ public class DimSchemeWriteRepository {
         jdbcTemplate.batchUpdate(UPSERT_PAIR_SQL, upserts);
 
         return writeDetails(mappings);
+    }
+
+    /**
+     * Makes another write to the same scheme wait until this transaction ends, so the two cannot interleave
+     * their reads and writes of its rows. Messages about one scheme share a partition, but a rebalance, or
+     * unkeyed messages sent before keys were added, can still hand two of them to different consumers.
+     * Two schemes whose keys collide only make one of them wait.
+     */
+    private void lockScheme(Integer tenantId, Integer schemeId) {
+        // Two int keys rather than one bigint, so the namespace keeps these apart from other locks.
+        jdbcTemplate.query("SELECT pg_advisory_xact_lock(?, ?)",
+                ps -> {
+                    ps.setInt(1, SCHEME_LOCK_NAMESPACE);
+                    ps.setInt(2, Objects.hash(tenantId, schemeId));
+                },
+                rs -> null);
     }
 
     private Location state(Integer tenantId) {
