@@ -5,6 +5,8 @@ import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEve
 import org.arghyam.jalsoochak.analytics.dto.event.UserSchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent.Location;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
@@ -178,6 +180,50 @@ class DimensionServiceImplTest {
 
         verify(dimSchemeWriteRepository, times(1)).upsertDetails(event);
         verifyNoInteractions(jdbcTemplate);
+    }
+
+    @Test
+    void replaceSchemeMappings_replacesTheSchemesRows() {
+        SchemeMappingsReplacedEvent event = schemeMappings(List.of(new Location()), List.of());
+        when(dimSchemeWriteRepository.replaceMappings(event)).thenReturn(1);
+
+        service.replaceSchemeMappings(event);
+
+        verify(dimSchemeWriteRepository, times(1)).replaceMappings(event);
+        verifyNoInteractions(jdbcTemplate);
+    }
+
+    @Test
+    void replaceSchemeMappings_skips_whenTheVillagesAreMissing() {
+        service.replaceSchemeMappings(schemeMappings(null, List.of()));
+
+        verifyNoInteractions(dimSchemeWriteRepository, jdbcTemplate);
+    }
+
+    @Test
+    void replaceSchemeMappings_skips_whenTheSubDivisionsAreMissing() {
+        service.replaceSchemeMappings(schemeMappings(List.of(), null));
+
+        verifyNoInteractions(dimSchemeWriteRepository, jdbcTemplate);
+    }
+
+    @Test
+    void replaceSchemeMappings_skips_whenTheSchemeIdIsMissing() {
+        SchemeMappingsReplacedEvent event = schemeMappings(List.of(), List.of());
+        event.setSchemeId(null);
+
+        service.replaceSchemeMappings(event);
+
+        verifyNoInteractions(dimSchemeWriteRepository, jdbcTemplate);
+    }
+
+    private static SchemeMappingsReplacedEvent schemeMappings(List<Location> villages, List<Location> subDivisions) {
+        SchemeMappingsReplacedEvent event = new SchemeMappingsReplacedEvent();
+        event.setSchemeId(1001);
+        event.setTenantId(1);
+        event.setVillages(villages);
+        event.setSubDivisions(subDivisions);
+        return event;
     }
 
     @Test

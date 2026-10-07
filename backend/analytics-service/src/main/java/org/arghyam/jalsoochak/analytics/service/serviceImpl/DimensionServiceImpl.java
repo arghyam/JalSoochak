@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
@@ -166,6 +167,25 @@ public class DimensionServiceImpl implements DimensionService {
         int rows = dimSchemeWriteRepository.upsertDetails(event);
         log.info("Upserted dim_scheme_table details [tenantId={}, schemeId={}, rows={}]",
                 event.getTenantId(), event.getSchemeId(), rows);
+    }
+
+    /**
+     * Skips a message missing either list instead of reading it as "none": that would wipe the scheme's
+     * villages or sub-divisions, and a retry cannot add the list.
+     */
+    @Override
+    @Transactional
+    public void replaceSchemeMappings(SchemeMappingsReplacedEvent event) {
+        if (event.getTenantId() == null || event.getSchemeId() == null
+                || event.getVillages() == null || event.getSubDivisions() == null) {
+            log.warn("Skipping dim_scheme_table mappings replace: missing tenantId/schemeId/villages/subDivisions "
+                    + "[tenantId={}, schemeId={}]", event.getTenantId(), event.getSchemeId());
+            return;
+        }
+        int rows = dimSchemeWriteRepository.replaceMappings(event);
+        log.info("Replaced dim_scheme_table mappings [tenantId={}, schemeId={}, villages={}, subDivisions={}, rows={}]",
+                event.getTenantId(), event.getSchemeId(), event.getVillages().size(),
+                event.getSubDivisions().size(), rows);
     }
 
     @Override

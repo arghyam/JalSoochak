@@ -1,6 +1,8 @@
 package org.arghyam.jalsoochak.analytics.repository;
 
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent.Location;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,15 +19,16 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Pins how a scheme's details reach {@code dim_scheme_table}: written to every row of the scheme, never
- * moving a row to another village or sub-division, and placing a scheme that has no rows yet under its
- * state.
+ * Pins how a scheme reaches {@code dim_scheme_table}. Its details are written to every row of the scheme,
+ * never moving a row to another village or sub-division, and a scheme that has no rows yet is placed
+ * under its state. Its villages and sub-divisions, when they change, become one row per pair.
  */
 @JdbcTest
 @Testcontainers
@@ -120,10 +123,7 @@ class DimSchemeWriteRepositoryIntegrationTest {
         repository.upsertDetails(details(TENANT, SCHEME, COMPLETED, NON_OPERATIVE, 30, 40, 50));
 
         assertThat(rows(TENANT, SCHEME))
-                .extracting(row -> List.of(
-                        row.get("parent_lgd_location_id"), row.get("level_1_lgd_id"), row.get("level_2_lgd_id"),
-                        row.get("parent_department_location_id"), row.get("level_1_dept_id"),
-                        row.get("level_2_dept_id")))
+                .extracting(DimSchemeWriteRepositoryIntegrationTest::location)
                 .containsExactlyInAnyOrder(
                         List.of(101, PARENT_LGD, 101, 201, PARENT_DEPT, 201),
                         List.of(102, PARENT_LGD, 102, 202, PARENT_DEPT, 202));
@@ -220,10 +220,170 @@ class DimSchemeWriteRepositoryIntegrationTest {
         assertThat(schemeRegularityRepository.getSchemeCountByLgdInScope(TENANT, PARENT_LGD)).isEqualTo(1);
     }
 
+    @Test
+    void replaceMappings_givesTheSchemeOneRowPerVillageAndSubDivisionPair() {
+        int written = repository.replaceMappings(mappings(TENANT, SCHEME,
+                List.of(village(101), village(102)), List.of(subDivision(201), subDivision(202))));
+
+        assertThat(written).isEqualTo(4);
+        assertThat(rows(TENANT, SCHEME))
+                .extracting(DimSchemeWriteRepositoryIntegrationTest::location)
+                .containsExactlyInAnyOrder(
+                        List.of(101, PARENT_LGD, 101, 201, PARENT_DEPT, 201),
+                        List.of(101, PARENT_LGD, 101, 202, PARENT_DEPT, 202),
+                        List.of(102, PARENT_LGD, 102, 201, PARENT_DEPT, 201),
+                        List.of(102, PARENT_LGD, 102, 202, PARENT_DEPT, 202));
+        assertThat(rows(TENANT, SCHEME)).allSatisfy(row -> {
+            assertThat(row.get("scheme_name")).isEqualTo("Renamed");
+            assertThat(row.get("state_scheme_id")).isEqualTo(7001);
+            assertThat(row.get("work_status")).isEqualTo(HANDED_OVER);
+            assertThat(row.get("fhtc_count")).isEqualTo(30);
+            assertThat(row.get("created_at")).isNotNull();
+            assertThat(row.get("updated_at")).isNotNull();
+        });
+    }
+
+    @Test
+    void replaceMappings_removesThePairsThatAreGone_andKeepsTheRowsOfThoseThatStay() {
+        insertSchemeRow(TENANT, SCHEME, 101, 201);
+        insertSchemeRow(TENANT, SCHEME, 102, 202);
+        Object keptRowId = rows(TENANT, SCHEME).stream()
+                .filter(row -> row.get("parent_lgd_location_id").equals(101))
+                .findFirst().orElseThrow().get("id");
+
+        repository.replaceMappings(mappings(TENANT, SCHEME, List.of(village(101)), List.of(subDivision(201))));
+
+        assertThat(rows(TENANT, SCHEME)).singleElement().satisfies(row -> {
+            assertThat(row.get("id")).isEqualTo(keptRowId);
+            assertThat(location(row)).isEqualTo(List.of(101, PARENT_LGD, 101, 201, PARENT_DEPT, 201));
+            assertThat(row.get("scheme_name")).isEqualTo("Renamed");
+            assertThat(row.get("fhtc_count")).isEqualTo(30);
+        });
+    }
+
+    @Test
+    void replaceMappings_updatesTheLevelIdsOfAPairThatStays() {
+        insertSchemeRow(TENANT, SCHEME, 101, 201);
+
+        repository.replaceMappings(mappings(TENANT, SCHEME,
+                List.of(new Location(101, PARENT_LGD, 102, 101, null, null, null)),
+                List.of(new Location(201, PARENT_DEPT, 202, 201, null, null, null))));
+
+        assertThat(rows(TENANT, SCHEME)).singleElement().satisfies(row -> {
+            assertThat(row.get("level_2_lgd_id")).isEqualTo(102);
+            assertThat(row.get("level_3_lgd_id")).isEqualTo(101);
+            assertThat(row.get("level_2_dept_id")).isEqualTo(202);
+            assertThat(row.get("level_3_dept_id")).isEqualTo(201);
+        });
+    }
+
+    @Test
+    void replaceMappings_removesThePlaceholder_onceTheSchemesVillagesAreKnown() {
+        repository.upsertDetails(details(TENANT, SCHEME, HANDED_OVER, OPERATIVE, null, null, null));
+
+        repository.replaceMappings(mappings(TENANT, SCHEME, List.of(village(101)), List.of(subDivision(201))));
+
+        assertThat(rows(TENANT, SCHEME))
+                .extracting(DimSchemeWriteRepositoryIntegrationTest::location)
+                .containsExactly(List.of(101, PARENT_LGD, 101, 201, PARENT_DEPT, 201));
+    }
+
+    @Test
+    void replaceMappings_placesASchemeWithNoVillagesUnderItsState_onceForEachSubDivision() {
+        insertSchemeRow(TENANT, SCHEME, 101, 201);
+
+        repository.replaceMappings(mappings(TENANT, SCHEME,
+                List.of(), List.of(subDivision(201), subDivision(202))));
+
+        assertThat(rows(TENANT, SCHEME))
+                .extracting(DimSchemeWriteRepositoryIntegrationTest::location)
+                .containsExactlyInAnyOrder(
+                        Arrays.asList(PARENT_LGD, PARENT_LGD, null, 201, PARENT_DEPT, 201),
+                        Arrays.asList(PARENT_LGD, PARENT_LGD, null, 202, PARENT_DEPT, 202));
+    }
+
+    @Test
+    void replaceMappings_leavesTheSubDivisionEmpty_forASchemeWithNone() {
+        insertSchemeRow(TENANT, SCHEME, 101, 201);
+
+        repository.replaceMappings(mappings(TENANT, SCHEME, List.of(village(101)), List.of()));
+
+        assertThat(rows(TENANT, SCHEME))
+                .extracting(DimSchemeWriteRepositoryIntegrationTest::location)
+                .containsExactly(Arrays.asList(101, PARENT_LGD, 101, null, null, null));
+    }
+
+    @Test
+    void replaceMappings_leavesOnePlaceholderUnderTheState_forASchemeWithNoVillagesOrSubDivisions() {
+        insertSchemeRow(TENANT, SCHEME, 101, 201);
+        insertSchemeRow(TENANT, SCHEME, 102, 202);
+
+        repository.replaceMappings(mappings(TENANT, SCHEME, List.of(), List.of()));
+
+        assertThat(rows(TENANT, SCHEME)).singleElement().satisfies(row -> {
+            assertThat(location(row)).isEqualTo(Arrays.asList(PARENT_LGD, PARENT_LGD, null, null, null, null));
+            assertThat(row.get("scheme_name")).isEqualTo("Renamed");
+        });
+    }
+
+    @Test
+    void replaceMappings_placesASchemeWithNoVillagesUnderVillageZero_whenTheTenantsStateIsNotLoaded() {
+        repository.replaceMappings(mappings(OTHER_TENANT, SCHEME, List.of(), List.of(subDivision(201))));
+
+        assertThat(rows(OTHER_TENANT, SCHEME))
+                .extracting(DimSchemeWriteRepositoryIntegrationTest::location)
+                .containsExactly(Arrays.asList(0, null, null, 201, PARENT_DEPT, 201));
+    }
+
+    @Test
+    void replaceMappings_touchesNoOtherSchemeAndNoOtherTenant() {
+        insertSchemeRow(TENANT, OTHER_SCHEME, 101, 201);
+        insertSchemeRow(OTHER_TENANT, SCHEME, 101, 201);
+
+        repository.replaceMappings(mappings(TENANT, SCHEME, List.of(village(102)), List.of(subDivision(202))));
+
+        assertThat(rows(TENANT, OTHER_SCHEME)).singleElement().satisfies(row -> {
+            assertThat(location(row)).isEqualTo(List.of(101, PARENT_LGD, 101, 201, PARENT_DEPT, 201));
+            assertThat(row.get("scheme_name")).isEqualTo("Original");
+        });
+        assertThat(rows(OTHER_TENANT, SCHEME)).singleElement().satisfies(row -> {
+            assertThat(location(row)).isEqualTo(List.of(101, PARENT_LGD, 101, 201, PARENT_DEPT, 201));
+            assertThat(row.get("scheme_name")).isEqualTo("Original");
+        });
+    }
+
+    @Test
+    void districtSchemeCount_followsTheSchemeToItsNewVillages() {
+        insertSchemeRow(TENANT, SCHEME, 101, 201);
+
+        repository.replaceMappings(mappings(TENANT, SCHEME, List.of(village(102)), List.of(subDivision(201))));
+
+        assertThat(schemeRegularityRepository.getSchemeCountByLgdInScope(TENANT, 101)).isZero();
+        assertThat(schemeRegularityRepository.getSchemeCountByLgdInScope(TENANT, 102)).isEqualTo(1);
+        assertThat(schemeRegularityRepository.getSchemeCountByLgdInScope(TENANT, PARENT_LGD)).isEqualTo(1);
+    }
+
     private static SchemeEvent details(int tenantId, int schemeId, Integer workStatus, Integer operatingStatus,
                                        Integer fhtcCount, Integer plannedFhtc, Integer houseHoldCount) {
-        SchemeEvent event = new SchemeEvent();
-        event.setEventType("SCHEME_UPDATED");
+        return withDetails(new SchemeEvent(), "SCHEME_UPDATED", tenantId, schemeId, workStatus, operatingStatus,
+                fhtcCount, plannedFhtc, houseHoldCount);
+    }
+
+    /** The scheme's villages and sub-divisions, sent with HANDED_OVER, OPERATIVE, FHTC 30/40/50. */
+    private static SchemeMappingsReplacedEvent mappings(int tenantId, int schemeId, List<Location> villages,
+                                                        List<Location> subDivisions) {
+        SchemeMappingsReplacedEvent event = withDetails(new SchemeMappingsReplacedEvent(),
+                "SCHEME_MAPPINGS_REPLACED", tenantId, schemeId, HANDED_OVER, OPERATIVE, 30, 40, 50);
+        event.setVillages(villages);
+        event.setSubDivisions(subDivisions);
+        return event;
+    }
+
+    private static <T extends SchemeEvent> T withDetails(T event, String eventType, int tenantId, int schemeId,
+                                                         Integer workStatus, Integer operatingStatus,
+                                                         Integer fhtcCount, Integer plannedFhtc,
+                                                         Integer houseHoldCount) {
+        event.setEventType(eventType);
         event.setTenantId(tenantId);
         event.setSchemeId(schemeId);
         event.setSchemeName("Renamed");
@@ -237,6 +397,23 @@ class DimSchemeWriteRepositoryIntegrationTest {
         event.setPlannedFhtc(plannedFhtc);
         event.setHouseHoldCount(houseHoldCount);
         return event;
+    }
+
+    /** A village in a district: its state at level 1, itself at level 2. */
+    private static Location village(int lgdId) {
+        return new Location(lgdId, PARENT_LGD, lgdId, null, null, null, null);
+    }
+
+    /** A sub-division under the top department at level 1, itself at level 2. */
+    private static Location subDivision(int departmentId) {
+        return new Location(departmentId, PARENT_DEPT, departmentId, null, null, null, null);
+    }
+
+    /** The row's village, its level 1 and 2 ids, then its sub-division and that one's level 1 and 2 ids. */
+    private static List<Object> location(Map<String, Object> row) {
+        return Arrays.asList(
+                row.get("parent_lgd_location_id"), row.get("level_1_lgd_id"), row.get("level_2_lgd_id"),
+                row.get("parent_department_location_id"), row.get("level_1_dept_id"), row.get("level_2_dept_id"));
     }
 
     private List<Map<String, Object>> rows(int tenantId, int schemeId) {
