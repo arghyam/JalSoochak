@@ -159,6 +159,39 @@ class AnalyticsKafkaConsumerTest {
     }
 
     @Test
+    void consumeSchemeEvents_schemeUpdated_bindsFhtcCounts() {
+        String message = """
+                {"eventType":"SCHEME_UPDATED","schemeId":1001,"tenantId":1,
+                 "fhtcCount":30,"plannedFhtc":40,"houseHoldCount":50}
+                """;
+
+        consumer.consumeSchemeEvents(message);
+
+        ArgumentCaptor<SchemeEvent> captor = ArgumentCaptor.forClass(SchemeEvent.class);
+        verify(dimensionService).upsertScheme(captor.capture());
+        assertThat(captor.getValue().getFhtcCount()).isEqualTo(30);
+        assertThat(captor.getValue().getPlannedFhtc()).isEqualTo(40);
+        assertThat(captor.getValue().getHouseHoldCount()).isEqualTo(50);
+    }
+
+    @Test
+    void consumeSchemeEvents_schemeUpdatedInTheOldFormat_isAppliedWithoutItsLocation() {
+        // Messages sent before the details/mappings split still carry one village and sub-division.
+        String message = """
+                {"eventType":"SCHEME_UPDATED","schemeId":1001,"tenantId":1,"status":1,"work_status":2,
+                 "parentLgdLocationId":101,"level1LgdId":101,"level6LgdId":101,
+                 "parentDepartmentLocationId":201,"level1DeptId":201,"level6DeptId":201}
+                """;
+
+        consumer.consumeSchemeEvents(message);
+
+        ArgumentCaptor<SchemeEvent> captor = ArgumentCaptor.forClass(SchemeEvent.class);
+        verify(dimensionService).upsertScheme(captor.capture());
+        assertThat(captor.getValue().getWorkStatus()).isEqualTo(2);
+        assertThat(captor.getValue().getFhtcCount()).isNull();
+    }
+
+    @Test
     void consumeUserEvents_userCreated_routesToUpsertUser() throws Exception {
         String message = """
                 {"eventType":"USER_CREATED","userId":42,"tenantId":3,"email":"admin@state.gov","userType":2,"uuid":"11111111-1111-1111-1111-111111111111","status":1,"title":"First Last"}

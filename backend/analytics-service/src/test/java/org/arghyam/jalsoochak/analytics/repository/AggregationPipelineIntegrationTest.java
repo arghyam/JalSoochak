@@ -136,8 +136,8 @@ class AggregationPipelineIntegrationTest {
     @Test
     void schemeDaily_fannedOutScheme_takesStatusFromLatestWrittenRow_andCountsFromLargestRow() {
         // A second mapping row for scheme 2, written later with the scheme's new status. The
-        // dimension writer only rewrites the row it finds last, so the original row still holds
-        // the old status (1 Ongoing / 2 Partially Operative) and the larger household counts.
+        // earlier one-row dimension writer left rows like the original one holding the old status
+        // (1 Ongoing / 2 Partially Operative) and the larger household counts.
         insertScheme(2, 2, 11, 2, 0, 5, "NOW() + INTERVAL '1 hour'");
 
         aggregationRepository.upsertSchemeDaily(D1, D1);
