@@ -16,7 +16,6 @@ import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -41,18 +40,6 @@ class KafkaProducerTest {
     }
 
     @Test
-    void publishJson_returnsTrueOnSuccessfulSerializationAndSend() throws Exception {
-        when(objectMapper.writeValueAsString(Map.of("k", "v"))).thenReturn("{\"k\":\"v\"}");
-        when(kafkaTemplate.send(eq("topic-1"), isNull(), anyString()))
-                .thenReturn(CompletableFuture.completedFuture(null));
-
-        boolean ok = kafkaProducer.publishJson("topic-1", Map.of("k", "v"));
-
-        assertThat(ok).isTrue();
-        verify(kafkaTemplate).send("topic-1", null, "{\"k\":\"v\"}");
-    }
-
-    @Test
     void publishJson_sendsTheRecordUnderTheGivenKey() throws Exception {
         when(objectMapper.writeValueAsString(Map.of("k", "v"))).thenReturn("{\"k\":\"v\"}");
         when(kafkaTemplate.send(eq("topic-1"), eq("200:77"), anyString()))
@@ -69,7 +56,7 @@ class KafkaProducerTest {
         when(objectMapper.writeValueAsString(Map.of("k", "v")))
                 .thenThrow(new RuntimeException("json error"));
 
-        boolean ok = kafkaProducer.publishJson("topic-1", Map.of("k", "v"));
+        boolean ok = kafkaProducer.publishJson("topic-1", "k1", Map.of("k", "v"));
 
         assertThat(ok).isFalse();
     }
