@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.scheme.service;
 
+import org.arghyam.jalsoochak.scheme.dto.SchemeAnalyticsResyncResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
@@ -56,4 +57,10 @@ public interface SchemeService {
     ReportLinkResponseDTO downloadSchemesReport();
 
     ReportLinkResponseDTO downloadSchemeMappingsReport();
+
+    /**
+     * Sends every scheme of the caller's tenant to analytics with its details, villages and
+     * sub-divisions, so analytics can bring the scheme's rows back in line with them.
+     */
+    SchemeAnalyticsResyncResponseDTO resyncSchemesToAnalytics();
 }

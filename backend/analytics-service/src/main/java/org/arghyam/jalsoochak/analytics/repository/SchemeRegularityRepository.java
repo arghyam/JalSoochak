@@ -247,15 +247,14 @@ public class SchemeRegularityRepository {
      * <p>Since V24 the table is unique on
      * {@code (tenant_id, scheme_id, parent_lgd_location_id, parent_department_location_id)}, so one scheme
      * spans one row per mapping. The scheme-level attributes on those rows — name, work_status,
-     * operating_status — describe the scheme rather than the mapping and are meant to be identical
-     * everywhere, but {@code DimensionServiceImpl} rewrites only the single row it finds by
-     * {@code findTopByTenantIdAndSchemeIdOrderByUpdatedAtDescCreatedAtDesc}, so after any status change the
-     * new value sits on that row alone. Aggregating over the raw rows therefore counts such a scheme once
-     * per distinct value, pushing the status buckets past the scheme total, and lists it once per row.
+     * operating_status — describe the scheme rather than the mapping. {@link DimSchemeWriteRepository}
+     * writes them to every row of the scheme, but an earlier writer rewrote only the latest row, and the
+     * rows it left behind keep their old values until scheme-service re-sends the scheme. Aggregating
+     * over the raw rows would count such a scheme once per distinct value, pushing the status buckets
+     * past the scheme total, and list it once per row.
      *
-     * <p>Mirroring the writer's own ordering keeps a read on the row it last wrote, so the dashboard shows
-     * the current status and counts the scheme exactly once. {@code id} closes the ordering for rows written
-     * in the same instant.
+     * <p>Reading the most recently written row shows the current status and counts the scheme exactly
+     * once. {@code id} closes the ordering for rows written in the same instant.
      *
      * <p>Package-visible so {@link AggregationRepository} reads scheme status from the same row.
      *

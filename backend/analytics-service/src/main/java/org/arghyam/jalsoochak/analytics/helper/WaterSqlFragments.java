@@ -89,8 +89,8 @@ public final class WaterSqlFragments {
      *
      * <p>Not to be confused with {@code canonicalSchemeRowOrder} ({@code {{CSR}}}), which orders by
      * {@code updated_at DESC} to find the most recently <em>written</em> row. That one is correct for
-     * reading a scheme's current status or name, because the dimension writer rewrites only the row it
-     * finds; this one is correct for reading its counts. They are not interchangeable.</p>
+     * reading a scheme's current status or name, because rows left by the earlier one-row writer can
+     * still hold old values; this one is correct for reading its counts. They are not interchangeable.</p>
      *
      * @param alias alias of {@code dim_scheme_table}, or blank when selecting from an earlier CTE
      */

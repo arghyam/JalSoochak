@@ -25,10 +25,14 @@ public class KafkaProducer {
         kafkaTemplate.send(TOPIC, message);
     }
 
-    public boolean publishJson(String topic, Object event) {
+    /**
+     * Publishes {@code event} as JSON under {@code key}. Kafka keeps records with the same key in one
+     * partition, so consumers see them in the order they were sent.
+     */
+    public boolean publishJson(String topic, String key, Object event) {
         try {
             String json = objectMapper.writeValueAsString(event);
-            CompletableFuture<SendResult<String, String>> fut = kafkaTemplate.send(topic, json);
+            CompletableFuture<SendResult<String, String>> fut = kafkaTemplate.send(topic, key, json);
             fut.whenComplete((result, ex) -> {
                 if (ex != null) {
                     log.error("[kafka:publish] FAILED topic={} err={}", topic, ex.getMessage(), ex);
