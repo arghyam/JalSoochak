@@ -46,4 +46,14 @@ class SchemeBulkTransferControllerTest {
         assertThat(controller.downloadSchemes().getBody()).isEqualTo(schemes);
         assertThat(controller.downloadSchemeMappings().getBody()).isEqualTo(mappings);
     }
+
+    @Test
+    void republishSchemeDimensions_delegatesToService() {
+        when(schemeService.republishSchemeDimensions("as")).thenReturn(java.util.Map.of("schemes", 3, "failed", 0));
+
+        var response = controller.republishSchemeDimensions("as");
+
+        assertThat(response.getBody()).containsEntry("schemes", 3);
+        verify(schemeService).republishSchemeDimensions("as");
+    }
 }

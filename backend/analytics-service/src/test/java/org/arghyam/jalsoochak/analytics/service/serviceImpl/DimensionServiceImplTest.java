@@ -68,8 +68,35 @@ class DimensionServiceImplTest {
     @Mock
     private JdbcTemplate jdbcTemplate;
 
+    @Mock
+    private org.arghyam.jalsoochak.analytics.repository.SchemeDimensionReplaceRepository schemeDimensionReplaceRepository;
+
     @InjectMocks
     private DimensionServiceImpl service;
+
+    @Test
+    void replaceSchemeDimension_delegatesForAKnownTenant() {
+        var event = new org.arghyam.jalsoochak.analytics.dto.event.SchemeDimensionReplacedEvent();
+        event.setTenantId(1);
+        event.setSchemeId(10);
+        org.mockito.Mockito.when(dimTenantRepository.existsById(1)).thenReturn(true);
+
+        service.replaceSchemeDimension(event);
+
+        org.mockito.Mockito.verify(schemeDimensionReplaceRepository).replace(event);
+    }
+
+    @Test
+    void replaceSchemeDimension_skipsATenantAnalyticsDoesNotKnowYet() {
+        var event = new org.arghyam.jalsoochak.analytics.dto.event.SchemeDimensionReplacedEvent();
+        event.setTenantId(1);
+        event.setSchemeId(10);
+        org.mockito.Mockito.when(dimTenantRepository.existsById(1)).thenReturn(false);
+
+        service.replaceSchemeDimension(event);
+
+        org.mockito.Mockito.verifyNoInteractions(schemeDimensionReplaceRepository);
+    }
 
     @Test
     void upsertTenant_setsDefaultsAndSaves() {

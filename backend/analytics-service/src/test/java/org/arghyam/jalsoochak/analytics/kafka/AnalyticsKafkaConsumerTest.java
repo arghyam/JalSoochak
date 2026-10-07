@@ -52,8 +52,38 @@ class AnalyticsKafkaConsumerTest {
     @Mock
     private FactService factService;
 
+    @Mock
+    private org.arghyam.jalsoochak.analytics.service.SchemeReassignmentService schemeReassignmentService;
+
     @InjectMocks
     private AnalyticsKafkaConsumer consumer;
+
+    @Test
+    void consumeSchemeEvents_dimensionReplaced_routesToReplaceSchemeDimension() {
+        consumer.consumeSchemeEvents("""
+                {"eventType":"SCHEME_DIMENSION_REPLACED","tenantId":1,"schemeId":10,"schemeName":"S",
+                 "rows":[{"parentLgdLocationId":501,"lgdLevels":[1,2,3,4,501],"parentDepartmentLocationId":61}]}
+                """);
+
+        ArgumentCaptor<org.arghyam.jalsoochak.analytics.dto.event.SchemeDimensionReplacedEvent> captor =
+                ArgumentCaptor.forClass(org.arghyam.jalsoochak.analytics.dto.event.SchemeDimensionReplacedEvent.class);
+        verify(dimensionService).replaceSchemeDimension(captor.capture());
+        assertThat(captor.getValue().getRows()).singleElement()
+                .satisfies(r -> assertThat(r.getLgdLevels()).containsExactly(1, 2, 3, 4, 501));
+    }
+
+    @Test
+    void consumeSchemeEvents_readingsReassigned_routesToTheReassignmentService() {
+        consumer.consumeSchemeEvents("""
+                {"eventType":"SCHEME_READINGS_REASSIGNED","tenantId":1,"fromSchemeId":99,"toSchemeId":10}
+                """);
+
+        ArgumentCaptor<org.arghyam.jalsoochak.analytics.dto.event.SchemeReadingsReassignedEvent> captor =
+                ArgumentCaptor.forClass(org.arghyam.jalsoochak.analytics.dto.event.SchemeReadingsReassignedEvent.class);
+        verify(schemeReassignmentService).reassign(captor.capture());
+        assertThat(captor.getValue().getFromSchemeId()).isEqualTo(99);
+        assertThat(captor.getValue().getToSchemeId()).isEqualTo(10);
+    }
 
     private static Object readField(Object target, String fieldName) {
         try {
