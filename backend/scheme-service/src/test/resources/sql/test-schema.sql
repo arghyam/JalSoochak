@@ -5,10 +5,18 @@
 CREATE SCHEMA IF NOT EXISTS tenant_mp;
 
 CREATE TABLE tenant_mp.scheme_master_table (
-    id               SERIAL        PRIMARY KEY,
-    state_scheme_id  VARCHAR(255)  NOT NULL,
-    scheme_name      VARCHAR(255)  NOT NULL,
-    created_at       TIMESTAMP     NOT NULL DEFAULT NOW(),
+    id               SERIAL            PRIMARY KEY,
+    state_scheme_id  VARCHAR(255)      NOT NULL,
+    centre_scheme_id VARCHAR(255)      NOT NULL,
+    scheme_name      VARCHAR(255)      NOT NULL,
+    fhtc_count       INTEGER           NOT NULL DEFAULT 0,
+    planned_fhtc     INTEGER           NOT NULL DEFAULT 0,
+    house_hold_count INTEGER           NOT NULL DEFAULT 0,
+    latitude         DOUBLE PRECISION,
+    longitude        DOUBLE PRECISION,
+    work_status      INTEGER           NOT NULL,
+    operating_status INTEGER           NOT NULL,
+    created_at       TIMESTAMP         NOT NULL DEFAULT NOW(),
     deleted_at       TIMESTAMP
 );
 

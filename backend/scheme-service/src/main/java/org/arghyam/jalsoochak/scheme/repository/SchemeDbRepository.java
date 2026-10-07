@@ -54,17 +54,19 @@ public class SchemeDbRepository {
             Integer operatingStatus
     ) {}
 
+    /** A scheme's details for analytics. Its villages and sub-divisions are sent separately. */
     public record SchemeAnalyticsRow(
             Integer schemeId,
             String stateSchemeId,
             String centreSchemeId,
             String schemeName,
+            Integer fhtcCount,
+            Integer plannedFhtc,
+            Integer houseHoldCount,
             Double latitude,
             Double longitude,
             Integer workStatus,
-            Integer operatingStatus,
-            Integer parentLgdId,
-            Integer parentDepartmentId
+            Integer operatingStatus
     ) {}
 
     public List<SchemeDTO> findAllSchemes(String schemaName) {
@@ -891,32 +893,17 @@ public class SchemeDbRepository {
                        sm.state_scheme_id,
                        sm.centre_scheme_id,
                        sm.scheme_name,
+                       sm.fhtc_count,
+                       sm.planned_fhtc,
+                       sm.house_hold_count,
                        sm.latitude,
                        sm.longitude,
                        sm.work_status,
-                       sm.operating_status,
-                       slm.parent_lgd_id,
-                       sdm.parent_department_id
+                       sm.operating_status
                 FROM %s.scheme_master_table sm
-                LEFT JOIN LATERAL (
-                    SELECT parent_lgd_id
-                    FROM %s.scheme_lgd_mapping_table
-                    WHERE scheme_id = sm.id
-                      AND deleted_at IS NULL
-                    ORDER BY id
-                    LIMIT 1
-                ) slm ON TRUE
-                LEFT JOIN LATERAL (
-                    SELECT parent_department_id
-                    FROM %s.scheme_department_mapping_table
-                    WHERE scheme_id = sm.id
-                      AND deleted_at IS NULL
-                    ORDER BY id
-                    LIMIT 1
-                ) sdm ON TRUE
                 WHERE sm.deleted_at IS NULL
                   AND lower(sm.state_scheme_id) IN (%s)
-                """, schemaName, schemaName, schemaName, placeholders);
+                """, schemaName, placeholders);
 
         List<Object> args = new ArrayList<>(uniq);
         return jdbcTemplate.query(sql, (rs, rowNum) -> new SchemeAnalyticsRow(
@@ -924,12 +911,13 @@ public class SchemeDbRepository {
                 rs.getString("state_scheme_id"),
                 rs.getString("centre_scheme_id"),
                 rs.getString("scheme_name"),
+                (Integer) rs.getObject("fhtc_count"),
+                (Integer) rs.getObject("planned_fhtc"),
+                (Integer) rs.getObject("house_hold_count"),
                 (Double) rs.getObject("latitude"),
                 (Double) rs.getObject("longitude"),
                 (Integer) rs.getObject("work_status"),
-                (Integer) rs.getObject("operating_status"),
-                (Integer) rs.getObject("parent_lgd_id"),
-                (Integer) rs.getObject("parent_department_id")
+                (Integer) rs.getObject("operating_status")
         ), args.toArray());
     }
 
@@ -949,32 +937,17 @@ public class SchemeDbRepository {
                        sm.state_scheme_id,
                        sm.centre_scheme_id,
                        sm.scheme_name,
+                       sm.fhtc_count,
+                       sm.planned_fhtc,
+                       sm.house_hold_count,
                        sm.latitude,
                        sm.longitude,
                        sm.work_status,
-                       sm.operating_status,
-                       slm.parent_lgd_id,
-                       sdm.parent_department_id
+                       sm.operating_status
                 FROM %s.scheme_master_table sm
-                LEFT JOIN LATERAL (
-                    SELECT parent_lgd_id
-                    FROM %s.scheme_lgd_mapping_table
-                    WHERE scheme_id = sm.id
-                      AND deleted_at IS NULL
-                    ORDER BY id
-                    LIMIT 1
-                ) slm ON TRUE
-                LEFT JOIN LATERAL (
-                    SELECT parent_department_id
-                    FROM %s.scheme_department_mapping_table
-                    WHERE scheme_id = sm.id
-                      AND deleted_at IS NULL
-                    ORDER BY id
-                    LIMIT 1
-                ) sdm ON TRUE
                 WHERE sm.deleted_at IS NULL
                   AND sm.id IN (%s)
-                """, schemaName, schemaName, schemaName, placeholders);
+                """, schemaName, placeholders);
 
         List<Object> args = new ArrayList<>(uniq);
         return jdbcTemplate.query(sql, (rs, rowNum) -> new SchemeAnalyticsRow(
@@ -982,12 +955,13 @@ public class SchemeDbRepository {
                 rs.getString("state_scheme_id"),
                 rs.getString("centre_scheme_id"),
                 rs.getString("scheme_name"),
+                (Integer) rs.getObject("fhtc_count"),
+                (Integer) rs.getObject("planned_fhtc"),
+                (Integer) rs.getObject("house_hold_count"),
                 (Double) rs.getObject("latitude"),
                 (Double) rs.getObject("longitude"),
                 (Integer) rs.getObject("work_status"),
-                (Integer) rs.getObject("operating_status"),
-                (Integer) rs.getObject("parent_lgd_id"),
-                (Integer) rs.getObject("parent_department_id")
+                (Integer) rs.getObject("operating_status")
         ), args.toArray());
     }
 

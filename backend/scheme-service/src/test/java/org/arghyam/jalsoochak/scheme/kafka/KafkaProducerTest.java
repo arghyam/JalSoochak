@@ -16,6 +16,7 @@ import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -42,13 +43,25 @@ class KafkaProducerTest {
     @Test
     void publishJson_returnsTrueOnSuccessfulSerializationAndSend() throws Exception {
         when(objectMapper.writeValueAsString(Map.of("k", "v"))).thenReturn("{\"k\":\"v\"}");
-        when(kafkaTemplate.send(eq("topic-1"), anyString()))
+        when(kafkaTemplate.send(eq("topic-1"), isNull(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture(null));
 
         boolean ok = kafkaProducer.publishJson("topic-1", Map.of("k", "v"));
 
         assertThat(ok).isTrue();
-        verify(kafkaTemplate).send("topic-1", "{\"k\":\"v\"}");
+        verify(kafkaTemplate).send("topic-1", null, "{\"k\":\"v\"}");
+    }
+
+    @Test
+    void publishJson_sendsTheRecordUnderTheGivenKey() throws Exception {
+        when(objectMapper.writeValueAsString(Map.of("k", "v"))).thenReturn("{\"k\":\"v\"}");
+        when(kafkaTemplate.send(eq("topic-1"), eq("200:77"), anyString()))
+                .thenReturn(CompletableFuture.completedFuture(null));
+
+        boolean ok = kafkaProducer.publishJson("topic-1", "200:77", Map.of("k", "v"));
+
+        assertThat(ok).isTrue();
+        verify(kafkaTemplate).send("topic-1", "200:77", "{\"k\":\"v\"}");
     }
 
     @Test
@@ -66,18 +79,18 @@ class KafkaProducerTest {
         when(objectMapper.writeValueAsString("e")).thenReturn("\"e\"");
         RecordMetadata meta = new RecordMetadata(new TopicPartition("topic-1", 2), 5L, 0, 0L, 0, 0);
         SendResult<String, String> result = new SendResult<>(null, meta);
-        when(kafkaTemplate.send("topic-1", "\"e\"")).thenReturn(CompletableFuture.completedFuture(result));
+        when(kafkaTemplate.send("topic-1", "k1", "\"e\"")).thenReturn(CompletableFuture.completedFuture(result));
 
-        assertThat(kafkaProducer.publishJson("topic-1", "e")).isTrue();
+        assertThat(kafkaProducer.publishJson("topic-1", "k1", "e")).isTrue();
     }
 
     @Test
     void publishJson_returnsTrueWhenMetadataUnavailable() throws Exception {
         when(objectMapper.writeValueAsString("e")).thenReturn("\"e\"");
-        when(kafkaTemplate.send("topic-1", "\"e\""))
+        when(kafkaTemplate.send("topic-1", "k1", "\"e\""))
                 .thenReturn(CompletableFuture.completedFuture(new SendResult<>(null, null)));
 
-        assertThat(kafkaProducer.publishJson("topic-1", "e")).isTrue();
+        assertThat(kafkaProducer.publishJson("topic-1", "k1", "e")).isTrue();
     }
 
     @Test
@@ -86,17 +99,17 @@ class KafkaProducerTest {
         when(objectMapper.writeValueAsString("e")).thenReturn("\"e\"");
         SendResult<String, String> result = mock(SendResult.class);
         when(result.getRecordMetadata()).thenThrow(new IllegalStateException("boom"));
-        when(kafkaTemplate.send("topic-1", "\"e\"")).thenReturn(CompletableFuture.completedFuture(result));
+        when(kafkaTemplate.send("topic-1", "k1", "\"e\"")).thenReturn(CompletableFuture.completedFuture(result));
 
-        assertThat(kafkaProducer.publishJson("topic-1", "e")).isTrue();
+        assertThat(kafkaProducer.publishJson("topic-1", "k1", "e")).isTrue();
     }
 
     @Test
     void publishJson_returnsTrueEvenWhenAsyncSendFails() throws Exception {
         when(objectMapper.writeValueAsString("e")).thenReturn("\"e\"");
-        when(kafkaTemplate.send("topic-1", "\"e\""))
+        when(kafkaTemplate.send("topic-1", "k1", "\"e\""))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("broker down")));
 
-        assertThat(kafkaProducer.publishJson("topic-1", "e")).isTrue();
+        assertThat(kafkaProducer.publishJson("topic-1", "k1", "e")).isTrue();
     }
 }

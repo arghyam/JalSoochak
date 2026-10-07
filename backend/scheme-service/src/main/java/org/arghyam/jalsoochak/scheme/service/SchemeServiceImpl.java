@@ -1281,9 +1281,6 @@ public class SchemeServiceImpl implements SchemeService {
             return;
         }
         for (SchemeDbRepository.SchemeAnalyticsRow row : rows) {
-            Integer parentLgd = row.parentLgdId() != null ? row.parentLgdId() : 0;
-            Integer parentDept = row.parentDepartmentId();
-            int deptLevelFallback = parentDept != null ? parentDept : 0;
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("eventType", "SCHEME_UPDATED");
             payload.put("schemeId", row.schemeId());
@@ -1293,25 +1290,19 @@ public class SchemeServiceImpl implements SchemeService {
             payload.put("centreSchemeId", safeParseInt(row.centreSchemeId()));
             payload.put("longitude", row.longitude());
             payload.put("latitude", row.latitude());
-            payload.put("parentLgdLocationId", parentLgd);
-            payload.put("level1LgdId", parentLgd);
-            payload.put("level2LgdId", parentLgd);
-            payload.put("level3LgdId", parentLgd);
-            payload.put("level4LgdId", parentLgd);
-            payload.put("level5LgdId", parentLgd);
-            payload.put("level6LgdId", parentLgd);
-            payload.put("parentDepartmentLocationId", parentDept);
-            payload.put("level1DeptId", deptLevelFallback);
-            payload.put("level2DeptId", deptLevelFallback);
-            payload.put("level3DeptId", deptLevelFallback);
-            payload.put("level4DeptId", deptLevelFallback);
-            payload.put("level5DeptId", deptLevelFallback);
-            payload.put("level6DeptId", deptLevelFallback);
+            payload.put("fhtcCount", row.fhtcCount());
+            payload.put("plannedFhtc", row.plannedFhtc());
+            payload.put("houseHoldCount", row.houseHoldCount());
             payload.put("status", row.operatingStatus());
             payload.put("operating_status", row.operatingStatus());
             payload.put("work_status", row.workStatus());
-            kafkaProducer.publishJson(SCHEME_TOPIC, payload);
+            kafkaProducer.publishJson(SCHEME_TOPIC, schemeEventKey(tenantId, row.schemeId()), payload);
         }
+    }
+
+    /** Keys every message about a scheme the same way, so analytics applies them in the order sent. */
+    private static String schemeEventKey(Integer tenantId, Integer schemeId) {
+        return tenantId + ":" + schemeId;
     }
 
     private Integer safeParseInt(String value) {
