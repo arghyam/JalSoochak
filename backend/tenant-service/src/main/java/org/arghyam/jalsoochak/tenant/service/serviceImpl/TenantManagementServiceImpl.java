@@ -26,6 +26,7 @@ import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.ElmFormulaConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageConfigDTO;
@@ -377,8 +378,20 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 // job for this tenant on the next startup. The cron fields carry the same risk as
                 // weekStartDay — validateScheduleConfig rejects all four alike — so both are checked.
                 WeeklyReportTimingConfigDTO weeklyDto = (WeeklyReportTimingConfigDTO) dto;
+                if (weeklyDto == null) {
+                    throw new InvalidConfigValueException("WEEKLY_SITUATION_REPORT_TIME must not be null");
+                }
                 weeklyDto.validatedWeekStartDay();
                 weeklyDto.validateSchedule();
+            }
+
+            if (key == TenantConfigKeyEnum.ELM_WATER_QUANTITY_FORMULA) {
+                // An unknown code already failed to bind above, but null and {} bind without error, and
+                // there is no default formula to fall back on.
+                if (dto == null) {
+                    throw new InvalidConfigValueException("ELM_WATER_QUANTITY_FORMULA must not be null");
+                }
+                ((ElmFormulaConfigDTO) dto).validatedFormula();
             }
 
             if (key.getType() == ConfigType.GENERIC) {

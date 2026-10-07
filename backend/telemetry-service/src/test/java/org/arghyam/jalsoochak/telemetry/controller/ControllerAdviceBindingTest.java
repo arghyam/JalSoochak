@@ -9,6 +9,7 @@ import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
 import org.arghyam.jalsoochak.telemetry.controller.ingest.MultiFormatReadingController;
 import org.arghyam.jalsoochak.telemetry.controller.ingest.ReadingIngestController;
 import org.arghyam.jalsoochak.telemetry.controller.ingest.TelemetryValidationExceptionHandler;
+import org.arghyam.jalsoochak.telemetry.controller.internal.ReadingBackfillController;
 import org.arghyam.jalsoochak.telemetry.controller.webhook.ConversationWebhookController;
 import org.arghyam.jalsoochak.telemetry.controller.webhook.IssueReportWebhookController;
 import org.arghyam.jalsoochak.telemetry.controller.webhook.MeterChangeWebhookController;
@@ -76,7 +77,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       {@code submissionRejected} on a validation reject, so analytics undercounts reported
  *       schemes.</li>
  * </ul>
- * {@code MultiFormatReadingController} is deliberately covered by neither.
+ * {@code MultiFormatReadingController} and {@code ReadingBackfillController} are deliberately covered
+ * by neither.
  *
  * <p>The binding checks use Spring's own {@link ControllerAdviceBean} applicability test over every
  * controller in the service, so they cover a controller no HTTP case can reach (most webhook request
@@ -202,6 +204,13 @@ class ControllerAdviceBindingTest {
         // It validates manually and handles its own malformed bodies, answering every failure in its
         // own envelope. Kept out so that a later change to the ingest advice cannot reach it.
         assertThat(advicesFor(MultiFormatReadingController.class)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("ReadingBackfillController is answered by neither advice")
+    void theBackfillControllerIsAnsweredByNeitherAdvice() {
+        // It handles its own validation failures and malformed bodies, in its own envelope.
+        assertThat(advicesFor(ReadingBackfillController.class)).isEmpty();
     }
 
     // ---- Webhook envelope, end to end ----

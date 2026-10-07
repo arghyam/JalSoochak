@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 
 /**
- * The one place the meter's native volume unit is converted to the unit the warehouse stores.
+ * The one place a volume is converted to the whole litres the warehouse stores.
  *
  * <p>Bulk flow meters read in cubic metres (m&sup3;, identical to kilolitres), while
  * {@code analytics_schema.fact_water_quantity_table.water_quantity} is denominated in <strong>litres</strong>
@@ -60,7 +60,26 @@ public final class WaterVolumeUnits {
         try {
             return litres.longValueExact();
         } catch (ArithmeticException e) {
-            throw new WaterVolumeOutOfRangeException(cubicMetres);
+            throw new WaterVolumeOutOfRangeException(cubicMetres, "m3");
+        }
+    }
+
+    /**
+     * Rounds a decimal volume in litres to whole litres, the same way
+     * {@link #cubicMetresToLitres(BigDecimal)} does.
+     *
+     * <p>For the ELM and PDU formulas, whose results are already litres but not whole ones. They
+     * compute at full precision and round only here, once.
+     *
+     * @param litres volume in litres, never negative
+     * @return the same volume rounded to the nearest whole litre, {@link RoundingMode#HALF_UP}
+     * @throws WaterVolumeOutOfRangeException if the result does not fit the {@code BIGINT} column
+     */
+    public static long wholeLitres(BigDecimal litres) {
+        try {
+            return litres.setScale(0, RoundingMode.HALF_UP).longValueExact();
+        } catch (ArithmeticException e) {
+            throw new WaterVolumeOutOfRangeException(litres, "L");
         }
     }
 

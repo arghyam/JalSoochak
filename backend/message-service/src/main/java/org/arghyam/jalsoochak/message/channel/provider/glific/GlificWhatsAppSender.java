@@ -771,7 +771,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      *
      * @param contactId    Glific contact ID obtained from {@link #optIn}
      * @param operatorName operator name; passed as {@code defaultResults} key {@code "name"}
-     * @param date         today's date string; passed as {@code defaultResults} key {@code "state"}
+     * @param date         the nudge date string; passed as {@code defaultResults} key {@code "date"}
      * @throws IllegalStateException if {@code whatsapp.flow.nudge-id} is blank
      * @throws RuntimeException      if Glific returns GraphQL errors or {@code success=false}
      */

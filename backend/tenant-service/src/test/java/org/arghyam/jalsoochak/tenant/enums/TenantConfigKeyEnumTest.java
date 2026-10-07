@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 
+import org.arghyam.jalsoochak.tenant.dto.internal.ElmFormulaConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.EmailProviderConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SmsProviderConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WhatsAppMessagesConfigDTO;
@@ -133,6 +134,19 @@ class TenantConfigKeyEnumTest {
             assertThat(key.isPublic()).isFalse();
             assertThat(key.isMandatory()).isFalse();
             // The admin UI saves the templates through the generic endpoint, which refuses managed keys.
+            assertThat(key.isManagedValue()).isFalse();
+        }
+
+        @Test
+        @DisplayName("ELM_WATER_QUANTITY_FORMULA is generic, private, optional and writable through PUT /config")
+        void elmWaterQuantityFormula_hasExpectedFlags() {
+            TenantConfigKeyEnum key = TenantConfigKeyEnum.ELM_WATER_QUANTITY_FORMULA;
+
+            assertThat(key.getType()).isEqualTo(TenantConfigKeyEnum.ConfigType.GENERIC);
+            assertThat(key.getDtoClass()).isEqualTo(ElmFormulaConfigDTO.class);
+            assertThat(key.isPublic()).isFalse();
+            // Optional: a tenant without ELM schemes never needs a formula.
+            assertThat(key.isMandatory()).isFalse();
             assertThat(key.isManagedValue()).isFalse();
         }
 

@@ -210,7 +210,7 @@ CREATE TABLE tenant_mp.flow_reading_table (
     confirmed_reading NUMERIC         NOT NULL,
     correlation_id    VARCHAR(255)    NOT NULL,
     quantity          NUMERIC         NOT NULL DEFAULT 0,
-    channel           INTEGER,
+    channel           VARCHAR(50),
     image_url         TEXT            DEFAULT '',
     created_by        INTEGER         NOT NULL REFERENCES tenant_mp.user_table(id),
     created_at        TIMESTAMP       NOT NULL DEFAULT NOW(),
@@ -266,3 +266,38 @@ CREATE TABLE tenant_mp.data_versions_table (
 INSERT INTO tenant_mp.data_versions_table (resource_type, version)
 VALUES ('STAFF_USERS', 1)
 ON CONFLICT (resource_type) DO NOTHING;
+
+-- ── Analytics facts read by the pump-operator list (analytics-service migrations V1–V50) ──
+-- A subset of the columns, enough for PersonSchemeRepository; the dimension-table FKs are left out.
+
+CREATE SCHEMA IF NOT EXISTS analytics_schema;
+
+CREATE TABLE analytics_schema.fact_water_quantity_table (
+    id                    BIGSERIAL    PRIMARY KEY,
+    tenant_id             INT          NOT NULL,
+    scheme_id             INT          NOT NULL,
+    user_id               INT,
+    water_quantity        BIGINT       NOT NULL,
+    date                  DATE         NOT NULL,
+    submission_status     INT,
+    outage_reason         VARCHAR(255),
+    non_submission_reason VARCHAR(255),
+    created_at            TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TIMESTAMP
+);
+
+CREATE TABLE analytics_schema.fact_meter_reading_table (
+    id                BIGSERIAL    PRIMARY KEY,
+    tenant_id         INT          NOT NULL,
+    scheme_id         INT          NOT NULL,
+    user_id           INT,
+    confirmed_reading NUMERIC,
+    reading_at        TIMESTAMP    NOT NULL,
+    reading_date      DATE         NOT NULL,
+    channel           INT,
+    created_at        TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_fact_meter_reading_tenant_scheme_date_lookup
+    ON analytics_schema.fact_meter_reading_table
+    (tenant_id, scheme_id, reading_date DESC, reading_at DESC, id DESC);

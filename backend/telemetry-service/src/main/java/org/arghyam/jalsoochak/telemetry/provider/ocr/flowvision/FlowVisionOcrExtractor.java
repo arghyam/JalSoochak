@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.RolloverPosition;
 import org.arghyam.jalsoochak.telemetry.service.MeterReadingExtractor;
@@ -10,7 +11,6 @@ import org.arghyam.jalsoochak.telemetry.service.OcrTransientFailures;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Primary;
 import org.springframework.http.*;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.stereotype.Component;
@@ -26,11 +26,10 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * The built-in OCR provider. It is the {@code @Primary} {@link MeterReadingExtractor}, so it serves every
- * tenant that sets no {@code ocr_*} override.
+ * The built-in OCR provider for bulk flow meters. It is BFM's default provider
+ * ({@code ocr.default-provider}), so it serves every tenant that sets no {@code ocr_*} override.
  */
 @Component
-@Primary
 @Slf4j
 public class FlowVisionOcrExtractor implements MeterReadingExtractor {
 
@@ -63,6 +62,11 @@ public class FlowVisionOcrExtractor implements MeterReadingExtractor {
     @Override
     public String providerId() {
         return OcrProviderSettings.DEFAULT_PROVIDER_ID;
+    }
+
+    @Override
+    public ReadingChannel channel() {
+        return ReadingChannel.BFM;
     }
 
     @Override

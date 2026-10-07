@@ -103,4 +103,13 @@ class ReadingChannelTest {
         assertThat(ReadingChannel.unsupportedDeclarationMessage())
                 .isEqualTo("Unsupported channel. Allowed values are: BFM, ELM, PDU, IOT, MAN");
     }
+
+    @Test
+    void supportsImageReading_onlyForTheMeterChannels() {
+        assertThat(ReadingChannel.BFM.supportsImageReading()).isTrue();
+        assertThat(ReadingChannel.ELM.supportsImageReading()).isTrue();
+        assertThat(ReadingChannel.PDU.supportsImageReading()).isFalse();
+        assertThat(ReadingChannel.IOT.supportsImageReading()).isFalse();
+        assertThat(ReadingChannel.MAN.supportsImageReading()).isFalse();
+    }
 }

@@ -208,6 +208,7 @@ public class MeterImageWorkflowService {
                     // CHANNEL_NOT_SUPPORTED — so an empty parse means the submission simply did not
                     // declare a channel, and the stored preference decides as before.
                     .declaredChannel(ReadingChannel.parseStrict(request.getChannel()).orElse(null))
+                    .readingUnit(request.getReadingUnit())
                     // LOCATION-AFFINITY: GeoJSON orders coordinates [longitude, latitude] — the
                     // opposite of how they read aloud, and the single easiest thing here to get
                     // backwards. Pinned by MeterImageWorkflowServiceCanonicalReadingTest.

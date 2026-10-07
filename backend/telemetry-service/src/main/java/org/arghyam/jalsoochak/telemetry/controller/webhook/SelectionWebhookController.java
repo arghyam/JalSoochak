@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.controller.webhook;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import org.arghyam.jalsoochak.telemetry.config.OpenApiConfig;
 import org.arghyam.jalsoochak.telemetry.config.WebhookRoute;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @WebhookRoute
+@SecurityRequirement(name = OpenApiConfig.WEBHOOK_TOKEN_SCHEME)
 @RequestMapping("/api/v1/telemetry")
 public class SelectionWebhookController {
     private static final Logger log = LoggerFactory.getLogger(SelectionWebhookController.class);
@@ -156,6 +159,7 @@ public class SelectionWebhookController {
     public ResponseEntity<SelectionResponse> selectedItem(@RequestBody @Valid SelectedItemRequest request) {
         try {
             SelectionResponse response = selectionService.selectedItemMessage(request);
+            attachSchemeList(request, response);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error processing selected item: {}", e.getMessage(), e);
@@ -167,6 +171,28 @@ public class SelectionWebhookController {
                             .message("Item selection could not be saved.")
                             .build()
             );
+        }
+    }
+
+    /**
+     * A reading submission's next screen is the scheme list. Carrying it on this answer saves the flow
+     * a second webhook round trip (1–2 s on the WhatsApp provider). Best effort: without it the flow
+     * calls {@code /schemes} itself, so a failure here must not spoil the selection.
+     */
+    private void attachSchemeList(SelectedItemRequest request, SelectionResponse response) {
+        if (response == null || !response.isSuccess() || response.getSelected() == null
+                || !response.getSelected().startsWith("readingSubmission")) {
+            return;
+        }
+        try {
+            IntroResponse schemes = selectionService.schemeSelectionMessage(
+                    IntroRequest.builder().contactId(request.getContactId()).build());
+            if (schemes != null && schemes.isSuccess()) {
+                response.setSchemesMessage(schemes.getMessage());
+                response.setIsSchemeGreaterThanOne(schemes.getIsSchemeGreaterThanOne());
+            }
+        } catch (Exception e) {
+            log.warn("Could not attach the scheme list to the item selection: {}", e.getMessage());
         }
     }
 }

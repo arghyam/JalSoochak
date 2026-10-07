@@ -137,9 +137,9 @@ public class TelemetryApiKeyAuthFilter extends OncePerRequestFilter {
      * Matches the path the way the dispatcher will: decoded, semicolon content stripped, duplicate
      * slashes collapsed and dot segments resolved. Without this, {@code /telemetry/./readings/...} or
      * {@code /telemetry//readings/...} could route to a protected handler while slipping past a naive
-     * prefix comparison here.
+     * prefix comparison here. {@link InternalAuthFilter} matches on it too.
      */
-    private static String normalizedPath(HttpServletRequest request) {
+    static String normalizedPath(HttpServletRequest request) {
         String path = UrlPathHelper.defaultInstance.getPathWithinApplication(request);
         if (path == null || path.isBlank()) {
             return "";

@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -13,6 +14,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
@@ -20,6 +22,13 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.CaptureInput;
+import org.arghyam.jalsoochak.telemetry.service.capture.CaptureOutcome;
+import org.arghyam.jalsoochak.telemetry.service.capture.CapturedReading;
+import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.ReadingCapture;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService;
 import org.arghyam.jalsoochak.telemetry.service.location.ReadingSubmission;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
@@ -39,6 +48,7 @@ import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 @Service
 @RequiredArgsConstructor
@@ -46,22 +56,20 @@ import java.util.UUID;
 public class BfmReadingService {
 
     private final TelemetryTenantRepository telemetryTenantRepository;
-    private final MeterReadingExtractor defaultOcrExtractor;
     private final TelemetryEventPublisher telemetryEventPublisher;
+    private final ReadingRepublisher readingRepublisher;
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
     private final OperatorContextService operatorContextService;
-    private final OcrReadingsRetryService ocrReadingsRetryService;
     private final ReadingChannelResolver readingChannelResolver;
     private final RolloverResolutionService rolloverResolutionService;
     private final SupplyPlausibilityGuard supplyPlausibilityGuard;
-    // Per-tenant OCR provider selection. Nullable so unit tests that construct BfmReadingService with only
-    // the collaborators they exercise (passing null here) fall back to the built-in OCR provider path.
-    private final OcrProviderResolver ocrProviderResolver;
-    private final OcrProviderRegistry ocrProviderRegistry;
-    // LOCATION-AFFINITY: the scheme-boundary check. Nullable on the same terms as the OCR
-    // collaborators above — a unit test that does not exercise it may pass null, and the check is
-    // then simply not run rather than costing the reading.
+    private final ImageReadingCapture imageReadingCapture;
+    private final SubmittedValueCapture submittedValueCapture;
+    private final PduDayLimit pduDayLimit;
+    private final CalculationParametersSnapshotter calculationParametersSnapshotter;
+    // LOCATION-AFFINITY: the scheme-boundary check. Nullable so a unit test that does not exercise it
+    // may pass null, and the check is then simply not run rather than costing the reading.
     private final LocationAffinityService locationAffinityService;
 
     /**
@@ -111,118 +119,48 @@ public class BfmReadingService {
         if (!belongsToScheme && !lenientIngestion) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Operator does not belong to the specified scheme");
         }
-        OcrReadingResult ocrResult = null;
-        BigDecimal finalReading = request.getReadingValue();
-        BigDecimal confidenceLevel = null;
-        String message = "Reading created successfully";
+        ReadingCapture capture = captureFor(request);
 
-        if (finalReading == null) {
-            if (request.getReadingUrl() == null || request.getReadingUrl().isBlank()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Either readingValue or readingUrl must be provided");
+        // The channel decides which units the submission may use and how its photo is read, so it is
+        // settled before anything is captured. A channel declared on the submission wins over the
+        // operator's stored preference: the submitting system knows the equipment behind this
+        // particular reading, whereas the preference is a default picked once in a WhatsApp
+        // conversation. Null means nothing was declared, which keeps the preference lookup, and so
+        // every existing caller, unchanged.
+        ReadingChannel resolvedChannel = request.getDeclaredChannel() != null
+                ? request.getDeclaredChannel()
+                : readingChannelResolver.resolve(schemaName, contactId);
+        Integer channel = resolvedChannel.getCode();
+
+        CaptureOutcome outcome = capture.capture(new CaptureInput(
+                schemaName,
+                tenantId,
+                operatorInRequest.id(),
+                request.getSchemeId(),
+                resolvedChannel,
+                request.getReadingUrl(),
+                request.getReadingValue(),
+                request.getReadingUnit(),
+                request.isExternallyAsserted(),
+                ocrRetryMode));
+        CapturedReading captured;
+        switch (outcome) {
+            case CaptureOutcome.Captured(CapturedReading reading) -> captured = reading;
+            case CaptureOutcome.Rejected(TelemetryErrorCode errorCode, String rejection) -> {
+                return rejected(errorCode, rejection);
             }
-
-            try {
-                OcrProviderSettings ocrSettings =
-                        ocrProviderResolver == null ? null : ocrProviderResolver.resolve(tenantId);
-                ocrResult = extractReading(request.getReadingUrl(), ocrSettings, ocrRetryMode);
-                log.info("readings_ocr ocr_result operatorId={} schemeId={} imageUrlHash={} result={}",
-                        operatorInRequest.id(),
-                        request.getSchemeId(),
-                        imageUrlHash(request.getReadingUrl()),
-                        summarizeOcrResult(ocrResult));
-                if (ocrResult == null || ocrResult.getAdjustedReading() == null) {
-                    String anomalyCorrelationId = buildImageAnomalyCorrelationId(
-                            AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                            operatorInRequest.id(),
-                            request.getSchemeId(),
-                            request.getReadingUrl()
-                    );
-                    recordImageAnomalyOncePerDay(
-                            schemaName,
-                            tenantId,
-                            operatorInRequest.id(),
-                            request.getSchemeId(),
-                            AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                            "Unreadable image. OCR could not extract a valid meter reading.",
-                            1,
-                            null,
-                            null,
-                            null,
-                            null,
-                            null,
-                            0,
-                            anomalyCorrelationId,
-                            // ANOMALY-SUBMISSION-LINK: the submission is rejected here, before any
-                            // flow_reading_table row is written, so there is nothing to point at.
-                            null,
-                            null
-                    );
-                    return CreateReadingResponse.builder()
-                            .success(false)
-                            .message(unreadableImageMessage(ocrResult))
-                            .correlationId(UUID.randomUUID().toString())
-                            .qualityStatus("REJECTED")
-                            .errorCode(TelemetryErrorCode.UNREADABLE_IMAGE)
-                            .build();
-                }
-                finalReading = ocrResult.getAdjustedReading();
-                confidenceLevel = ocrResult.getQualityConfidence();
-                log.info("readings_ocr ocr_accepted operatorId={} schemeId={} correlationId={} adjustedReading={} confidence={} qualityStatus={}",
-                        operatorInRequest.id(),
-                        request.getSchemeId(),
-                        sanitizeLogValue(ocrResult.getCorrelationId()),
-                        finalReading,
-                        confidenceLevel,
-                        sanitizeLogValue(ocrResult.getQualityStatus()));
-            } catch (OcrReadingsUnavailableException ex) {
-                log.warn("OCR temporarily unavailable for imageUrlHash={}: {}",
-                        imageUrlHash(request.getReadingUrl()),
-                        ex.getMessage());
+            case CaptureOutcome.Retry(String retry) -> {
                 return CreateReadingResponse.builder()
                         .success(false)
-                        .message("Meter reading service is temporarily unavailable. Please try again shortly.")
+                        .message(retry)
                         .correlationId(UUID.randomUUID().toString())
                         .qualityStatus("RETRY")
                         .build();
-            } catch (Exception ex) {
-                log.error("OCR failed for imageUrlHash={}: {}", imageUrlHash(request.getReadingUrl()), ex.getMessage(), ex);
-                if (log.isDebugEnabled()) {
-                    log.debug("OCR failed for URL: {}", request.getReadingUrl());
-                }
-                String anomalyCorrelationId = buildImageAnomalyCorrelationId(
-                        AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                        operatorInRequest.id(),
-                        request.getSchemeId(),
-                        request.getReadingUrl()
-                );
-                recordImageAnomalyOncePerDay(
-                        schemaName,
-                        tenantId,
-                        operatorInRequest.id(),
-                        request.getSchemeId(),
-                        AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                        "Unreadable image. OCR failed during extraction.",
-                        1,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        0,
-                        anomalyCorrelationId,
-                        // ANOMALY-SUBMISSION-LINK: rejected before any row is written — nothing to link.
-                        null,
-                        null
-                );
-                return CreateReadingResponse.builder()
-                        .success(false)
-                        .message("Could not read meter value from image. Please retry with a clearer photo.")
-                        .correlationId(UUID.randomUUID().toString())
-                        .qualityStatus("REJECTED")
-                        .errorCode(TelemetryErrorCode.FLOW_VISION_FAILED)
-                        .build();
             }
         }
+        OcrReadingResult ocrResult = captured.ocrResult();
+        BigDecimal finalReading = captured.value();
+        BigDecimal confidenceLevel = captured.confidence();
 
         boolean hasPositiveReading = finalReading != null
                 && finalReading.compareTo(BigDecimal.ZERO) > 0;
@@ -245,20 +183,27 @@ public class BfmReadingService {
         LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(ReadingTime.now());
 
         // READING-PROVENANCE: extracted_reading records what the OCR provider read off the meter photo. The
-        // OCR gate above runs only when the caller supplied no value, so on an API-asserted submission
+        // image capture runs only when the caller supplied no value, so on an API-asserted submission
         // nothing extracted anything — echoing the caller's own number back into extracted_reading made
         // such a row indistinguishable from an AI-extracted one, fed the duplicate-image guard below a
         // value no image ever produced, and counted the submission as "compliant" (extracted ==
         // confirmed) on the dashboards. ocrExtractedReading is null on that path and gates both; the
         // persisted column is NOT NULL, so it takes the same 0 sentinel every other non-OCR row already
         // uses (scheme-selection placeholder, manual entry, meter-change, issue-report).
-        BigDecimal ocrExtractedReading = ocrResult != null ? ocrResult.getAdjustedReading() : null;
+        BigDecimal ocrExtractedReading = captured.extractedReading();
         BigDecimal extractedReading = ocrExtractedReading != null ? ocrExtractedReading : BigDecimal.ZERO;
-        BigDecimal confirmedReading = request.getReadingValue() != null ? request.getReadingValue() : finalReading;
+        // In the channel's standard unit already, so every comparison below and the stored value agree.
+        BigDecimal confirmedReading = captured.value();
         BigDecimal effectiveConfirmedReading = confirmedReading;
 
-        Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt = telemetryTenantRepository
-                .findLatestConfirmedReadingSnapshot(schemaName, request.getSchemeId(), null);
+        // A reading is compared only with earlier readings on its own channel: a kWh index is never a
+        // flow meter's previous reading. A PDU reading is one run's duration rather than a running
+        // total, so it has no earlier reading to compare with or to show back at all.
+        boolean comparesWithEarlierReadings = resolvedChannel != ReadingChannel.PDU;
+        Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt = comparesWithEarlierReadings
+                ? telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
+                        schemaName, request.getSchemeId(), resolvedChannel, null)
+                : Optional.empty();
 
         // For non-meter-replacement submissions, validate against the latest confirmed reading.
         // Meter-replacement submissions are treated as a new baseline.
@@ -404,14 +349,13 @@ public class BfmReadingService {
         // The resolved value seeds confirmed_reading and is the number surfaced to the operator for
         // confirmation; extracted_reading stays the model value (dedup/audit). When the resolver is not
         // applicable (empty result) effectiveConfirmedReading is left untouched — byte-identical to legacy.
-        // READING-PROVENANCE: an API-supplied value is not "as extracted" — nothing extracted it. Seeded
-        // here, ahead of the rollover resolver, which cannot run on this path (it needs an OCR result).
-        int confirmedReadingSource = request.isExternallyAsserted()
-                ? RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED
-                : RolloverResolutionService.SOURCE_AS_EXTRACTED;
+        // READING-PROVENANCE: an API-supplied value is not "as extracted" — nothing extracted it. The
+        // capture step says how the value arrived, ahead of the rollover resolver, which cannot run on
+        // that path (it needs an OCR result).
+        int confirmedReadingSource = captured.source();
         String rolloverAuditJson = null;
         Optional<RolloverResolutionService.ResolvedReading> rollover =
-                resolveRolloverIfApplicable(schemaName, request, ocrResult, isMeterReplaced, latestSnapshotOpt);
+                resolveRolloverIfApplicable(schemaName, request, resolvedChannel, ocrResult, isMeterReplaced, latestSnapshotOpt);
         if (rollover.isPresent()) {
             effectiveConfirmedReading = rollover.get().confirmedReading();
             confirmedReadingSource = rollover.get().source();
@@ -423,20 +367,8 @@ public class BfmReadingService {
         // number that will actually be stored — and before persistence so the publish/no-publish
         // decision is held in memory rather than depending on a second write succeeding.
         //
-        // The channel lookup is hoisted from below the insert for the same reason: only BFM readings
-        // are cumulative m3 indices, so the delta is meaningless on any other channel. There are no
-        // early returns between the old position and this one, so the resolver runs in exactly the
-        // cases it ran in before.
+        // Only BFM readings are cumulative m3 indices, so the delta is meaningless on any other channel.
         //
-        // A channel declared on the submission wins over the operator's stored preference: the
-        // submitting system knows the equipment behind this particular reading, whereas the
-        // preference is a default picked once in a WhatsApp conversation. Null means nothing was
-        // declared, which keeps the preference lookup — and so every existing caller — unchanged.
-        ReadingChannel resolvedChannel = request.getDeclaredChannel() != null
-                ? request.getDeclaredChannel()
-                : readingChannelResolver.resolve(schemaName, contactId);
-        Integer channel = resolvedChannel.getCode();
-
         // A pre-V40 tenant is skipped entirely rather than checked: storing a quarantined row it has
         // no column to mark would leave it indistinguishable from an accepted one, which is worse
         // than not checking at all.
@@ -456,6 +388,7 @@ public class BfmReadingService {
             supplyBaseline = telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate(
                     schemaName,
                     request.getSchemeId(),
+                    resolvedChannel,
                     LocalDate.from(readingAt),
                     null).orElse(null);
             Verdict verdict = supplyPlausibilityGuard.assess(
@@ -472,67 +405,95 @@ public class BfmReadingService {
             quarantined = verdict instanceof Verdict.Quarantined && supplyPlausibilityGuard.isEnforcing();
         }
 
-        Long readingId;
-        Optional<Long> placeholderIdOpt = telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
-                schemaName,
-                request.getSchemeId(),
-                operatorInRequest.id(),
-                LocalDate.from(readingAt)
-        );
-        if (lenientIngestion || request.isExternallyAsserted() || quarantined) {
-            // LENIENT-INGEST: persist the reading and its ingestion tracking (source + submitted scheme
-            // ids / phone hash) atomically, so a failure can never leave a recorded reading without its
-            // tracking metadata. Covers both the new-insert and same-day placeholder-reuse paths.
-            // READING-PROVENANCE: API-supplied values take the same transactional path — same inserts and
-            // updates as before, plus the EXTERNALLY_ASSERTED marker committed with the row.
-            readingId = telemetryTenantRepository.persistFlowReadingWithTracking(
+        // Written by the insert itself rather than by a later UPDATE, so no stored reading is ever
+        // without its channel. The value is in the channel's standard unit; submitted_unit records the
+        // unit it arrived in.
+        String channelName = resolvedChannel.name();
+        String submittedUnit = captured.submittedUnitCode();
+        // Fixed here because a PDU run is written through a callback, inside its day's lock.
+        BigDecimal valueToStore = effectiveConfirmedReading;
+        Integer assertedSource = request.isExternallyAsserted() ? confirmedReadingSource : null;
+        boolean storeQuarantined = quarantined;
+        Supplier<FlowReadingVersion> store = () -> {
+            Optional<Long> placeholderIdOpt = telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
                     schemaName,
-                    placeholderIdOpt.orElse(null),
+                    request.getSchemeId(),
+                    operatorInRequest.id(),
+                    LocalDate.from(readingAt)
+            );
+            if (lenientIngestion || request.isExternallyAsserted() || storeQuarantined) {
+                // LENIENT-INGEST: persist the reading and its ingestion tracking (source + submitted scheme
+                // ids / phone hash) atomically, so a failure can never leave a recorded reading without its
+                // tracking metadata. Covers both the new-insert and same-day placeholder-reuse paths.
+                // READING-PROVENANCE: API-supplied values take the same transactional path — same inserts and
+                // updates as before, plus the EXTERNALLY_ASSERTED marker committed with the row.
+                return telemetryTenantRepository.persistFlowReadingWithTracking(
+                        schemaName,
+                        placeholderIdOpt.orElse(null),
+                        request.getSchemeId(),
+                        operatorInRequest.id(),
+                        readingAt,
+                        extractedReading,
+                        valueToStore,
+                        storageCorrelationId,
+                        ocrCorrelationId,
+                        request.getReadingUrl(),
+                        request.getMeterChangeReason(),
+                        request.getIngestionSource() != null ? request.getIngestionSource() : IngestionSource.NORMAL,
+                        request.getSubmittedStateSchemeId(),
+                        request.getSubmittedCentreSchemeId(),
+                        request.getSubmittedPhoneHash(),
+                        assertedSource,
+                        // SUPPLY-PLAUSIBILITY: the marker commits inside the same transaction as the
+                        // insert, so the row cannot land without it.
+                        storeQuarantined ? QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY : null,
+                        channelName,
+                        submittedUnit);
+            }
+            if (placeholderIdOpt.isPresent()) {
+                return telemetryTenantRepository.updateFlowReadingFromIngestion(
+                        schemaName,
+                        placeholderIdOpt.get(),
+                        readingAt,
+                        extractedReading,
+                        valueToStore,
+                        storageCorrelationId,
+                        ocrCorrelationId,
+                        request.getReadingUrl(),
+                        request.getMeterChangeReason(),
+                        operatorInRequest.id(),
+                        channelName,
+                        submittedUnit
+                );
+            }
+            return telemetryTenantRepository.createFlowReading(
+                    schemaName,
                     request.getSchemeId(),
                     operatorInRequest.id(),
                     readingAt,
                     extractedReading,
-                    effectiveConfirmedReading,
+                    valueToStore,
                     storageCorrelationId,
                     ocrCorrelationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason(),
-                    request.getIngestionSource() != null ? request.getIngestionSource() : IngestionSource.NORMAL,
-                    request.getSubmittedStateSchemeId(),
-                    request.getSubmittedCentreSchemeId(),
-                    request.getSubmittedPhoneHash(),
-                    request.isExternallyAsserted() ? confirmedReadingSource : null,
-                    // SUPPLY-PLAUSIBILITY: the marker commits inside the same transaction as the
-                    // insert, so the row cannot land without it.
-                    quarantined ? QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY : null);
-        } else if (placeholderIdOpt.isPresent()) {
-            readingId = placeholderIdOpt.get();
-            telemetryTenantRepository.updateFlowReadingFromIngestion(
-                    schemaName,
-                    readingId,
-                    readingAt,
-                    extractedReading,
-                    effectiveConfirmedReading,
-                    storageCorrelationId,
-                    ocrCorrelationId,
-                    request.getReadingUrl(),
-                    request.getMeterChangeReason(),
-                    operatorInRequest.id()
+                    channelName,
+                    submittedUnit
             );
+        };
+        FlowReadingVersion storedReading;
+        if (resolvedChannel == ReadingChannel.PDU) {
+            // A new run: whichever row it lands on, a placeholder or a new one, holds no minutes yet.
+            Optional<FlowReadingVersion> stored = pduDayLimit.writeWithinLimit(
+                    schemaName, request.getSchemeId(), LocalDate.from(readingAt), valueToStore, () -> null, store);
+            if (stored.isEmpty()) {
+                return rejected(PduDayLimit.EXCEEDED.errorCode(), PduDayLimit.EXCEEDED.message());
+            }
+            storedReading = stored.get();
         } else {
-            readingId = telemetryTenantRepository.createFlowReading(
-                    schemaName,
-                    request.getSchemeId(),
-                    operatorInRequest.id(),
-                    readingAt,
-                    extractedReading,
-                    effectiveConfirmedReading,
-                    storageCorrelationId,
-                    ocrCorrelationId,
-                    request.getReadingUrl(),
-                    request.getMeterChangeReason()
-            );
+            storedReading = store.get();
         }
+        Long readingId = storedReading.id();
 
         // ROLLOVER-RESOLVE: tag provenance + best-effort audit only when the resolver actually overrode
         // the model value. createReading is not @Transactional, so this runs as a separate guarded
@@ -594,11 +555,10 @@ public class BfmReadingService {
         // SUPPLY-PLAUSIBILITY: the row is stored and marked, but it is not a reading. The channel
         // still belongs on it, and the anomaly is still published — "nothing reaches analytics" was
         // never literal. What is withheld is publishMeterReadingRecorded, the single event that
-        // writes fact_meter_reading, dim_operator_attendance and fact_water_quantity. Withholding it
+        // writes fact_meter_reading, fact_operator_attendance and fact_water_quantity. Withholding it
         // marks the operator absent and the scheme non-reporting for the day: intended, and called
         // out in the ops runbook so the daily-report gap is not chased as a pipeline fault.
         if (quarantined) {
-            telemetryTenantRepository.updateFlowReadingChannel(schemaName, readingId, resolvedChannel.name());
             recordAnomaly(
                     schemaName,
                     tenantId,
@@ -648,15 +608,12 @@ public class BfmReadingService {
         BigDecimal lastConfirmedReading = latestSnapshotOpt
                 .map(TelemetryConfirmedReadingSnapshot::confirmedReading)
                 .orElse(null);
-        if (lastConfirmedReading == null) {
+        if (lastConfirmedReading == null && comparesWithEarlierReadings) {
             lastConfirmedReading = telemetryTenantRepository
-                    .findLastConfirmedReading(schemaName, request.getSchemeId(), readingId)
+                    .findLastConfirmedReading(schemaName, request.getSchemeId(), resolvedChannel, readingId)
                     .orElse(null);
         }
 
-        // ReadingChannelResolver.resolve never returns null (it falls back to DEFAULT/BFM). Resolved
-        // above, ahead of the supply check, which is scoped to BFM.
-        telemetryTenantRepository.updateFlowReadingChannel(schemaName, readingId, resolvedChannel.name());
         telemetryEventPublisher.publishMeterReadingRecorded(
                 tenantId,
                 request.getSchemeId(),
@@ -676,7 +633,13 @@ public class BfmReadingService {
                 0,
                 // ANOMALY-SUBMISSION-LINK: the same value written to flow_reading_table.correlation_id
                 // above, so the warehouse row can be found from an anomaly that names it.
-                storageCorrelationId
+                storageCorrelationId,
+                readingId,
+                // The version the write above gave the row. The markers written after it move
+                // updated_at on without changing anything published here, and a later republish
+                // reads the newer value, so analytics still keeps the latest.
+                storedReading.updatedAt(),
+                calculationParametersSnapshotter.snapshot(schemaName, tenantId, request.getSchemeId(), resolvedChannel)
         );
 
         // Surface the resolved value to the operator: the "please confirm" message text and the response
@@ -738,6 +701,7 @@ public class BfmReadingService {
     private Optional<RolloverResolutionService.ResolvedReading> resolveRolloverIfApplicable(
             String schemaName,
             CreateReadingRequest request,
+            ReadingChannel channel,
             OcrReadingResult ocrResult,
             boolean isMeterReplaced,
             Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt) {
@@ -752,7 +716,7 @@ public class BfmReadingService {
             return Optional.empty();
         }
         List<DailyConfirmedReading> dailyHistory = telemetryTenantRepository
-                .findRecentDailyConfirmedReadings(schemaName, request.getSchemeId(), null, ROLLOVER_HISTORY_DAYS);
+                .findRecentDailyConfirmedReadings(schemaName, request.getSchemeId(), channel, null, ROLLOVER_HISTORY_DAYS);
         return Optional.of(rolloverResolutionService.resolve(
                 ocrResult,
                 dailyHistory,
@@ -760,24 +724,29 @@ public class BfmReadingService {
                 isMeterReplaced));
     }
 
+    /** A submission refused before anything is stored, so it has no correlation id of its own yet. */
+    private static CreateReadingResponse rejected(TelemetryErrorCode errorCode, String message) {
+        return CreateReadingResponse.builder()
+                .success(false)
+                .message(message)
+                .correlationId(UUID.randomUUID().toString())
+                .qualityStatus("REJECTED")
+                .errorCode(errorCode)
+                .build();
+    }
+
     /**
-     * Runs OCR for {@code readingUrl}. When {@code settings} is {@code null} the tenant has no per-tenant
-     * OCR override and the built-in provider path is used unchanged; otherwise the resolved provider is
-     * dispatched via {@link OcrProviderRegistry}. Honours the resilient (retry/circuit-breaker) path.
+     * A value sent with the submission is captured as it is, even when a photo came with it: the photo
+     * is kept on the row and OCR doesn't run. Only a submission with neither is refused here.
      */
-    private OcrReadingResult extractReading(String readingUrl, OcrProviderSettings settings, OcrRetryMode ocrRetryMode) {
-        if (ocrRetryMode == OcrRetryMode.RESILIENT && ocrReadingsRetryService != null) {
-            return settings == null
-                    ? ocrReadingsRetryService.extractReading(readingUrl)
-                    : ocrReadingsRetryService.extractReading(readingUrl, settings);
+    private ReadingCapture captureFor(CreateReadingRequest request) {
+        if (request.getReadingValue() != null) {
+            return submittedValueCapture;
         }
-        if (ocrRetryMode == OcrRetryMode.RESILIENT) {
-            log.warn("OCR readings retry service is not available; using direct OCR path");
+        if (request.getReadingUrl() == null || request.getReadingUrl().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Either readingValue or readingUrl must be provided");
         }
-        if (settings == null) {
-            return defaultOcrExtractor.extractReading(readingUrl, null);
-        }
-        return ocrProviderRegistry.get(settings.providerId()).extractReading(readingUrl, settings);
+        return imageReadingCapture;
     }
 
     @Transactional
@@ -785,7 +754,7 @@ public class BfmReadingService {
         if (correlationId == null || correlationId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "correlationId must be provided");
         }
-        return updateConfirmedReadingByCorrelationId(correlationId, confirmedReading, null);
+        return updateConfirmedReadingByCorrelationId(correlationId, confirmedReading, null, null);
     }
 
     @Transactional
@@ -808,12 +777,28 @@ public class BfmReadingService {
                                                         String phoneNumber,
                                                         BigDecimal confirmedReading,
                                                         Integer tenantId) {
+        return updateConfirmedReading(correlationId, phoneNumber, confirmedReading, null, tenantId);
+    }
+
+    /**
+     * As {@link #updateConfirmedReading(String, String, BigDecimal, Integer)}, with the unit
+     * {@code confirmedReading} is given in. The unit is checked against the corrected row's channel and
+     * the value converted to that channel's standard unit, as on a submission.
+     *
+     * @param readingUnit the declared unit, unchecked; null or blank means the channel's standard unit
+     */
+    @Transactional
+    public CreateReadingResponse updateConfirmedReading(String correlationId,
+                                                        String phoneNumber,
+                                                        BigDecimal confirmedReading,
+                                                        String readingUnit,
+                                                        Integer tenantId) {
         if (confirmedReading == null || confirmedReading.compareTo(BigDecimal.ZERO) < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "confirmedReading must be a non-negative number");
         }
 
         if (correlationId != null && !correlationId.isBlank()) {
-            return updateConfirmedReadingByCorrelationId(correlationId.trim(), confirmedReading, tenantId);
+            return updateConfirmedReadingByCorrelationId(correlationId.trim(), confirmedReading, readingUnit, tenantId);
         }
 
         if (phoneNumber == null || phoneNumber.isBlank()) {
@@ -837,11 +822,12 @@ public class BfmReadingService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, OPERATOR_LOOKUP_MISS));
 
         return applyConfirmedReadingCorrection(
-                schemaName, latestReading, confirmedReading, operator.id(), operator.tenantId());
+                schemaName, latestReading, confirmedReading, readingUnit, operator.id(), operator.tenantId());
     }
 
     private CreateReadingResponse updateConfirmedReadingByCorrelationId(String correlationId,
                                                                         BigDecimal confirmedReading,
+                                                                        String readingUnit,
                                                                         Integer tenantId) {
         String schemaName = resolveSchemaForCorrelationUpdate(tenantId);
 
@@ -872,6 +858,7 @@ public class BfmReadingService {
                 schemaName,
                 reading,
                 confirmedReading,
+                readingUnit,
                 reading.createdBy() != null ? reading.createdBy() : 1L,
                 eventTenantId);
     }
@@ -898,25 +885,9 @@ public class BfmReadingService {
     }
 
     /**
-     * The extracted reading to publish for a stored row. {@code extracted_reading} is NOT NULL, so every
-     * row whose value did not come from OCR carries a 0 sentinel — an API submission that supplied
-     * confirmed_reading, a hand-typed reading that opened the row, a reused placeholder. Republishing that
-     * 0 would file the row under "operator overrode the AI" (extracted <> confirmed) on the dashboards,
-     * which needs an AI reading to have existed; null keeps it out of both buckets. A row that really was
-     * extracted always has a positive value, so nothing legitimate is suppressed.
-     *
-     * <p>Rows written before that sentinel was introduced still hold the supplied value and keep
-     * publishing it — this is forward-only, with no backfill.
-     */
-    private static BigDecimal publishableExtractedReading(BigDecimal storedExtractedReading) {
-        return storedExtractedReading == null || storedExtractedReading.signum() == 0
-                ? null
-                : storedExtractedReading;
-    }
-
-    /**
      * The body both correction routes share once they have resolved the row to correct: apply the
-     * supply-plausibility rule, then either write the value or refuse it.
+     * submission rules of the row's channel (unit, PDU limits) and the supply-plausibility rule, then
+     * either write the value or refuse it.
      *
      * <p>SUPPLY-PLAUSIBILITY, §6.3. <strong>A failing correction never writes
      * {@code confirmed_reading}</strong>; a passing one writes it and clears the quarantine flag.
@@ -940,24 +911,44 @@ public class BfmReadingService {
      * chatbot image workflow and so needs one, whereas this method is reached only from
      * {@code PUT /readings} — the chatbot confirm path updates the repository directly.
      *
-     * @param updatedBy     the operator credited with the correction, and the operator the anomaly
-     *                      is filed against
-     * @param eventTenantId the tenant for the published event and for the household-size config
+     * @param submittedReading the corrected value, in {@code readingUnit}
+     * @param readingUnit      the unit the caller declared, unchecked; null or blank means the
+     *                         channel's standard unit
+     * @param updatedBy        the operator credited with the correction, and the operator the anomaly
+     *                         is filed against
+     * @param eventTenantId    the tenant for the published event and for the household-size config
      */
     private CreateReadingResponse applyConfirmedReadingCorrection(String schemaName,
                                                                   TelemetryLatestFlowReadingRecord reading,
-                                                                  BigDecimal confirmedReading,
+                                                                  BigDecimal submittedReading,
+                                                                  String readingUnit,
                                                                   Long updatedBy,
                                                                   Integer eventTenantId) {
         LocalDate readingDate = readingDateOf(reading);
+        // An absent channel reads as BFM, which is what analytics assumes for the same rows.
+        ReadingChannel channel = ReadingChannel.fromChannelValue(reading.channel());
+
+        // A correction can't store what the same channel's submission would have been refused. A
+        // refused unit, PDU run or PDU day writes nothing, and no anomaly: it is the request that is
+        // wrong, not the reading.
+        CapturedReading captured;
+        switch (submittedValueCapture.captureCorrection(channel, submittedReading, readingUnit)) {
+            case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
+            case CaptureOutcome.Rejected(TelemetryErrorCode errorCode, String rejection) -> {
+                return rejectedCorrection(reading, errorCode, rejection);
+            }
+            case CaptureOutcome.Retry retry ->
+                    throw new IllegalStateException("A submitted value is never retried");
+        }
+        // In the channel's standard unit, so the checks below and the stored value agree.
+        BigDecimal confirmedReading = captured.value();
 
         // A pre-V40 tenant is skipped rather than checked, as on the submission path: refusing a
         // correction on a schema that cannot record a quarantine leaves the two stores' notion of
         // this row's status unexpressible. Only BFM rows are cumulative m3 indices, so the delta is
-        // not a water volume on any other channel; an absent channel reads as BFM, which is what
-        // analytics assumes for the same rows.
+        // not a water volume on any other channel.
         boolean supplyCheckApplies = !supplyPlausibilityGuard.isDisabled()
-                && ReadingChannel.fromChannelValue(reading.channel()) == ReadingChannel.BFM
+                && channel == ReadingChannel.BFM
                 && telemetryTenantRepository.supportsQuarantine(schemaName);
 
         if (supplyCheckApplies) {
@@ -966,7 +957,7 @@ public class BfmReadingService {
             // every correction would look like a tiny delta.
             TelemetryConfirmedReadingSnapshot baseline = telemetryTenantRepository
                     .findLatestConfirmedReadingSnapshotBeforeDate(
-                            schemaName, reading.schemeId(), readingDate, reading.id())
+                            schemaName, reading.schemeId(), channel, readingDate, reading.id())
                     .orElse(null);
             Verdict verdict = supplyPlausibilityGuard.assess(
                     schemaName,
@@ -984,13 +975,26 @@ public class BfmReadingService {
             }
         }
 
-        telemetryTenantRepository.updateConfirmedReading(
-                schemaName,
-                reading.id(),
-                confirmedReading,
-                updatedBy,
-                RolloverResolutionService.manualConfirmSource(confirmedReading, reading.confirmedReading())
-        );
+        Supplier<Long> write = () -> {
+            telemetryTenantRepository.updateConfirmedReading(
+                    schemaName,
+                    reading.id(),
+                    confirmedReading,
+                    updatedBy,
+                    RolloverResolutionService.manualConfirmSource(confirmedReading, reading.confirmedReading()),
+                    captured.submittedUnitCode()
+            );
+            return reading.id();
+        };
+        if (channel == ReadingChannel.PDU) {
+            // The corrected row's old minutes don't count towards its day.
+            if (pduDayLimit.writeWithinLimit(
+                    schemaName, reading.schemeId(), readingDate, confirmedReading, reading::id, write).isEmpty()) {
+                return rejectedCorrection(reading, PduDayLimit.EXCEEDED.errorCode(), PduDayLimit.EXCEEDED.message());
+            }
+        } else {
+            write.get();
+        }
         // SUPPLY-PLAUSIBILITY: the release path. Unconditional, and deliberately outside the check's
         // own branch — a clean row is set to the 0 it already holds, and a quarantined row is
         // published below for the first time. Clearing here rather than only when the check ran is
@@ -999,7 +1003,7 @@ public class BfmReadingService {
         // where the repository guards on the column existing.
         telemetryTenantRepository.applyQuarantineReason(schemaName, reading.id(), QuarantineReason.NONE);
 
-        publishConfirmedReadingUpdate(eventTenantId, reading, confirmedReading);
+        readingRepublisher.republish(schemaName, eventTenantId, reading.id());
 
         return CreateReadingResponse.builder()
                 .success(true)
@@ -1007,6 +1011,19 @@ public class BfmReadingService {
                 .correlationId(reading.correlationId())
                 .meterReading(confirmedReading)
                 .qualityStatus("CONFIRMED")
+                .build();
+    }
+
+    /** A correction refused for breaking its channel's submission rules: nothing is written. */
+    private static CreateReadingResponse rejectedCorrection(TelemetryLatestFlowReadingRecord reading,
+                                                            TelemetryErrorCode errorCode,
+                                                            String message) {
+        return CreateReadingResponse.builder()
+                .success(false)
+                .message(message)
+                .correlationId(reading.correlationId())
+                .qualityStatus("REJECTED")
+                .errorCode(errorCode)
                 .build();
     }
 
@@ -1102,44 +1119,6 @@ public class BfmReadingService {
         return (reading.readingAt() != null ? reading.readingAt() : ReadingTime.now()).toLocalDate();
     }
 
-    private void publishConfirmedReadingUpdate(Integer tenantId,
-                                               TelemetryLatestFlowReadingRecord reading,
-                                               BigDecimal confirmedReading) {
-        LocalDateTime readingAt = reading.readingAt() != null ? reading.readingAt() : ReadingTime.now();
-        LocalDate readingDate = readingDateOf(reading);
-        telemetryEventPublisher.publishMeterReadingRecorded(
-                tenantId,
-                reading.schemeId(),
-                reading.createdBy(),
-                publishableExtractedReading(reading.extractedReading()),
-                confirmedReading,
-                null,
-                reading.imageUrl(),
-                readingAt,
-                channelCodeFromReading(reading),
-                readingDate,
-                1,
-                0,
-                // ANOMALY-SUBMISSION-LINK: a correction republishes the same row, so it carries the
-                // row's own correlation id and the warehouse keeps pointing at one submission.
-                reading.correlationId()
-        );
-    }
-
-    /**
-     * Re-uses the channel persisted on the reading at submission so corrections keep the
-     * original channel (BFM/ELM/PDU...) and analytics does not recompute the water quantity
-     * with a different calculator. Returns {@code null} for legacy rows that never stored a
-     * channel, which analytics treats as the default (BFM).
-     */
-    private Integer channelCodeFromReading(TelemetryLatestFlowReadingRecord reading) {
-        String channelValue = reading.channel();
-        if (channelValue == null || channelValue.isBlank()) {
-            return null;
-        }
-        return ReadingChannel.fromChannelValue(channelValue).getCode();
-    }
-
     /**
      * Zeroes the operator's latest confirmed reading, scoped to the tenant the caller authenticated as.
      *
@@ -1173,11 +1152,17 @@ public class BfmReadingService {
                 .findLatestFlowReadingByOperator(schemaName, operator.id())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, OPERATOR_LOOKUP_MISS));
 
+        // The reset has no unit field, so its 0 is in the standard unit of the row's channel, as on
+        // every correction path.
         telemetryTenantRepository.updateConfirmedReading(
                 schemaName,
                 latestReading.id(),
                 BigDecimal.ZERO,
-                operator.id()
+                operator.id(),
+                null,
+                ReadingChannel.fromChannelValue(latestReading.channel()).standardUnit()
+                        .map(ReadingUnit::code)
+                        .orElse(null)
         );
         // SUPPLY-PLAUSIBILITY: the marker described the value the reset has just destroyed, so it
         // cannot outlive it — 0 is not an implausible supply. Leaving it behind is not cosmetic:
@@ -1189,24 +1174,9 @@ public class BfmReadingService {
         // warehouse. Same unconditional clear as the correction path, and the same no-op on pre-V40.
         telemetryTenantRepository.applyQuarantineReason(schemaName, latestReading.id(), QuarantineReason.NONE);
 
-        LocalDateTime readingAt = latestReading.readingAt() != null ? latestReading.readingAt() : ReadingTime.now();
-        LocalDate readingDate = latestReading.readingDate() != null ? latestReading.readingDate() : readingAt.toLocalDate();
-        telemetryEventPublisher.publishMeterReadingRecorded(
-                operator.tenantId(),
-                latestReading.schemeId(),
-                operator.id(),
-                publishableExtractedReading(latestReading.extractedReading()),
-                BigDecimal.ZERO,
-                null,
-                latestReading.imageUrl(),
-                readingAt,
-                channelCodeFromReading(latestReading),
-                readingDate,
-                1,
-                0,
-                // ANOMALY-SUBMISSION-LINK: the reset republishes the row it just zeroed.
-                latestReading.correlationId()
-        );
+        // Published from the row as it now stands. Its created_by is operator.id(), because the row
+        // is the operator's own latest, so the event is credited as it was before.
+        readingRepublisher.republish(schemaName, operator.tenantId(), latestReading.id());
 
         return CreateReadingResponse.builder()
                 .success(true)
@@ -1315,100 +1285,18 @@ public class BfmReadingService {
         return value.stripTrailingZeros().toPlainString();
     }
 
-    private String buildImageAnomalyCorrelationId(int anomalyType, Long userId, Long schemeId, String readingUrl) {
-        String normalizedUrl = readingUrl == null ? "" : readingUrl.trim();
-        String key = anomalyType + ":" + userId + ":" + schemeId + ":" + normalizedUrl;
-        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
-    }
-
     /**
      * SUPPLY-PLAUSIBILITY: one anomaly per operator, per scheme, per day.
      *
-     * <p>Analytics derives {@code anomaly_table.uuid} deterministically from the correlationId, and
+     * <p>Analytics derives {@code fact_anomaly_table.uuid} deterministically from the correlationId, and
      * dedups on it — a repeat is touched, not inserted. The date is in the key because the keys
      * analytics builds for itself carry none: without it every type-10 anomaly for an operator and
      * scheme would collapse into a single row forever, and the second day's rejection would be
-     * invisible. Same construction as {@link #buildImageAnomalyCorrelationId}.
+     * invisible. Same construction as the unreadable-image id in {@code ImageReadingCapture}.
      */
     private String buildSupplyAnomalyCorrelationId(int anomalyType, Long userId, Long schemeId, LocalDate readingDate) {
         String key = anomalyType + ":" + userId + ":" + schemeId + ":" + readingDate;
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
-    }
-
-    private void recordImageAnomalyOncePerDay(String schemaName,
-                                              Integer tenantId,
-                                              Long userId,
-                                              Long schemeId,
-                                              int anomalyType,
-                                              String reason,
-                                              int retries,
-                                              BigDecimal aiReading,
-                                              BigDecimal aiConfidencePercentage,
-                                              BigDecimal overriddenReading,
-                                              BigDecimal previousReading,
-                                              LocalDateTime previousReadingDate,
-                                              Integer consecutiveDaysMissed,
-                                              String correlationId,
-                                              Long flowReadingId,
-                                              String submissionCorrelationId) {
-//        int existingCount = telemetryTenantRepository.countAnomaliesByTypeForToday(
-//                schemaName,
-//                userId,
-//                schemeId,
-//                anomalyType
-//        );
-//        if (existingCount > 0) {
-//            telemetryTenantRepository.touchLatestAnomalyByTypeForToday(
-//                    schemaName,
-//                    userId,
-//                    schemeId,
-//                    anomalyType
-//            );
-//            int effectiveRetries = Math.max(retries, existingCount + 1);
-//            telemetryEventPublisher.publishAnomalyRecorded(
-//                    tenantId,
-//                    anomalyType,
-//                    userId,
-//                    schemeId,
-//                    aiReading,
-//                    aiConfidencePercentage,
-//                    overriddenReading,
-//                    effectiveRetries,
-//                    previousReading,
-//                    previousReadingDate,
-//                    consecutiveDaysMissed,
-//                    reason,
-//                    AnomalyConstants.STATUS_OPEN,
-//                    correlationId
-//            );
-//            log.info("Skipping duplicate image anomaly publish for userId={} schemeId={} anomalyType={} correlationId={}",
-//                    userId, schemeId, anomalyType, correlationId);
-//            return;
-//        }
-
-        telemetryTenantRepository.createTenantAnomalyRecord(
-                schemaName,
-                tenantAnomaly(userId, schemeId, anomalyType, reason, retries,
-                        aiReading, aiConfidencePercentage, overriddenReading,
-                        previousReading, previousReadingDate, flowReadingId)
-        );
-        telemetryEventPublisher.publishAnomalyRecorded(
-                tenantId,
-                anomalyType,
-                userId,
-                schemeId,
-                aiReading,
-                aiConfidencePercentage,
-                overriddenReading,
-                retries,
-                previousReading,
-                previousReadingDate,
-                consecutiveDaysMissed,
-                reason,
-                AnomalyConstants.STATUS_OPEN,
-                correlationId,
-                submissionCorrelationId
-        );
     }
 
     /**
@@ -1496,44 +1384,6 @@ public class BfmReadingService {
                 .previousReading(previousReading)
                 .previousReadingDate(previousReadingDate)
                 .build();
-    }
-
-    private String summarizeOcrResult(OcrReadingResult result) {
-        if (result == null) {
-            return "null";
-        }
-        return String.format(
-                "{adjustedReading=%s,qualityStatus=%s,qualityConfidence=%s,correlationId=%s}",
-                result.getAdjustedReading(),
-                sanitizeLogValue(result.getQualityStatus()),
-                result.getQualityConfidence(),
-                sanitizeLogValue(result.getCorrelationId())
-        );
-    }
-
-    private String unreadableImageMessage(OcrReadingResult result) {
-        String rejectionReason = Optional.ofNullable(result)
-                .map(OcrReadingResult::getRejectionReason)
-                .filter(reason -> !reason.isBlank())
-                .orElse(null);
-        if (rejectionReason == null) {
-            return "Could not read meter value from image. Please retry with a clearer photo.";
-        }
-        return "Could not read meter value from image. " + rejectionReason;
-    }
-
-    private String imageUrlHash(String readingUrl) {
-        if (readingUrl == null || readingUrl.isBlank()) {
-            return "n/a";
-        }
-        return Integer.toHexString(readingUrl.hashCode());
-    }
-
-    private String sanitizeLogValue(String value) {
-        if (value == null || value.isBlank()) {
-            return "n/a";
-        }
-        return value.replace('\n', ' ').replace('\r', ' ').trim();
     }
 
     private record WaterSupplyThreshold(double undersupplyThresholdPercent, double oversupplyThresholdPercent) {

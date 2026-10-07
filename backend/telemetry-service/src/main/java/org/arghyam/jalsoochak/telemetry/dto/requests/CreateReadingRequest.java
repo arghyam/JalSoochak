@@ -61,6 +61,13 @@ public class CreateReadingRequest {
     private ReadingChannel declaredChannel;
 
     /**
+     * Unit of {@link #readingValue} as the submitting system sent it, not yet checked. Null means the
+     * channel's standard unit. Checked against the resolved channel, and the value converted to that
+     * channel's standard unit, when the reading is captured.
+     */
+    private String readingUnit;
+
+    /**
      * LOCATION-AFFINITY: where the submission says it was made, when the coordinates arrive
      * <em>with</em> the reading. Set only by the state-IT reading APIs, which carry a
      * {@code geolocation} object on the request — the same scoping as

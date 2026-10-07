@@ -3,6 +3,8 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
@@ -14,14 +16,19 @@ import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
-import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryFlowReadingDetails;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryPendingMeterChangeRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.CaptureInput;
+import org.arghyam.jalsoochak.telemetry.service.capture.CaptureOutcome;
+import org.arghyam.jalsoochak.telemetry.service.capture.CapturedReading;
+import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationVerdict;
 import org.arghyam.jalsoochak.telemetry.service.location.ReadingSubmission;
@@ -37,6 +44,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 @Service
@@ -173,6 +181,10 @@ public class MeterReadingConversationService {
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final ObjectMapper objectMapper;
     private final LocationAffinityService locationAffinityService;
+    private final ReadingChannelResolver readingChannelResolver;
+    private final ReadingRepublisher readingRepublisher;
+    private final SubmittedValueCapture submittedValueCapture;
+    private final PduDayLimit pduDayLimit;
 
     public MeterReadingConversationService(OperatorContextService operatorContextService,
                                            ConversationLocalizationService localizationService,
@@ -181,7 +193,11 @@ public class MeterReadingConversationService {
                                            TelemetryTenantRepository telemetryTenantRepository,
                                            TelemetryEventPublisher telemetryEventPublisher,
                                            ObjectMapper objectMapper,
-                                           LocationAffinityService locationAffinityService) {
+                                           LocationAffinityService locationAffinityService,
+                                           ReadingChannelResolver readingChannelResolver,
+                                           ReadingRepublisher readingRepublisher,
+                                           SubmittedValueCapture submittedValueCapture,
+                                           PduDayLimit pduDayLimit) {
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
         this.tenantConfigRepository = tenantConfigRepository;
@@ -190,6 +206,10 @@ public class MeterReadingConversationService {
         this.telemetryEventPublisher = telemetryEventPublisher;
         this.objectMapper = objectMapper;
         this.locationAffinityService = locationAffinityService;
+        this.readingChannelResolver = readingChannelResolver;
+        this.readingRepublisher = readingRepublisher;
+        this.submittedValueCapture = submittedValueCapture;
+        this.pduDayLimit = pduDayLimit;
     }
 
     public IntroResponse meterChangeMessage(IntroRequest request) {
@@ -233,7 +253,7 @@ public class MeterReadingConversationService {
                     .message(message.toString())
                     .build();
         } catch (Exception e) {
-            log.error("Error building meter change reasons for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error building meter change reasons", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message("Meter change reasons could not be prepared.")
@@ -267,9 +287,7 @@ public class MeterReadingConversationService {
             String selectedReason = resolveSelection(request.getReason(), reasons)
                     .orElseThrow(() -> new IllegalStateException("Invalid meter change reason selection"));
 
-            Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = resolveSchemeForToday(operatorWithSchema);
 
             String correlationId = telemetryTenantRepository.upsertPendingMeterChangeRecord(
                     operatorWithSchema.schemaName(),
@@ -288,7 +306,7 @@ public class MeterReadingConversationService {
                     .correlationId(correlationId)
                     .build();
         } catch (Exception e) {
-            log.error("Error preparing take meter reading prompt for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error preparing take meter reading prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message("Take meter reading prompt could not be prepared.")
@@ -350,7 +368,7 @@ public class MeterReadingConversationService {
                     .message(message.toString())
                     .build();
         } catch (Exception e) {
-            log.error("Error preparing issue report prompt for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error preparing issue report prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message("Issue report prompt could not be prepared.")
@@ -530,9 +548,7 @@ public class MeterReadingConversationService {
             String selectedReason = selectedReasonNode.path("name").asText().trim();
             String selectedKey = selectedReasonNode.path("id").asText().trim();
 
-            Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = resolveSchemeForToday(operatorWithSchema);
 
             String correlationId = telemetryTenantRepository.upsertPendingMeterChangeRecord(
                     operatorWithSchema.schemaName(),
@@ -564,7 +580,7 @@ public class MeterReadingConversationService {
                     .notOthers("OTHERS".equalsIgnoreCase(selectedKey))
                     .build();
         } catch (Exception e) {
-            log.error("Error saving meter change reason for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error saving meter change reason", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message("Meter change reason could not be saved.")
@@ -645,9 +661,7 @@ public class MeterReadingConversationService {
             String responseSelectedKey = normalizeIssueReportSelectedKey(selectedKey);
             String anomalySelectedKey = isReasonKey(selectedKey) ? responseSelectedKey : selectedKey;
 
-            Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = resolveSchemeForToday(operatorWithSchema);
             List<Long> analyticsUserIds = resolveAnalyticsUserIds(
                     operatorWithSchema.schemaName(),
                     schemeId,
@@ -734,7 +748,7 @@ public class MeterReadingConversationService {
                     .selected(responseSelectedKey)
                     .build();
         } catch (Exception e) {
-            log.error("Error saving issue report for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error saving issue report", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
@@ -768,7 +782,7 @@ public class MeterReadingConversationService {
                     .message(message)
                     .build();
         } catch (Exception e) {
-            log.error("Error preparing others prompt for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error preparing others prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message("Others prompt could not be prepared.")
@@ -808,7 +822,7 @@ public class MeterReadingConversationService {
                     .message(message.toString())
                     .build();
         } catch (Exception e) {
-            log.error("Error preparing telemetry issue report prompt for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error preparing telemetry issue report prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message("Issue report prompt could not be prepared.")
@@ -883,9 +897,7 @@ public class MeterReadingConversationService {
                 );
             }
 
-            Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = resolveSchemeForToday(operatorWithSchema);
             List<Long> analyticsUserIds = resolveAnalyticsUserIds(
                     operatorWithSchema.schemaName(),
                     schemeId,
@@ -937,7 +949,7 @@ public class MeterReadingConversationService {
                     .notOthers("OTHERS".equalsIgnoreCase(selectedKey) || "others".equalsIgnoreCase(selectedKey))
                     .build();
         } catch (Exception e) {
-            log.error("Error saving telemetry issue report for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error saving telemetry issue report", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
@@ -964,9 +976,7 @@ public class MeterReadingConversationService {
                 throw new IllegalStateException("Operator tenant could not be resolved");
             }
 
-            Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = resolveSchemeForToday(operatorWithSchema);
             List<Long> analyticsUserIds = resolveAnalyticsUserIds(
                     operatorWithSchema.schemaName(),
                     schemeId,
@@ -1036,7 +1046,7 @@ public class MeterReadingConversationService {
                     .selected("others")
                     .build();
         } catch (Exception e) {
-            log.error("Error saving others issue report for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error saving others issue report", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
@@ -1046,6 +1056,152 @@ public class MeterReadingConversationService {
                     ))
                     .build();
         }
+    }
+
+    /** The row a manual value was written to, and the correlation id of that row's submission. */
+    private record ManualReadingRow(Long id, String correlationId) {
+    }
+
+    /**
+     * Writes a manual value over the pending meter-change row, else over the operator's latest row
+     * today, else as a new row.
+     *
+     * @param newRowCorrelationId the correlation id a new row is given, and the one kept when the
+     *                            reused row today has none
+     */
+    private ManualReadingRow writeManualReading(TelemetryOperatorWithSchema operatorWithSchema,
+                                                Long schemeId,
+                                                LocalDate today,
+                                                Optional<TelemetryPendingMeterChangeRecord> pendingOpt,
+                                                BigDecimal value,
+                                                CapturedReading captured,
+                                                ReadingChannel channel,
+                                                boolean isMeterReplaced,
+                                                String meterChangeReason,
+                                                String newRowCorrelationId) {
+        if (pendingOpt.isPresent()) {
+            // Manual reading submissions should only update confirmed_reading (never extracted_reading).
+            // A pending meter-change row has confirmed_reading = 0 by query invariant, so it can never
+            // carry rollover-resolved provenance — tag MANUAL unconditionally, folded into the same UPDATE.
+            Long pendingId = pendingOpt.get().id();
+            telemetryTenantRepository.updateConfirmedReading(
+                    operatorWithSchema.schemaName(),
+                    pendingId,
+                    value,
+                    operatorWithSchema.operator().id(),
+                    RolloverResolutionService.SOURCE_MANUAL,
+                    captured.submittedUnitCode()
+            );
+            telemetryTenantRepository.updateFlowReadingChannel(
+                    operatorWithSchema.schemaName(), pendingId, channel.name());
+            if (isMeterReplaced) {
+                telemetryTenantRepository.updateMeterChangeReason(
+                        operatorWithSchema.schemaName(),
+                        pendingId,
+                        "METER_REPLACED",
+                        operatorWithSchema.operator().id()
+                );
+            }
+            return new ManualReadingRow(pendingId, pendingOpt.get().correlationId());
+        }
+
+        Optional<TelemetryFlowReadingDetails> todaysFlowOpt = telemetryTenantRepository.findLatestFlowReadingForDate(
+                operatorWithSchema.schemaName(),
+                schemeId,
+                operatorWithSchema.operator().id(),
+                today
+        );
+        if (todaysFlowOpt.isPresent()) {
+            TelemetryFlowReadingDetails todaysFlow = todaysFlowOpt.get();
+            // Manual reading submissions should only update confirmed_reading (never extracted_reading),
+            // regardless of whether extracted_reading exists for today's row. Today's row may have been
+            // rollover-resolved earlier, so retag MANUAL only when the value actually changes — a
+            // same-value re-entry keeps SOURCE_ROLLOVER_RESOLVED. Folded into the same UPDATE.
+            telemetryTenantRepository.updateConfirmedReading(
+                    operatorWithSchema.schemaName(),
+                    todaysFlow.id(),
+                    value,
+                    operatorWithSchema.operator().id(),
+                    RolloverResolutionService.manualConfirmSource(value, todaysFlow.confirmedReading()),
+                    captured.submittedUnitCode()
+            );
+            telemetryTenantRepository.updateFlowReadingChannel(
+                    operatorWithSchema.schemaName(), todaysFlow.id(), channel.name());
+            if (isMeterReplaced) {
+                telemetryTenantRepository.updateMeterChangeReason(
+                        operatorWithSchema.schemaName(),
+                        todaysFlow.id(),
+                        "METER_REPLACED",
+                        operatorWithSchema.operator().id()
+                );
+            }
+            String correlationId = todaysFlow.correlationId() != null && !todaysFlow.correlationId().isBlank()
+                    ? todaysFlow.correlationId()
+                    : newRowCorrelationId;
+            return new ManualReadingRow(todaysFlow.id(), correlationId);
+        }
+
+        // Nothing recorded for today yet, so the manual value opens the row: extracted_reading
+        // keeps the 0 sentinel (nothing extracted it) and the row is tagged MANUAL. Without the
+        // tag it would keep confirmed_reading_source at its DEFAULT 0 = AS_EXTRACTED and claim
+        // the AI picked a number it never saw.
+        //
+        // Both writes go through the @Transactional persist helper rather than an insert
+        // followed by a separate applyConfirmedReadingSource: a marker write that failed on its
+        // own would commit exactly the mislabelled row this is here to prevent. NORMAL
+        // ingestion with no submitted ids skips the tracking UPDATE, so this is the same two
+        // statements the API path already runs, under one transaction. The channel and the
+        // unit are written by the insert itself.
+        Long newRowId = telemetryTenantRepository.persistFlowReadingWithTracking(
+                operatorWithSchema.schemaName(),
+                null,
+                schemeId,
+                operatorWithSchema.operator().id(),
+                ReadingTime.now(),
+                BigDecimal.ZERO,
+                value,
+                newRowCorrelationId,
+                null,
+                "",
+                isMeterReplaced ? "METER_REPLACED" : meterChangeReason,
+                IngestionSource.NORMAL,
+                null,
+                null,
+                null,
+                RolloverResolutionService.SOURCE_MANUAL,
+                null,
+                channel.name(),
+                captured.submittedUnitCode()
+        ).id();
+        return new ManualReadingRow(newRowId, newRowCorrelationId);
+    }
+
+    private CreateReadingResponse rejectedManualReading(String message,
+                                                        String languageKey,
+                                                        String correlationId,
+                                                        BigDecimal manualReadingValue) {
+        return CreateReadingResponse.builder()
+                .success(false)
+                .message(localizationService.localizeMessage(message, languageKey))
+                .qualityStatus("REJECTED")
+                .correlationId(correlationId)
+                .meterReading(manualReadingValue)
+                .build();
+    }
+
+    /**
+     * The row {@link #writeManualReading} writes the value over, picked as it picks it: the pending
+     * meter-change row, else the operator's latest row today. Null when the value adds a row.
+     */
+    private Long rowTheManualValueReplaces(TelemetryOperatorWithSchema operatorWithSchema,
+                                           Long schemeId,
+                                           Optional<TelemetryPendingMeterChangeRecord> pendingOpt,
+                                           LocalDate today) {
+        return pendingOpt.map(TelemetryPendingMeterChangeRecord::id)
+                .or(() -> telemetryTenantRepository.findLatestFlowReadingForDate(
+                                operatorWithSchema.schemaName(), schemeId, operatorWithSchema.operator().id(), today)
+                        .map(TelemetryFlowReadingDetails::id))
+                .orElse(null);
     }
 
     public CreateReadingResponse manualReadingMessage(ManualReadingRequest request) {
@@ -1102,28 +1258,53 @@ public class MeterReadingConversationService {
                     ? request.getCorrelationId().trim()
                     : "manual-" + UUID.randomUUID();
 
-            // Validation baseline:
+            // The manual value is a reading like any other, so its row carries the channel it was
+            // taken on: the operator's stored preference, as on the photo path. The channel is settled
+            // first because it decides the rules the value is checked against and its baseline.
+            ReadingChannel resolvedChannel = readingChannelResolver.resolve(
+                    operatorWithSchema.schemaName(), request.getContactId());
+
+            // The same rules as any other submitted value. WhatsApp has no unit field, so the value is
+            // in the channel's standard unit.
+            CapturedReading captured;
+            switch (submittedValueCapture.capture(new CaptureInput(
+                    operatorWithSchema.schemaName(),
+                    tenantId,
+                    operatorWithSchema.operator().id(),
+                    schemeId,
+                    resolvedChannel,
+                    null,
+                    manualReadingValue,
+                    null,
+                    false,
+                    OcrRetryMode.NONE))) {
+                case CaptureOutcome.Captured(CapturedReading reading) -> captured = reading;
+                case CaptureOutcome.Rejected rejected -> {
+                    return rejectedManualReading(rejected.message(), languageKey, correlationId, manualReadingValue);
+                }
+                case CaptureOutcome.Retry retry ->
+                        throw new IllegalStateException("A submitted value is never retried");
+            }
+
+            // Validation baseline, from readings on the same channel only:
             // - If the meter is not replaced, compare against the most recent confirmed reading by default.
             // - If isManualReading=false, compare against the most recent confirmed reading strictly before today.
             // - If the meter is replaced, load latest snapshot for anomaly/audit context only.
+            // - A PDU reading is one run's duration rather than a running total, so it has none.
             LocalDate today = ReadingTime.today();
             boolean compareWithLatest = request.getIsManualReading() == null || Boolean.TRUE.equals(request.getIsManualReading());
-            Optional<TelemetryConfirmedReadingSnapshot> previousSnapshotOpt = isMeterReplaced
-                    ? telemetryTenantRepository.findLatestConfirmedReadingSnapshot(operatorWithSchema.schemaName(), schemeId, null)
-                    : (compareWithLatest
-                    ? telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
-                            operatorWithSchema.schemaName(),
-                            schemeId,
-                            null
-                    )
-                    : telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate(
-                            operatorWithSchema.schemaName(),
-                            schemeId,
-                            today,
-                            null
-                    ));
+            Optional<TelemetryConfirmedReadingSnapshot> previousSnapshotOpt;
+            if (resolvedChannel == ReadingChannel.PDU) {
+                previousSnapshotOpt = Optional.empty();
+            } else if (isMeterReplaced || compareWithLatest) {
+                previousSnapshotOpt = telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
+                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, null);
+            } else {
+                previousSnapshotOpt = telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate(
+                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, today, null);
+            }
 
-            BigDecimal effectiveConfirmedReading = manualReadingValue;
+            BigDecimal effectiveConfirmedReading = captured.value();
 //            if (!isMeterReplaced
 //                    && previousSnapshotOpt.isPresent()
 //                    && manualReadingValue.compareTo(previousSnapshotOpt.get().confirmedReading()) < 0) {
@@ -1168,8 +1349,9 @@ public class MeterReadingConversationService {
 //            }
 
             // Tenant-configured water supply threshold validation (relative to WATER_NORM).
-            // Validate against the effective confirmed value after baseline clamping.
-            if (!isMeterReplaced) {
+            // Validate against the effective confirmed value after baseline clamping. The maximum
+            // measures a water volume against a meter total, which only a BFM reading is.
+            if (!isMeterReplaced && resolvedChannel == ReadingChannel.BFM) {
                 Optional<WaterSupplyThreshold> thresholdOpt = loadWaterSupplyThreshold(tenantId);
                 Optional<BigDecimal> waterNormOpt = loadWaterNorm(tenantId);
                 if (thresholdOpt.isPresent() && waterNormOpt.isPresent()) {
@@ -1301,98 +1483,33 @@ public class MeterReadingConversationService {
                 }
             }
 
-            // ANOMALY-SUBMISSION-LINK: the flow_reading_table row the manual value lands on, captured
-            // across all three branches below so the MANUAL_OVERRIDE anomaly recorded after them can
-            // point at it. Every branch ends with a real row — one reused, one updated, one created —
-            // so this is never null by the time the anomaly is written.
-            Long manualReadingId;
-            if (pendingOpt.isPresent()) {
-                // Manual reading submissions should only update confirmed_reading (never extracted_reading).
-                // A pending meter-change row has confirmed_reading = 0 by query invariant, so it can never
-                // carry rollover-resolved provenance — tag MANUAL unconditionally, folded into the same UPDATE.
-                manualReadingId = pendingOpt.get().id();
-                telemetryTenantRepository.updateConfirmedReading(
-                        operatorWithSchema.schemaName(),
-                        pendingOpt.get().id(),
-                        effectiveConfirmedReading,
-                        operatorWithSchema.operator().id(),
-                        RolloverResolutionService.SOURCE_MANUAL
-                );
-                if (isMeterReplaced) {
-                    telemetryTenantRepository.updateMeterChangeReason(
-                            operatorWithSchema.schemaName(),
-                            pendingOpt.get().id(),
-                            "METER_REPLACED",
-                            operatorWithSchema.operator().id()
-                    );
+            // ANOMALY-SUBMISSION-LINK: the flow_reading_table row the manual value lands on, which the
+            // MANUAL_OVERRIDE anomaly recorded below points at. Every branch of the write ends with a real
+            // row — one reused, one updated, one created — so it is never null.
+            String newRowCorrelationId = correlationId;
+            Supplier<ManualReadingRow> write = () -> writeManualReading(operatorWithSchema, schemeId, today, pendingOpt,
+                    effectiveConfirmedReading, captured, resolvedChannel, isMeterReplaced,
+                    request.getMeterChangeReason(), newRowCorrelationId);
+            ManualReadingRow manualReadingRow;
+            if (resolvedChannel == ReadingChannel.PDU) {
+                Optional<ManualReadingRow> written = pduDayLimit.writeWithinLimit(
+                        operatorWithSchema.schemaName(), schemeId, today, effectiveConfirmedReading,
+                        () -> rowTheManualValueReplaces(operatorWithSchema, schemeId, pendingOpt, today), write);
+                if (written.isEmpty()) {
+                    return rejectedManualReading(
+                            PduDayLimit.EXCEEDED.message(), languageKey, correlationId, manualReadingValue);
                 }
-                correlationId = pendingOpt.get().correlationId();
+                manualReadingRow = written.get();
             } else {
-                Optional<TelemetryFlowReadingDetails> todaysFlowOpt = telemetryTenantRepository.findLatestFlowReadingForDate(
-                        operatorWithSchema.schemaName(),
-                        schemeId,
-                        operatorWithSchema.operator().id(),
-                        today
-                );
-
-                if (todaysFlowOpt.isPresent()) {
-                    TelemetryFlowReadingDetails todaysFlow = todaysFlowOpt.get();
-                    manualReadingId = todaysFlow.id();
-                    // Manual reading submissions should only update confirmed_reading (never extracted_reading),
-                    // regardless of whether extracted_reading exists for today's row. Today's row may have been
-                    // rollover-resolved earlier, so retag MANUAL only when the value actually changes — a
-                    // same-value re-entry keeps SOURCE_ROLLOVER_RESOLVED. Folded into the same UPDATE.
-                    telemetryTenantRepository.updateConfirmedReading(
-                            operatorWithSchema.schemaName(),
-                            todaysFlow.id(),
-                            effectiveConfirmedReading,
-                            operatorWithSchema.operator().id(),
-                            RolloverResolutionService.manualConfirmSource(
-                                    effectiveConfirmedReading, todaysFlow.confirmedReading())
-                    );
-                    if (isMeterReplaced) {
-                        telemetryTenantRepository.updateMeterChangeReason(
-                                operatorWithSchema.schemaName(),
-                                todaysFlow.id(),
-                                "METER_REPLACED",
-                                operatorWithSchema.operator().id()
-                        );
-                    }
-
-                    if (todaysFlow.correlationId() != null && !todaysFlow.correlationId().isBlank()) {
-                        correlationId = todaysFlow.correlationId();
-                    }
-                } else {
-                    // Nothing recorded for today yet, so the manual value opens the row: extracted_reading
-                    // keeps the 0 sentinel (nothing extracted it) and the row is tagged MANUAL. Without the
-                    // tag it would keep confirmed_reading_source at its DEFAULT 0 = AS_EXTRACTED and claim
-                    // the AI picked a number it never saw.
-                    //
-                    // Both writes go through the @Transactional persist helper rather than an insert
-                    // followed by a separate applyConfirmedReadingSource: a marker write that failed on its
-                    // own would commit exactly the mislabelled row this is here to prevent. NORMAL
-                    // ingestion with no submitted ids skips the tracking UPDATE, so this is the same two
-                    // statements the API path already runs, under one transaction.
-                    manualReadingId = telemetryTenantRepository.persistFlowReadingWithTracking(
-                            operatorWithSchema.schemaName(),
-                            null,
-                            schemeId,
-                            operatorWithSchema.operator().id(),
-                            ReadingTime.now(),
-                            BigDecimal.ZERO,
-                            effectiveConfirmedReading,
-                            correlationId,
-                            null,
-                            "",
-                            isMeterReplaced ? "METER_REPLACED" : request.getMeterChangeReason(),
-                            IngestionSource.NORMAL,
-                            null,
-                            null,
-                            null,
-                            RolloverResolutionService.SOURCE_MANUAL
-                    );
-                }
+                manualReadingRow = write.get();
             }
+            Long manualReadingId = manualReadingRow.id();
+            correlationId = manualReadingRow.correlationId();
+
+            // Analytics has to receive the manual value: without this the row exists in telemetry
+            // only, with no fact row and no water quantity for the day. Published straight after the
+            // write, so a failure in the checks below cannot leave a stored reading unpublished.
+            readingRepublisher.republish(operatorWithSchema.schemaName(), tenantId, manualReadingId);
 
             // LOCATION-AFFINITY: the manual path never reaches BfmReadingService.createReading, so it
             // needs its own call or an operator who types the reading in — typically after an
@@ -1517,7 +1634,7 @@ public class MeterReadingConversationService {
             }
             return response;
         } catch (Exception e) {
-            log.error("Error processing manual reading for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error processing manual reading", request.getContactId(), e);
             String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Manual reading could not be saved.", languageKey);
             return CreateReadingResponse.builder()
@@ -1562,8 +1679,13 @@ public class MeterReadingConversationService {
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, operatorWithSchema.operator().tenantId())
             );
 
+            // The scheme selected earlier in this conversation, as the image and manual-reading paths
+            // resolve it. The first mapped scheme is only a fallback: checking it for an operator
+            // with several schemes measured the boundary of a scheme they were not submitting for.
             Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorId)
+                    .findLatestPendingSchemeSelectionForDate(operatorWithSchema.schemaName(), operatorId, ReadingTime.today())
+                    .map(TelemetrySchemeSelectionRecord::schemeId)
+                    .or(() -> telemetryTenantRepository.findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorId))
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
             String correlationId = null;
@@ -1629,7 +1751,7 @@ public class MeterReadingConversationService {
                     .build();
         } catch (Exception e) {
             String safeContactId = request != null ? request.resolveContactId() : null;
-            log.error("Error processing location for contactId {}: {}", safeContactId, e.getMessage(), e);
+            logFailure("Error processing location", safeContactId, e);
             String languageKey = localizationService.resolveLanguageKeyForContact(safeContactId);
             String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Location could not be saved.", languageKey);
             return CreateReadingResponse.builder()
@@ -1696,13 +1818,11 @@ public class MeterReadingConversationService {
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
 
-            Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorId)
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = resolveSchemeForToday(operatorWithSchema);
 
             LocalDate today = ReadingTime.today();
 
-            Optional<TelemetryCompletedFlowReading> targetDayRecordOpt = telemetryTenantRepository
+            Optional<TelemetryLatestFlowReadingRecord> targetDayRecordOpt = telemetryTenantRepository
                     .findLatestCompletedFlowReadingBeforeDate(operatorWithSchema.schemaName(), schemeId, operatorId, today);
             if (targetDayRecordOpt.isEmpty()) {
                 return CreateReadingResponse.builder()
@@ -1715,70 +1835,54 @@ public class MeterReadingConversationService {
                         .correlationId(request.getContactId())
                         .build();
             }
-            TelemetryCompletedFlowReading targetDayRecord = targetDayRecordOpt.get();
-            LocalDate targetDay = targetDayRecord.readingDate();
+            TelemetryLatestFlowReadingRecord targetDayRecord = targetDayRecordOpt.get();
 
-            Optional<TelemetryCompletedFlowReading> dayBeforeTargetOpt = telemetryTenantRepository
-                    .findLatestCompletedFlowReadingBeforeDate(operatorWithSchema.schemaName(), schemeId, operatorId, targetDay);
-
-            Optional<TelemetryCompletedFlowReading> dayAfterTargetOpt = telemetryTenantRepository
-                    .findEarliestCompletedFlowReadingAfterDate(operatorWithSchema.schemaName(), schemeId, operatorId, targetDay);
-
-            if (dayBeforeTargetOpt.isPresent()) {
-                TelemetryCompletedFlowReading dayBeforeTarget = dayBeforeTargetOpt.get();
-//                if (readingValue.compareTo(dayBeforeTarget.confirmedReading()) <= 0) {
-//                    return CreateReadingResponse.builder()
-//                            .success(false)
-//                            .message(localizationService.localizeMessage(
-//                                    "Reading must be greater than the reading on " + dayBeforeTarget.readingDate()
-//                                            + " (" + toPlain(dayBeforeTarget.confirmedReading()) + "). Submitted reading: "
-//                                            + toPlain(readingValue) + ".",
-//                                    languageKey
-//                            ))
-//                            .qualityStatus("REJECTED")
-//                            .correlationId(request.getContactId())
-//                            .meterReading(readingValue)
-//                            .build();
-//                }
+            // The corrected value follows the rules of the target row's channel, as a submission on it
+            // would. WhatsApp has no unit field, so the value is in that channel's standard unit.
+            ReadingChannel channel = ReadingChannel.fromChannelValue(targetDayRecord.channel());
+            CapturedReading captured;
+            switch (submittedValueCapture.captureCorrection(channel, readingValue, null)) {
+                case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
+                case CaptureOutcome.Rejected rejected -> {
+                    return rejectedManualReading(rejected.message(), languageKey, request.getContactId(), readingValue);
+                }
+                case CaptureOutcome.Retry retry ->
+                        throw new IllegalStateException("A submitted value is never retried");
             }
+            BigDecimal correctedReading = captured.value();
 
             // A hand-typed correction moves confirmed_reading only. This used to call
             // updateReadingValues, which also overwrote extracted_reading and so destroyed the only
             // record of what the OCR provider read off that day's photo. Retag MANUAL only when the value
             // actually moves, so restating the stored number keeps an existing ROLLOVER_RESOLVED or
             // EXTERNALLY_ASSERTED marker.
-            telemetryTenantRepository.updateConfirmedReading(
-                    operatorWithSchema.schemaName(),
-                    targetDayRecord.id(),
-                    readingValue,
-                    operatorId,
-                    RolloverResolutionService.manualConfirmSource(
-                            readingValue, targetDayRecord.confirmedReading())
-            );
-            BigDecimal previousDayConfirmedReading = dayBeforeTargetOpt
-                    .map(TelemetryCompletedFlowReading::confirmedReading)
-                    .orElse(BigDecimal.ZERO);
-            BigDecimal targetDayWaterQuantity = readingValue.subtract(previousDayConfirmedReading);
-            telemetryEventPublisher.publishWaterQuantityRecorded(
-                    tenantId,
-                    schemeId,
-                    operatorId,
-                    targetDay,
-                    targetDayWaterQuantity,
-                    1
-            );
-            if (dayAfterTargetOpt.isPresent()) {
-                TelemetryCompletedFlowReading dayAfterTarget = dayAfterTargetOpt.get();
-                BigDecimal dayAfterWaterQuantity = dayAfterTarget.confirmedReading().subtract(readingValue);
-                telemetryEventPublisher.publishWaterQuantityRecorded(
-                        tenantId,
-                        schemeId,
+            Supplier<Long> write = () -> {
+                telemetryTenantRepository.updateConfirmedReading(
+                        operatorWithSchema.schemaName(),
+                        targetDayRecord.id(),
+                        correctedReading,
                         operatorId,
-                        dayAfterTarget.readingDate(),
-                        dayAfterWaterQuantity,
-                        1
+                        RolloverResolutionService.manualConfirmSource(
+                                correctedReading, targetDayRecord.confirmedReading()),
+                        captured.submittedUnitCode()
                 );
+                return targetDayRecord.id();
+            };
+            if (channel == ReadingChannel.PDU) {
+                // The row's old minutes don't count towards its day.
+                if (pduDayLimit.writeWithinLimit(operatorWithSchema.schemaName(), schemeId,
+                        targetDayRecord.readingDate(), correctedReading, targetDayRecord::id, write).isEmpty()) {
+                    return rejectedManualReading(
+                            PduDayLimit.EXCEEDED.message(), languageKey, request.getContactId(), readingValue);
+                }
+            } else {
+                write.get();
             }
+
+            // Analytics recalculates the corrected day and the day after it from the stored readings, so
+            // the corrected row is published again rather than a water quantity worked out here. This
+            // path doesn't release a quarantined row, so one stays unpublished.
+            readingRepublisher.republish(operatorWithSchema.schemaName(), tenantId, targetDayRecord.id());
 
             String correlationId = targetDayRecord.correlationId();
             if (correlationId == null || correlationId.isBlank()) {
@@ -1790,10 +1894,10 @@ public class MeterReadingConversationService {
                     .message("Previous reading updated successfully.")
                     .qualityStatus("CONFIRMED")
                     .correlationId(correlationId)
-                    .meterReading(readingValue)
+                    .meterReading(correctedReading)
                     .build();
         } catch (Exception e) {
-            log.error("Error updating previous day reading for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            logFailure("Error updating previous day reading", request.getContactId(), e);
             String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(
                     e,
@@ -2072,6 +2176,26 @@ public class MeterReadingConversationService {
         return out.toString();
     }
 
+    /**
+     * NUDGE-SCHEME: the scheme this conversation is about — the one the operator picked today via
+     * {@code /scheme/selected} — falling back to their first mapped scheme, which is also the only
+     * one for a single-scheme operator (the flow asks only when there are several).
+     */
+    private Long resolveSchemeForToday(TelemetryOperatorWithSchema operatorWithSchema) {
+        return telemetryTenantRepository
+                .findLatestPendingSchemeSelectionForDate(
+                        operatorWithSchema.schemaName(),
+                        operatorWithSchema.operator().id(),
+                        ReadingTime.today()
+                )
+                .map(TelemetrySchemeSelectionRecord::schemeId)
+                .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
+                        operatorWithSchema.schemaName(),
+                        operatorWithSchema.operator().id()
+                ))
+                .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+    }
+
     private List<Long> resolveAnalyticsUserIds(String schemaName, Long schemeId, Long fallbackUserId) {
         List<Long> subDivisionalOfficerIds = telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme(schemaName, schemeId);
         if (subDivisionalOfficerIds != null && !subDivisionalOfficerIds.isEmpty()) {
@@ -2107,5 +2231,28 @@ public class MeterReadingConversationService {
             }
         }
         return count;
+    }
+
+    /**
+     * Logs a failed chatbot answer. {@link IllegalStateException} is what this service throws for an
+     * expected outcome — an operator's invalid input, a missing mapping or config — so it is a WARN
+     * without a stack trace; anything else is unexpected and keeps its ERROR and stack trace. Either
+     * way the phone is masked: phone numbers are PII and appear raw only at DEBUG.
+     */
+    private static void logFailure(String what, String contactId, Exception e) {
+        if (e instanceof IllegalStateException) {
+            log.warn("{} for contact {}: {}", what, maskPhone(contactId), e.getMessage());
+        } else {
+            log.error("{} for contact {}: {}", what, maskPhone(contactId), e.getMessage(), e);
+        }
+        log.debug("{} for contactId {}", what, contactId);
+    }
+
+    private static String maskPhone(String phone) {
+        if (phone == null || phone.isBlank()) {
+            return "n/a";
+        }
+        String digits = phone.replaceAll("\\D", "");
+        return digits.length() <= 4 ? "****" : "****" + digits.substring(digits.length() - 4);
     }
 }

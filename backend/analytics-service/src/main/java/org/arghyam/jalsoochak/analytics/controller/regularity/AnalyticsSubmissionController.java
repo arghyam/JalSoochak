@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.HourlySubmissionActivityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SubmissionStatusSummaryResponse;
@@ -22,6 +23,7 @@ import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvide
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
 import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
+import org.arghyam.jalsoochak.analytics.service.SubmissionActivityService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -49,6 +51,7 @@ public class AnalyticsSubmissionController {
     private final FactMeterReadingRepository meterReadingRepository;
     private final DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
     private final AuthenticatedRequestContextService authenticatedRequestContextService;
+    private final SubmissionActivityService submissionActivityService;
 
     @GetMapping("/reading-submission-rate")
     @Operation(
@@ -401,6 +404,45 @@ public class AnalyticsSubmissionController {
                     .success(false)
                     .data(null)
                     .build());
+        }
+    }
+
+    @GetMapping("/submission-activity/hourly")
+    @Operation(
+            summary = "Get hourly reading-submission activity (submissions + distinct schemes per hour) for a tenant, "
+                    + "optionally scoped to one LGD or department region",
+            description = """
+                    Returns one bucket per hour over [start_date, end_date]. `submissionCount` is additive across
+                    hours; `distinctSchemeCount` is a per-hour figure and must NOT be summed across hours in the UI
+                    (a scheme can submit in several hours). Computed from the base meter-reading fact, so any region
+                    level is supported. Omit both `lgd_id` and `department_id` for the whole-tenant (state) view.
+                    """)
+    public ResponseEntity<ApiResponse<HourlySubmissionActivityResponse>> getHourlySubmissionActivity(
+            @RequestParam(name = "tenant_id") Integer tenantId,
+            @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(name = "lgd_id", required = false) Integer lgdId,
+            @RequestParam(name = "department_id", required = false) Integer departmentId) {
+        try {
+            HourlySubmissionActivityResponse data = submissionActivityService.getHourlySubmissionActivity(
+                    tenantId, lgdId, departmentId, startDate, endDate);
+            return ResponseEntity.ok(ApiResponse.<HourlySubmissionActivityResponse>builder()
+                    .success(true)
+                    .data(data)
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<HourlySubmissionActivityResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        } catch (Exception e) {
+            log.error("Failed /submission-activity/hourly (tenantId={}, startDate={}, endDate={}, lgdId={}, departmentId={})",
+                    tenantId, startDate, endDate, lgdId, departmentId, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.<HourlySubmissionActivityResponse>builder()
+                            .success(false)
+                            .data(null)
+                            .build());
         }
     }
 }

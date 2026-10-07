@@ -18,15 +18,26 @@ import java.math.BigDecimal;
  */
 public class WaterVolumeOutOfRangeException extends ArithmeticException {
 
-    private final transient BigDecimal cubicMetres;
+    private final transient BigDecimal value;
+    private final String unit;
 
-    public WaterVolumeOutOfRangeException(BigDecimal cubicMetres) {
-        super("Water volume " + cubicMetres + " m3 converts to more litres than a BIGINT column holds");
-        this.cubicMetres = cubicMetres;
+    /**
+     * @param value the offending quantity, in the unit it was in when it overflowed
+     * @param unit  that unit, for the log line (e.g. {@code m3} for a meter delta, {@code L} for a sum)
+     */
+    public WaterVolumeOutOfRangeException(BigDecimal value, String unit) {
+        super("Water volume " + value + " " + unit + " converts to more litres than a BIGINT column holds");
+        this.value = value;
+        this.unit = unit;
     }
 
-    /** The offending volume, in the meter's native m&sup3; — the number worth putting in the log. */
-    public BigDecimal getCubicMetres() {
-        return cubicMetres;
+    /** The offending quantity — the number worth putting in the log. */
+    public BigDecimal getValue() {
+        return value;
+    }
+
+    /** The unit {@link #getValue()} is in. */
+    public String getUnit() {
+        return unit;
     }
 }

@@ -30,6 +30,15 @@ class ReadingChannelTest {
     }
 
     @Test
+    void kind_meterIndexForTheRunningTotalsAndPeriodAmountForPumpDuration() {
+        assertThat(ReadingChannel.BFM.kind()).contains(ReadingKind.METER_INDEX);
+        assertThat(ReadingChannel.ELM.kind()).contains(ReadingKind.METER_INDEX);
+        assertThat(ReadingChannel.PDU.kind()).contains(ReadingKind.PERIOD_AMOUNT);
+        assertThat(ReadingChannel.IOT.kind()).isEmpty();
+        assertThat(ReadingChannel.MAN.kind()).isEmpty();
+    }
+
+    @Test
     void fromCode_nullOrUnknown_defaultsToBfm() {
         assertThat(ReadingChannel.fromCode(null)).isEqualTo(ReadingChannel.BFM);
         assertThat(ReadingChannel.fromCode(999)).isEqualTo(ReadingChannel.BFM);

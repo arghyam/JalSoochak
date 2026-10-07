@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.enums;
 
 import java.util.Arrays;
+import java.util.Optional;
 
 /**
  * Reading-submission channel (a.k.a. communication / meter channel) carried on
@@ -15,20 +16,22 @@ import java.util.Arrays;
  * {@code channel} is {@code null}.
  */
 public enum ReadingChannel {
-    BFM(1, "Bulk Flow Meter"),
-    ELM(2, "Electric Meter"),
-    PDU(3, "Pump Duration"),
-    IOT(4, "IoT"),
-    MAN(5, "Manual");
+    BFM(1, "Bulk Flow Meter", ReadingKind.METER_INDEX),
+    ELM(2, "Electric Meter", ReadingKind.METER_INDEX),
+    PDU(3, "Pump Duration", ReadingKind.PERIOD_AMOUNT),
+    IOT(4, "IoT", null),
+    MAN(5, "Manual", null);
 
     public static final ReadingChannel DEFAULT = BFM;
 
     private final int code;
     private final String displayName;
+    private final ReadingKind kind;
 
-    ReadingChannel(int code, String displayName) {
+    ReadingChannel(int code, String displayName, ReadingKind kind) {
         this.code = code;
         this.displayName = displayName;
+        this.kind = kind;
     }
 
     public int getCode() {
@@ -37,6 +40,14 @@ public enum ReadingChannel {
 
     public String getDisplayName() {
         return displayName;
+    }
+
+    /**
+     * What one of this channel's readings measures. Empty for a channel whose readings have no
+     * defined meaning yet (IOT, MAN): water quantity is not worked out for them at all.
+     */
+    public Optional<ReadingKind> kind() {
+        return Optional.ofNullable(kind);
     }
 
     /**

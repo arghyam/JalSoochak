@@ -276,7 +276,7 @@ class SchemeRegularityRepositoryWorkStatusFilterIntegrationTest {
     @Test
     void periodicWaterQuantity_byLgd_aggregatesOnlyHandedOverScheme() {
         List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> rows =
-                repository.getPeriodicWaterQuantityByLgdId(100, D1, D3, PeriodScale.MONTH);
+                repository.getPeriodicWaterQuantityByLgdId(1, 100, D1, D3, PeriodScale.MONTH);
 
         assertThat(rows).hasSize(1);
         // Household total sums only in-scope schemes -> Scheme 1's 10 (not 35 across all three).

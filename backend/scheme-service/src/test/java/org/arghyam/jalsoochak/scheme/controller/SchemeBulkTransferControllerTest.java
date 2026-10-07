@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.scheme.controller;
 
+import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.service.SchemeService;
 import org.junit.jupiter.api.Test;
@@ -33,5 +34,16 @@ class SchemeBulkTransferControllerTest {
         assertThat(controller.uploadSchemeMappings(file).getBody()).isEqualTo(response);
         verify(schemeService).uploadSchemes(file);
         verify(schemeService).uploadSchemeMappings(file);
+    }
+
+    @Test
+    void downloadEndpoints_delegateToService() {
+        ReportLinkResponseDTO schemes = ReportLinkResponseDTO.builder().link("https://files/s.csv").build();
+        ReportLinkResponseDTO mappings = ReportLinkResponseDTO.builder().link("https://files/m.csv").build();
+        when(schemeService.downloadSchemesReport()).thenReturn(schemes);
+        when(schemeService.downloadSchemeMappingsReport()).thenReturn(mappings);
+
+        assertThat(controller.downloadSchemes().getBody()).isEqualTo(schemes);
+        assertThat(controller.downloadSchemeMappings().getBody()).isEqualTo(mappings);
     }
 }

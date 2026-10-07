@@ -383,6 +383,7 @@ public class ReadingIngestController {
                     hasCorrelationId ? request.getCorrelationId().trim() : null,
                     hasPhoneNumber ? request.getPhoneNumber().trim() : null,
                     request.getConfirmedReading(),
+                    request.getReadingUnit(),
                     tenantId
             );
             // SUPPLY-PLAUSIBILITY: a correction can now be refused on its value rather than on its

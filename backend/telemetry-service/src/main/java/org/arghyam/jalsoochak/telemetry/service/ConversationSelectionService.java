@@ -422,7 +422,6 @@ public class ConversationSelectionService {
 
             TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(request.getContactId());
             Integer tenantId = operatorWithSchema.operator().tenantId();
-            System.out.println("tenant id " + tenantId);
             if (tenantId == null) {
                 throw new IllegalStateException("Operator tenant could not be resolved");
             }
@@ -503,10 +502,14 @@ public class ConversationSelectionService {
                 visibleItemOptions = buildVisibleItemOptions(tenantId, languageKey, itemOptions);
             }
 
+            // A menu number or label from the operator; or, from the nudge flow, the item code itself
+            // (e.g. "readingSubmission"), since that flow knows neither the tenant's numbering nor its
+            // localized labels.
             int selectedIndex = resolveSelectionIndex(
                     request.getChannel(),
                     visibleItemOptions.stream().map(VisibleItemOption::label).toList()
-            ).orElseThrow(() -> new IllegalStateException("Invalid item selection"));
+            ).or(() -> resolveItemCodeIndex(request.getChannel(), visibleItemOptions))
+                    .orElseThrow(() -> new IllegalStateException("Invalid item selection"));
 
             VisibleItemOption selectedItem = visibleItemOptions.get(selectedIndex);
             String selectedItemLabel = selectedItem.label();
@@ -605,6 +608,16 @@ public class ConversationSelectionService {
         }
         for (int i = 0; i < options.size(); i++) {
             if (options.get(i).equalsIgnoreCase(value)) {
+                return Optional.of(i);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<Integer> resolveItemCodeIndex(String rawSelection, List<VisibleItemOption> options) {
+        String value = rawSelection.trim();
+        for (int i = 0; i < options.size(); i++) {
+            if (value.equalsIgnoreCase(options.get(i).code())) {
                 return Optional.of(i);
             }
         }

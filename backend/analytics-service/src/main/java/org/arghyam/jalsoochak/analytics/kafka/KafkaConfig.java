@@ -4,6 +4,7 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.arghyam.jalsoochak.analytics.exception.MalformedEventException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -56,9 +57,12 @@ public class KafkaConfig {
 
     @Bean
     public DefaultErrorHandler kafkaErrorHandler(KafkaTemplate<String, String> kafkaTemplate) {
-        // After 3 retries (2 s apart) publish the failed record to <topic>.DLT
+        // After 3 retries (2 s apart) publish the failed record to <topic>.DLT; a malformed one
+        // goes there at once
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate);
-        return new DefaultErrorHandler(recoverer, new FixedBackOff(2000L, 3));
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer, new FixedBackOff(2000L, 3));
+        errorHandler.addNotRetryableExceptions(MalformedEventException.class);
+        return errorHandler;
     }
 
     @Bean

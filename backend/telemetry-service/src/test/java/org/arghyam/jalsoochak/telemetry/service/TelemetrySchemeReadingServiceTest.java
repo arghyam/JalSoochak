@@ -1,7 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
-import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -10,6 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -27,9 +27,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,8 +37,8 @@ import static org.mockito.Mockito.when;
  *
  * <p>The endpoint has no JWT: the caller is authenticated by the per-tenant {@code X-Api-Key} at the
  * controller, and authorisation within that tenant is phone-number → user → scheme-mapping, so the
- * reject paths matter as much as the happy path. A correction also re-publishes the derived water
- * quantity for the corrected day and for the day after it, since both deltas move.</p>
+ * reject paths matter as much as the happy path. A correction publishes the corrected reading again,
+ * and analytics recalculates the corrected day and the day after it, since both deltas move.</p>
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -54,7 +53,7 @@ class TelemetrySchemeReadingServiceTest {
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
     @Mock
-    private TelemetryEventPublisher telemetryEventPublisher;
+    private ReadingRepublisher readingRepublisher;
 
     @InjectMocks
     private TelemetrySchemeReadingService service;
@@ -72,10 +71,6 @@ class TelemetrySchemeReadingServiceTest {
         when(telemetryTenantRepository.isUserMappedToScheme(SCHEMA, 11L, SCHEME_ID)).thenReturn(true);
         when(telemetryTenantRepository.findLatestCompletedFlowReadingForScheme(SCHEMA, SCHEME_ID))
                 .thenReturn(Optional.of(reading(100L, TARGET_DAY, "500", 22L)));
-        when(telemetryTenantRepository.findPreviousFlowReadingForScheme(anyString(), anyLong()))
-                .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDateForScheme(
-                anyString(), anyLong(), any())).thenReturn(Optional.empty());
     }
 
     @AfterEach
@@ -214,7 +209,8 @@ class TelemetrySchemeReadingServiceTest {
                             .isEqualTo(HttpStatus.FORBIDDEN));
 
             verify(telemetryTenantRepository, never())
-                    .updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any());
+                    .updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+            verify(readingRepublisher, never()).republish(any(), any(), any());
         }
     }
 
@@ -277,7 +273,7 @@ class TelemetrySchemeReadingServiceTest {
     }
 
     @Nested
-    @DisplayName("correction and derived water quantity")
+    @DisplayName("correction and republish")
     class Correction {
 
         @Test
@@ -286,9 +282,10 @@ class TelemetrySchemeReadingServiceTest {
 
             // An officer's correction is a manual override of the number, so the row must stop
             // claiming its confirmed_reading is the value the AI extracted.
+            // The target is always a BFM row and the request has no unit, so the value is in m3.
             verify(telemetryTenantRepository)
                     .updateConfirmedReading(SCHEMA, 100L, new BigDecimal("600"), 11L,
-                            RolloverResolutionService.SOURCE_MANUAL);
+                            RolloverResolutionService.SOURCE_MANUAL, "m3");
         }
 
         @Test
@@ -298,7 +295,7 @@ class TelemetrySchemeReadingServiceTest {
             // Re-submitting the value already on the row changes nothing, so a ROLLOVER_RESOLVED or
             // EXTERNALLY_ASSERTED marker must survive it.
             verify(telemetryTenantRepository)
-                    .updateConfirmedReading(SCHEMA, 100L, new BigDecimal("500"), 11L, null);
+                    .updateConfirmedReading(SCHEMA, 100L, new BigDecimal("500"), 11L, null, "m3");
         }
 
         @Test
@@ -322,62 +319,16 @@ class TelemetrySchemeReadingServiceTest {
         }
 
         @Test
-        void publishesTheFullCorrectedReadingAsTheDaysQuantityWhenThereIsNoPriorReading() {
+        void publishesTheCorrectedRowAgainAfterWritingIt() {
             service.updateYesterdayFinalReadingBySchemeId(SCHEME_ID, PHONE, new BigDecimal("600"), null);
 
-            verify(telemetryEventPublisher).publishWaterQuantityRecorded(
-                    eq(17), eq(SCHEME_ID), eq(22L), eq(TARGET_DAY), eq(new BigDecimal("600")), eq(1));
-        }
-
-        @Test
-        void subtractsThePriorReadingWhenComputingTheDaysQuantity() {
-            when(telemetryTenantRepository.findPreviousFlowReadingForScheme(SCHEMA, 100L))
-                    .thenReturn(Optional.of(reading(99L, TARGET_DAY.minusDays(1), "450", 22L)));
-
-            service.updateYesterdayFinalReadingBySchemeId(SCHEME_ID, PHONE, new BigDecimal("600"), null);
-
-            verify(telemetryEventPublisher).publishWaterQuantityRecorded(
-                    eq(17), eq(SCHEME_ID), eq(22L), eq(TARGET_DAY), eq(new BigDecimal("150")), eq(1));
-        }
-
-        @Test
-        void alsoRepublishesTheFollowingDayBecauseItsDeltaMoved() {
-            when(telemetryTenantRepository.findPreviousFlowReadingForScheme(SCHEMA, 100L))
-                    .thenReturn(Optional.of(reading(99L, TARGET_DAY.minusDays(1), "450", 22L)));
-            when(telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDateForScheme(
-                    SCHEMA, SCHEME_ID, TARGET_DAY))
-                    .thenReturn(Optional.of(reading(101L, TARGET_DAY.plusDays(1), "800", 33L)));
-
-            service.updateYesterdayFinalReadingBySchemeId(SCHEME_ID, PHONE, new BigDecimal("600"), null);
-
-            verify(telemetryEventPublisher).publishWaterQuantityRecorded(
-                    eq(17), eq(SCHEME_ID), eq(22L), eq(TARGET_DAY), eq(new BigDecimal("150")), eq(1));
-            verify(telemetryEventPublisher).publishWaterQuantityRecorded(
-                    eq(17), eq(SCHEME_ID), eq(33L), eq(TARGET_DAY.plusDays(1)),
-                    eq(new BigDecimal("200")), eq(1));
-        }
-
-        @Test
-        void attributesTheEventToTheCorrectingUserWhenTheReadingHasNoAuthor() {
-            when(telemetryTenantRepository.findLatestCompletedFlowReadingForScheme(SCHEMA, SCHEME_ID))
-                    .thenReturn(Optional.of(reading(100L, TARGET_DAY, "500", null)));
-
-            service.updateYesterdayFinalReadingBySchemeId(SCHEME_ID, PHONE, new BigDecimal("600"), null);
-
-            verify(telemetryEventPublisher).publishWaterQuantityRecorded(
-                    eq(17), eq(SCHEME_ID), eq(11L), eq(TARGET_DAY), any(), eq(1));
-        }
-
-        @Test
-        void attributesTheFollowingDaysEventToTheTargetAuthorWhenItHasNone() {
-            when(telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDateForScheme(
-                    SCHEMA, SCHEME_ID, TARGET_DAY))
-                    .thenReturn(Optional.of(reading(101L, TARGET_DAY.plusDays(1), "800", null)));
-
-            service.updateYesterdayFinalReadingBySchemeId(SCHEME_ID, PHONE, new BigDecimal("600"), null);
-
-            verify(telemetryEventPublisher, times(2)).publishWaterQuantityRecorded(
-                    eq(17), eq(SCHEME_ID), eq(22L), any(), any(), eq(1));
+            // The row is published from what is stored, so it goes out after the write, under the
+            // tenant the correction was applied to.
+            InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
+            order.verify(telemetryTenantRepository)
+                    .updateConfirmedReading(SCHEMA, 100L, new BigDecimal("600"), 11L,
+                            RolloverResolutionService.SOURCE_MANUAL, "m3");
+            order.verify(readingRepublisher).republish(SCHEMA, 17, 100L);
         }
 
         @Test

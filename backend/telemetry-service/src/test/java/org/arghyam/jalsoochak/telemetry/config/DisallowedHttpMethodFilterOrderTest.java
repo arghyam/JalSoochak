@@ -37,13 +37,14 @@ class DisallowedHttpMethodFilterOrderTest {
     }
 
     @Test
-    @DisplayName("runs before both credential gates")
-    void runsBeforeBothCredentialGates() {
+    @DisplayName("runs before every credential gate")
+    void runsBeforeEveryCredentialGate() {
         // So a disallowed method never triggers an API-key lookup against the database and never
         // reaches TenantInterceptor, which would otherwise apply an unauthenticated X-Tenant-Code.
         assertThat(DisallowedHttpMethodFilter.ORDER)
                 .isLessThan(TelemetryApiKeyAuthFilter.ORDER)
-                .isLessThan(WebhookAuthFilter.ORDER);
+                .isLessThan(WebhookAuthFilter.ORDER)
+                .isLessThan(InternalAuthFilter.ORDER);
     }
 
     @Test

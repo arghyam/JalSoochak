@@ -7,11 +7,13 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
+import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,9 +46,6 @@ class BfmReadingServiceMeterReplacedTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
-    private MeterReadingExtractor defaultOcrExtractor;
-
-    @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
 
     @Mock
@@ -54,9 +53,6 @@ class BfmReadingServiceMeterReplacedTest {
 
     @Mock
     private OperatorContextService operatorContextService;
-
-    @Mock
-    private OcrReadingsRetryService ocrReadingsRetryService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -71,6 +67,13 @@ class BfmReadingServiceMeterReplacedTest {
     // tests never set CreateReadingRequest.supplyPlausibilityChecked, so the guard is never consulted.
     @Mock
     private SupplyPlausibilityGuard supplyPlausibilityGuard;
+
+    // Declared so @InjectMocks supplies the real capture step: every submission here sends a value.
+    @Spy
+    private SubmittedValueCapture submittedValueCapture = new SubmittedValueCapture();
+
+    @Mock
+    private CalculationParametersSnapshotter calculationParametersSnapshotter;
 
     @InjectMocks
     private BfmReadingService service;
@@ -95,7 +98,7 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
@@ -109,8 +112,10 @@ class BfmReadingServiceMeterReplacedTest {
                 anyString(),
                 any(),
                 any(),
+                any(),
+                any(),
                 any()
-        )).thenReturn(99L);
+        )).thenReturn(new FlowReadingVersion(99L, null));
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
         assertNotNull(resp);
@@ -127,6 +132,8 @@ class BfmReadingServiceMeterReplacedTest {
                 any(BigDecimal.class),
                 any(BigDecimal.class),
                 anyString(),
+                any(),
+                any(),
                 any(),
                 any(),
                 any()
@@ -169,7 +176,7 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("800"), ReadingTime.now().minusDays(1))));
 
         when(tenantConfigRepository.findConfigValue(1, "TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD"))
@@ -190,8 +197,10 @@ class BfmReadingServiceMeterReplacedTest {
                 anyString(),
                 any(),
                 any(),
+                any(),
+                any(),
                 any()
-        )).thenReturn(101L);
+        )).thenReturn(new FlowReadingVersion(101L, null));
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
@@ -208,6 +217,8 @@ class BfmReadingServiceMeterReplacedTest {
                 any(),
                 any(),
                 anyString(),
+                any(),
+                any(),
                 any(),
                 any(),
                 any()
@@ -232,7 +243,7 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, ReadingChannel.BFM, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
 
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.from(readingAt)))
@@ -248,8 +259,10 @@ class BfmReadingServiceMeterReplacedTest {
                 anyString(),
                 any(),
                 any(),
+                any(),
+                any(),
                 any()
-        )).thenReturn(99L);
+        )).thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", true);
 
@@ -266,6 +279,8 @@ class BfmReadingServiceMeterReplacedTest {
                 any(BigDecimal.class),
                 any(BigDecimal.class),
                 anyString(),
+                any(),
+                any(),
                 any(),
                 any(),
                 any()

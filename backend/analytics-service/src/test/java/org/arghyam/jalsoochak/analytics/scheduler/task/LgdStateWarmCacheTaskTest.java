@@ -55,7 +55,7 @@ class LgdStateWarmCacheTaskTest {
 
         // lgd_id style + scale=day
         verify(schemeRegularityService, times(1))
-                .getPeriodicWaterQuantityByLgdId(eq(889100), any(LocalDate.class), any(LocalDate.class), eq(PeriodScale.DAY));
+                .getPeriodicWaterQuantityByLgdId(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class), eq(PeriodScale.DAY));
         verify(schemeRegularityService, times(1))
                 .getPeriodicSchemeRegularityByLgdId(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class), eq(PeriodScale.DAY));
         verify(schemeRegularityService, times(1))

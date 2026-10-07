@@ -27,7 +27,8 @@ class CanonicalReadingRequestMapperTest {
                   "center_scheme_id": "30244993",
                   "phone_number": "91XXXXXXXXXX",
                   "reading_date_time": "2026-04-23T07:38:22.031Z",
-                  "channel": "PDU"
+                  "channel": "PDU",
+                  "reading_unit": "h"
                 }
                 """;
 
@@ -42,6 +43,7 @@ class CanonicalReadingRequestMapperTest {
         assertEquals("91XXXXXXXXXX", request.getPhoneNumber());
         assertNotNull(request.getReadingDateTime());
         assertEquals("PDU", request.getChannel());
+        assertEquals("h", request.getReadingUnit());
     }
 
     @Test
@@ -81,6 +83,13 @@ class CanonicalReadingRequestMapperTest {
         CanonicalReadingRequest request = mapper.map(objectMapper.createObjectNode().put("channel", " pdu "));
 
         assertEquals(" pdu ", request.getChannel());
+    }
+
+    @Test
+    void readingUnitIsCarriedThroughVerbatimToBeCheckedAgainstTheChannel() {
+        CanonicalReadingRequest request = mapper.map(objectMapper.createObjectNode().put("reading_unit", " kl "));
+
+        assertEquals(" kl ", request.getReadingUnit());
     }
 
     @Test

@@ -30,6 +30,7 @@ class RouteParityTest {
             "POST /api/v1/telemetry/manual-reading",
             "POST /api/v1/telemetry/location",
             "POST /api/v1/telemetry/update-previous-reading",
+            "POST /api/v1/telemetry/reject-latest-reading",
             // Chatbot webhooks — selections
             "POST /api/v1/telemetry/language/selection",
             "POST /api/v1/telemetry/selected/language",
@@ -62,7 +63,9 @@ class RouteParityTest {
             "PUT /api/v1/telemetry/readings/",
             "POST /api/v1/telemetry/readings/reset-latest",
             "PATCH /api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading",
-            "POST /api/v1/telemetry/readings/formats/{format}"
+            "POST /api/v1/telemetry/readings/formats/{format}",
+            // Operations
+            "POST /api/v1/telemetry/internal/readings/republish"
     );
 
     @Test

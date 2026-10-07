@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.tenant.enums;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.DateFormatConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.ElmFormulaConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.EmailProviderConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WhatsAppMessagesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.MessageBrokerConfigDTO;
@@ -284,6 +285,16 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * default, when unset. Published to analytics via REGULARITY_THRESHOLD_UPDATED.
      */
     REGULARITY_THRESHOLD_PERCENT(ConfigType.GENERIC, RegularityThresholdConfigDTO.class, false, false, false),
+
+    /**
+     * The formula that turns this tenant's ELM (electricity meter) readings into litres: F1, F2 or F3
+     * (see {@link ElmFormula}). Format: { formula: "F1" }, accepted in any case.
+     * <p>
+     * There is no default: while it is unset, ELM readings get no water quantity. telemetry-service
+     * reads it when it publishes an ELM reading, so no event is published here, and a change applies
+     * to readings submitted or corrected after it.
+     */
+    ELM_WATER_QUANTITY_FORMULA(ConfigType.GENERIC, ElmFormulaConfigDTO.class, false, false, false),
 
     /**
      * The email account this tenant's own mail is sent through (SendGrid or SMTP), including the

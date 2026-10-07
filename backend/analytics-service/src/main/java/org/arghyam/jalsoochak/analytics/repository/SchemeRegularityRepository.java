@@ -257,9 +257,11 @@ public class SchemeRegularityRepository {
      * the current status and counts the scheme exactly once. {@code id} closes the ordering for rows written
      * in the same instant.
      *
+     * <p>Package-visible so {@link AggregationRepository} reads scheme status from the same row.
+     *
      * @param alias alias of {@code dim_scheme_table}, or blank when selecting from an earlier CTE
      */
-    private static String canonicalSchemeRowOrder(String alias) {
+    static String canonicalSchemeRowOrder(String alias) {
         String prefix = (alias == null || alias.isBlank()) ? "" : alias + ".";
         return prefix + "updated_at DESC NULLS LAST, "
                 + prefix + "created_at DESC NULLS LAST, "
@@ -3387,7 +3389,7 @@ public class SchemeRegularityRepository {
 
                     UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
                     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
-                    FROM analytics_schema.anomaly_table a
+                    FROM analytics_schema.fact_anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
                       AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
@@ -3467,7 +3469,7 @@ public class SchemeRegularityRepository {
 
                     UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
                     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
-                    FROM analytics_schema.anomaly_table a
+                    FROM analytics_schema.fact_anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
                       AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
@@ -3543,7 +3545,7 @@ public class SchemeRegularityRepository {
 
                     UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
                     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
-                    FROM analytics_schema.anomaly_table a
+                    FROM analytics_schema.fact_anomaly_table a
                     JOIN user_schemes us ON us.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
                       AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
@@ -3624,7 +3626,7 @@ public class SchemeRegularityRepository {
 
                     UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
                     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
-                    FROM analytics_schema.anomaly_table a
+                    FROM analytics_schema.fact_anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
                       AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
@@ -3719,7 +3721,7 @@ public class SchemeRegularityRepository {
 
                     UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
                     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
-                    FROM analytics_schema.anomaly_table a
+                    FROM analytics_schema.fact_anomaly_table a
                     JOIN user_schemes us ON us.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
                       AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
@@ -3810,7 +3812,7 @@ public class SchemeRegularityRepository {
 
                     UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
                     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
-                    FROM analytics_schema.anomaly_table a
+                    FROM analytics_schema.fact_anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
                       AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
@@ -7289,23 +7291,23 @@ public class SchemeRegularityRepository {
     }
 
     public List<PeriodicWaterQuantityMetrics> getPeriodicWaterQuantityByLgdId(
-            Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
-        Integer lgdLevel = getLgdLevel(lgdId);
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
         if (lgdLevel == null) {
             throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
-        return getPeriodicWaterQuantityMetrics(schemeLgdColumn, lgdId, startDate, endDate, scale);
+        return getPeriodicWaterQuantityMetrics(tenantId, schemeLgdColumn, lgdId, startDate, endDate, scale);
     }
 
     public List<PeriodicWaterQuantityMetrics> getPeriodicWaterQuantityByDepartment(
-            Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
-        Integer departmentLevel = getDepartmentLevel(departmentId);
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
         if (departmentLevel == null) {
             throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
-        return getPeriodicWaterQuantityMetrics(schemeDepartmentColumn, departmentId, startDate, endDate, scale);
+        return getPeriodicWaterQuantityMetrics(tenantId, schemeDepartmentColumn, departmentId, startDate, endDate, scale);
     }
 
     public List<PeriodicOutageReasonSchemeCountRow> getPeriodicOutageReasonSchemeCountByLgdId(
@@ -7507,6 +7509,7 @@ public class SchemeRegularityRepository {
     }
 
     private List<PeriodicWaterQuantityMetrics> getPeriodicWaterQuantityMetrics(
+            Integer tenantId,
             String schemeLocationColumn,
             Object locationId,
             LocalDate startDate,
@@ -7519,12 +7522,13 @@ public class SchemeRegularityRepository {
                 ),
                 schemes_in_scope AS (
                     SELECT DISTINCT ON (s.scheme_id)
+                        s.tenant_id,
                         s.scheme_id,
                         COALESCE(s.house_hold_count, 0)::bigint AS house_hold_count,
                         COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count,
                         COALESCE(s.planned_fhtc, 0)::bigint AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?{{WS}}
+                    WHERE s.tenant_id = ? AND s.%1$s = ?{{WS}}
                     ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 periods AS (
@@ -7536,14 +7540,18 @@ public class SchemeRegularityRepository {
                          generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 water_by_period AS (
+                    -- Average over qualifying supplied rows only (the shared supplied-water-day
+                    -- predicate over the de-duplicated latest-row source), so this series uses the
+                    -- same water figure as every other water KPI (national, region-wise, periodic
+                    -- regularity) instead of a raw average that also counted NOT_SUBMITTED rows.
                     SELECT
                         %5$s AS period_start_date,
-                        AVG(f.water_quantity::numeric) AS avg_water_quantity
+                        AVG(f.water_quantity::numeric) FILTER (WHERE {{SWD}}) AS avg_water_quantity
                     FROM params,
-                         analytics_schema.fact_water_quantity_table f
+                         {{LWQ}} f
                     JOIN schemes_in_scope s
-                        ON s.scheme_id = f.scheme_id
-                    WHERE f.date BETWEEN ? AND ?
+                        ON s.tenant_id = f.tenant_id AND s.scheme_id = f.scheme_id
+                    WHERE f.tenant_id = ? AND f.date BETWEEN ? AND ?
                     GROUP BY %5$s
                 ),
                 household_total AS (
@@ -7584,9 +7592,11 @@ public class SchemeRegularityRepository {
                         rs.getLong("fhtc_count"),
                         rs.getLong("planned_fhtc")),
                 startDate,
+                tenantId,
                 locationId,
                 startDate,
                 endDate,
+                tenantId,
                 startDate,
                 endDate);
     }
@@ -7620,9 +7630,9 @@ public class SchemeRegularityRepository {
 
     private PeriodSqlParts buildPeriodSqlParts(PeriodScale scale) {
         // Period alignment rules:
-        // - WEEK: rolling 7-day buckets anchored to the request start_date (params.anchor_start), not ISO-week aligned.
+        // - WEEK: calendar weeks running Sunday -> Saturday (EXTRACT(DOW)=0 on Sunday), not anchored to start_date.
         // - MONTH/QUARTER/YEAR: calendar-aligned buckets via DATE_TRUNC (month=Jan/Feb..., quarter=Jan-Mar/Apr-Jun..., year=Jan 1-Dec 31).
-        // These fragments assume the calling query defines `params(anchor_start)` CTE when WEEK scale is used.
+        // The `params(anchor_start)` CTE remains for the day spine; WEEK no longer references it.
         return switch (scale) {
             case DAY -> new PeriodSqlParts(
                     "g.day_date::date",
@@ -7630,10 +7640,10 @@ public class SchemeRegularityRepository {
                     "TO_CHAR(g.day_date::date, 'YYYY-MM-DD')",
                     "f.date::date");
             case WEEK -> new PeriodSqlParts(
-                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date",
-                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7) + 6)::date",
-                    "TO_CHAR((params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date, 'YYYY-MM-DD')",
-                    "(params.anchor_start + (((f.date::date - params.anchor_start) / 7) * 7))::date");
+                    "(g.day_date::date - (EXTRACT(DOW FROM g.day_date::date))::int)::date",
+                    "(g.day_date::date - (EXTRACT(DOW FROM g.day_date::date))::int + 6)::date",
+                    "TO_CHAR((g.day_date::date - (EXTRACT(DOW FROM g.day_date::date))::int)::date, 'YYYY-MM-DD')",
+                    "(f.date::date - (EXTRACT(DOW FROM f.date::date))::int)::date");
             case MONTH -> new PeriodSqlParts(
                     "DATE_TRUNC('month', g.day_date)::date",
                     "(DATE_TRUNC('month', g.day_date)::date + INTERVAL '1 month - 1 day')::date",
@@ -7661,10 +7671,10 @@ public class SchemeRegularityRepository {
                     "TO_CHAR(g.day_date::date, 'YYYY-MM-DD')",
                     "m.reading_date::date");
             case WEEK -> new PeriodSqlParts(
-                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date",
-                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7) + 6)::date",
-                    "TO_CHAR((params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date, 'YYYY-MM-DD')",
-                    "(params.anchor_start + (((m.reading_date::date - params.anchor_start) / 7) * 7))::date");
+                    "(g.day_date::date - (EXTRACT(DOW FROM g.day_date::date))::int)::date",
+                    "(g.day_date::date - (EXTRACT(DOW FROM g.day_date::date))::int + 6)::date",
+                    "TO_CHAR((g.day_date::date - (EXTRACT(DOW FROM g.day_date::date))::int)::date, 'YYYY-MM-DD')",
+                    "(m.reading_date::date - (EXTRACT(DOW FROM m.reading_date::date))::int)::date");
             case MONTH -> new PeriodSqlParts(
                     "DATE_TRUNC('month', g.day_date)::date",
                     "(DATE_TRUNC('month', g.day_date)::date + INTERVAL '1 month - 1 day')::date",
@@ -7692,10 +7702,10 @@ public class SchemeRegularityRepository {
                     "TO_CHAR(g.day_date::date, 'YYYY-MM-DD')",
                     "sd.reading_date::date");
             case WEEK -> new PeriodSqlParts(
-                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date",
-                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7) + 6)::date",
-                    "TO_CHAR((params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date, 'YYYY-MM-DD')",
-                    "(params.anchor_start + (((sd.reading_date::date - params.anchor_start) / 7) * 7))::date");
+                    "(g.day_date::date - (EXTRACT(DOW FROM g.day_date::date))::int)::date",
+                    "(g.day_date::date - (EXTRACT(DOW FROM g.day_date::date))::int + 6)::date",
+                    "TO_CHAR((g.day_date::date - (EXTRACT(DOW FROM g.day_date::date))::int)::date, 'YYYY-MM-DD')",
+                    "(sd.reading_date::date - (EXTRACT(DOW FROM sd.reading_date::date))::int)::date");
             case MONTH -> new PeriodSqlParts(
                     "DATE_TRUNC('month', g.day_date)::date",
                     "(DATE_TRUNC('month', g.day_date)::date + INTERVAL '1 month - 1 day')::date",

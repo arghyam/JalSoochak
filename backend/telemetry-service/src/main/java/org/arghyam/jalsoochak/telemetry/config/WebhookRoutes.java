@@ -55,7 +55,8 @@ public final class WebhookRoutes {
             "/take-meter-reading",
             "/manual-reading",
             "/location",
-            "/update-previous-reading"
+            "/update-previous-reading",
+            "/reject-latest-reading"
     );
 
     /** Every chatbot route is a POST; nothing else on a webhook controller is mapped. */

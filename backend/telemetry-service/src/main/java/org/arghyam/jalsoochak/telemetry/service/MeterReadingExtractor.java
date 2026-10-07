@@ -1,27 +1,33 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 
 /**
- * Strategy for extracting a water-meter reading from an image via an external AI/OCR provider.
+ * Strategy for extracting a meter reading from an image via an external AI/OCR provider.
  *
- * <p>One Spring bean per provider, with one built-in implementation. The active provider is
- * chosen per tenant by {@link OcrProviderResolver} and dispatched to by {@link OcrProviderRegistry},
- * keyed on {@link #providerId()}. To add a new AI model for a state/tenant, implement this interface,
- * register it as a bean, and point that tenant's {@code ocr_provider} config key at its id — no changes
- * to the ingestion pipeline are required.
+ * <p>One Spring bean per provider. Each provider reads one kind of meter, so it declares the
+ * {@link #channel()} it serves. The provider for a photo is chosen per tenant and channel by
+ * {@link OcrProviderResolver} and dispatched to by {@link OcrProviderRegistry}, keyed on the channel and
+ * {@link #providerId()}. To add a new AI model for a state/tenant, implement this interface, register it
+ * as a bean, and point that tenant's provider config key for the channel at its id — no changes to the
+ * ingestion pipeline are required.
  *
- * <p>Exactly one implementation is marked {@code @Primary}: the built-in provider that serves tenants with
- * no {@code ocr_*} override. Callers inject it by this type and pass {@code null} settings, which every
- * implementation must read as "use your own globally configured endpoint and credentials".
+ * <p>Nothing injects a single extractor: every extraction goes through the registry, including for
+ * tenants with no override, so a photo is never read by another channel's model. {@code null} settings
+ * mean the tenant has no override, and every implementation must read them as "use your own globally
+ * configured endpoint and credentials".
  *
  * <p>Results are normalised to {@link OcrReadingResult}, the internal reading contract shared by the
  * rollover resolver and reading persistence; each provider adapter maps its own response shape onto it.
  */
 public interface MeterReadingExtractor {
 
-    /** Stable, case-insensitive id matched against a tenant's configured {@code ocr_provider}. */
+    /** Stable, case-insensitive id matched against a tenant's configured provider for {@link #channel()}. */
     String providerId();
+
+    /** The reading channel whose meter photos this provider reads. It is never chosen for another. */
+    ReadingChannel channel();
 
     /**
      * Extracts a reading, absorbing failures: returns {@code null} (unreadable / infrastructure error)

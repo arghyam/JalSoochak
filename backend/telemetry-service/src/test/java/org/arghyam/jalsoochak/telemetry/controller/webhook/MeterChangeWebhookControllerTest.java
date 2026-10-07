@@ -75,7 +75,7 @@ class MeterChangeWebhookControllerTest {
 
         var response = controller.meterChangeReasons(introRequest());
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody())
                 .isEqualTo("{\"success\":false,\"message\":\"Meter change reasons could not be fetched.\"}");
     }

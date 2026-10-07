@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
 
 public class TenantInterceptor implements HandlerInterceptor {
     private static final Logger log = LoggerFactory.getLogger(TenantInterceptor.class);
-    private static final String TENANT_HEADER = "X-Tenant-Code";
+    public static final String TENANT_HEADER = "X-Tenant-Code";
     private static final Pattern SAFE_TENANT_CODE = Pattern.compile("^[A-Za-z0-9_]{1,32}$");
 
     @Override

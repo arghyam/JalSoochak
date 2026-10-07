@@ -200,13 +200,16 @@ class TelemetryTenantRepositorySchemesQueryTest {
         );
 
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).update(
+        verify(jdbcTemplate).query(
                 sqlCaptor.capture(),
+                any(RowMapper.class),
                 any(),
                 any(),
                 any(),
                 any(),
                 eq("new-request-id"),
+                eq(null),
+                // channel: the legacy overload leaves it as it is
                 eq(null),
                 eq("https://example.com/meter.jpg"),
                 eq(null),

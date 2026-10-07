@@ -10,6 +10,7 @@
 * [Architecture Decision Records](architecture-decision-records.md)
 * [API Specifications](api-specifications.md)
 * [Database Design](database-design.md)
+  * [Entity-Relationship Diagrams](database-er-diagram.md)
 * [Non-functional Requirements](nfrs.md)
 * [Future Work](future-work.md)
 
@@ -17,3 +18,8 @@
 
 * [Installation Guide](installation-guide.md)
 * [Create a New Tenant (State/UT)](create-new-tenant.md)
+
+## User Manuals
+
+* [State System Admin](user-manual-state-system-admin.md)
+* [Sub Divisional Officers & Section Officers](user-manual-sdo-so.md)

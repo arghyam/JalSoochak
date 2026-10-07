@@ -22,6 +22,7 @@ public sealed interface ConfigValueDTO permits
         WaterSupplyThresholdConfigDTO,
         IncludedWorkStatusesConfigDTO,
         RegularityThresholdConfigDTO,
+        ElmFormulaConfigDTO,
         EmailProviderConfigDTO,
         SmsProviderConfigDTO,
         MessagingAllowedHostsConfigDTO {

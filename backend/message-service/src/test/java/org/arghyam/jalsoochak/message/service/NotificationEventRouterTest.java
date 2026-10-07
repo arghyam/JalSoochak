@@ -34,6 +34,7 @@ import org.arghyam.jalsoochak.message.channel.provider.TenantChannelProviders;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendStage;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
+import org.arghyam.jalsoochak.message.channel.NudgeSendOutcome;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.config.StorageProperties;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
@@ -178,7 +179,7 @@ class NotificationEventRouterTest {
 
     @Test
     void route_sendsNudge_usingStoredContactId_whenPresent() {
-        when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(true);
+        when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(NudgeSendOutcome.SENT);
 
         router.route("""
                 {"eventType":"NUDGE","recipientPhone":"919876543210",
@@ -195,7 +196,7 @@ class NotificationEventRouterTest {
     @Test
     void route_fallsBackToOptIn_andPublishesEvent_whenNoStoredContactId() {
         when(whatsAppSender.optIn("919876543210")).thenReturn(99L);
-        when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(true);
+        when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(NudgeSendOutcome.SENT);
 
         router.route("""
                 {"eventType":"NUDGE","recipientPhone":"919876543210",
@@ -223,7 +224,7 @@ class NotificationEventRouterTest {
     @Test
     void route_usesDefaultOperatorName_whenOperatorNameAbsent() {
         when(whatsAppSender.optIn(anyString())).thenReturn(55L);
-        when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(true);
+        when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(NudgeSendOutcome.SENT);
 
         router.route("""
                 {"eventType":"NUDGE","recipientPhone":"911234567890","tenantId":1}
@@ -235,7 +236,7 @@ class NotificationEventRouterTest {
     @Test
     void route_isCaseInsensitive_forNudgeEventType() {
         when(whatsAppSender.optIn(anyString())).thenReturn(55L);
-        when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(true);
+        when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(NudgeSendOutcome.SENT);
 
         router.route("""
                 {"eventType":"nudge","recipientPhone":"919999999999","operatorName":"Op","tenantId":1}
@@ -386,7 +387,58 @@ class NotificationEventRouterTest {
     }
 
     @Test
-    void route_rethrowsException_forKafkaRetry_whenNudgeFails() {
+    void route_rethrowsForKafkaRetry_whenNudgeDefinitelyWasNotSent() {
+        when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString()))
+                .thenReturn(NudgeSendOutcome.NOT_SENT);
+
+        assertThatThrownBy(() -> router.route("""
+                {"eventType":"NUDGE","operatorName":"Op","tenantId":1,"whatsappConnectionId":42}
+                """))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Notification event processing failed");
+    }
+
+    @Test
+    void route_acksWithoutRetry_whenNudgeOutcomeIsUnknown() {
+        // A retry would start the flow again and send the operator a second identical nudge.
+        when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString()))
+                .thenReturn(NudgeSendOutcome.UNKNOWN);
+
+        router.route("""
+                {"eventType":"NUDGE","operatorName":"Op","tenantId":1,"whatsappConnectionId":42}
+                """);
+
+        verify(whatsAppChannel).sendNudgeViaFlow(eq(42L), eq("Op"), anyString());
+    }
+
+    @Test
+    void route_formatsNudgeDateFromEvent_notFromTheServerClock() {
+        when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(NudgeSendOutcome.SENT);
+
+        router.route("""
+                {"eventType":"NUDGE","operatorName":"Op","tenantId":1,"whatsappConnectionId":42,
+                 "nudgeDate":"2026-09-30"}
+                """);
+
+        verify(whatsAppChannel).sendNudgeViaFlow(42L, "Op", "30 September 2026");
+    }
+
+    @Test
+    void route_fallsBackToIstToday_whenNudgeDateMissingOrMalformed() {
+        when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString())).thenReturn(NudgeSendOutcome.SENT);
+        String istToday = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata"))
+                .format(java.time.format.DateTimeFormatter.ofPattern("dd MMMM yyyy", java.util.Locale.ENGLISH));
+
+        router.route("""
+                {"eventType":"NUDGE","operatorName":"Op","tenantId":1,"whatsappConnectionId":42,
+                 "nudgeDate":"not-a-date"}
+                """);
+
+        verify(whatsAppChannel).sendNudgeViaFlow(42L, "Op", istToday);
+    }
+
+    @Test
+    void route_rethrowsException_forKafkaRetry_whenNudgeChannelThrows() {
         when(whatsAppSender.optIn(anyString())).thenReturn(55L);
         when(whatsAppChannel.sendNudgeViaFlow(anyLong(), anyString(), anyString()))
                 .thenThrow(new RuntimeException("provider unreachable"));

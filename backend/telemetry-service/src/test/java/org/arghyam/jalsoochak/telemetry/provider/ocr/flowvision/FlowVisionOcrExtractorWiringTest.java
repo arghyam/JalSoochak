@@ -3,35 +3,44 @@ package org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision;
 import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryRegistry;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
+import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.service.MeterReadingExtractor;
 import org.arghyam.jalsoochak.telemetry.service.OcrProviderRegistry;
+import org.arghyam.jalsoochak.telemetry.service.OcrProviderResolver;
 import org.arghyam.jalsoochak.telemetry.service.OcrProviderSettings;
 import org.arghyam.jalsoochak.telemetry.service.OcrReadingsRetryService;
+import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tenants with no {@code ocr_*} override are served by whichever {@link MeterReadingExtractor} the
- * neutral services receive when they inject the port by type. Every OCR provider is a bean of that type,
- * so a second provider would make that injection ambiguous and stop the context booting, or hand those
- * tenants to the wrong provider, unless the built-in one is marked primary.
+ * Every OCR provider is a bean of the {@link MeterReadingExtractor} type, and none is primary. That only
+ * boots because nothing injects a single extractor: each photo's provider is picked by channel through
+ * {@link OcrProviderRegistry}. A by-type injection added later would fail here rather than at deploy.
  */
-@DisplayName("OCR provider wiring — the built-in extractor answers a by-type injection of the port")
+@DisplayName("OCR provider wiring — providers are picked by channel, never injected one by one")
 class FlowVisionOcrExtractorWiringTest {
 
-    /** A second provider, registered the way a new AI backend would be. */
-    static class OtherProviderExtractor implements MeterReadingExtractor {
+    /** A provider for another channel, registered the way a new AI backend would be. */
+    static class ElmProviderExtractor implements MeterReadingExtractor {
         @Override
         public String providerId() {
-            return "vision-x";
+            return "elm-vision";
+        }
+
+        @Override
+        public ReadingChannel channel() {
+            return ReadingChannel.ELM;
         }
 
         @Override
@@ -49,29 +58,37 @@ class FlowVisionOcrExtractorWiringTest {
             .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration.class))
             .withBean(RestTemplate.class)
             .withBean(FlowVisionOcrExtractor.class)
-            .withBean(OtherProviderExtractor.class)
+            .withBean(ElmProviderExtractor.class)
             .withBean(OcrProviderRegistry.class)
             .withBean(RetryRegistry.class, RetryRegistry::ofDefaults)
             .withBean(CircuitBreakerRegistry.class, CircuitBreakerRegistry::ofDefaults)
             .withBean(BulkheadRegistry.class, BulkheadRegistry::ofDefaults)
             .withBean(OcrReadingsRetryService.class)
+            .withBean(TelemetryTenantRepository.class, () -> Mockito.mock(TelemetryTenantRepository.class))
+            .withBean(TelemetryEventPublisher.class, () -> Mockito.mock(TelemetryEventPublisher.class))
+            .withBean(OcrProviderResolver.class, () -> Mockito.mock(OcrProviderResolver.class))
+            .withBean(ImageReadingCapture.class)
             .withPropertyValues("ocr.url=https://ocr.example/extract");
 
     @Test
-    void resolvesThePortToTheBuiltInExtractorAlongsideASecondProvider() {
+    void bootsWithASecondProviderAndNoPrimary() {
         contextRunner.run(context -> {
             assertThat(context).hasNotFailed();
             assertThat(context).getBeans(MeterReadingExtractor.class).hasSize(2);
-            assertThat(context.getBean(MeterReadingExtractor.class)).isInstanceOf(FlowVisionOcrExtractor.class);
+            assertThat(context).hasSingleBean(ImageReadingCapture.class);
         });
     }
 
     @Test
-    void givesTheRetryServiceTheBuiltInExtractorAsItsDefault() {
+    void givesEachChannelItsOwnDefaultProvider() {
         contextRunner.run(context -> {
-            OcrReadingsRetryService retryService = context.getBean(OcrReadingsRetryService.class);
-            assertThat(ReflectionTestUtils.getField(retryService, "defaultOcrExtractor"))
-                    .isSameAs(context.getBean(FlowVisionOcrExtractor.class));
+            OcrProviderRegistry registry = context.getBean(OcrProviderRegistry.class);
+            assertThat(registry.get(ReadingChannel.BFM, null))
+                    .containsSame(context.getBean(FlowVisionOcrExtractor.class));
+            assertThat(registry.get(ReadingChannel.ELM, "elm-vision"))
+                    .containsSame(context.getBean(ElmProviderExtractor.class));
+            // ELM has no default provider yet, so a tenant with no ELM override gets none, never FlowVision.
+            assertThat(registry.get(ReadingChannel.ELM, null)).isEmpty();
         });
     }
 }

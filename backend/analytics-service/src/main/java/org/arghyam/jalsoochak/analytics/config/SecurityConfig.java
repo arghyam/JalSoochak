@@ -46,6 +46,7 @@ public class SecurityConfig {
             "/api/v1/analytics/scheme-regularity/periodic/national",
             "/api/v1/analytics/schemes/dashboard",
             "/api/v1/analytics/schemes/dashboard/download",
+            "/api/v1/analytics/submission-activity/hourly",
             "/api/v1/analytics/submission-status",
             "/api/v1/analytics/tenant_boundaries",
             "/api/v1/analytics/tenant_data",

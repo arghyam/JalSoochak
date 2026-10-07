@@ -2,9 +2,9 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.UpdateYesterdayFinalReadingBySchemeResponse;
-import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.springframework.http.HttpStatus;
@@ -13,7 +13,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Optional;
 
 @Service
@@ -22,7 +21,7 @@ import java.util.Optional;
 public class TelemetrySchemeReadingService {
 
     private final TelemetryTenantRepository telemetryTenantRepository;
-    private final TelemetryEventPublisher telemetryEventPublisher;
+    private final ReadingRepublisher readingRepublisher;
 
     /**
      * Falls back to the schema in {@link TenantContext}, i.e. the unauthenticated
@@ -99,72 +98,25 @@ public class TelemetrySchemeReadingService {
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Target reading date is missing");
             }
 
-            // Validate against the reading immediately before the target record, even if both
-            // submissions happened on the same date.
-            Optional<TelemetryCompletedFlowReading> previousReadingOpt =
-                    telemetryTenantRepository.findPreviousFlowReadingForScheme(schemaName, targetDayRecord.id());
-            if (previousReadingOpt.isPresent()) {
-                TelemetryCompletedFlowReading previousReading = previousReadingOpt.get();
-                BigDecimal minReading = previousReading.confirmedReading();
-//                if (minReading != null && finalReading.compareTo(minReading) <= 0) {
-//                    throw new ResponseStatusException(
-//                            HttpStatus.BAD_REQUEST,
-//                            "reading must be greater than last confirmed reading (" + previousReading.readingDate() + ")"
-//                    );
-//                }
-            }
-
             log.info("[update-yesterday-final-reading] targetDayRecord id={} date={} createdBy={}",
                     targetDayRecord.id(), targetDayRecord.readingDate(), targetDayRecord.createdBy());
-
-            Optional<TelemetryCompletedFlowReading> dayBeforeTargetOpt = previousReadingOpt;
-            Optional<TelemetryCompletedFlowReading> dayAfterTargetOpt =
-                    telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDateForScheme(schemaName, schemeId, targetDay);
-
-            if (dayBeforeTargetOpt.isPresent()) {
-                TelemetryCompletedFlowReading dayBeforeTarget = dayBeforeTargetOpt.get();
-                log.info("[update-yesterday-final-reading] previousRecord date={} reading={} (no min-check enforced)",
-                        dayBeforeTarget.readingDate(), dayBeforeTarget.confirmedReading());
-            } else {
-                log.info("[update-yesterday-final-reading] previousRecord none (no min-check enforced)");
-            }
 
             // Always treat this as a "confirmed correction": keep extracted_reading untouched (or 0 for created rows).
             // The officer's number is a manual override, so the row must also stop claiming its
             // confirmed_reading is what the AI extracted (confirmed_reading_source DEFAULT 0 =
             // AS_EXTRACTED). Retag only when the value actually moves, so a correction that restates the
             // stored number preserves an existing ROLLOVER_RESOLVED or EXTERNALLY_ASSERTED marker.
+            // The target is always a BFM row and the request has no unit field, so the value is in m3.
             telemetryTenantRepository.updateConfirmedReading(schemaName, targetDayRecord.id(), finalReading, updaterUserId,
-                    RolloverResolutionService.manualConfirmSource(finalReading, targetDayRecord.confirmedReading()));
+                    RolloverResolutionService.manualConfirmSource(finalReading, targetDayRecord.confirmedReading()),
+                    ReadingUnit.CUBIC_METRE.code());
             log.info("[update-yesterday-final-reading] updated readingId={} newFinalReading={}",
                     targetDayRecord.id(), finalReading);
 
-            BigDecimal previousDayConfirmedReading = dayBeforeTargetOpt
-                    .map(TelemetryCompletedFlowReading::confirmedReading)
-                    .orElse(BigDecimal.ZERO);
-            BigDecimal targetDayWaterQuantity = finalReading.subtract(previousDayConfirmedReading);
-
-            Long eventUserId = targetDayRecord.createdBy() != null ? targetDayRecord.createdBy() : updaterUserId;
-            telemetryEventPublisher.publishWaterQuantityRecorded(
-                    tenantId,
-                    schemeId,
-                    eventUserId,
-                    targetDay,
-                    targetDayWaterQuantity,
-                    1
-            );
-            if (dayAfterTargetOpt.isPresent()) {
-                TelemetryCompletedFlowReading dayAfter = dayAfterTargetOpt.get();
-                BigDecimal dayAfterWaterQuantity = dayAfter.confirmedReading().subtract(finalReading);
-                telemetryEventPublisher.publishWaterQuantityRecorded(
-                        tenantId,
-                        schemeId,
-                        dayAfter.createdBy() != null ? dayAfter.createdBy() : eventUserId,
-                        dayAfter.readingDate(),
-                        dayAfterWaterQuantity,
-                        1
-                );
-            }
+            // Analytics recalculates the corrected day and the day after it from the stored readings, so
+            // the corrected row is published again rather than a water quantity worked out here.
+            readingRepublisher.republish(schemaName, tenantId, targetDayRecord.id());
+            log.info("[update-yesterday-final-reading] republished readingId={}", targetDayRecord.id());
 
             log.info("[update-yesterday-final-reading] success schemeId={} date={}", schemeId, targetDay);
             return UpdateYesterdayFinalReadingBySchemeResponse.builder()

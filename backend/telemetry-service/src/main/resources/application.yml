@@ -52,6 +52,10 @@ whatsapp:
     enabled: ${WHATSAPP_RESUME_ENABLED:true}
     base-url: ${WHATSAPP_RESUME_BASE_URL:https://api.arghyam.glific.com}
     flow-id: ${WHATSAPP_RESUME_FLOW_ID:40368}
+    # Minimum ms between accepting an image and resuming the flow, so a fast OCR result cannot reach
+    # the WhatsApp provider before the flow has parked in its wait-for-result node (the provider
+    # drops such a resume).
+    min-delay-ms: ${WHATSAPP_RESUME_MIN_DELAY_MS:4000}
     user:
       phone: ${WHATSAPP_RESUME_USER_PHONE:${WHATSAPP_SYNC_USER_PHONE:}}
       password: ${WHATSAPP_RESUME_USER_PASSWORD:${WHATSAPP_SYNC_USER_PASSWORD:}}
@@ -94,6 +98,16 @@ telemetry:
       # Two entries make a rotation window: add the new hash, update the chatbot flows, drop the old one.
       # Startup fails if this is empty while mode=ENFORCE, or if an entry is not 64-char lowercase hex.
       token-hashes: ${TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES:}
+  internal:
+    auth:
+      # Operations token for the routes under /api/v1/telemetry/internal, sent in X-Internal-Token.
+      # The api-gateway routes /api/v1/telemetry/** publicly, so this token is the only thing in front
+      # of them.
+      #
+      # SHA-256 hex hash of the token — NOT the token itself. Left empty, the internal routes are
+      # disabled: the service still starts and every call to them gets 401. A value that is not
+      # 64-character hex disables them the same way, with a warning at startup.
+      token-hash: ${TELEMETRY_INTERNAL_AUTH_TOKEN_HASH:}
   supply-plausibility:
     # SUPPLY-PLAUSIBILITY: rejects a meter reading whose implied daily volume exceeds what the
     # scheme's connected population could physically consume:
@@ -143,9 +157,11 @@ security:
 
 ocr:
   url: ${OCR_URL:https://jalsoochak.beehyv.com/flowvision/v1/extract-reading}
-  # Default OCR/AI provider id used when a tenant sets no `ocr_provider` config key. Providers are
-  # pluggable per state/tenant: implement MeterReadingExtractor, register it as a bean, and point the
-  # tenant's `ocr_provider` (+ optional `ocr_url` / `ocr_api_key` / `ocr_auth_header`) config at its id.
+  # Default OCR/AI provider id for BFM photos, used when a tenant sets no `ocr_provider` config key.
+  # Providers are pluggable per state/tenant and channel: implement MeterReadingExtractor for a channel,
+  # register it as a bean, and point the tenant's `ocr_provider` (+ optional `ocr_url` / `ocr_api_key` /
+  # `ocr_auth_header`) config at its id. The `ocr.*` settings are BFM's; ELM photos use only the tenant's
+  # `ocr_elm_*` keys and never these, and are rejected until an ELM provider exists.
   default-provider: ${OCR_DEFAULT_PROVIDER:flowvision}
   # Optional auth for the global-default OCR endpoint (per-tenant keys override via `ocr_api_key`).
   api-key: ${OCR_API_KEY:}

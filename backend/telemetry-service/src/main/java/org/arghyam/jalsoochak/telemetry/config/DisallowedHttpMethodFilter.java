@@ -82,10 +82,11 @@ public class DisallowedHttpMethodFilter extends OncePerRequestFilter {
 
     /**
      * Runs after {@link RequestCorrelationFilter} (10) so rejections carry the request id in the MDC,
-     * and ahead of {@link TelemetryApiKeyAuthFilter} (20) and {@link WebhookAuthFilter} (30) so
-     * a disallowed method never triggers an API-key lookup against the database and never reaches
-     * {@link TenantInterceptor}. Every path answers an identical 405, so answering before
-     * authentication reveals nothing that authenticating first would have concealed.
+     * and ahead of {@link TelemetryApiKeyAuthFilter} (20), {@link WebhookAuthFilter} (30) and
+     * {@link InternalAuthFilter} (40) so a disallowed method never triggers an API-key lookup against
+     * the database and never reaches {@link TenantInterceptor}. Every path answers an identical 405,
+     * so answering before authentication reveals nothing that authenticating first would have
+     * concealed.
      *
      * <p>Consequence: {@code OPTIONS /api/v1/telemetry/readings} answers 405 rather than the 401 the
      * API-key filter used to give it. The method is unsupported regardless of credentials, so 405 is
