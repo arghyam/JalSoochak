@@ -260,16 +260,54 @@ class SchemeMappingUploadTest {
         verifyNoMoreInteractions(kafkaProducer);
     }
 
+    @Test
+    void uploadSchemeMappings_takesTheTenantFromTheSchemaWhenTheUploaderHasNone() {
+        stubOneSchemeWithNewMappings();
+        when(schemeDbRepository.findTenantIdByUserId("tenant_ka", 10)).thenReturn(null);
+        when(schemeDbRepository.findTenantIdBySchemaName("tenant_ka")).thenReturn(200);
+        when(schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds("tenant_ka", List.of(1)))
+                .thenReturn(List.of(schemeOne()));
+
+        schemeService.uploadSchemeMappings(mappingFile("""
+                state_scheme_id,village_lgd_code,sub_division_name
+                SS-1,VLG-001,Bengaluru North
+                """));
+
+        verify(kafkaProducer).publishJson(eq("scheme-service-topic"), eq("200:1"), payloadCaptor.capture());
+        assertThat(payloadCaptor.getValue()).containsEntry("tenantId", 200);
+    }
+
+    @Test
+    void uploadSchemeMappings_savesTheMappingsButSendsNothingWhenTheTenantIsUnknown() {
+        stubOneSchemeWithNewMappings();
+        when(schemeDbRepository.findTenantIdByUserId("tenant_ka", 10)).thenReturn(null);
+
+        SchemeUploadResponseDTO res = schemeService.uploadSchemeMappings(mappingFile("""
+                state_scheme_id,village_lgd_code,sub_division_name
+                SS-1,VLG-001,Bengaluru North
+                """));
+
+        assertThat(res.getUploadedRows()).isEqualTo(1);
+        verify(chunkProcessor).insertMappingsChunk(eq("tenant_ka"), anyList(), anyList());
+        verify(schemeDbRepository).findTenantIdBySchemaName("tenant_ka");
+        verifyNoInteractions(kafkaProducer);
+    }
+
     private void stubOneSchemeMappedToOneVillageAndSubDivision() {
         when(schemeDbRepository.findTenantIdByUserId("tenant_ka", 10)).thenReturn(200);
+        stubOneSchemeWithNewMappings();
+        when(schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds("tenant_ka", List.of(1)))
+                .thenReturn(List.of(schemeOne()));
+    }
+
+    /** Scheme SS-1, with no mappings yet, mapped to one village and sub-division by the upload. */
+    private void stubOneSchemeWithNewMappings() {
         when(schemeDbRepository.findSchemeIdsByStateSchemeIds(eq("tenant_ka"), anyList()))
                 .thenReturn(Map.of("ss-1", 1));
         when(schemeDbRepository.findLgdIdsByCodes(eq("tenant_ka"), anyList()))
                 .thenReturn(Map.of("vlg-001", 501));
         when(schemeDbRepository.findDepartmentIdsByTitles(eq("tenant_ka"), anyList()))
                 .thenReturn(Map.of("bengaluru north", 1001));
-        when(schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds("tenant_ka", List.of(1)))
-                .thenReturn(List.of(schemeOne()));
     }
 
     private static SchemeDbRepository.SchemeAnalyticsRow schemeOne() {

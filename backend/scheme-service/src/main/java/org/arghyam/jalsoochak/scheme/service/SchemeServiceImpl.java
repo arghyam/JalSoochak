@@ -1254,7 +1254,17 @@ public class SchemeServiceImpl implements SchemeService {
             schemeDbRepository.clearSchemeMappingsForSchemes(schemaName, schemesToClear, actorUserId);
         }
         insertMappingsInChunks(schemaName, lgd, dept);
-        publishSchemeMappingsReplacedEvents(schemaName, tenantId, schemesToClear);
+        if (!schemesToClear.isEmpty()) {
+            // The uploader's row may carry no tenant; the schema still names one.
+            Integer eventTenantId = tenantId != null
+                    ? tenantId : schemeDbRepository.findTenantIdBySchemaName(schemaName);
+            if (eventTenantId == null) {
+                log.warn("No tenant found for {}; {} schemes with changed mappings not sent to analytics",
+                        schemaName, schemesToClear.size());
+            } else {
+                publishSchemeMappingsReplacedEvents(schemaName, eventTenantId, schemesToClear);
+            }
+        }
 
         return new MappingProcessResult(uploaded, unchanged);
     }
