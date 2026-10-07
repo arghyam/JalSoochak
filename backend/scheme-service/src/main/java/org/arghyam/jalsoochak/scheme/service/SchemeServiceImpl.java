@@ -14,6 +14,7 @@ import org.arghyam.jalsoochak.scheme.config.SchemeSecurityEvaluator;
 import org.arghyam.jalsoochak.scheme.config.TenantContext;
 import org.arghyam.jalsoochak.scheme.config.properties.StorageProperties;
 import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeAnalyticsResyncResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusBreakdownDTO;
@@ -413,6 +414,26 @@ public class SchemeServiceImpl implements SchemeService {
                 reportGenerationLocks.remove(lockKey, lock);
             }
         }
+    }
+
+    @Override
+    public SchemeAnalyticsResyncResponseDTO resyncSchemesToAnalytics() {
+        String schemaName = requireTenantSchema();
+        int actorUserId = resolveCurrentUserId(schemaName);
+        Integer tenantId = schemeDbRepository.findTenantIdBySchemaName(schemaName);
+        if (tenantId == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        }
+
+        List<Integer> schemeIds = schemeDbRepository.findAllSchemeIds(schemaName);
+        int sent = publishSchemeMappingsReplacedEvents(schemaName, tenantId, schemeIds);
+        log.info("Analytics resync of {} by user {}: sent {} of {} schemes",
+                schemaName, actorUserId, sent, schemeIds.size());
+
+        return SchemeAnalyticsResyncResponseDTO.builder()
+                .totalSchemes(schemeIds.size())
+                .sentSchemes(sent)
+                .build();
     }
 
     private void saveReportRecord(
@@ -1283,11 +1304,14 @@ public class SchemeServiceImpl implements SchemeService {
     /**
      * Sends each scheme's details with its full lists of villages and sub-divisions, from which analytics
      * rebuilds the scheme's rows. Both lists are always sent; an empty one means the scheme has none.
+     *
+     * @return the number of messages handed to Kafka
      */
-    private void publishSchemeMappingsReplacedEvents(String schemaName, Integer tenantId, List<Integer> schemeIds) {
+    private int publishSchemeMappingsReplacedEvents(String schemaName, Integer tenantId, List<Integer> schemeIds) {
         if (tenantId == null || schemeIds == null || schemeIds.isEmpty()) {
-            return;
+            return 0;
         }
+        int sent = 0;
         for (int i = 0; i < schemeIds.size(); i += CHUNK_SIZE) {
             List<Integer> chunk = schemeIds.subList(i, Math.min(i + CHUNK_SIZE, schemeIds.size()));
             Map<Integer, List<SchemeDbRepository.MappedLocation>> villages =
@@ -1299,9 +1323,12 @@ public class SchemeServiceImpl implements SchemeService {
                 Map<String, Object> payload = schemeDetailsPayload("SCHEME_MAPPINGS_REPLACED", tenantId, row);
                 payload.put("villages", villages.getOrDefault(row.schemeId(), List.of()));
                 payload.put("subDivisions", subDivisions.getOrDefault(row.schemeId(), List.of()));
-                kafkaProducer.publishJson(SCHEME_TOPIC, schemeEventKey(tenantId, row.schemeId()), payload);
+                if (kafkaProducer.publishJson(SCHEME_TOPIC, schemeEventKey(tenantId, row.schemeId()), payload)) {
+                    sent++;
+                }
             }
         }
+        return sent;
     }
 
     private Map<String, Object> schemeDetailsPayload(

@@ -763,6 +763,36 @@ public class SchemeDbRepository {
                 .orElse(null);
     }
 
+    /**
+     * The reverse of {@link #findSchemaNameByTenantId}: the id of the tenant whose schema this is, or
+     * {@code null} when no tenant that is not deleted has that state code.
+     */
+    public Integer findTenantIdBySchemaName(String schemaName) {
+        validateSchemaName(schemaName);
+        String sql = """
+                SELECT id
+                FROM common_schema.tenant_master_table
+                WHERE 'tenant_' || LOWER(TRIM(state_code)) = ?
+                  AND deleted_at IS NULL
+                ORDER BY id
+                LIMIT 1
+                """;
+        List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getInt("id"), schemaName);
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    /** Ids of every scheme in the tenant that is not deleted, in id order. */
+    public List<Integer> findAllSchemeIds(String schemaName) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                SELECT id
+                FROM %s.scheme_master_table
+                WHERE deleted_at IS NULL
+                ORDER BY id
+                """, schemaName);
+        return jdbcTemplate.query(sql, (rs, n) -> rs.getInt("id"));
+    }
+
     public SchemeStatusesResponseDTO findSchemeStatusesById(String schemaName, int schemeId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
