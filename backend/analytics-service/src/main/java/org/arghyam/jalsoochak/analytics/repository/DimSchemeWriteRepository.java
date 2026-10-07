@@ -16,15 +16,23 @@ import org.springframework.stereotype.Repository;
 public class DimSchemeWriteRepository {
 
     /**
-     * Gives a scheme with no rows a placeholder row, so its details have somewhere to go before its
-     * villages are known. {@code parent_lgd_location_id} is NOT NULL, so "no village" is 0; the
-     * sub-division and every level id are left NULL. {@code ON CONFLICT} covers another writer
-     * inserting the same placeholder in between.
+     * Gives a scheme with no rows a placeholder row under its state, so it has somewhere to be counted
+     * before its villages are known. The state is the tenant's level-1 location (the lowest id if there
+     * are several, as the national dashboard picks it). When the tenant's locations are not loaded yet,
+     * {@code parent_lgd_location_id}, which is NOT NULL, falls back to 0. The sub-division and the lower
+     * level ids are left NULL. {@code ON CONFLICT} covers another writer inserting the same placeholder
+     * in between.
      */
     private static final String INSERT_PLACEHOLDER_SQL = """
+            WITH state AS (
+                SELECT MIN(lgd_id) AS lgd_id
+                FROM analytics_schema.dim_lgd_location_table
+                WHERE tenant_id = ? AND lgd_level = 1)
             INSERT INTO analytics_schema.dim_scheme_table
-                (tenant_id, scheme_id, state_scheme_id, centre_scheme_id, parent_lgd_location_id, created_at)
-            SELECT ?, ?, ?, ?, 0, NOW()
+                (tenant_id, scheme_id, state_scheme_id, centre_scheme_id,
+                 parent_lgd_location_id, level_1_lgd_id, created_at)
+            SELECT ?, ?, ?, ?, COALESCE(state.lgd_id, 0), state.lgd_id, NOW()
+            FROM state
             WHERE NOT EXISTS (
                 SELECT 1 FROM analytics_schema.dim_scheme_table
                 WHERE tenant_id = ? AND scheme_id = ?)
@@ -51,13 +59,14 @@ public class DimSchemeWriteRepository {
     private final JdbcTemplate jdbcTemplate;
 
     /**
-     * Writes the scheme's details to every row it has, inserting a placeholder row first when it has
-     * none. Village, sub-division and level ids are never changed.
+     * Writes the scheme's details to every row it has, first inserting a placeholder row under its state
+     * when it has none. The village, sub-division and level ids of existing rows are never changed.
      *
      * @return the number of rows written
      */
     public int upsertDetails(SchemeEvent details) {
         jdbcTemplate.update(INSERT_PLACEHOLDER_SQL,
+                details.getTenantId(),
                 details.getTenantId(), details.getSchemeId(),
                 details.getStateSchemeId(), details.getCentreSchemeId(),
                 details.getTenantId(), details.getSchemeId());

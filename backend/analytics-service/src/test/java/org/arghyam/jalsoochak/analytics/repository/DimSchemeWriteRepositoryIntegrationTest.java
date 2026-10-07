@@ -24,8 +24,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Pins how a scheme's details reach {@code dim_scheme_table}: written to every row of the scheme, never
- * moving a row to another village or sub-division, and creating a placeholder row for a scheme that has
- * none yet.
+ * moving a row to another village or sub-division, and placing a scheme that has no rows yet under its
+ * state.
  */
 @JdbcTest
 @Testcontainers
@@ -85,9 +85,9 @@ class DimSchemeWriteRepositoryIntegrationTest {
                 """);
         insertTenant(TENANT);
         insertTenant(OTHER_TENANT);
-        insertLgd(PARENT_LGD, 1, PARENT_LGD, null);
-        insertLgd(101, 2, PARENT_LGD, 101);
-        insertLgd(102, 2, PARENT_LGD, 102);
+        insertLgd(TENANT, PARENT_LGD, 1, PARENT_LGD, null);
+        insertLgd(TENANT, 101, 2, PARENT_LGD, 101);
+        insertLgd(TENANT, 102, 2, PARENT_LGD, 102);
     }
 
     @Test
@@ -158,15 +158,20 @@ class DimSchemeWriteRepositoryIntegrationTest {
     }
 
     @Test
-    void upsertDetails_insertsOnePlaceholderRow_forASchemeWithNoRows() {
+    void upsertDetails_insertsOnePlaceholderRowUnderTheState_forASchemeWithNoRows() {
+        insertLgd(OTHER_TENANT, 50, 1, 50, null); // another tenant's state, which must not be picked
+
         repository.upsertDetails(details(TENANT, SCHEME, COMPLETED, NON_OPERATIVE, 30, 40, 50));
         repository.upsertDetails(details(TENANT, SCHEME, HANDED_OVER, OPERATIVE, null, null, null));
 
         assertThat(rows(TENANT, SCHEME)).singleElement().satisfies(row -> {
-            assertThat(row.get("parent_lgd_location_id")).isEqualTo(0);
+            assertThat(row.get("parent_lgd_location_id")).isEqualTo(PARENT_LGD);
+            assertThat(row.get("level_1_lgd_id")).isEqualTo(PARENT_LGD);
+            for (int level = 2; level <= 6; level++) {
+                assertThat(row.get("level_" + level + "_lgd_id")).isNull();
+            }
             assertThat(row.get("parent_department_location_id")).isNull();
             for (int level = 1; level <= 6; level++) {
-                assertThat(row.get("level_" + level + "_lgd_id")).isNull();
                 assertThat(row.get("level_" + level + "_dept_id")).isNull();
             }
             assertThat(row.get("scheme_name")).isEqualTo("Renamed");
@@ -176,6 +181,28 @@ class DimSchemeWriteRepositoryIntegrationTest {
             assertThat(row.get("created_at")).isNotNull();
             assertThat(row.get("updated_at")).isNotNull();
         });
+    }
+
+    @Test
+    void upsertDetails_placeholderFallsBackToVillageZero_whenTheTenantsStateIsNotLoaded() {
+        repository.upsertDetails(details(OTHER_TENANT, SCHEME, COMPLETED, NON_OPERATIVE, 30, 40, 50));
+
+        assertThat(rows(OTHER_TENANT, SCHEME)).singleElement().satisfies(row -> {
+            assertThat(row.get("parent_lgd_location_id")).isEqualTo(0);
+            assertThat(row.get("level_1_lgd_id")).isNull();
+        });
+    }
+
+    @Test
+    void stateSchemeCount_includesANewSchemeBeforeItsVillagesAreKnown() {
+        insertSchemeRow(TENANT, OTHER_SCHEME, 101, 201);
+
+        repository.upsertDetails(details(TENANT, SCHEME, HANDED_OVER, OPERATIVE, null, null, null));
+
+        assertThat(schemeRegularityRepository.getSchemeCountByLgdInScope(TENANT, PARENT_LGD)).isEqualTo(2);
+        assertThat(schemeRegularityRepository.getSchemeCountByLgdInScope(TENANT, 101))
+                .as("the placeholder is in no district")
+                .isEqualTo(1);
     }
 
     @Test
@@ -227,13 +254,13 @@ class DimSchemeWriteRepositoryIntegrationTest {
                 """, tenantId, "s" + tenantId, "State " + tenantId);
     }
 
-    private void insertLgd(int lgdId, int level, Integer level1, Integer level2) {
+    private void insertLgd(int tenantId, int lgdId, int level, Integer level1, Integer level2) {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_lgd_location_table
                 (lgd_id, tenant_id, lgd_code, lgd_c_name, title, lgd_level,
                  level_1_lgd_id, level_2_lgd_id, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-                """, lgdId, TENANT, "L" + lgdId, "LGD " + lgdId, "LGD " + lgdId, level, level1, level2);
+                """, lgdId, tenantId, "L" + lgdId, "LGD " + lgdId, "LGD " + lgdId, level, level1, level2);
     }
 
     /** A row as an earlier message left it: HANDED_OVER, OPERATIVE, FHTC 10/11/12. */
