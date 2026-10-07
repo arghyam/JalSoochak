@@ -42,3 +42,34 @@ CREATE TABLE tenant_mp.flow_reading_table (
     created_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
     deleted_at        TIMESTAMP
 );
+
+CREATE TABLE tenant_mp.location_config_master_table (
+    id    SERIAL  PRIMARY KEY,
+    level INTEGER NOT NULL
+);
+
+CREATE TABLE tenant_mp.lgd_location_master_table (
+    id                     SERIAL  PRIMARY KEY,
+    lgd_location_config_id INTEGER REFERENCES tenant_mp.location_config_master_table(id),
+    parent_id              INTEGER REFERENCES tenant_mp.lgd_location_master_table(id)
+);
+
+CREATE TABLE tenant_mp.department_location_master_table (
+    id                            SERIAL  PRIMARY KEY,
+    department_location_config_id INTEGER REFERENCES tenant_mp.location_config_master_table(id),
+    parent_id                     INTEGER REFERENCES tenant_mp.department_location_master_table(id)
+);
+
+CREATE TABLE tenant_mp.scheme_lgd_mapping_table (
+    id            SERIAL    PRIMARY KEY,
+    scheme_id     INTEGER   NOT NULL REFERENCES tenant_mp.scheme_master_table(id),
+    parent_lgd_id INTEGER   NOT NULL REFERENCES tenant_mp.lgd_location_master_table(id),
+    deleted_at    TIMESTAMP
+);
+
+CREATE TABLE tenant_mp.scheme_department_mapping_table (
+    id                   SERIAL    PRIMARY KEY,
+    scheme_id            INTEGER   NOT NULL REFERENCES tenant_mp.scheme_master_table(id),
+    parent_department_id INTEGER   NOT NULL REFERENCES tenant_mp.department_location_master_table(id),
+    deleted_at           TIMESTAMP
+);

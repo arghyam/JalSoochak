@@ -69,6 +69,20 @@ public class SchemeDbRepository {
             Integer operatingStatus
     ) {}
 
+    /**
+     * A village or sub-division a scheme serves, with the ids of its level 1 to 6 ancestors. Its own id
+     * sits at its own level; the levels below it are null.
+     */
+    public record MappedLocation(
+            Integer id,
+            Integer level1Id,
+            Integer level2Id,
+            Integer level3Id,
+            Integer level4Id,
+            Integer level5Id,
+            Integer level6Id
+    ) {}
+
     public List<SchemeDTO> findAllSchemes(String schemaName) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -1054,6 +1068,23 @@ public class SchemeDbRepository {
         return findMappingIdsByScheme(schemaName, "scheme_department_mapping_table", "parent_department_id", schemeIds);
     }
 
+    /**
+     * The villages each scheme serves, with their LGD ancestors. A scheme with none is absent from the map.
+     */
+    public Map<Integer, List<MappedLocation>> findSchemeVillagesBySchemeIds(String schemaName, List<Integer> schemeIds) {
+        return findMappedLocationsByScheme(schemaName, "scheme_lgd_mapping_table", "parent_lgd_id",
+                "lgd_location_master_table", "lgd_location_config_id", schemeIds);
+    }
+
+    /**
+     * The sub-divisions each scheme serves, with their department ancestors. A scheme with none is absent
+     * from the map.
+     */
+    public Map<Integer, List<MappedLocation>> findSchemeSubDivisionsBySchemeIds(String schemaName, List<Integer> schemeIds) {
+        return findMappedLocationsByScheme(schemaName, "scheme_department_mapping_table", "parent_department_id",
+                "department_location_master_table", "department_location_config_id", schemeIds);
+    }
+
     public Integer findUserIdByEmail(String schemaName, String email) {
         validateSchemaName(schemaName);
         if (email == null || email.isBlank()) {
@@ -1622,6 +1653,87 @@ public class SchemeDbRepository {
             int schemeId = rs.getInt("scheme_id");
             int childId = rs.getInt("child_id");
             out.computeIfAbsent(schemeId, k -> new HashSet<>()).add(childId);
+        }, args.toArray());
+        return out;
+    }
+
+    /**
+     * Walks up each mapped location's {@code parent_id} chain and places every location on it at the
+     * level its location config gives. The walk stops after six steps, the depth of the tree, so a
+     * {@code parent_id} loop cannot run forever.
+     */
+    private Map<Integer, List<MappedLocation>> findMappedLocationsByScheme(
+            String schemaName,
+            String mappingTable,
+            String locationColumn,
+            String locationTable,
+            String configColumn,
+            List<Integer> schemeIds
+    ) {
+        validateSchemaName(schemaName);
+        if (schemeIds == null || schemeIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Set<Integer> uniq = new HashSet<>();
+        for (Integer id : schemeIds) {
+            if (id != null) {
+                uniq.add(id);
+            }
+        }
+        if (uniq.isEmpty()) {
+            return Map.of();
+        }
+
+        String placeholders = String.join(",", java.util.Collections.nCopies(uniq.size(), "?"));
+        String sql = String.format("""
+                WITH RECURSIVE mapped AS (
+                    SELECT DISTINCT scheme_id, %2$s AS location_id
+                    FROM %1$s.%3$s
+                    WHERE deleted_at IS NULL
+                      AND scheme_id IN (%6$s)
+                ),
+                ancestry AS (
+                    SELECT loc.id AS location_id, loc.id AS ancestor_id, loc.parent_id, loc.%5$s AS config_id, 1 AS depth
+                    FROM %1$s.%4$s loc
+                    WHERE loc.id IN (SELECT location_id FROM mapped)
+                    UNION ALL
+                    SELECT a.location_id, parent.id, parent.parent_id, parent.%5$s, a.depth + 1
+                    FROM ancestry a
+                    JOIN %1$s.%4$s parent ON parent.id = a.parent_id
+                    WHERE a.depth < 6
+                ),
+                levels AS (
+                    SELECT a.location_id,
+                           MAX(a.ancestor_id) FILTER (WHERE lc.level = 1) AS level_1_id,
+                           MAX(a.ancestor_id) FILTER (WHERE lc.level = 2) AS level_2_id,
+                           MAX(a.ancestor_id) FILTER (WHERE lc.level = 3) AS level_3_id,
+                           MAX(a.ancestor_id) FILTER (WHERE lc.level = 4) AS level_4_id,
+                           MAX(a.ancestor_id) FILTER (WHERE lc.level = 5) AS level_5_id,
+                           MAX(a.ancestor_id) FILTER (WHERE lc.level = 6) AS level_6_id
+                    FROM ancestry a
+                    JOIN %1$s.location_config_master_table lc ON lc.id = a.config_id
+                    GROUP BY a.location_id
+                )
+                SELECT m.scheme_id, m.location_id,
+                       lv.level_1_id, lv.level_2_id, lv.level_3_id, lv.level_4_id, lv.level_5_id, lv.level_6_id
+                FROM mapped m
+                LEFT JOIN levels lv ON lv.location_id = m.location_id
+                ORDER BY m.scheme_id, m.location_id
+                """, schemaName, locationColumn, mappingTable, locationTable, configColumn, placeholders);
+
+        List<Object> args = new ArrayList<>(uniq);
+        Map<Integer, List<MappedLocation>> out = new LinkedHashMap<>();
+        jdbcTemplate.query(sql, rs -> {
+            out.computeIfAbsent(rs.getInt("scheme_id"), k -> new ArrayList<>()).add(new MappedLocation(
+                    (Integer) rs.getObject("location_id"),
+                    (Integer) rs.getObject("level_1_id"),
+                    (Integer) rs.getObject("level_2_id"),
+                    (Integer) rs.getObject("level_3_id"),
+                    (Integer) rs.getObject("level_4_id"),
+                    (Integer) rs.getObject("level_5_id"),
+                    (Integer) rs.getObject("level_6_id")
+            ));
         }, args.toArray());
         return out;
     }

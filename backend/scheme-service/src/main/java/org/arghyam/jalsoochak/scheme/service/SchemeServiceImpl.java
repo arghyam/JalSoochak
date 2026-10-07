@@ -1233,13 +1233,7 @@ public class SchemeServiceImpl implements SchemeService {
             schemeDbRepository.clearSchemeMappingsForSchemes(schemaName, schemesToClear, actorUserId);
         }
         insertMappingsInChunks(schemaName, lgd, dept);
-        if (!schemesToClear.isEmpty()) {
-            List<SchemeDbRepository.SchemeAnalyticsRow> updatedSchemes =
-                    schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds(schemaName, new ArrayList<>(rowsByScheme.keySet()));
-            if (!updatedSchemes.isEmpty()) {
-                publishSchemeDimensionEventsFromRows(tenantId, updatedSchemes);
-            }
-        }
+        publishSchemeMappingsReplacedEvents(schemaName, tenantId, schemesToClear);
 
         return new MappingProcessResult(uploaded, unchanged);
     }
@@ -1281,23 +1275,56 @@ public class SchemeServiceImpl implements SchemeService {
             return;
         }
         for (SchemeDbRepository.SchemeAnalyticsRow row : rows) {
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("eventType", "SCHEME_UPDATED");
-            payload.put("schemeId", row.schemeId());
-            payload.put("tenantId", tenantId);
-            payload.put("schemeName", row.schemeName());
-            payload.put("stateSchemeId", safeParseInt(row.stateSchemeId()));
-            payload.put("centreSchemeId", safeParseInt(row.centreSchemeId()));
-            payload.put("longitude", row.longitude());
-            payload.put("latitude", row.latitude());
-            payload.put("fhtcCount", row.fhtcCount());
-            payload.put("plannedFhtc", row.plannedFhtc());
-            payload.put("houseHoldCount", row.houseHoldCount());
-            payload.put("status", row.operatingStatus());
-            payload.put("operating_status", row.operatingStatus());
-            payload.put("work_status", row.workStatus());
+            Map<String, Object> payload = schemeDetailsPayload("SCHEME_UPDATED", tenantId, row);
             kafkaProducer.publishJson(SCHEME_TOPIC, schemeEventKey(tenantId, row.schemeId()), payload);
         }
+    }
+
+    /**
+     * Sends each scheme's details with its full lists of villages and sub-divisions, from which analytics
+     * rebuilds the scheme's rows. Both lists are always sent; an empty one means the scheme has none.
+     */
+    private void publishSchemeMappingsReplacedEvents(String schemaName, Integer tenantId, List<Integer> schemeIds) {
+        if (tenantId == null || schemeIds == null || schemeIds.isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < schemeIds.size(); i += CHUNK_SIZE) {
+            List<Integer> chunk = schemeIds.subList(i, Math.min(i + CHUNK_SIZE, schemeIds.size()));
+            Map<Integer, List<SchemeDbRepository.MappedLocation>> villages =
+                    schemeDbRepository.findSchemeVillagesBySchemeIds(schemaName, chunk);
+            Map<Integer, List<SchemeDbRepository.MappedLocation>> subDivisions =
+                    schemeDbRepository.findSchemeSubDivisionsBySchemeIds(schemaName, chunk);
+            for (SchemeDbRepository.SchemeAnalyticsRow row
+                    : schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds(schemaName, chunk)) {
+                Map<String, Object> payload = schemeDetailsPayload("SCHEME_MAPPINGS_REPLACED", tenantId, row);
+                payload.put("villages", villages.getOrDefault(row.schemeId(), List.of()));
+                payload.put("subDivisions", subDivisions.getOrDefault(row.schemeId(), List.of()));
+                kafkaProducer.publishJson(SCHEME_TOPIC, schemeEventKey(tenantId, row.schemeId()), payload);
+            }
+        }
+    }
+
+    private Map<String, Object> schemeDetailsPayload(
+            String eventType,
+            Integer tenantId,
+            SchemeDbRepository.SchemeAnalyticsRow row
+    ) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("eventType", eventType);
+        payload.put("schemeId", row.schemeId());
+        payload.put("tenantId", tenantId);
+        payload.put("schemeName", row.schemeName());
+        payload.put("stateSchemeId", safeParseInt(row.stateSchemeId()));
+        payload.put("centreSchemeId", safeParseInt(row.centreSchemeId()));
+        payload.put("longitude", row.longitude());
+        payload.put("latitude", row.latitude());
+        payload.put("fhtcCount", row.fhtcCount());
+        payload.put("plannedFhtc", row.plannedFhtc());
+        payload.put("houseHoldCount", row.houseHoldCount());
+        payload.put("status", row.operatingStatus());
+        payload.put("operating_status", row.operatingStatus());
+        payload.put("work_status", row.workStatus());
+        return payload;
     }
 
     /** Keys every message about a scheme the same way, so analytics applies them in the order sent. */
