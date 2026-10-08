@@ -1,8 +1,8 @@
 # Pluggable OCR / AI Provider (per tenant)
 
 The external AI service that reads meter values from images is pluggable per state/tenant and per
-reading channel. Each provider reads one kind of meter, so it serves one channel. The built-in provider
-is `FlowVisionOcrExtractor`, registered for BFM under the id `"flowvision"`; a different AI model /
+reading channel. Each provider reads one kind of meter, so it serves one channel. BFM's built-in provider
+is `FlowVisionBfmOcrExtractor`, registered under the id `"flowvision"`; a different AI model /
 endpoint can be selected for any tenant through configuration, and new providers can be added without
 touching the ingestion pipeline.
 
@@ -14,7 +14,7 @@ in. No ELM provider exists yet, so an ELM photo is rejected like a PDU one until
 | Type | Role |
 |------|------|
 | `MeterReadingExtractor` | Strategy interface — one bean per provider. `providerId()`, `channel()` + settings-aware `extractReading` / `extractReadingOrThrow`. No bean is `@Primary`; nothing injects a single extractor. |
-| `FlowVisionOcrExtractor` | Built-in BFM provider (`providerId = "flowvision"`). Applies the endpoint + auth header from the supplied `OcrProviderSettings`, or its global `ocr.*` config when they are `null`. |
+| `FlowVisionBfmOcrExtractor` | Built-in BFM provider (`providerId = "flowvision"`). Applies the endpoint + auth header from the supplied `OcrProviderSettings`, or its global `ocr.*` config when they are `null`. |
 | `OcrProviderSettings` | Resolved per-tenant config: provider id, endpoint URL, API key, auth header. |
 | `OcrProviderResolver` | Reads a tenant's config keys for the channel → `OcrProviderSettings` (or `null` = use the channel's default provider with its own config). |
 | `OcrProviderRegistry` | Indexes all `MeterReadingExtractor` beans by channel and id. `get(channel, providerId)` returns the tenant's provider for that channel, else the channel's default, else empty. |
@@ -89,9 +89,9 @@ breaker and cannot open the default provider's:
 
 - The instance is keyed on the **resolved** provider (the extractor the registry actually returns), not
   the raw configured id.
-- The built-in `"flowvision"` provider (including tenants with no override) uses the tuned
+- BFM's built-in `"flowvision"` provider (including tenants with no override) uses the tuned
   `ocrReadings` instances configured in `application.yml`. An **unknown/mis-typed `ocr_provider`**
-  degrades to the built-in provider in the registry, so it also uses these default instances — it never
+  degrades to that provider in the registry, so it also uses these default instances — it never
   spawns a phantom `ocrReadings-<typo>` breaker that would never match a real backend.
 - Any other registered provider gets instances named `ocrReadings-<providerId>`, **derived from
   the default instance's config** — so tuning (max-attempts, window, thresholds) and the

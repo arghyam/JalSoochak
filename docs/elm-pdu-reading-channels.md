@@ -216,7 +216,7 @@ and OCR doesn't run.
 | Unset fields fall back to `ocr.*` | Yes, as before | **Never** | — |
 | Default provider | `ocr.default-provider` | none yet | — |
 
-- Each `MeterReadingExtractor` declares its `channel()`. `FlowVisionOcrExtractor` is BFM's, and is
+- Each `MeterReadingExtractor` declares its `channel()`. `FlowVisionBfmOcrExtractor` is BFM's, and is
   no longer `@Primary`: nothing injects a single extractor, so a photo is never read by another
   channel's model.
 - `OcrProviderRegistry.get(channel, providerId)` returns the tenant's provider if it is registered for

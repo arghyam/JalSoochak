@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class FlowVisionOcrExtractorTest {
+class FlowVisionBfmOcrExtractorTest {
     private static final String FLOW_VISION_URL = "https://example.com/flowvision/v1/extract-reading";
 
     @Test
@@ -30,7 +30,7 @@ class FlowVisionOcrExtractorTest {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("123.4", "black"), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
@@ -48,7 +48,7 @@ class FlowVisionOcrExtractorTest {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("returned-id-123", "123.4", "black"), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
@@ -63,7 +63,7 @@ class FlowVisionOcrExtractorTest {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("004983", "red"), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
@@ -79,7 +79,7 @@ class FlowVisionOcrExtractorTest {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new RestClientException("temporary"));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
@@ -98,7 +98,7 @@ class FlowVisionOcrExtractorTest {
                 )
         ), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
@@ -121,7 +121,7 @@ class FlowVisionOcrExtractorTest {
                 )
         ), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
@@ -154,7 +154,7 @@ class FlowVisionOcrExtractorTest {
                 java.nio.charset.StandardCharsets.UTF_8
         ));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("", null);
 
@@ -173,7 +173,7 @@ class FlowVisionOcrExtractorTest {
                         "alternateValue", 2, "alternateConfidence", "0.45")
         )), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
@@ -197,7 +197,7 @@ class FlowVisionOcrExtractorTest {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("123.4", "black"), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
@@ -216,7 +216,7 @@ class FlowVisionOcrExtractorTest {
         positions.add(Map.of("position", 3)); // malformed — missing digits, skipped
         restTemplate.enqueue(new ResponseEntity<>(buildRolloverResponse("987", "black", positions), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
@@ -238,7 +238,7 @@ class FlowVisionOcrExtractorTest {
                 "alternateDigit", Map.of("value", 6, "confidence", 0.91)));
         restTemplate.enqueue(new ResponseEntity<>(buildRolloverResponse("125", "black", positions), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
@@ -258,7 +258,7 @@ class FlowVisionOcrExtractorTest {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new ResponseEntity<>(buildNoMeterResponse(), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
@@ -279,7 +279,7 @@ class FlowVisionOcrExtractorTest {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new ResponseEntity<>(buildNoMeterResponse(), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReadingOrThrow("https://image-url", null);
 
@@ -294,7 +294,7 @@ class FlowVisionOcrExtractorTest {
                 "result", Map.of("status", "FAILED", "correlationId", "corr-rejected")
         ), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
@@ -307,7 +307,7 @@ class FlowVisionOcrExtractorTest {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("123.4", "black"), HttpStatus.OK));
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
 
         assertFalse(service.extractReading("https://image-url", null).isNoMeter());
     }

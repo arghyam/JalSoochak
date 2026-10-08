@@ -24,10 +24,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Verifies the pluggable per-tenant behaviour of the built-in FlowVision extractor: the resolved
+ * Verifies the pluggable per-tenant behaviour of the built-in FlowVision BFM extractor: the resolved
  * {@link OcrProviderSettings} decide the endpoint hit and the auth header sent.
  */
-class FlowVisionOcrExtractorProviderSettingsTest {
+class FlowVisionBfmOcrExtractorProviderSettingsTest {
 
     private static final String DEFAULT_URL = "https://default/extract";
 
@@ -37,7 +37,7 @@ class FlowVisionOcrExtractorProviderSettingsTest {
         when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
                 .thenReturn(successResponse());
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, DEFAULT_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, DEFAULT_URL);
         OcrProviderSettings settings =
                 new OcrProviderSettings("vision-x", "https://vision-x/extract", "secret-token", "X-Api-Key");
 
@@ -58,7 +58,7 @@ class FlowVisionOcrExtractorProviderSettingsTest {
         when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
                 .thenReturn(successResponse());
 
-        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, DEFAULT_URL);
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, DEFAULT_URL);
 
         service.extractReading("https://img", null);
 

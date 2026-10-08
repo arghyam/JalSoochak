@@ -29,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@link OcrProviderRegistry}. A by-type injection added later would fail here rather than at deploy.
  */
 @DisplayName("OCR provider wiring — providers are picked by channel, never injected one by one")
-class FlowVisionOcrExtractorWiringTest {
+class FlowVisionBfmOcrExtractorWiringTest {
 
     /** A provider for another channel, registered the way a new AI backend would be. */
     static class ElmProviderExtractor implements MeterReadingExtractor {
@@ -57,7 +57,7 @@ class FlowVisionOcrExtractorWiringTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration.class))
             .withBean(RestTemplate.class)
-            .withBean(FlowVisionOcrExtractor.class)
+            .withBean(FlowVisionBfmOcrExtractor.class)
             .withBean(ElmProviderExtractor.class)
             .withBean(OcrProviderRegistry.class)
             .withBean(RetryRegistry.class, RetryRegistry::ofDefaults)
@@ -84,7 +84,7 @@ class FlowVisionOcrExtractorWiringTest {
         contextRunner.run(context -> {
             OcrProviderRegistry registry = context.getBean(OcrProviderRegistry.class);
             assertThat(registry.get(ReadingChannel.BFM, null))
-                    .containsSame(context.getBean(FlowVisionOcrExtractor.class));
+                    .containsSame(context.getBean(FlowVisionBfmOcrExtractor.class));
             assertThat(registry.get(ReadingChannel.ELM, "elm-vision"))
                     .containsSame(context.getBean(ElmProviderExtractor.class));
             // ELM has no default provider yet, so a tenant with no ELM override gets none, never FlowVision.
