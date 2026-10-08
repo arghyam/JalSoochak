@@ -170,6 +170,15 @@ ocr:
   http:
     connect-timeout-ms: ${OCR_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${OCR_READ_TIMEOUT_MS:10000}
+  # The ELM OCR provider's own endpoint and key. Nothing here falls back to the BFM settings above.
+  elm:
+    url: ${OCR_ELM_URL:}
+    api-key: ${OCR_ELM_API_KEY:}
+    auth-header: ${OCR_ELM_AUTH_HEADER:X-API-Key}
+    http:
+      connect-timeout-ms: ${OCR_ELM_CONNECT_TIMEOUT_MS:5000}
+      # A read takes 20-30 s and up to about 100 s, so this is far above the BFM timeout.
+      read-timeout-ms: ${OCR_ELM_READ_TIMEOUT_MS:120000}
   rollover:
     resolution:
       # Kill-switch for the rollover-digit resolver. Default OFF for a safe cutover — must only be
