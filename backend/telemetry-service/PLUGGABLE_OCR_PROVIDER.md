@@ -85,8 +85,10 @@ environment variable, and none falls back to BFM's:
 
 Every environment sets `OCR_ELM_API_KEY` to a key the ELM service accepts (it checks the `X-API-Key`
 header against its `METER_SERVICE_API_KEY`); a missing or wrong key gets every ELM photo a 401
-rejection. Every environment also sets `OCR_ELM_URL` to its own ELM endpoint: with `"flowvision-elm"`
-as the default provider and no URL, startup fails.
+rejection. `OCR_ELM_URL` is required wherever `"flowvision-elm"` reads through the global endpoint:
+while it is the default provider (without the URL, startup fails), and for a tenant that names it in
+`ocr_elm_provider` without its own `ocr_elm_url` (without the URL, that tenant's ELM photos can't be
+read). With `OCR_ELM_DEFAULT_PROVIDER` blank, startup doesn't need it.
 
 ## Adding a new provider
 
