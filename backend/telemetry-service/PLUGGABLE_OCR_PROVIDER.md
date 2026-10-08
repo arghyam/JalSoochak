@@ -2,12 +2,14 @@
 
 The external AI service that reads meter values from images is pluggable per state/tenant and per
 reading channel. Each provider reads one kind of meter, so it serves one channel. BFM's built-in provider
-is `FlowVisionBfmOcrExtractor`, registered under the id `"flowvision"`; a different AI model /
-endpoint can be selected for any tenant through configuration, and new providers can be added without
-touching the ingestion pipeline.
+is `FlowVisionBfmOcrExtractor`, registered under the id `"flowvision"`; ELM's is
+`FlowVisionElmOcrExtractor`, registered under `FlowVisionElmOcrExtractor.PROVIDER_ID`. A different AI
+model / endpoint can be selected for any tenant through configuration, and new providers can be added
+without touching the ingestion pipeline.
 
 Only BFM and ELM read photos (`ReadingChannel.supportsImageReading()`). PDU readings are always typed
-in. No ELM provider exists yet, so an ELM photo is rejected like a PDU one until it does.
+in. ELM has no default provider unless `ocr.elm.default-provider` is set, so an ELM photo from a tenant
+that names no ELM provider is rejected like a PDU one.
 
 ## Moving parts
 
@@ -15,9 +17,10 @@ in. No ELM provider exists yet, so an ELM photo is rejected like a PDU one until
 |------|------|
 | `MeterReadingExtractor` | Strategy interface — one bean per provider. `providerId()`, `channel()` + settings-aware `extractReading` / `extractReadingOrThrow`. No bean is `@Primary`; nothing injects a single extractor. |
 | `FlowVisionBfmOcrExtractor` | Built-in BFM provider (`providerId = "flowvision"`). Applies the endpoint + auth header from the supplied `OcrProviderSettings`, or its global `ocr.*` config when they are `null`. |
+| `FlowVisionElmOcrExtractor` | Built-in ELM provider. Reads the kWh register, on its own `elmOcrRestTemplate` sized for a 20–30 s read. Applies the tenant's `ocr_elm_*` settings, or its global `ocr.elm.*` config for any that are unset. |
 | `OcrProviderSettings` | Resolved per-tenant config: provider id, endpoint URL, API key, auth header. |
 | `OcrProviderResolver` | Reads a tenant's config keys for the channel → `OcrProviderSettings` (or `null` = use the channel's default provider with its own config). |
-| `OcrProviderRegistry` | Indexes all `MeterReadingExtractor` beans by channel and id. `get(channel, providerId)` returns the tenant's provider for that channel, else the channel's default, else empty. |
+| `OcrProviderRegistry` | Indexes all `MeterReadingExtractor` beans by channel and id. `get(channel, providerId)` returns the tenant's provider for that channel, else the channel's default, else empty. An `ocr.elm.default-provider` that isn't registered for ELM fails startup. |
 | `ImageReadingCapture` | Picks the provider through the resolver and registry for every photo, and rejects the photo with `IMAGE_NOT_SUPPORTED_FOR_CHANNEL` when the channel doesn't read photos or has no provider. |
 | `OcrReadingsRetryService` | Resilience wrapping the provider the registry picked: **per-provider retry + circuit breaker** (isolation), **shared bulkhead** (global concurrency cap). |
 
@@ -29,12 +32,14 @@ channel doesn't read photos (PDU) ─▶ 400 IMAGE_NOT_SUPPORTED_FOR_CHANNEL   (
 (tenantId, channel) ─▶ OcrProviderResolver.resolve(tenantId, channel)  ─▶ settings or null
                     ─▶ OcrProviderRegistry.get(channel, settings?.providerId)
                          │
-                         ├─ empty     ─▶ 400 IMAGE_NOT_SUPPORTED_FOR_CHANNEL   (ELM today)
+                         ├─ empty     ─▶ 400 IMAGE_NOT_SUPPORTED_FOR_CHANNEL   (ELM with no provider)
                          └─ extractor ─▶ OcrReadingsRetryService.extractReading(extractor, imageUrl, settings)
 ```
 
 A BFM tenant with no `ocr_*` keys gets `null` settings and BFM's default provider
-(`ocr.default-provider`, default `"flowvision"`), which reads with its global `ocr.*` config.
+(`ocr.default-provider`, default `"flowvision"`), which reads with its global `ocr.*` config. An ELM
+tenant with no `ocr_elm_*` keys gets ELM's default provider (`ocr.elm.default-provider`), which reads
+with its global `ocr.elm.*` config. That default is blank, so until it is set those photos are rejected.
 
 ## Per-tenant configuration
 
@@ -47,12 +52,13 @@ optional; setting *any* one of a channel's keys activates the override path for 
 | `ocr_provider` | `ocr_elm_provider` | Provider id to use | `vision-x` |
 | `ocr_url` | `ocr_elm_url` | Endpoint URL | `https://vision-x.example/extract` |
 | `ocr_api_key` | `ocr_elm_api_key` | API key/token — a literal, or `env:VAR_NAME` to read from the environment instead of storing the secret in the DB | `env:VISION_X_KEY` |
-| `ocr_auth_header` | `ocr_elm_auth_header` | Header carrying the key (default `Authorization`) | `X-Api-Key` |
+| `ocr_auth_header` | `ocr_elm_auth_header` | Header carrying the key (default `Authorization` for BFM, `X-API-Key` for ELM) | `X-Api-Key` |
 
 - **BFM:** unspecified keys fall back to the global `ocr.*` defaults.
-- **ELM:** unspecified keys never fall back to `ocr.*`, which belong to the BFM model; they are left to
-  the ELM provider's own configuration, so an ELM photo is never sent to the BFM endpoint or with the
-  BFM key. The ELM keys have no effect until an ELM provider exists.
+- **ELM:** unspecified keys never fall back to `ocr.*`, which belong to the BFM model; they fall back
+  to ELM's own `ocr.elm.*`, so an ELM photo is never sent to the BFM endpoint or with the BFM key. The
+  global `ocr.elm.api-key` is sent only to the global `ocr.elm.url`: a tenant `ocr_elm_url` needs its
+  own `ocr_elm_api_key`.
 - **PDU** has no keys.
 
 Example (tenant `id = 12` → a separate OCR endpoint with a key from the environment):
@@ -65,7 +71,20 @@ INSERT INTO common_schema.tenant_config_master_table (tenant_id, config_key, con
 ```
 
 BFM's global defaults live under `ocr:` in `application.yml`
-(`default-provider`, `url`, `api-key`, `auth-header`).
+(`default-provider`, `url`, `api-key`, `auth-header`). ELM's live under `ocr.elm:`, each with its own
+environment variable, and none falls back to BFM's:
+
+| Setting | Environment variable | Default |
+|---------|----------------------|---------|
+| `ocr.elm.default-provider` | `OCR_ELM_DEFAULT_PROVIDER` | blank: no default provider |
+| `ocr.elm.url` | `OCR_ELM_URL` | blank |
+| `ocr.elm.api-key` | `OCR_ELM_API_KEY` | blank |
+| `ocr.elm.auth-header` | `OCR_ELM_AUTH_HEADER` | `X-API-Key` |
+| `ocr.elm.http.connect-timeout-ms` | `OCR_ELM_CONNECT_TIMEOUT_MS` | `5000` |
+| `ocr.elm.http.read-timeout-ms` | `OCR_ELM_READ_TIMEOUT_MS` | `120000` |
+
+To read ELM photos for every tenant without its own `ocr_elm_provider`, set `OCR_ELM_DEFAULT_PROVIDER`
+to `FlowVisionElmOcrExtractor.PROVIDER_ID` and `OCR_ELM_URL` to the endpoint.
 
 ## Adding a new provider
 
@@ -74,10 +93,9 @@ BFM's global defaults live under `ocr:` in `application.yml`
 3. Point a tenant's provider key for that channel (`ocr_provider` or `ocr_elm_provider`) at that id (plus
    the channel's URL / API key keys as needed).
 
-An extractor for a channel that doesn't read photos (PDU) is ignored at startup with a warning. ELM has
-no default provider yet: when the first ELM provider is added, give ELM a default in
-`OcrProviderRegistry` the way `ocr.default-provider` serves BFM, or tenants without `ocr_elm_provider`
-keep having their ELM photos rejected.
+An extractor for a channel that doesn't read photos (PDU) is ignored at startup with a warning. To make
+a new provider the one tenants get when they name none, set the channel's default to its id
+(`ocr.default-provider` for BFM, `ocr.elm.default-provider` for ELM).
 
 No changes to `BfmReadingService`, the resilience layer, or persistence are required — the registry
 discovers the new bean at startup.

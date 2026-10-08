@@ -87,8 +87,30 @@ class FlowVisionBfmOcrExtractorWiringTest {
                     .containsSame(context.getBean(FlowVisionBfmOcrExtractor.class));
             assertThat(registry.get(ReadingChannel.ELM, "elm-vision"))
                     .containsSame(context.getBean(ElmProviderExtractor.class));
-            // ELM has no default provider yet, so a tenant with no ELM override gets none, never FlowVision.
+            // ELM's default provider is blank unless ocr.elm.default-provider is set, so a tenant with no
+            // ELM override gets none, never FlowVision.
             assertThat(registry.get(ReadingChannel.ELM, null)).isEmpty();
         });
+    }
+
+    @Test
+    void givesElmTheDefaultProviderNamedInOcrElmDefaultProvider() {
+        contextRunner
+                .withPropertyValues("ocr.elm.default-provider=elm-vision")
+                .run(context -> {
+                    OcrProviderRegistry registry = context.getBean(OcrProviderRegistry.class);
+                    assertThat(registry.get(ReadingChannel.ELM, null))
+                            .containsSame(context.getBean(ElmProviderExtractor.class));
+                });
+    }
+
+    @Test
+    void failsToStartWhenTheElmDefaultProviderIsNotRegistered() {
+        contextRunner
+                .withPropertyValues("ocr.elm.default-provider=elm-typo")
+                .run(context -> assertThat(context).getFailure()
+                        .rootCause()
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("elm-typo"));
     }
 }

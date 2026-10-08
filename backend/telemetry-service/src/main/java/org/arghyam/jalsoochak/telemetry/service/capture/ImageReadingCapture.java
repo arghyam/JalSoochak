@@ -28,9 +28,9 @@ import java.util.UUID;
  * Captures a reading from a meter photo through OCR.
  *
  * <p>The OCR provider is chosen by channel through {@link OcrProviderRegistry}, so a photo is only ever
- * read by a model for its kind of meter. A channel that doesn't read photos, or has no provider yet, is
- * rejected with {@code IMAGE_NOT_SUPPORTED_FOR_CHANNEL}; for a channel that doesn't read photos this
- * happens before any OCR setting is read.
+ * read by a model for its kind of meter. A channel that doesn't read photos, or has no provider for the
+ * tenant (ELM while it has no default provider), is rejected with {@code IMAGE_NOT_SUPPORTED_FOR_CHANNEL};
+ * for a channel that doesn't read photos this happens before any OCR setting is read.
  *
  * <p>A photo that can't be read is rejected and recorded as an unreadable-image anomaly, once per
  * attempt. A photo with no meter in it at all (the provider's no-meter verdict) is rejected as
