@@ -40,7 +40,7 @@ class FlowVisionElmOcrExtractorTest {
 
     private final ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
     private final FlowVisionElmOcrExtractor extractor =
-            new FlowVisionElmOcrExtractor(restTemplate, ELM_URL, GLOBAL_API_KEY, "X-API-Key");
+            new FlowVisionElmOcrExtractor(restTemplate, ELM_URL, GLOBAL_API_KEY, "X-API-Key", "");
 
     @Test
     void readsElmPhotosUnderItsOwnProviderId() {
@@ -126,7 +126,7 @@ class FlowVisionElmOcrExtractorTest {
 
     @Test
     void sendsNoKeyWhenNoneIsConfigured() {
-        FlowVisionElmOcrExtractor withoutKey = new FlowVisionElmOcrExtractor(restTemplate, ELM_URL, "", "X-API-Key");
+        FlowVisionElmOcrExtractor withoutKey = new FlowVisionElmOcrExtractor(restTemplate, ELM_URL, "", "X-API-Key", "");
         restTemplate.enqueue(ok(accepted("0019712.7", "kWh")));
 
         withoutKey.extractReadingOrThrow(IMAGE_URL, null);
@@ -136,12 +136,19 @@ class FlowVisionElmOcrExtractorTest {
 
     @Test
     void refusesToCallWhenNoEndpointIsConfigured() {
-        FlowVisionElmOcrExtractor unconfigured = new FlowVisionElmOcrExtractor(restTemplate, "", GLOBAL_API_KEY, "X-API-Key");
+        FlowVisionElmOcrExtractor unconfigured = new FlowVisionElmOcrExtractor(restTemplate, "", GLOBAL_API_KEY, "X-API-Key", "");
 
         assertThatThrownBy(() -> unconfigured.extractReadingOrThrow(IMAGE_URL, null))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(unconfigured.extractReading(IMAGE_URL, null)).isNull();
         assertThat(restTemplate.callCount()).isZero();
+    }
+
+    @Test
+    void failsToStartAsElmsDefaultProviderWithNoEndpoint() {
+        assertThatThrownBy(() -> new FlowVisionElmOcrExtractor(restTemplate, "", GLOBAL_API_KEY, "X-API-Key", " FlowVision-ELM "))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("OCR_ELM_URL");
     }
 
     @Test

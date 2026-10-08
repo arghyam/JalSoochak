@@ -42,6 +42,10 @@ import java.util.UUID;
  * result back instead of a second paid read. No {@code consumerId} is sent. It would switch on the
  * service's previous-reading checks, and those would reject the first reading of a replaced meter.
  *
+ * <p>As ELM's default provider it reads for every tenant that names no endpoint of its own, so it
+ * fails startup without {@code ocr.elm.url}. Otherwise an unconfigured deployment would reject every
+ * such ELM photo.
+ *
  * <p>Only an {@code ACCEPT} in kWh becomes a reading. {@code NOMETER} is a photo without a meter; every
  * other verdict, a kVAh reading included, is a rejection.
  */
@@ -74,12 +78,19 @@ public class FlowVisionElmOcrExtractor implements MeterReadingExtractor {
             @Qualifier("elmOcrRestTemplate") RestTemplate restTemplate,
             @Value("${ocr.elm.url:}") String endpointUrl,
             @Value("${ocr.elm.api-key:}") String apiKey,
-            @Value("${ocr.elm.auth-header:" + DEFAULT_AUTH_HEADER + "}") String authHeader
+            @Value("${ocr.elm.auth-header:" + DEFAULT_AUTH_HEADER + "}") String authHeader,
+            @Value("${ocr.elm.default-provider:}") String elmDefaultProviderId
     ) {
         this.restTemplate = restTemplate;
         this.defaultEndpointUrl = blankToNull(endpointUrl);
         this.defaultApiKey = blankToNull(apiKey);
         this.defaultAuthHeader = Objects.requireNonNullElse(blankToNull(authHeader), DEFAULT_AUTH_HEADER);
+        if (defaultEndpointUrl == null && elmDefaultProviderId != null
+                && PROVIDER_ID.equalsIgnoreCase(elmDefaultProviderId.trim())) {
+            throw new IllegalStateException("ocr.elm.default-provider is '" + PROVIDER_ID
+                    + "' but ocr.elm.url is blank: set OCR_ELM_URL, or set OCR_ELM_DEFAULT_PROVIDER blank"
+                    + " to make ELM OCR opt-in per tenant");
+        }
     }
 
     @Override

@@ -56,17 +56,30 @@ class FlowVisionElmOcrExtractorWiringTest {
     }
 
     @Test
-    void isElmsDefaultProviderWithAnEndpointInTheShippedConfig() {
+    void isElmsDefaultProviderInTheShippedConfigOnceOcrElmUrlIsSet() {
         contextRunner
                 .withInitializer(new ConfigDataApplicationContextInitializer())
                 .withBean(OcrProviderRegistry.class)
+                .withPropertyValues("OCR_ELM_URL=https://elm.example/extract")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     FlowVisionElmOcrExtractor extractor = context.getBean(FlowVisionElmOcrExtractor.class);
                     assertThat(context.getBean(OcrProviderRegistry.class).get(ReadingChannel.ELM, null))
                             .containsSame(extractor);
-                    assertThat(ReflectionTestUtils.getField(extractor, "defaultEndpointUrl")).isNotNull();
+                    assertThat(ReflectionTestUtils.getField(extractor, "defaultEndpointUrl"))
+                            .isEqualTo("https://elm.example/extract");
                 });
+    }
+
+    @Test
+    void failsToStartWithTheShippedConfigWhenOcrElmUrlIsUnset() {
+        contextRunner
+                .withInitializer(new ConfigDataApplicationContextInitializer())
+                .withBean(OcrProviderRegistry.class)
+                .run(context -> assertThat(context).getFailure()
+                        .rootCause()
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("OCR_ELM_URL"));
     }
 
     @Test

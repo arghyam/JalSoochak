@@ -77,7 +77,7 @@ environment variable, and none falls back to BFM's:
 | Setting | Environment variable | Default |
 |---------|----------------------|---------|
 | `ocr.elm.default-provider` | `OCR_ELM_DEFAULT_PROVIDER` | `"flowvision-elm"`; blank = ELM OCR is opt-in per tenant |
-| `ocr.elm.url` | `OCR_ELM_URL` | the dev endpoint, `https://jalsoochak.beehyv.com/meter-reader/v1/extract-reading` |
+| `ocr.elm.url` | `OCR_ELM_URL` | blank; required while the default provider is `"flowvision-elm"` |
 | `ocr.elm.api-key` | `OCR_ELM_API_KEY` | blank |
 | `ocr.elm.auth-header` | `OCR_ELM_AUTH_HEADER` | `X-API-Key` |
 | `ocr.elm.http.connect-timeout-ms` | `OCR_ELM_CONNECT_TIMEOUT_MS` | `5000` |
@@ -85,7 +85,8 @@ environment variable, and none falls back to BFM's:
 
 Every environment sets `OCR_ELM_API_KEY` to a key the ELM service accepts (it checks the `X-API-Key`
 header against its `METER_SERVICE_API_KEY`); a missing or wrong key gets every ELM photo a 401
-rejection. Every environment other than dev also sets `OCR_ELM_URL`.
+rejection. Every environment also sets `OCR_ELM_URL` to its own ELM endpoint: with `"flowvision-elm"`
+as the default provider and no URL, startup fails.
 
 ## Adding a new provider
 

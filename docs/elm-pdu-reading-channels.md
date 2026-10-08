@@ -556,7 +556,7 @@ corrected after it; earlier ones need §7.
 | --- | --- | --- | --- |
 | `TELEMETRY_INTERNAL_AUTH_TOKEN_HASH` (`telemetry.internal.auth.token-hash`) | telemetry | empty: internal routes disabled | SHA-256 hex of the token, never the token |
 | `ocr_elm_provider`, `ocr_elm_url`, `ocr_elm_api_key`, `ocr_elm_auth_header` | tenant config rows | unset | Unset fields fall back to `ocr.elm.*`. Raw rows; tenant-service needs no change |
-| `OCR_ELM_DEFAULT_PROVIDER`, `OCR_ELM_URL`, `OCR_ELM_API_KEY`, `OCR_ELM_AUTH_HEADER`, `OCR_ELM_CONNECT_TIMEOUT_MS`, `OCR_ELM_READ_TIMEOUT_MS` (`ocr.elm.*`) | telemetry | `"flowvision-elm"`, the dev endpoint, blank, `X-API-Key`, `5000`, `120000` | `OCR_ELM_API_KEY` must be a key the ELM service accepts. A blank default provider makes ELM OCR opt-in per tenant |
+| `OCR_ELM_DEFAULT_PROVIDER`, `OCR_ELM_URL`, `OCR_ELM_API_KEY`, `OCR_ELM_AUTH_HEADER`, `OCR_ELM_CONNECT_TIMEOUT_MS`, `OCR_ELM_READ_TIMEOUT_MS` (`ocr.elm.*`) | telemetry | `"flowvision-elm"`, blank, blank, `X-API-Key`, `5000`, `120000` | Every environment sets `OCR_ELM_URL`; with `"flowvision-elm"` as the default provider and no URL, startup fails. `OCR_ELM_API_KEY` must be a key the ELM service accepts. A blank default provider makes ELM OCR opt-in per tenant |
 | `ocr.*` | telemetry | as before | Now documented as BFM's only |
 
 ---
