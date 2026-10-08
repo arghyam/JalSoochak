@@ -20,10 +20,9 @@ import java.util.Optional;
  * for the channel whose meters it reads. A tenant's provider that isn't registered for the channel falls
  * back to the channel's default provider with a warning, so a mis-typed tenant config can never drop a
  * reading. BFM's default is {@code ocr.default-provider} (default
- * {@link OcrProviderSettings#DEFAULT_PROVIDER_ID}). ELM's is {@code ocr.elm.default-provider}, blank by
- * default: until it is set, only a tenant that names its own ELM provider has its ELM photos read. An
- * ELM default that isn't registered for ELM fails startup. Other channels have no default, so their
- * photos can't be read.
+ * {@link OcrProviderSettings#DEFAULT_PROVIDER_ID}). ELM's is {@code ocr.elm.default-provider}; while it
+ * is blank, only a tenant that names its own ELM provider has its ELM photos read. An ELM default that
+ * isn't registered for ELM fails startup. Other channels have no default, so their photos can't be read.
  */
 @Component
 @Slf4j

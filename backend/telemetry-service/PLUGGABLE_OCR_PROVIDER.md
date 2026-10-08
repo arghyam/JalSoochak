@@ -3,13 +3,13 @@
 The external AI service that reads meter values from images is pluggable per state/tenant and per
 reading channel. Each provider reads one kind of meter, so it serves one channel. BFM's built-in provider
 is `FlowVisionBfmOcrExtractor`, registered under the id `"flowvision"`; ELM's is
-`FlowVisionElmOcrExtractor`, registered under `FlowVisionElmOcrExtractor.PROVIDER_ID`. A different AI
-model / endpoint can be selected for any tenant through configuration, and new providers can be added
-without touching the ingestion pipeline.
+`FlowVisionElmOcrExtractor`, registered under `"flowvision-elm"`. A different AI model / endpoint can be
+selected for any tenant through configuration, and new providers can be added without touching the
+ingestion pipeline.
 
 Only BFM and ELM read photos (`ReadingChannel.supportsImageReading()`). PDU readings are always typed
-in. ELM has no default provider unless `ocr.elm.default-provider` is set, so an ELM photo from a tenant
-that names no ELM provider is rejected like a PDU one.
+in. With `ocr.elm.default-provider` set blank, ELM OCR is opt-in per tenant, and an ELM photo from a
+tenant that names no ELM provider is rejected like a PDU one.
 
 ## Moving parts
 
@@ -38,8 +38,8 @@ channel doesn't read photos (PDU) ─▶ 400 IMAGE_NOT_SUPPORTED_FOR_CHANNEL   (
 
 A BFM tenant with no `ocr_*` keys gets `null` settings and BFM's default provider
 (`ocr.default-provider`, default `"flowvision"`), which reads with its global `ocr.*` config. An ELM
-tenant with no `ocr_elm_*` keys gets ELM's default provider (`ocr.elm.default-provider`), which reads
-with its global `ocr.elm.*` config. That default is blank, so until it is set those photos are rejected.
+tenant with no `ocr_elm_*` keys gets ELM's default provider (`ocr.elm.default-provider`, default
+`"flowvision-elm"`), which reads with its global `ocr.elm.*` config.
 
 ## Per-tenant configuration
 
@@ -76,15 +76,16 @@ environment variable, and none falls back to BFM's:
 
 | Setting | Environment variable | Default |
 |---------|----------------------|---------|
-| `ocr.elm.default-provider` | `OCR_ELM_DEFAULT_PROVIDER` | blank: no default provider |
-| `ocr.elm.url` | `OCR_ELM_URL` | blank |
+| `ocr.elm.default-provider` | `OCR_ELM_DEFAULT_PROVIDER` | `"flowvision-elm"`; blank = ELM OCR is opt-in per tenant |
+| `ocr.elm.url` | `OCR_ELM_URL` | the dev endpoint, `https://jalsoochak.beehyv.com/meter-reader/v1/extract-reading` |
 | `ocr.elm.api-key` | `OCR_ELM_API_KEY` | blank |
 | `ocr.elm.auth-header` | `OCR_ELM_AUTH_HEADER` | `X-API-Key` |
 | `ocr.elm.http.connect-timeout-ms` | `OCR_ELM_CONNECT_TIMEOUT_MS` | `5000` |
 | `ocr.elm.http.read-timeout-ms` | `OCR_ELM_READ_TIMEOUT_MS` | `120000` |
 
-To read ELM photos for every tenant without its own `ocr_elm_provider`, set `OCR_ELM_DEFAULT_PROVIDER`
-to `FlowVisionElmOcrExtractor.PROVIDER_ID` and `OCR_ELM_URL` to the endpoint.
+Every environment sets `OCR_ELM_API_KEY` to a key the ELM service accepts (it checks the `X-API-Key`
+header against its `METER_SERVICE_API_KEY`); a missing or wrong key gets every ELM photo a 401
+rejection. Every environment other than dev also sets `OCR_ELM_URL`.
 
 ## Adding a new provider
 

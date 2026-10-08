@@ -173,10 +173,13 @@ ocr:
   # ELM's default provider, and the ELM OCR provider's own endpoint and key. Nothing here falls back to
   # the BFM settings above.
   elm:
-    # Provider id for ELM photos when a tenant sets no `ocr_elm_provider`. Blank by default, so those
-    # photos are rejected as IMAGE_NOT_SUPPORTED_FOR_CHANNEL. An id with no ELM provider fails startup.
-    default-provider: ${OCR_ELM_DEFAULT_PROVIDER:}
-    url: ${OCR_ELM_URL:}
+    # Provider id for ELM photos when a tenant sets no `ocr_elm_provider`. Set it blank to make ELM OCR
+    # opt-in per tenant: other tenants' ELM photos are then rejected as IMAGE_NOT_SUPPORTED_FOR_CHANNEL.
+    # An id with no ELM provider fails startup.
+    default-provider: ${OCR_ELM_DEFAULT_PROVIDER:flowvision-elm}
+    # The dev endpoint; set OCR_ELM_URL in every other environment.
+    url: ${OCR_ELM_URL:https://jalsoochak.beehyv.com/meter-reader/v1/extract-reading}
+    # Sent in `auth-header`; must be a key the ELM service accepts, or every ELM photo gets a 401.
     api-key: ${OCR_ELM_API_KEY:}
     auth-header: ${OCR_ELM_AUTH_HEADER:X-API-Key}
     http:

@@ -1,11 +1,14 @@
 package org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.config.ElmOcrRestTemplateConfig;
 import org.arghyam.jalsoochak.telemetry.config.RestTemplateConfig;
+import org.arghyam.jalsoochak.telemetry.service.OcrProviderRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
@@ -50,6 +53,20 @@ class FlowVisionElmOcrExtractorWiringTest {
             assertThat(ReflectionTestUtils.getField(extractor, "defaultApiKey")).isNull();
             assertThat(ReflectionTestUtils.getField(extractor, "defaultAuthHeader")).isEqualTo("X-API-Key");
         });
+    }
+
+    @Test
+    void isElmsDefaultProviderWithAnEndpointInTheShippedConfig() {
+        contextRunner
+                .withInitializer(new ConfigDataApplicationContextInitializer())
+                .withBean(OcrProviderRegistry.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    FlowVisionElmOcrExtractor extractor = context.getBean(FlowVisionElmOcrExtractor.class);
+                    assertThat(context.getBean(OcrProviderRegistry.class).get(ReadingChannel.ELM, null))
+                            .containsSame(extractor);
+                    assertThat(ReflectionTestUtils.getField(extractor, "defaultEndpointUrl")).isNotNull();
+                });
     }
 
     @Test
