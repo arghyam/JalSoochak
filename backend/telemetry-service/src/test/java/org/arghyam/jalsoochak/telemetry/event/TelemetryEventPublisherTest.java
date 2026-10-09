@@ -330,7 +330,7 @@ class TelemetryEventPublisherTest {
             CalculationParameters snapshot = new CalculationParameters(1, "F2", new BigDecimal("0.95"), List.of(
                     new CalculationParameters.Pump(12L, new BigDecimal("500"), new BigDecimal("0.7"),
                             new BigDecimal("40"), new BigDecimal("7.5"), "HP", new BigDecimal("0.85"),
-                            new BigDecimal("5"))));
+                            new BigDecimal("5"), new BigDecimal("0.9"))));
 
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
                     null, LocalDateTime.of(2026, 3, 1, 6, 30), 2, DATE, 1, 0, null, 99L, null, snapshot);
@@ -350,6 +350,7 @@ class TelemetryEventPublisherTest {
             assertThat(pump.get("motorPowerUnit").asText()).isEqualTo("HP");
             assertThat(pump.get("motorEfficiency").decimalValue()).isEqualByComparingTo("0.85");
             assertThat(pump.get("unitsConsumedPerHour").decimalValue()).isEqualByComparingTo("5");
+            assertThat(pump.get("powerFactor").decimalValue()).isEqualByComparingTo("0.9");
         }
 
         @Test

@@ -93,6 +93,7 @@ public class CalculationParametersSnapshotter {
                 pump.motorPower(),
                 pump.motorPowerUnit(),
                 pump.motorEfficiency(),
-                pump.unitsConsumedPerHour());
+                pump.unitsConsumedPerHour(),
+                pump.powerFactor());
     }
 }
