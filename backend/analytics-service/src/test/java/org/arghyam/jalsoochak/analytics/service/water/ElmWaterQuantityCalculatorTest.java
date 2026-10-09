@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.service.water;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.arghyam.jalsoochak.analytics.dto.event.CalculationParameters;
 import org.arghyam.jalsoochak.analytics.dto.event.CalculationParameters.Pump;
+import org.arghyam.jalsoochak.analytics.enums.MeterRegister;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityOutcome.Reason;
 import org.junit.jupiter.api.Test;
@@ -179,6 +180,68 @@ class ElmWaterQuantityCalculatorTest {
         assertThat(calculate("10", snapshot("F2", null, PUMP, second))).isEqualTo(derived(56_643L));
     }
 
+    // ---- kVAh register -----------------------------------------------------------------------
+
+    @Test
+    void kilovoltAmpereHours_areTurnedIntoKilowattHoursWithThePowerFactor() {
+        Pump withPowerFactor = pump(12).dischargeCapacityLpm("500").unitsConsumedPerHour("5").powerFactor("0.9").build();
+
+        // 10 kVAh x 0.9 = 9 kWh; 9 x 500 x 60 / 5 = 54,000 L
+        assertThat(calculateKvah("10", snapshot("F1", null, withPowerFactor))).isEqualTo(derived(54_000L));
+    }
+
+    @Test
+    void kilovoltAmpereHours_thePowerFactorAndKFactorAreAppliedBeforeRoundingSoTheResultIsRoundedOnce() {
+        Pump withPowerFactor = pump(12).dischargeCapacityLpm("500").motorPower("7.5", "HP").powerFactor("0.85").build();
+
+        // 10 kVAh x 0.85 = 8.5 kWh; 8.5 x 500 x 60 / 5.59275 = 45,594.74 L; x 0.9 = 41,035.27 L
+        assertThat(calculateKvah("10", snapshot("F2", "0.9", withPowerFactor))).isEqualTo(derived(41_035L));
+    }
+
+    @Test
+    void kilovoltAmpereHours_thePowerFactorIsAveragedOverThePumps() {
+        Pump first = pump(12).dischargeCapacityLpm("500").unitsConsumedPerHour("5").powerFactor("0.9").build();
+        Pump second = pump(13).dischargeCapacityLpm("500").unitsConsumedPerHour("5").powerFactor("0.8").build();
+
+        // 10 kVAh x 0.85 = 8.5 kWh; 8.5 x 500 x 60 / 5 = 51,000 L
+        assertThat(calculateKvah("10", snapshot("F1", null, first, second))).isEqualTo(derived(51_000L));
+    }
+
+    @Test
+    void kilovoltAmpereHours_withNoPowerFactor_isMissingParameter() {
+        assertThat(calculateKvah("10", snapshot("F1", null, PUMP))).isEqualTo(notDerivable(Reason.MISSING_PARAMETER));
+    }
+
+    @Test
+    void kilovoltAmpereHours_withNoPowerFactor_isMissingParameterEvenForZero() {
+        // As for a missing formula parameter: the scheme's data has to be fixed before any kVAh day counts.
+        assertThat(calculateKvah("0", snapshot("F1", null, PUMP))).isEqualTo(notDerivable(Reason.MISSING_PARAMETER));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-0.9", "1.01", "90"})
+    void kilovoltAmpereHours_withAPowerFactorOutOfRange_isInvalid(String powerFactor) {
+        Pump outOfRange = pump(12).dischargeCapacityLpm("500").unitsConsumedPerHour("5").powerFactor(powerFactor).build();
+
+        assertThat(calculateKvah("10", snapshot("F1", null, outOfRange)))
+                .isEqualTo(notDerivable(Reason.INVALID_PARAMETER));
+    }
+
+    @Test
+    void kilovoltAmpereHours_withNoFormula_isMissingFormula() {
+        Pump withPowerFactor = pump(12).dischargeCapacityLpm("500").unitsConsumedPerHour("5").powerFactor("0.9").build();
+
+        assertThat(calculateKvah("10", snapshot(null, null, withPowerFactor)))
+                .isEqualTo(notDerivable(Reason.MISSING_FORMULA));
+    }
+
+    @Test
+    void kilowattHours_neverReadThePowerFactor() {
+        Pump outOfRange = pump(12).dischargeCapacityLpm("500").unitsConsumedPerHour("5").powerFactor("90").build();
+
+        assertThat(calculate("10", snapshot("F1", null, outOfRange))).isEqualTo(derived(60_000L));
+    }
+
     // ---- range ------------------------------------------------------------------------------
 
     @Test
@@ -190,14 +253,25 @@ class ElmWaterQuantityCalculatorTest {
                 });
     }
 
+    /** A kWh day: the context leaves the register out, which means the standard one. */
     private WaterQuantityOutcome calculate(String kilowattHours, CalculationParameters parameters) {
-        return calculator.calculate(WaterQuantityContext.builder()
+        return calculator.calculate(context(kilowattHours, parameters).build());
+    }
+
+    private WaterQuantityOutcome calculateKvah(String kilovoltAmpereHours, CalculationParameters parameters) {
+        return calculator.calculate(context(kilovoltAmpereHours, parameters)
+                .register(MeterRegister.APPARENT_ENERGY)
+                .build());
+    }
+
+    private static WaterQuantityContext.WaterQuantityContextBuilder context(String amount,
+                                                                            CalculationParameters parameters) {
+        return WaterQuantityContext.builder()
                 .tenantId(1)
                 .schemeId(11)
                 .channel(ReadingChannel.ELM)
-                .amount(new BigDecimal(kilowattHours))
-                .parameters(parameters)
-                .build());
+                .amount(new BigDecimal(amount))
+                .parameters(parameters);
     }
 
     private static CalculationParameters snapshot(String formula, String kFactor, Pump... pumps) {

@@ -19,6 +19,7 @@ import static org.arghyam.jalsoochak.analytics.service.water.PumpFixture.pump;
 import static org.arghyam.jalsoochak.analytics.service.water.PumpParameter.DISCHARGE_CAPACITY_LPM;
 import static org.arghyam.jalsoochak.analytics.service.water.PumpParameter.MOTOR_EFFICIENCY;
 import static org.arghyam.jalsoochak.analytics.service.water.PumpParameter.MOTOR_POWER_KW;
+import static org.arghyam.jalsoochak.analytics.service.water.PumpParameter.POWER_FACTOR;
 import static org.arghyam.jalsoochak.analytics.service.water.PumpParameter.PUMP_EFFICIENCY;
 import static org.arghyam.jalsoochak.analytics.service.water.PumpParameter.PUMP_HEAD_M;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -125,6 +126,37 @@ class PumpParameterAggregatorTest {
                 .isEqualTo(new Unavailable(Reason.INVALID_PARAMETER));
         assertThat(aggregator.average(List.of(pump(1).motorPower(bad, "kW").build()), Set.of(MOTOR_POWER_KW)))
                 .isEqualTo(new Unavailable(Reason.INVALID_PARAMETER));
+        assertThat(aggregator.average(List.of(pump(1).powerFactor(bad).build()), Set.of(POWER_FACTOR)))
+                .isEqualTo(new Unavailable(Reason.INVALID_PARAMETER));
+    }
+
+    // ---- power factor -----------------------------------------------------------------------
+
+    @Test
+    void powerFactor_isAveragedOverThePumpsThatHaveOne() {
+        assertThat(value(POWER_FACTOR,
+                pump(1).powerFactor("0.9"),
+                pump(2).dischargeCapacityLpm("500"),
+                pump(3).powerFactor("0.8")))
+                .isEqualByComparingTo("0.85");
+    }
+
+    @Test
+    void powerFactor_ofExactlyOne_isAccepted() {
+        assertThat(value(POWER_FACTOR, pump(1).powerFactor("1"))).isEqualByComparingTo("1");
+    }
+
+    @Test
+    void powerFactor_aboveOne_isInvalid() {
+        // Stored as a percentage by mistake.
+        assertThat(aggregator.average(List.of(pump(1).powerFactor("90").build()), Set.of(POWER_FACTOR)))
+                .isEqualTo(new Unavailable(Reason.INVALID_PARAMETER));
+    }
+
+    @Test
+    void powerFactor_onNoPump_isMissingParameter() {
+        assertThat(aggregator.average(List.of(pump(1).dischargeCapacityLpm("500").build()), Set.of(POWER_FACTOR)))
+                .isEqualTo(new Unavailable(Reason.MISSING_PARAMETER));
     }
 
     // ---- motor power units ------------------------------------------------------------------

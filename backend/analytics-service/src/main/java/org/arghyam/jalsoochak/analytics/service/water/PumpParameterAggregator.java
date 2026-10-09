@@ -30,7 +30,8 @@ import java.util.Set;
  * consumption or power, and the ratio of two averages is the ratio of those totals, with a pump
  * missing a value counted at the others' average. PDU needs the total rate, so it multiplies the
  * average by the number of pumps, counting a missing value the same way. F3 is exact only for pumps
- * with the same efficiencies and head, since the meter's kWh can't be split between them.
+ * with the same efficiencies and head, since the meter's kWh can't be split between them. So is the
+ * power factor a kVAh reading is converted with, for the same reason.
  */
 @Component
 @RequiredArgsConstructor
@@ -52,8 +53,9 @@ public class PumpParameterAggregator {
      * @param pumps      the snapshot's active pumps; null or empty when the scheme has none
      * @param parameters the parameters the formula needs
      * @return each parameter's average, or {@link Reason#NO_ACTIVE_PUMP} when there are no pumps,
-     *         {@link Reason#INVALID_PARAMETER} when a pump's value is 0 or less, or an efficiency above
-     *         1, and {@link Reason#MISSING_PARAMETER} when no pump has a value for a parameter. The
+     *         {@link Reason#INVALID_PARAMETER} when a pump's value is 0 or less, or a
+     *         {@linkplain PumpParameter#isFraction() fraction} above 1, and
+     *         {@link Reason#MISSING_PARAMETER} when no pump has a value for a parameter. The
      *         parameters are checked in {@link PumpParameter} order and the first failure is returned.
      */
     public AveragedPumpParameters average(List<Pump> pumps, Set<PumpParameter> parameters) {
@@ -94,6 +96,7 @@ public class PumpParameterAggregator {
             case PUMP_EFFICIENCY -> Optional.ofNullable(pump.pumpEfficiency());
             case MOTOR_EFFICIENCY -> Optional.ofNullable(pump.motorEfficiency());
             case PUMP_HEAD_M -> Optional.ofNullable(pump.pumpHeadM());
+            case POWER_FACTOR -> Optional.ofNullable(pump.powerFactor());
         };
     }
 

@@ -134,7 +134,8 @@ class MeterReadingIngestionIntegrationTest {
     /** One pump with every value set, as telemetry snapshots {@code asset_pump_registry_table}. */
     private static final String PUMP = """
             {"pumpId": 12, "pumpDischargeCapacityLpm": 500, "pumpEfficiency": 0.7, "pumpHeadM": 40,
-             "motorPower": 7.5, "motorPowerUnit": "HP", "motorEfficiency": 0.85, "unitsConsumedPerHour": 5}""";
+             "motorPower": 7.5, "motorPowerUnit": "HP", "motorEfficiency": 0.85, "unitsConsumedPerHour": 5,
+             "powerFactor": 0.8}""";
 
     @BeforeEach
     void setUp() {
@@ -164,6 +165,20 @@ class MeterReadingIngestionIntegrationTest {
         assertThat(litres(D1)).contains(0L);
         // 10 kWh x 500 LPM x 60 / (7.5 HP x 0.7457 = 5.59275 kW) = 53,640.87 L; x 0.9 = 48,276.79 L
         assertThat(litres(D2)).contains(48_277L);
+    }
+
+    @Test
+    void kvahDay_isItsIncreaseTimesThePowerFactor_andTheSwitchFromKwhStartsAfresh() throws Exception {
+        String f1 = elmSnapshot("\"F1\"", "0.9");
+        // A manual reading, which is kWh.
+        ingest(1, SCHEME, ELM, "2026-03-01T08:00", "100.0", OPERATOR, f1, null);
+        ingest(2, SCHEME, ELM, "2026-03-02T08:00", "300.0", OPERATOR, f1, "kV.A.h");
+        ingest(3, SCHEME, ELM, "2026-03-03T08:00", "310.0", OPERATOR, f1, "kV.A.h");
+
+        // kWh and kVAh are different running totals, so the first kVAh reading has no starting point.
+        assertThat(litres(D2)).contains(0L);
+        // 10 kVAh x 0.8 = 8 kWh; 8 x 500 LPM x 60 / 5 kWh per hour = 48,000 L; x 0.9
+        assertThat(litres(D3)).contains(43_200L);
     }
 
     @Test
@@ -259,21 +274,29 @@ class MeterReadingIngestionIntegrationTest {
         ingest(sourceReadingId, SCHEME, channel, readingAt, reading, userId, calculationParameters);
     }
 
+    private void ingest(long sourceReadingId, int schemeId, int channel, String readingAt, String reading,
+                        int userId, String calculationParameters) throws Exception {
+        ingest(sourceReadingId, schemeId, channel, readingAt, reading, userId, calculationParameters, null);
+    }
+
     /**
      * Deserialises the JSON telemetry publishes and ingests it as the Kafka consumer does, each event in
      * a persistence context of its own, as each event's own transaction would have. The version is
      * derived from {@code readingAt}, so a later {@code readingAt} is a newer version.
+     *
+     * @param submittedUnit the reading's UCUM code; null for the channel's standard unit
      */
     private void ingest(long sourceReadingId, int schemeId, int channel, String readingAt, String reading,
-                        int userId, String calculationParameters) throws Exception {
+                        int userId, String calculationParameters, String submittedUnit) throws Exception {
         String json = """
                 {"eventType": "METER_READING_RECORDED", "tenantId": %d, "schemeId": %d, "userId": %d,
                  "extractedReading": %s, "confirmedReading": %s, "confidence": null, "imageUrl": null,
                  "readingAt": "%s", "channel": %d, "readingDate": "%s", "submissionStatus": 1, "readingType": 0,
                  "correlationId": "corr-%d", "sourceReadingId": %d, "sourceUpdatedAt": "%s:05.123456",
-                 "calculationParameters": %s}
+                 "calculationParameters": %s, "submittedUnit": %s}
                 """.formatted(TENANT, schemeId, userId, reading, reading, readingAt, channel, readingAt.substring(0, 10),
-                sourceReadingId, sourceReadingId, readingAt, calculationParameters);
+                sourceReadingId, sourceReadingId, readingAt, calculationParameters,
+                submittedUnit == null ? "null" : '"' + submittedUnit + '"');
         factService.ingestMeterReading(objectMapper.readValue(json, MeterReadingEvent.class));
         entityManager.flush();
         entityManager.clear();

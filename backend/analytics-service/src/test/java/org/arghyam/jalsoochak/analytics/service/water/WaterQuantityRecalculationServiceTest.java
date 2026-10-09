@@ -4,6 +4,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.arghyam.jalsoochak.analytics.dto.event.CalculationParameters;
 import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
 import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
+import org.arghyam.jalsoochak.analytics.enums.MeterRegister;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactWaterQuantityRepository;
@@ -12,6 +13,8 @@ import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityOutcome.Reaso
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -41,6 +44,7 @@ class WaterQuantityRecalculationServiceTest {
     private static final LocalDate D1 = LocalDate.of(2026, 1, 1);
     private static final LocalDate D2 = LocalDate.of(2026, 1, 2);
     private static final LocalDate D3 = LocalDate.of(2026, 1, 3);
+    private static final String KVAH = "kV.A.h";
     private static final CalculationParameters PUMP_SNAPSHOT = new CalculationParameters(1, null, null, List.of());
 
     @Mock
@@ -93,6 +97,22 @@ class WaterQuantityRecalculationServiceTest {
 
         @Override
         public WaterQuantityOutcome calculate(WaterQuantityContext context) {
+            return WaterQuantityOutcome.derived(context.amount().multiply(BigDecimal.valueOf(1000)).longValueExact());
+        }
+    }
+
+    /** {@link StubElmCalculator}'s 1,000 L per unit, keeping each context it was given. */
+    private static final class RecordingElmCalculator implements WaterQuantityCalculator {
+        private final List<WaterQuantityContext> contexts = new ArrayList<>();
+
+        @Override
+        public ReadingChannel channel() {
+            return ReadingChannel.ELM;
+        }
+
+        @Override
+        public WaterQuantityOutcome calculate(WaterQuantityContext context) {
+            contexts.add(context);
             return WaterQuantityOutcome.derived(context.amount().multiply(BigDecimal.valueOf(1000)).longValueExact());
         }
     }
@@ -224,6 +244,78 @@ class WaterQuantityRecalculationServiceTest {
 
         verify(waterQuantityRepository, never()).save(any());
         verify(waterQuantityRepository, never()).deleteReadingDerivedDay(any(), any(), any());
+    }
+
+    // ---- METER_INDEX registers (ELM kWh and kVAh) -------------------------------------------
+
+    @Test
+    void meterIndex_aStartingPointOnTheSameRegisterIsUsedAndTheCalculatorIsToldTheRegister() {
+        RecordingElmCalculator elm = new RecordingElmCalculator();
+        WaterQuantityRecalculationService elmService = serviceWith(elm);
+        latestOn(D2, inUnit(reading(ReadingChannel.ELM, "150", OPERATOR_A, D2), KVAH));
+        startingPoint(D2, inUnit(reading(ReadingChannel.ELM, "100", OPERATOR_A, D1), KVAH));
+        noDayRow(D2);
+
+        elmService.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement()
+                .extracting(FactWaterQuantity::getWaterQuantity).isEqualTo(50_000L);
+        assertThat(elm.contexts).singleElement().satisfies(context -> {
+            assertThat(context.amount()).isEqualByComparingTo("50");
+            assertThat(context.register()).isEqualTo(MeterRegister.APPARENT_ENERGY);
+        });
+    }
+
+    @Test
+    void meterIndex_aKwhReadingAndOneWithNoUnitAreOnTheSameRegister() {
+        // Readings stored before the unit was recorded are kWh.
+        RecordingElmCalculator elm = new RecordingElmCalculator();
+        WaterQuantityRecalculationService elmService = serviceWith(elm);
+        latestOn(D2, inUnit(reading(ReadingChannel.ELM, "150", OPERATOR_A, D2), "kW.h"));
+        startingPoint(D2, reading(ReadingChannel.ELM, "100", OPERATOR_A, D1));
+        noDayRow(D2);
+
+        elmService.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement()
+                .extracting(FactWaterQuantity::getWaterQuantity).isEqualTo(50_000L);
+        assertThat(elm.contexts).singleElement()
+                .extracting(WaterQuantityContext::register).isEqualTo(MeterRegister.STANDARD);
+    }
+
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource({"kW.h, kV.A.h", "kV.A.h, kW.h", ", kV.A.h"})
+    void meterIndex_aStartingPointOnTheOtherRegisterIsNotUsed(String startUnit, String dayUnit) {
+        // kWh and kVAh are different running totals: the switch is treated like a new meter, so the day
+        // has no starting point rather than an increase of the difference between the two.
+        WaterQuantityRecalculationService elmService = serviceWith(new StubElmCalculator());
+        latestOn(D2, inUnit(reading(ReadingChannel.ELM, "150", OPERATOR_A, D2), dayUnit));
+        startingPoint(D2, inUnit(reading(ReadingChannel.ELM, "100", OPERATOR_A, D1), startUnit));
+        noDayRow(D2);
+
+        elmService.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement()
+                .extracting(FactWaterQuantity::getWaterQuantity).isEqualTo(0L);
+    }
+
+    @Test
+    void aRegisterSwitchDayIsWorkedOutFromAnotherChannelsReadingThatDay() {
+        WaterQuantityRecalculationService elmService = serviceWith(new StubElmCalculator());
+        FactMeterReading kvah = inUnit(reading(ReadingChannel.ELM, "150", OPERATOR_B, D2), KVAH);
+        FactMeterReading bfm = reading(ReadingChannel.BFM, "150", OPERATOR_A, D2);
+        latestOn(D2, kvah);
+        startingPoint(D2, reading(ReadingChannel.ELM, "100", OPERATOR_B, D1));
+        readingsOn(D2, kvah, bfm);
+        startingPoint(D2, ReadingChannel.BFM, "100");
+        noDayRow(D2);
+
+        elmService.recalculateAfterReading(TENANT, SCHEME, D2);
+
+        assertThat(savedRows()).singleElement().satisfies(row -> {
+            assertThat(row.getWaterQuantity()).isEqualTo(50_000L);
+            assertThat(row.getUserId()).isEqualTo(OPERATOR_A);
+        });
     }
 
     @Test
@@ -900,8 +992,12 @@ class WaterQuantityRecalculationServiceTest {
     }
 
     private void startingPoint(LocalDate date, ReadingChannel channel, String confirmedReading, LocalDate readOn) {
-        when(meterReadingRepository.findLatestBefore(TENANT, SCHEME, date, channel))
-                .thenReturn(Optional.of(reading(channel, confirmedReading, OPERATOR_A, readOn)));
+        startingPoint(date, reading(channel, confirmedReading, OPERATOR_A, readOn));
+    }
+
+    private void startingPoint(LocalDate date, FactMeterReading start) {
+        when(meterReadingRepository.findLatestBefore(TENANT, SCHEME, date, ReadingChannel.fromCode(start.getChannel())))
+                .thenReturn(Optional.of(start));
     }
 
     /**
@@ -967,6 +1063,11 @@ class WaterQuantityRecalculationServiceTest {
                 .submissionStatus(1)
                 .calculationParameters(parameters)
                 .build();
+    }
+
+    private static FactMeterReading inUnit(FactMeterReading reading, String submittedUnit) {
+        reading.setSubmittedUnit(submittedUnit);
+        return reading;
     }
 
     private static FactWaterQuantity dayRow(LocalDate date, long litres, int userId, int submissionStatus) {

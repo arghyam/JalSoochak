@@ -54,8 +54,9 @@ public class FactIngestionRepository {
             INSERT INTO analytics_schema.fact_meter_reading_table
                 (tenant_id, scheme_id, user_id, extracted_reading, confirmed_reading, confidence,
                  image_url, reading_at, channel, reading_date, submission_status, reading_type,
-                 correlation_id, created_at, source_reading_id, source_updated_at, calculation_parameters)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb))
+                 correlation_id, created_at, source_reading_id, source_updated_at, calculation_parameters,
+                 submitted_unit)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?)
             ON CONFLICT (tenant_id, source_reading_id) WHERE source_reading_id IS NOT NULL
             DO UPDATE SET
                 scheme_id = EXCLUDED.scheme_id,
@@ -71,7 +72,8 @@ public class FactIngestionRepository {
                 reading_type = EXCLUDED.reading_type,
                 correlation_id = EXCLUDED.correlation_id,
                 source_updated_at = EXCLUDED.source_updated_at,
-                calculation_parameters = EXCLUDED.calculation_parameters
+                calculation_parameters = EXCLUDED.calculation_parameters,
+                submitted_unit = EXCLUDED.submitted_unit
             WHERE fact_meter_reading_table.source_updated_at IS NULL
                OR fact_meter_reading_table.source_updated_at <= EXCLUDED.source_updated_at
             RETURNING id
@@ -80,7 +82,7 @@ public class FactIngestionRepository {
     private static final int[] UPSERT_METER_READING_TYPES = {
             Types.INTEGER, Types.INTEGER, Types.INTEGER, Types.NUMERIC, Types.NUMERIC, Types.INTEGER,
             Types.VARCHAR, Types.TIMESTAMP, Types.INTEGER, Types.DATE, Types.INTEGER, Types.INTEGER,
-            Types.VARCHAR, Types.TIMESTAMP, Types.BIGINT, Types.TIMESTAMP, Types.VARCHAR
+            Types.VARCHAR, Types.TIMESTAMP, Types.BIGINT, Types.TIMESTAMP, Types.VARCHAR, Types.VARCHAR
     };
 
     private final JdbcTemplate jdbcTemplate;
@@ -183,7 +185,8 @@ public class FactIngestionRepository {
                 reading.getCreatedAt(),
                 reading.getSourceReadingId(),
                 reading.getSourceUpdatedAt(),
-                toJson(reading.getCalculationParameters())
+                toJson(reading.getCalculationParameters()),
+                reading.getSubmittedUnit()
         };
         List<Long> ids = jdbcTemplate.query(UPSERT_METER_READING_SQL, args, UPSERT_METER_READING_TYPES,
                 (rs, rowNum) -> rs.getLong(1));

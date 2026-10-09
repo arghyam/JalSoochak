@@ -22,7 +22,10 @@ public enum PumpParameter {
     MOTOR_EFFICIENCY(true),
 
     /** {@code pump_head}, metres. */
-    PUMP_HEAD_M(false);
+    PUMP_HEAD_M(false),
+
+    /** {@code power_factor}, a fraction: the kWh in each kVAh. Needed only for a kVAh reading. */
+    POWER_FACTOR(true);
 
     private final boolean fraction;
 
@@ -30,7 +33,10 @@ public enum PumpParameter {
         this.fraction = fraction;
     }
 
-    /** Whether a value above 1 is out of range: efficiencies are stored as fractions, not percentages. */
+    /**
+     * Whether a value above 1 is out of range: efficiencies and the power factor are stored as
+     * fractions, not percentages.
+     */
     public boolean isFraction() {
         return fraction;
     }
