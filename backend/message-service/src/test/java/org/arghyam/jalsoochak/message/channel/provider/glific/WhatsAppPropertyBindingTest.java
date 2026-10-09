@@ -39,7 +39,17 @@ class WhatsAppPropertyBindingTest {
             GlificAuthService.class,
             GlificGraphQLClient.class,
             GlificWhatsAppConfig.class,
-            WhatsAppDeliveryReconciliationService.class})
+            WhatsAppDeliveryReconciliationService.class,
+            // The delivery ledger, its status passes and its receipt adapters.
+            org.arghyam.jalsoochak.message.ledger.NotificationLedger.class,
+            org.arghyam.jalsoochak.message.ledger.NotificationDeliveryEventPublisher.class,
+            org.arghyam.jalsoochak.message.ledger.WhatsAppLedgerStatusSync.class,
+            org.arghyam.jalsoochak.message.ledger.NotificationStatusSweepService.class,
+            org.arghyam.jalsoochak.message.ledger.NotificationLedgerMaintenanceService.class,
+            org.arghyam.jalsoochak.message.channel.provider.SendGridDeliveryReceiptAdapter.class,
+            org.arghyam.jalsoochak.message.channel.provider.SmsCountryDeliveryReceiptAdapter.class,
+            org.arghyam.jalsoochak.message.channel.provider.SendGridMailSenderFactory.class,
+            org.arghyam.jalsoochak.message.channel.provider.SmsCountrySenderFactory.class})
     void everyBoundPropertyIsDeclaredInApplicationYaml(Class<?> type) throws IOException {
         Set<String> bound = boundKeys(type);
 

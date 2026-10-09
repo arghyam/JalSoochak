@@ -12,8 +12,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
+import org.arghyam.jalsoochak.message.ledger.WhatsAppLedgerStatusSync;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -27,12 +28,14 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -53,9 +56,12 @@ class WhatsAppDeliveryReconciliationServiceTest {
 
     private static final String SO = "SECTION_OFFICER";
     private static final String SDO = "SUB_DIVISIONAL_OFFICER";
-    private static final int DAILY_REPORT_TEMPLATE = 880557;
-    private static final int WEEKLY_REPORT_TEMPLATE = 990101;
-    private static final int NUDGE_TEMPLATE = 770001;
+    private static final String DAILY_REPORT_TEMPLATE = "880557";
+    private static final String WEEKLY_REPORT_TEMPLATE = "990101";
+    private static final String NUDGE_TEMPLATE = "770001";
+    /** The reader's own status words, in progression order; the service takes them from the reader. */
+    private static final List<String> STATUSES =
+            List.of("ENQUEUED", "SENT", "DELIVERED", "READ", "SEEN", "PLAYED", "ERROR", "CONTACT_OPT_OUT");
 
     /** Not a real number. Present so a test can prove it never reaches a log line. */
     private static final String FIXTURE_PHONE = "919999900001";
@@ -66,7 +72,10 @@ class WhatsAppDeliveryReconciliationServiceTest {
     @Mock
     private JdbcTemplate jdbcTemplate;
 
-    @InjectMocks
+    /** Inactive unless a test says otherwise, as while the delivery ledger is switched off. */
+    @Mock
+    private WhatsAppLedgerStatusSync ledgerSync;
+
     private WhatsAppDeliveryReconciliationService service;
 
     private ListAppender<ILoggingEvent> appender;
@@ -77,6 +86,8 @@ class WhatsAppDeliveryReconciliationServiceTest {
 
     @BeforeEach
     void setUp() {
+        service = new WhatsAppDeliveryReconciliationService(Optional.of(deliveryStatusReader), jdbcTemplate, ledgerSync);
+        lenient().when(deliveryStatusReader.statusesInProgression()).thenReturn(STATUSES);
         ReflectionTestUtils.setField(service, "enabled", true);
         ReflectionTestUtils.setField(service, "windowHours", 6L);
         ReflectionTestUtils.setField(service, "pageSize", 250);
@@ -114,6 +125,19 @@ class WhatsAppDeliveryReconciliationServiceTest {
         verifyNoInteractions(deliveryStatusReader, jdbcTemplate);
     }
 
+    /** A provider that only pushes status has no reader; the service must still start, and do nothing. */
+    @Test
+    void withNoStatusReaderEveryPassIsANoOp() {
+        WhatsAppDeliveryReconciliationService pushOnly =
+                new WhatsAppDeliveryReconciliationService(Optional.empty(), jdbcTemplate, ledgerSync);
+        ReflectionTestUtils.setField(pushOnly, "enabled", true);
+
+        pushOnly.reconcileScheduled();
+        pushOnly.reconcile(from, to);
+
+        verifyNoInteractions(jdbcTemplate, ledgerSync);
+    }
+
     /**
      * With no template ids there is nothing to match, so every message in the window would be
      * discarded. Better to refuse the pass loudly than to log a confident-looking zero.
@@ -127,6 +151,73 @@ class WhatsAppDeliveryReconciliationServiceTest {
 
         verifyNoInteractions(deliveryStatusReader);
         assertThat(logLines()).anyMatch(l -> l.contains("No report template ids configured"));
+    }
+
+    // ───────────────────────────── delivery ledger ─────────────────────────────
+
+    @Nested
+    class DeliveryLedger {
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void everyOutboundTemplateMessageReachesTheLedger_notOnlyTheReports() {
+            stubTenants(tenant(74, "MH"));
+            stubOfficers(Map.of(6530736L, officer(16714L, SO)));
+            stubStatus("DELIVERED",
+                    delivered("241952654", 6530736L),
+                    withTemplate(delivered("241952700", 6530799L), NUDGE_TEMPLATE));
+            when(ledgerSync.isActive()).thenReturn(true);
+            when(ledgerSync.apply(any())).thenReturn(new WhatsAppLedgerStatusSync.SyncStats(2, 2, 0));
+
+            service.reconcile(from, to);
+
+            ArgumentCaptor<java.util.Collection<WhatsAppMessageStatus>> applied =
+                    ArgumentCaptor.forClass(java.util.Collection.class);
+            verify(ledgerSync).apply(applied.capture());
+            assertThat(applied.getValue()).extracting(WhatsAppMessageStatus::messageId)
+                    .containsExactlyInAnyOrder("241952654", "241952700");
+            verify(ledgerSync).syncIncremental(to);
+            verify(ledgerSync).sweep();
+            assertThat(logLines()).anyMatch(l -> l.contains("ledger window: seen=2 applied=2 notInLedger=0"));
+        }
+
+        @Test
+        void aMessageReadUnderTwoStatusesInOnePassIsCountedOnce() {
+            stubTenants(tenant(74, "MH"));
+            stubOfficers(Map.of(6530736L, officer(16714L, SO)));
+            stubStatus("SENT", message("241952654", "SENT", 6530736L, WhatsAppDeliveryOutcome.PENDING, null, null));
+            stubStatus("DELIVERED", delivered("241952654", 6530736L));
+
+            service.reconcile(from, to);
+
+            assertThat(summaryTotal()).contains("matched=1").contains("pending=0");
+        }
+
+        @Test
+        void aLedgerFailureNeverCostsTheSummaries() {
+            stubTenants(tenant(74, "MH"));
+            stubOfficers(Map.of(6530736L, officer(16714L, SO)));
+            stubStatus("DELIVERED", delivered("241952654", 6530736L));
+            when(ledgerSync.isActive()).thenReturn(true);
+            when(ledgerSync.apply(any())).thenThrow(new IllegalStateException("db down"));
+
+            service.reconcile(from, to);
+
+            assertThat(summaryTotal()).contains("matched=1");
+            assertThat(logLines()).anyMatch(l -> l.contains("ledger sync failed"));
+        }
+
+        @Test
+        void theLedgerIsStillSyncedWhenNoReportTemplateIsConfigured() {
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "");
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "");
+            when(ledgerSync.isActive()).thenReturn(true);
+
+            service.reconcile(from, to);
+
+            verify(ledgerSync).syncIncremental(to);
+            verify(ledgerSync).sweep();
+        }
     }
 
     // ───────────────────────── goals 1, 2 and 3 ────────────────────────────────
@@ -349,7 +440,7 @@ class WhatsAppDeliveryReconciliationServiceTest {
             ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880559");
 
             assertThat(service.resolveTemplateIds())
-                    .containsExactlyInAnyOrder(880557, 880558, 880559, WEEKLY_REPORT_TEMPLATE);
+                    .containsExactlyInAnyOrder("880557", "880558", "880559", WEEKLY_REPORT_TEMPLATE);
         }
 
         @Test
@@ -359,7 +450,7 @@ class WhatsAppDeliveryReconciliationServiceTest {
             ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "7001");
             ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "7002");
 
-            assertThat(service.resolveTemplateIds()).contains(7001, 7002);
+            assertThat(service.resolveTemplateIds()).contains("7001", "7002");
         }
 
         /** Both reports share a provider account, so only the template id tells them apart. */
@@ -370,9 +461,9 @@ class WhatsAppDeliveryReconciliationServiceTest {
 
             assertThat(service.resolveTemplateKinds().kinds())
                     .containsEntry(DAILY_REPORT_TEMPLATE, WhatsAppDeliveryReconciliationService.ReportKind.DAILY)
-                    .containsEntry(880559, WhatsAppDeliveryReconciliationService.ReportKind.DAILY)
+                    .containsEntry("880559", WhatsAppDeliveryReconciliationService.ReportKind.DAILY)
                     .containsEntry(WEEKLY_REPORT_TEMPLATE, WhatsAppDeliveryReconciliationService.ReportKind.WEEKLY)
-                    .containsEntry(990102, WhatsAppDeliveryReconciliationService.ReportKind.WEEKLY);
+                    .containsEntry("990102", WhatsAppDeliveryReconciliationService.ReportKind.WEEKLY);
         }
 
         /**
@@ -434,7 +525,7 @@ class WhatsAppDeliveryReconciliationServiceTest {
         void anExplicitTemplateIdListOverridesTheDerivedOne() {
             ReflectionTestUtils.setField(service, "templateIdsCsv", " 111 , 222 ");
 
-            assertThat(service.resolveTemplateIds()).containsExactlyInAnyOrder(111, 222);
+            assertThat(service.resolveTemplateIds()).containsExactlyInAnyOrder("111", "222");
         }
 
         /**
@@ -449,14 +540,15 @@ class WhatsAppDeliveryReconciliationServiceTest {
             assertThat(service.resolveTemplateKinds().kinds())
                     .containsEntry(DAILY_REPORT_TEMPLATE, WhatsAppDeliveryReconciliationService.ReportKind.DAILY)
                     .containsEntry(WEEKLY_REPORT_TEMPLATE, WhatsAppDeliveryReconciliationService.ReportKind.WEEKLY)
-                    .containsEntry(111, WhatsAppDeliveryReconciliationService.ReportKind.UNKNOWN);
+                    .containsEntry("111", WhatsAppDeliveryReconciliationService.ReportKind.UNKNOWN);
         }
 
+        /** Some providers name templates rather than number them, so an id is compared as text. */
         @Test
-        void ignoresANonNumericTemplateId() {
-            ReflectionTestUtils.setField(service, "templateIdsCsv", "111,not-a-number");
+        void acceptsATemplateIdThatIsAName() {
+            ReflectionTestUtils.setField(service, "templateIdsCsv", "111, daily_report_v2 ");
 
-            assertThat(service.resolveTemplateIds()).containsExactly(111);
+            assertThat(service.resolveTemplateIds()).containsExactly("111", "daily_report_v2");
         }
     }
 
@@ -520,7 +612,7 @@ class WhatsAppDeliveryReconciliationServiceTest {
     class AccountLevelAndPrivacy {
 
         /**
-         * A zero Gupshup balance fails every message in flight. Reported on its own line, because
+         * A zero provider balance fails every message in flight. Reported on its own line, because
          * counting it as N officer failures reads as a mass recipient-data problem it is not.
          */
         @Test
@@ -533,7 +625,7 @@ class WhatsAppDeliveryReconciliationServiceTest {
 
             assertThat(logLines()).anyMatch(l -> l.contains("ACCOUNT-LEVEL FAILURE")
                     && l.contains("errorCode=9999")
-                    && l.contains("Gupshup account condition"));
+                    && l.contains("WhatsApp provider account condition"));
         }
 
         /**
@@ -712,8 +804,8 @@ class WhatsAppDeliveryReconciliationServiceTest {
         return withTemplate(m, WEEKLY_REPORT_TEMPLATE);
     }
 
-    private static WhatsAppMessageStatus withTemplate(WhatsAppMessageStatus m, Integer templateId) {
-        return new WhatsAppMessageStatus(m.messageId(), m.bspMessageId(), m.bspStatus(), templateId, m.hsm(),
+    private static WhatsAppMessageStatus withTemplate(WhatsAppMessageStatus m, String templateId) {
+        return new WhatsAppMessageStatus(m.messageId(), m.upstreamMessageId(), m.bspStatus(), templateId, m.hsm(),
                 m.flow(), m.receiverContactId(), m.outcome(), m.errorCode(), m.errorReason());
     }
 

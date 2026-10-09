@@ -19,8 +19,10 @@ import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterQuantityEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.AnomalyEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.NotificationDeliveryEvent;
 import org.arghyam.jalsoochak.analytics.service.DimensionService;
 import org.arghyam.jalsoochak.analytics.service.FactService;
+import org.arghyam.jalsoochak.analytics.service.NotificationDeliveryIngestionService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -53,6 +55,9 @@ class AnalyticsKafkaConsumerTest {
 
     @Mock
     private FactService factService;
+
+    @Mock
+    private NotificationDeliveryIngestionService notificationDeliveryIngestionService;
 
     @InjectMocks
     private AnalyticsKafkaConsumer consumer;
@@ -707,5 +712,69 @@ class AnalyticsKafkaConsumerTest {
 
         verifyNoMoreInteractions(dimensionService);
         verifyNoMoreInteractions(factService);
+    }
+
+    @Test
+    void consumeMessageServiceEvents_notificationDeliveryUpdated_routesToIngest() {
+        String message = """
+                {"eventType":"NOTIFICATION_DELIVERY_UPDATED","notificationUuid":"8d0c2f4e-0000-4000-8000-000000000001",
+                 "statusVersion":3,"tenantId":12,"messageType":"DAILY_REPORT","channel":"WHATSAPP",
+                 "provider":"sendgrid","userId":4411,"userType":"SECTION_OFFICER","dispatchStatus":"ACCEPTED",
+                 "failureStage":null,"deliveryStatus":"DELIVERED","providerErrorCode":null,
+                 "createdAt":"2026-10-06T10:30:00Z","dispatchedAt":"2026-10-06T10:30:01Z",
+                 "deliveredAt":null,"readAt":null,"settledAt":null,"latencyMs":412,
+                 "subjectDate":"2026-10-05","costAmount":0.3,"costCurrency":"INR","someFutureField":"x"}
+                """;
+
+        consumer.consumeMessageServiceEvents(message);
+
+        ArgumentCaptor<NotificationDeliveryEvent> captor = ArgumentCaptor.forClass(NotificationDeliveryEvent.class);
+        verify(notificationDeliveryIngestionService).ingest(captor.capture());
+        NotificationDeliveryEvent event = captor.getValue();
+        assertThat(event.getNotificationUuid()).isEqualTo("8d0c2f4e-0000-4000-8000-000000000001");
+        assertThat(event.getStatusVersion()).isEqualTo(3);
+        assertThat(event.getTenantId()).isEqualTo(12);
+        assertThat(event.getUserId()).isEqualTo(4411L);
+        assertThat(event.getLatencyMs()).isEqualTo(412);
+        assertThat(event.getCostAmount()).isEqualByComparingTo("0.3");
+        assertThat(event.getDispatchedAt()).isEqualTo("2026-10-06T10:30:01Z");
+        verifyNoInteractions(dimensionService, factService);
+    }
+
+    @Test
+    void consumeMessageServiceEvents_unknownEventType_isIgnored() {
+        String message = """
+                {"eventType":"DEBUG_PING","payload":"anything"}
+                """;
+
+        consumer.consumeMessageServiceEvents(message);
+
+        verifyNoInteractions(notificationDeliveryIngestionService, dimensionService, factService);
+    }
+
+    @Test
+    void consumeMessageServiceEvents_missingEventType_isIgnored() {
+        consumer.consumeMessageServiceEvents("{\"hello\":\"world\"}");
+
+        verifyNoInteractions(notificationDeliveryIngestionService);
+    }
+
+    @Test
+    void consumeMessageServiceEvents_nonJson_isIgnored() {
+        consumer.consumeMessageServiceEvents("plain text from a debug endpoint");
+
+        verifyNoInteractions(notificationDeliveryIngestionService);
+    }
+
+    @Test
+    void consumeMessageServiceEvents_knownEventType_butInvalidPayload_throwsRuntimeException() {
+        String message = """
+                {"eventType":"NOTIFICATION_DELIVERY_UPDATED","notificationUuid":"u-1","statusVersion":"three"}
+                """;
+
+        assertThatThrownBy(() -> consumer.consumeMessageServiceEvents(message))
+                .isInstanceOf(RuntimeException.class);
+
+        verifyNoInteractions(notificationDeliveryIngestionService);
     }
 }

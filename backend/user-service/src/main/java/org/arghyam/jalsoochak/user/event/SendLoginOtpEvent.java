@@ -55,4 +55,12 @@ public class SendLoginOtpEvent {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty("tenantCode")
     String tenantCode;
+
+    /**
+     * Id of the staff user in the tenant's {@code user_table}. Optional and additive — lets
+     * {@code message-service} attribute the delivery to its recipient; omitted from JSON when null.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty("userId")
+    Long userId;
 }

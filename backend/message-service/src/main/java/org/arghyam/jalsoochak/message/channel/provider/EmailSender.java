@@ -2,6 +2,10 @@ package org.arghyam.jalsoochak.message.channel.provider;
 
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 
+import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
+
 /**
  * Port interface for transactional email delivery.
  *
@@ -27,6 +31,10 @@ import org.arghyam.jalsoochak.message.dto.MailRequest;
  * <p>Implementations throw {@link RuntimeException} on delivery failure so that
  * callers (e.g. {@code NotificationEventRouter}) can route the Kafka message
  * to the dead-letter topic without swallowing the error.
+ *
+ * <p>DELIVERY-LEDGER: a successful send returns what the provider handed back, so the ledger can match
+ * the provider's later delivery reports to it. An adapter that can be asked about a message
+ * afterwards also implements {@link #lookupStatuses}.
  */
 public interface EmailSender {
 
@@ -34,7 +42,34 @@ public interface EmailSender {
      * Send a transactional email.
      *
      * @param request fully-populated mail request
+     * @return the provider's id and word for the accepted message; never a delivery confirmation
      * @throws RuntimeException if delivery fails for any reason
      */
-    void send(MailRequest request);
+    ProviderAcceptance send(MailRequest request);
+
+    /**
+     * The provider this adapter sends through, as recorded in the delivery ledger — a short lower-case
+     * identifier that stays stable across releases.
+     */
+    String providerId();
+
+    /** Whether {@link #lookupStatuses} can actually ask the provider anything. */
+    default boolean supportsStatusLookup() {
+        return false;
+    }
+
+    /**
+     * Asks the provider what became of messages this account sent.
+     *
+     * @param providerMessageIds ids returned by {@link #send}
+     * @param sentFrom           the earliest send among them, so a provider queried by time window
+     *                           can be asked for no more than necessary
+     * @param sentTo             the latest send among them
+     * @return a report for each message the provider had something to say about; messages it did not
+     *         mention are simply absent. Never throws: a failed lookup returns what it has.
+     */
+    default List<DeliveryReceipt> lookupStatuses(Collection<String> providerMessageIds, Instant sentFrom,
+                                                 Instant sentTo) {
+        return List.of();
+    }
 }

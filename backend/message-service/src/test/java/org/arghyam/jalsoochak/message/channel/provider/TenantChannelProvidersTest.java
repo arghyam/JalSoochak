@@ -39,6 +39,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import io.micrometer.core.instrument.MeterRegistry;
@@ -100,7 +101,15 @@ class TenantChannelProvidersTest {
         return providers(List.of(), List.of());
     }
 
+    /** A factory for {@code provider}; a mock sender is given the provider id a real one would record. */
     private EmailSenderFactory emailFactory(EmailProviderType provider, EmailSender sender) {
+        if (Mockito.mockingDetails(sender).isMock()) {
+            lenient().when(sender.providerId()).thenReturn(provider.getWireName());
+        }
+        return rawEmailFactory(provider, sender);
+    }
+
+    private EmailSenderFactory rawEmailFactory(EmailProviderType provider, EmailSender sender) {
         return new EmailSenderFactory() {
             @Override
             public EmailProviderType providerId() {
@@ -115,6 +124,13 @@ class TenantChannelProvidersTest {
     }
 
     private SmsSenderFactory smsFactory(SmsProviderType provider, SmsSender sender) {
+        if (Mockito.mockingDetails(sender).isMock()) {
+            lenient().when(sender.providerId()).thenReturn(provider.getWireName());
+        }
+        return rawSmsFactory(provider, sender);
+    }
+
+    private SmsSenderFactory rawSmsFactory(SmsProviderType provider, SmsSender sender) {
         return new SmsSenderFactory() {
             @Override
             public SmsProviderType providerId() {
@@ -394,6 +410,31 @@ class TenantChannelProvidersTest {
                 .isSameAs(systemDefaultEmail);
     }
 
+    @Test
+    @DisplayName("a sender whose ledger provider id is not its factory's wire name falls back")
+    void mismatchedEmailProviderIdFallsBack() {
+        when(configRepository.findEmailSettings(TENANT.id())).thenReturn(Optional.of(sendGridSettings()));
+        emailSecretsResolve();
+        when(tenantEmail.providerId()).thenReturn("sendgrid-v2");
+
+        assertThat(providers(List.of(rawEmailFactory(EmailProviderType.SENDGRID, tenantEmail)), List.of())
+                .emailFor(TENANT)).isSameAs(systemDefaultEmail);
+        assertThat(countFor("email", TenantChannelProviders.OUTCOME_TENANT)).isZero();
+    }
+
+    @Test
+    @DisplayName("an SMS sender whose ledger provider id is not its factory's wire name falls back")
+    void mismatchedSmsProviderIdFallsBack() {
+        when(configRepository.findSmsSettings(TENANT.id())).thenReturn(Optional.of(smsCountrySettings()));
+        when(secretResolver.resolveAll(eq(TENANT), eq(MessagingChannel.SMS), any()))
+                .thenReturn(Optional.of(TenantSecrets.of(MessagingChannel.SMS,
+                        Map.of("authKey", "k", "authToken", "t"))));
+        when(tenantSms.providerId()).thenReturn(null);
+
+        assertThat(providers(List.of(), List.of(rawSmsFactory(SmsProviderType.SMSCOUNTRY, tenantSms)))
+                .smsFor(TENANT)).isSameAs(systemDefaultSms);
+    }
+
     // ── caching (O2-3) and eviction (O2-10) ─────────────────────────────────────
 
     @Test
@@ -528,7 +569,13 @@ class TenantChannelProvidersTest {
             private final CountDownLatch closed = new CountDownLatch(1);
 
             @Override
-            public void send(org.arghyam.jalsoochak.message.dto.MailRequest request) {
+            public ProviderAcceptance send(org.arghyam.jalsoochak.message.dto.MailRequest request) {
+                return ProviderAcceptance.untracked(null);
+            }
+
+            @Override
+            public String providerId() {
+                return EmailProviderType.SENDGRID.getWireName();
             }
 
             @Override

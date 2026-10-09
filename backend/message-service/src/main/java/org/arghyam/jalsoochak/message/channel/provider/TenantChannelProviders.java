@@ -253,7 +253,9 @@ public class TenantChannelProviders {
             }
             TenantSecrets secrets = requireSecrets(tenant, MessagingChannel.EMAIL,
                     provider.getRequiredSecretNames(), providerId);
-            return Resolved.tenant(factory.create(settings, secrets), providerId);
+            EmailSender sender = factory.create(settings, secrets);
+            requireLedgerProviderId(sender.providerId(), provider.getWireName());
+            return Resolved.tenant(sender, providerId);
         } catch (RuntimeException e) {
             return fallback(tenant, MessagingChannel.EMAIL, providerId, e);
         }
@@ -286,9 +288,24 @@ public class TenantChannelProviders {
             }
             TenantSecrets secrets = requireSecrets(tenant, MessagingChannel.SMS,
                     provider.getRequiredSecretNames(), providerId);
-            return Resolved.tenant(factory.create(settings, secrets), providerId);
+            SmsSender sender = factory.create(settings, secrets);
+            requireLedgerProviderId(sender.providerId(), provider.getWireName());
+            return Resolved.tenant(sender, providerId);
         } catch (RuntimeException e) {
             return fallback(tenant, MessagingChannel.SMS, providerId, e);
+        }
+    }
+
+    /**
+     * A sender records its {@code providerId()} on every ledger row it sends, and the status sweep asks a
+     * tenant's sender about a row only when that id equals the row's provider. A factory whose sender
+     * reports anything but its own wire name would leave every row it sends silently unswept, so the
+     * mismatch is refused here, where it is an ERROR and a fallback the first time a tenant is seen.
+     */
+    private static void requireLedgerProviderId(String senderProviderId, String wireName) {
+        if (!wireName.equals(senderProviderId)) {
+            throw new ProviderNotUsableException("the '" + wireName + "' factory built a sender whose providerId()"
+                    + " is '" + senderProviderId + "'; it must equal the wire name");
         }
     }
 
