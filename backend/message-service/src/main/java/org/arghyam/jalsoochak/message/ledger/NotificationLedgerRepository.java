@@ -130,7 +130,9 @@ public class NotificationLedgerRepository {
 
     /**
      * Applies a provider report to the row it is about — by our uuid when the provider echoed our
-     * reference, otherwise by the provider's message id. Moves the row forward only (see
+     * reference, otherwise by the provider's message id. Either way only a row that went out through the
+     * reporting provider matches, so one vendor's reports can never change another vendor's rows, however
+     * the report came to name them. Moves the row forward only (see
      * {@link DeliveryState#canAdvanceTo}); a pending row also takes a new provider word, so its
      * {@code provider_status} follows the provider while it waits. A report that changes nothing
      * matches nothing, so a status read again on the next pass is not a change.
@@ -140,7 +142,7 @@ public class NotificationLedgerRepository {
     public List<LedgerSnapshot> applyStatus(String schema, String uuid, DeliveryReceipt r) {
         String s = checked(schema);
         String key = uuid != null
-                ? "uuid = ?"
+                ? "uuid = ? AND provider = ?"
                 : "provider = ? AND provider_message_id = ?";
         String next = r.state().name();
         Long reportedAtMs = r.occurredAt() == null ? null : r.occurredAt().toEpochMilli();
@@ -168,7 +170,7 @@ public class NotificationLedgerRepository {
                 + " RETURNING " + SNAPSHOT_COLUMNS;
         String providerStatus = truncate(r.providerStatus(), 40);
         Object[] keyArgs = uuid != null
-                ? new Object[]{uuid}
+                ? new Object[]{uuid, r.providerId()}
                 : new Object[]{r.providerId(), r.providerMessageId()};
         Object[] head = {
                 next, providerStatus, truncate(r.errorCode(), 64), truncate(r.errorReason(), ERROR_MESSAGE_MAX),

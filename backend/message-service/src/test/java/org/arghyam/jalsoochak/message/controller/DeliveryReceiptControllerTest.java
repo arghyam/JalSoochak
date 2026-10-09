@@ -5,6 +5,8 @@ import org.arghyam.jalsoochak.message.channel.provider.DeliveryReceiptAdapter;
 import org.arghyam.jalsoochak.message.channel.provider.DeliveryReceiptRequest;
 import org.arghyam.jalsoochak.message.channel.provider.DeliveryState;
 import org.arghyam.jalsoochak.message.channel.provider.ReceiptRejectedException;
+import org.arghyam.jalsoochak.message.channel.provider.ReceiptScope;
+import org.arghyam.jalsoochak.message.channel.provider.VerifiedReceipts;
 import org.arghyam.jalsoochak.message.ledger.NotificationLedger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,10 +20,12 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -53,8 +57,8 @@ class DeliveryReceiptControllerTest {
     void handsTheAdapterTheExactBody_andAppliesEveryReport() throws Exception {
         DeliveryReceipt receipt = new DeliveryReceipt("sendgrid", "m1", null, DeliveryState.DELIVERED, "delivered",
                 null, null, null, null, null);
-        when(adapter.parseAndVerify(any())).thenReturn(List.of(receipt, receipt));
-        when(ledger.applyReceipt(receipt)).thenReturn(1);
+        when(adapter.parseAndVerify(any())).thenReturn(VerifiedReceipts.unscoped(List.of(receipt, receipt)));
+        when(ledger.applyReceipt(receipt, ReceiptScope.ANY)).thenReturn(1);
 
         ResponseEntity<Map<String, Object>> response =
                 controller.receive("SendGrid", request("[{\"event\":\"delivered\"}]", "token=a%20b&ref=x"));
@@ -66,6 +70,30 @@ class DeliveryReceiptControllerTest {
         assertThat(new String(passed.getValue().body(), StandardCharsets.UTF_8)).isEqualTo("[{\"event\":\"delivered\"}]");
         assertThat(passed.getValue().header("X-TWILIO-EMAIL-EVENT-WEBHOOK-SIGNATURE")).isEqualTo("sig");
         assertThat(passed.getValue().query()).containsEntry("token", "a b").containsEntry("ref", "x");
+    }
+
+    @Test
+    void passesTheAdaptersScopeToTheLedger() throws Exception {
+        DeliveryReceipt receipt = new DeliveryReceipt("sendgrid", "m1", null, DeliveryState.DELIVERED, "delivered",
+                null, null, null, null, null);
+        ReceiptScope scope = ReceiptScope.only(Set.of("tenant_mp"));
+        when(adapter.parseAndVerify(any())).thenReturn(new VerifiedReceipts(List.of(receipt), scope));
+
+        controller.receive("sendgrid", request("[]", null));
+
+        verify(ledger).applyReceipt(receipt, scope);
+    }
+
+    @Test
+    void aReportForAnotherProviderIsDropped() throws Exception {
+        DeliveryReceipt foreign = new DeliveryReceipt("smscountry", "m1", null, DeliveryState.FAILED, "failed",
+                null, null, null, null, null);
+        when(adapter.parseAndVerify(any())).thenReturn(VerifiedReceipts.unscoped(List.of(foreign)));
+
+        ResponseEntity<Map<String, Object>> response = controller.receive("sendgrid", request("[]", null));
+
+        assertThat(response.getBody()).containsEntry("received", 1).containsEntry("applied", 0);
+        verify(ledger, never()).applyReceipt(any(DeliveryReceipt.class), any(ReceiptScope.class));
     }
 
     @Test

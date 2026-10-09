@@ -16,7 +16,7 @@ and the provider's own word is kept alongside.
 | --- | --- | --- |
 | `<tenant>.notification_table` | message-service | One row per message per recipient, in the ledger shape V63 gives it |
 | `common_schema.notification_table` | message-service | The same shape, for sends that belong to no tenant: super-user invites and password resets |
-| `common_schema.notification_status_sync_state` | message-service | The cursor for the incremental WhatsApp status pull |
+| `common_schema.notification_status_sync_state` | message-service | The cursors for the incremental WhatsApp status pull, one per provider and window column (`<provider>:<column>`) |
 | `analytics_schema.fact_notification_delivery_table` | analytics-service | One row per notification, upserted from the change feed |
 | `analytics_schema.agg_notification_delivery_daily_table` | analytics-service | Per tenant, day, type, channel, provider and role: sent, delivered, read, failed, pending and more |
 | `analytics_schema.agg_notification_failure_daily_table` | analytics-service | Failures per tenant, day, stage and provider error code |
@@ -86,11 +86,20 @@ sending nothing.
 
 | Provider | Pull | Push |
 | --- | --- | --- |
-| WhatsApp | Every reconcile pass (`WhatsAppDeliveryReconciliationService` → `WhatsAppLedgerStatusSync`), in three steps: **(1)** every outbound template message in the send-time window; **(2)** an incremental read of every status change since the persisted `updated_at` cursor; **(3)** a per-message lookup for rows still pending after 2 h, capped per pass | none |
+| WhatsApp | Every reconcile pass (`WhatsAppDeliveryReconciliationService` → `WhatsAppLedgerStatusSync`), in three steps: **(1)** every outbound template message in the send-time window; **(2)** an incremental read of every status change since the provider's persisted cursor, on the reader's `changedSinceColumn()` (skipped when it has none); **(3)** a per-message lookup for rows still pending after 2 h, capped per pass | none today; a `DeliveryReceiptAdapter` for a provider that pushes |
 | SMS | `NotificationStatusSweepService`, every 15 min: asks the account that sent each pending row (`GET …/SMSes/{MessageUUID}/`). This is the main SMS path | optional delivery-report callback |
 | Email | the same sweep, through the Email Activity API, **only if** `NOTIFICATIONS_EMAIL_STATUS_LOOKUP_ENABLED` (a paid SendGrid add-on) | SendGrid Signed Event Webhook (main email path) |
 
 Rows still `PENDING` after `notifications.ledger.status.lookback-hours` (72) become `UNRESOLVED`.
+
+The WhatsApp pull needs a `WhatsAppDeliveryStatusReader`. A provider that only pushes status to a webhook
+(no status API to ask) has none: message-service still starts, every WhatsApp pull pass is skipped, and
+its status arrives through a `DeliveryReceiptAdapter` on the push endpoint instead. That is the intended
+route for such a provider, and needs no change to the endpoint or the ledger.
+
+A report only ever changes a row of the provider it comes from. With our reference it is matched on
+`uuid` **and** `provider`; without one, on `provider` and the provider's message id. So an adapter, a
+pull, or a forged report from one vendor cannot touch another vendor's rows.
 
 ### Reading WhatsApp status completely
 
@@ -101,8 +110,10 @@ reader works with that:
 - **Count-sized budget.** It sizes its page budget from the provider's own count: `ceil(count/50) + 1`, capped by `whatsapp.status.reconcile.max-pages-cap`.
 - **Visible truncation.** It logs `count=` against `fetched=` per status, with `complete=false` whenever it read fewer than counted.
 
-Statuses are read in the order a message moves through them, so a message that advances mid-pass lands
-in a status not yet read. A message seen under two statuses is counted once, at its most advanced status.
+Statuses are read in the order a message moves through them, as the reader lists them
+(`statusesInProgression()`), so a message that advances mid-pass lands in a status not yet read. A message
+seen under two statuses is counted once, at its most advanced status. The status words, the window
+columns and the mapping of each word onto a delivery outcome all live in the reader adapter.
 
 ### Push endpoint
 
@@ -114,8 +125,10 @@ anything:
 
 - **SendGrid** (`/delivery-receipts/sendgrid`): ECDSA signature over timestamp + raw body, verified
   against `NOTIFICATIONS_EMAIL_WEBHOOK_VERIFICATION_KEYS`. That setting is comma-separated: one public
-  key per SendGrid account, so a tenant's own account adds its key. Events carry our row reference in
-  `custom_args.ledger_ref`, so a report goes straight to its schema and row.
+  key per SendGrid account. The platform account's key goes in bare. A tenant's own account adds its key
+  as `<tenant_code>:<key>`, and events that only such a key verifies can change only
+  `tenant_<tenant_code>`'s rows, so one tenant's account cannot sign reports about another's. Events
+  carry our row reference in `custom_args.ledger_ref`, so a report goes straight to its schema and row.
 - **SMSCountry** (`/delivery-receipts/smscountry`): a shared `token` in the callback URL, checked by
   SHA-256 against `NOTIFICATIONS_SMS_WEBHOOK_TOKEN_HASHES`. Our row reference rides as `ref`.
 
@@ -146,11 +159,67 @@ The endpoint answers:
    - **Events:** processed, delivered, deferred, bounce, dropped, open
    - **Signed Event Webhook:** on
 
-   Then set `NOTIFICATIONS_EMAIL_WEBHOOK_VERIFICATION_KEYS` to the public key(s) SendGrid shows.
+   Then set `NOTIFICATIONS_EMAIL_WEBHOOK_VERIFICATION_KEYS` to the public key(s) SendGrid shows: the
+   platform account's bare, each tenant account's as `<tenant_code>:<key>`.
 5. **SMS push (optional):** set `NOTIFICATIONS_SMS_DELIVERY_REPORT_URL` to
    `https://<public-host>/api/v1/message/delivery-receipts/smscountry?token=<secret>`. Set
    `NOTIFICATIONS_SMS_WEBHOOK_TOKEN_HASHES` to `sha256(<secret>)`, as lowercase hex. Leaving both unset
    is fine: the sweep reads SMS status anyway.
+
+## Adding a provider
+
+### A new vendor on an existing channel (email or SMS)
+
+Neither `LedgerChannel` nor the status sweep changes. Write:
+
+1. **A sender adapter and its factory.** An `EmailSender` or `SmsSender`, an `EmailSenderFactory` or
+   `SmsSenderFactory` registered as a `@Component`, and a constant in `EmailProviderType` or
+   `SmsProviderType` (kept in step with tenant-service's copy).
+2. **`providerId()` equal to that constant's wire name.** Declare it as
+   `PROVIDER_ID = XxxProviderType.X.getWireName()`, as the existing adapters do. The ledger records this
+   id on every row, and the sweep asks a tenant's sender about a row only when the two are equal.
+   `TenantChannelProviders` refuses a factory-built sender whose id differs, with an ERROR and a fallback
+   to the system default. Assert it in the factory's test (`builtSender_recordsTheFactorysWireNameInTheLedger`).
+3. **The vendor's message id at send time.** Email: `send` returns `ProviderAcceptance.of(id, word)`.
+   SMS: override `sendOtpForResult` to return `SmsSendResult.accepted(ProviderAcceptance.of(id, word))`.
+   Without an id the row is `NOT_TRACKED` and nothing can settle it. If the vendor can echo a value back
+   on its reports (custom args, a callback query parameter), pass it the ledger's tracking reference.
+4. **Optional pull.** `supportsStatusLookup()` returning `true`, and `lookupStatuses(...)`, which the
+   sweep calls for rows pending past `email-sms-sweep-after-minutes`. It must never throw.
+5. **Optional push.** A `DeliveryReceiptAdapter` bean with the same `providerId()`. Its reports arrive at
+   `/api/v1/message/delivery-receipts/<providerId>`, which the gateway and message-service already leave
+   open for every provider, so neither changes. The adapter must:
+   - authenticate the request before parsing it, and throw `ReceiptRejectedException` otherwise;
+   - return `VerifiedReceipts` with `ReceiptScope.ANY` for a platform credential, or
+     `ReceiptScope.only(...)` for one that belongs to a single tenant's account;
+   - stamp every report with its own `providerId()` (the endpoint drops any other);
+   - keep only ids, statuses and redacted error text from the payload.
+6. **A mapping onto `DeliveryState`, inside the adapter.** Keep the vendor's own word as `providerStatus`,
+   and map a word you don't recognise to `PENDING`: it can then delay a row's settlement but never settle
+   it wrongly.
+7. **Configuration.** Its properties go in `application.yml`, and the classes that bind them go in
+   `WhatsAppPropertyBindingTest`'s list.
+
+### A new WhatsApp vendor
+
+- A `WhatsAppSender` adapter. It is a single bean shared by every tenant.
+- If the vendor has a status API, a `WhatsAppDeliveryStatusReader` that supplies its own
+  `statusesInProgression()` and `changedSinceColumn()` (or empty), and maps each word onto
+  `WhatsAppDeliveryOutcome` in the adapter. Its incremental cursor is keyed by its `providerId()`, so it
+  starts afresh (`first-run-hours` back) rather than reusing another vendor's position.
+- If it only pushes, no reader, and a `DeliveryReceiptAdapter` as above.
+- Template ids are compared as text, so a vendor that names its templates works as well as one that
+  numbers them.
+
+### A new channel (voice, push, …)
+
+This is the only case that needs changes outside an adapter:
+
+- A `LedgerChannel` constant, and a migration seeding its `common_schema.channel_master_table` id with
+  the matching title.
+- If its status is pulled, add it to the channels `NotificationStatusSweepService.sweep` walks (today
+  `EMAIL` and `SMS`) and a branch in its `lookupFor`.
+- Each send path opens and closes its own ledger row; `NotificationEventRouterTest` fails until it does.
 
 ## Useful queries
 
@@ -204,3 +273,7 @@ analytics-service settings:
 - **SMTP bounces** arrive as mail to the sender address. Reading that mailbox is not built.
 - **`dedupe_key`** (`TYPE:recipient:subject_date`) is recorded, but nothing enforces it.
 - **No read API** over the ledger or the analytics tables yet.
+- **Switching a tenant's email or SMS provider strands its pending rows.** The sweep asks only the sender
+  the tenant uses now, and only about rows of that sender's provider. Rows sent through the old account
+  can't be asked about (its credentials are gone), so they settle only by a push from the old provider,
+  and otherwise turn `UNRESOLVED` after 72 h.

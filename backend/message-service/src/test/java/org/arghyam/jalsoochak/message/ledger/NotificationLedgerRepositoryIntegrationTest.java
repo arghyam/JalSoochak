@@ -212,6 +212,18 @@ class NotificationLedgerRepositoryIntegrationTest {
     }
 
     @Test
+    void aReceiptFromAnotherProviderNeverChangesTheRow_evenWithOurUuid() {
+        String uuid = open(TENANT, null, null);
+        repository.close(TENANT, uuid, accepted("own-1"));
+
+        List<LedgerSnapshot> changed = repository.applyStatus(TENANT, uuid, new DeliveryReceipt("provider-y",
+                "own-1", TENANT + ":" + uuid, DeliveryState.FAILED, "failed", "X", "forged", null, null, null));
+
+        assertThat(changed).isEmpty();
+        assertThat(row(TENANT, uuid)).containsEntry("delivery_status", "PENDING");
+    }
+
+    @Test
     void aProviderMessageIdIsUniquePerProvider() {
         repository.close(TENANT, open(TENANT, null, null), accepted("dup-1"));
         String second = open(TENANT, null, null);

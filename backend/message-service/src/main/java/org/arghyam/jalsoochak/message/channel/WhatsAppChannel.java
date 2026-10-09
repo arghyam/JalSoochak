@@ -227,7 +227,7 @@ public class WhatsAppChannel implements NotificationChannel {
      *                        document. Not logged — see the privacy rule in CLAUDE.md
      * @return an accepted outcome carrying the provider's message id, template id and mode, or a failed
      *         outcome naming the {@link WhatsAppSendStage} it broke at. <strong>Acceptance is not
-     *         delivery</strong> — it means the provider's send call returned no errors; Gupshup and
+     *         delivery</strong> — it means the provider's send call returned no errors; its BSP and
      *         Meta act after this call returns and report back only to the provider
      */
     public ReportSendOutcome sendDailyReport(long contactId, String documentUrl, String officerUserType,

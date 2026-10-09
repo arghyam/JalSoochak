@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.arghyam.jalsoochak.message.channel.provider.DeliveryReceipt;
 import org.arghyam.jalsoochak.message.channel.provider.DeliveryState;
 import org.arghyam.jalsoochak.message.channel.provider.ProviderAcceptance;
+import org.arghyam.jalsoochak.message.channel.provider.ReceiptScope;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.arghyam.jalsoochak.message.dto.TenantRef;
 import org.arghyam.jalsoochak.message.service.PiiEncryptionService;
@@ -22,6 +23,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -205,7 +207,7 @@ class NotificationLedgerTest {
 
         assertThat(ref.recorded()).isFalse();
         verifyNoInteractions(repository, publisher);
-        assertThat(off.applyReceipt(receipt("x", "tenant_mp:" + java.util.UUID.randomUUID()))).isZero();
+        assertThat(off.applyReceipt(receipt("x", "tenant_mp:" + java.util.UUID.randomUUID()), ReceiptScope.ANY)).isZero();
     }
 
     @Test
@@ -219,7 +221,7 @@ class NotificationLedgerTest {
         String uuid = "7d0f6c0a-1111-2222-3333-444455556666";
         when(repository.applyStatus(eq("tenant_up"), eq(uuid), any())).thenReturn(List.of(snapshot("DELIVERED")));
 
-        assertThat(ledger.applyReceipt(receipt("sg-1", "tenant_up:" + uuid))).isEqualTo(1);
+        assertThat(ledger.applyReceipt(receipt("sg-1", "tenant_up:" + uuid), ReceiptScope.ANY)).isEqualTo(1);
         verify(repository, never()).ledgerSchemas();
     }
 
@@ -229,15 +231,37 @@ class NotificationLedgerTest {
         when(repository.applyStatus(anyString(), isNull(), any())).thenReturn(List.of());
         when(repository.applyStatus(eq("tenant_a"), isNull(), any())).thenReturn(List.of(snapshot("FAILED")));
 
-        assertThat(ledger.applyReceipt(receipt("sg-2", null))).isEqualTo(1);
+        assertThat(ledger.applyReceipt(receipt("sg-2", null), ReceiptScope.ANY)).isEqualTo(1);
         verify(repository, never()).applyStatus(eq("tenant_b"), any(), any());
+    }
+
+    @Test
+    void aScopedReceiptNamingAnotherTenantsRowIsDropped() {
+        String uuid = "7d0f6c0a-1111-2222-3333-444455556666";
+
+        assertThat(ledger.applyReceipt(receipt("sg-4", "tenant_up:" + uuid),
+                ReceiptScope.only(Set.of("tenant_mp")))).isZero();
+        verify(repository, never()).applyStatus(anyString(), any(), any());
+        assertThat(meters.counter("notification.ledger.status.out-of-scope", "provider", "sendgrid").count())
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    void aScopedReceiptWithoutARefIsLookedUpOnlyInItsOwnSchemas() {
+        when(repository.ledgerSchemas()).thenReturn(List.of("common_schema", "tenant_mp", "tenant_up"));
+        when(repository.applyStatus(eq("tenant_mp"), isNull(), any())).thenReturn(List.of());
+
+        assertThat(ledger.applyReceipt(receipt("sg-5", null), ReceiptScope.only(Set.of("tenant_mp")))).isZero();
+        verify(repository).applyStatus(eq("tenant_mp"), isNull(), any());
+        verify(repository, never()).applyStatus(eq("common_schema"), any(), any());
+        verify(repository, never()).applyStatus(eq("tenant_up"), any(), any());
     }
 
     @Test
     void aForgedTrackingRefIsIgnored() {
         when(repository.ledgerSchemas()).thenReturn(List.of());
 
-        assertThat(ledger.applyReceipt(receipt("sg-3", "tenant_x; DROP TABLE:abc"))).isZero();
+        assertThat(ledger.applyReceipt(receipt("sg-3", "tenant_x; DROP TABLE:abc"), ReceiptScope.ANY)).isZero();
         verify(repository, never()).applyStatus(anyString(), anyString(), any());
     }
 

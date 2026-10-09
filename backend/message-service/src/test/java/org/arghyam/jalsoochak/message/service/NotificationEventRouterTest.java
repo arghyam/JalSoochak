@@ -1512,7 +1512,7 @@ class NotificationEventRouterTest {
 
     /**
      * {@code result=SENT} means the provider ACCEPTED the send, not that WhatsApp delivered it. The
-     * {@code providerMsgId} on this line is the only join key that lets the delivery status Gupshup and
+     * {@code providerMsgId} on this line is the only join key that lets the delivery status the BSP and
      * Meta later report back to the provider be matched to this officer — losing it breaks reconciliation
      * silently, so it is asserted rather than assumed.
      */

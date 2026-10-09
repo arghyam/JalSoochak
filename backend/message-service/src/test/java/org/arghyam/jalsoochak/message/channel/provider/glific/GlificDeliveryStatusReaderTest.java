@@ -113,6 +113,27 @@ class GlificDeliveryStatusReaderTest {
         }
 
         @Test
+        @SuppressWarnings("unchecked")
+        void aBlankDateColumnFiltersAndOrdersOnTheSendTimeColumn() {
+            when(client.execute(contains("messages"), anyMap())).thenReturn(emptyMessages());
+
+            service.fetchMessages(from, to, "DELIVERED", "", 250, 5);
+
+            ArgumentCaptor<Map<String, Object>> vars = ArgumentCaptor.forClass(Map.class);
+            verify(client).execute(anyString(), vars.capture());
+            Map<String, Object> filter = (Map<String, Object>) vars.getValue().get("filter");
+            assertThat((Map<String, Object>) filter.get("dateRange")).containsEntry("column", "inserted_at");
+            assertThat((Map<String, Object>) vars.getValue().get("opts")).containsEntry("orderWith", "inserted_at");
+        }
+
+        @Test
+        void suppliesItsOwnStatusWordsAndChangedSinceColumn() {
+            assertThat(service.statusesInProgression()).containsExactly(
+                    "ENQUEUED", "SENT", "DELIVERED", "READ", "SEEN", "PLAYED", "ERROR", "CONTACT_OPT_OUT");
+            assertThat(service.changedSinceColumn()).contains("updated_at");
+        }
+
+        @Test
         void countMessages_readsTheScalar() {
             ObjectNode data = mapper.createObjectNode();
             data.put("countMessages", 14208);
@@ -257,15 +278,15 @@ class GlificDeliveryStatusReaderTest {
                 "DELETED,         IGNORED",
         })
         void mapsEveryConfirmedEnumMember(String bspStatus, WhatsAppDeliveryOutcome expected) {
-            assertThat(WhatsAppDeliveryOutcome.fromBspStatus(bspStatus)).isEqualTo(expected);
+            assertThat(GlificDeliveryStatusReader.outcomeOf(bspStatus)).isEqualTo(expected);
         }
 
         /** Glific may add members; a pass must not die on one it has never seen. */
         @Test
         void anUnknownStatusIsNotAnError() {
-            assertThat(WhatsAppDeliveryOutcome.fromBspStatus("SOME_FUTURE_STATE"))
+            assertThat(GlificDeliveryStatusReader.outcomeOf("SOME_FUTURE_STATE"))
                     .isEqualTo(WhatsAppDeliveryOutcome.UNKNOWN_STATUS);
-            assertThat(WhatsAppDeliveryOutcome.fromBspStatus(null))
+            assertThat(GlificDeliveryStatusReader.outcomeOf(null))
                     .isEqualTo(WhatsAppDeliveryOutcome.UNKNOWN_STATUS);
         }
 
@@ -276,8 +297,8 @@ class GlificDeliveryStatusReaderTest {
          */
         @Test
         void glificSentIsPendingNotDelivered() {
-            assertThat(WhatsAppDeliveryOutcome.fromBspStatus("SENT")).isEqualTo(WhatsAppDeliveryOutcome.PENDING);
-            assertThat(WhatsAppDeliveryOutcome.fromBspStatus("SENT").isTerminal()).isFalse();
+            assertThat(GlificDeliveryStatusReader.outcomeOf("SENT")).isEqualTo(WhatsAppDeliveryOutcome.PENDING);
+            assertThat(GlificDeliveryStatusReader.outcomeOf("SENT").isTerminal()).isFalse();
         }
 
         @Test
@@ -290,9 +311,9 @@ class GlificDeliveryStatusReaderTest {
                     service.fetchMessages(from, to, "DELIVERED", "inserted_at", 10, 1).get(0);
 
             assertThat(status.messageId()).isEqualTo("241952654");
-            assertThat(status.bspMessageId()).isEqualTo("da3d8d62-fe89-4f63-ab20-730dac83a8a1");
+            assertThat(status.upstreamMessageId()).isEqualTo("da3d8d62-fe89-4f63-ab20-730dac83a8a1");
             assertThat(status.bspStatus()).isEqualTo("DELIVERED");
-            assertThat(status.templateId()).isEqualTo(880557);
+            assertThat(status.templateId()).isEqualTo("880557");
             assertThat(status.hsm()).isTrue();
             assertThat(status.flow()).isEqualTo("OUTBOUND");
             assertThat(status.receiverContactId()).isEqualTo(6530736L);

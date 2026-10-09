@@ -72,8 +72,10 @@ class DeliveryReceiptAdaptersTest {
 
         @Test
         void parsesASignedBatch() throws Exception {
-            List<DeliveryReceipt> receipts = adapter("ENFORCE").parseAndVerify(signed(keys, EVENTS));
+            VerifiedReceipts verified = adapter("ENFORCE").parseAndVerify(signed(keys, EVENTS));
+            List<DeliveryReceipt> receipts = verified.receipts();
 
+            assertThat(verified.scope()).as("a bare key is the platform's").isSameAs(ReceiptScope.ANY);
             assertThat(receipts).hasSize(3);
             DeliveryReceipt delivered = receipts.get(0);
             assertThat(delivered.providerId()).isEqualTo("sendgrid");
@@ -121,7 +123,40 @@ class DeliveryReceiptAdaptersTest {
         @Test
         void auditModeAcceptsAnUnsignedRequest() {
             assertThat(adapter("AUDIT").parseAndVerify(new DeliveryReceiptRequest(Map.of(),
-                    EVENTS.getBytes(StandardCharsets.UTF_8), Map.of()))).hasSize(3);
+                    EVENTS.getBytes(StandardCharsets.UTF_8), Map.of())).receipts()).hasSize(3);
+        }
+
+        @Test
+        void aTenantBoundKeyScopesItsEventsToThatTenant() throws Exception {
+            SendGridDeliveryReceiptAdapter adapter = new SendGridDeliveryReceiptAdapter(MAPPER,
+                    "MP:" + encoded(otherKeys) + ", " + encoded(keys), "ENFORCE");
+
+            VerifiedReceipts byTenant = adapter.parseAndVerify(signed(otherKeys, EVENTS));
+            assertThat(byTenant.scope().isRestricted()).isTrue();
+            assertThat(byTenant.scope().allows("tenant_mp")).isTrue();
+            assertThat(byTenant.scope().allows("tenant_up")).isFalse();
+            assertThat(byTenant.scope().allows("common_schema")).isFalse();
+
+            assertThat(adapter.parseAndVerify(signed(keys, EVENTS)).scope())
+                    .as("the platform's key still reaches every schema").isSameAs(ReceiptScope.ANY);
+        }
+
+        @Test
+        void aKeyListedForATenantAndForThePlatformIsThePlatforms() throws Exception {
+            SendGridDeliveryReceiptAdapter adapter = new SendGridDeliveryReceiptAdapter(MAPPER,
+                    "mp:" + encoded(keys) + "," + encoded(keys), "ENFORCE");
+
+            assertThat(adapter.parseAndVerify(signed(keys, EVENTS)).scope()).isSameAs(ReceiptScope.ANY);
+        }
+
+        @Test
+        void aMalformedTenantCodeFailsAtStartup() {
+            assertThatThrownBy(() -> new SendGridDeliveryReceiptAdapter(MAPPER, "m p:" + encoded(keys), "ENFORCE"))
+                    .isInstanceOf(IllegalStateException.class);
+        }
+
+        private static String encoded(KeyPair pair) {
+            return Base64.getEncoder().encodeToString(pair.getPublic().getEncoded());
         }
 
         @Test
@@ -156,10 +191,11 @@ class DeliveryReceiptAdaptersTest {
                      "Status":"Delivered","StatusTime":"Sep 29 2026  8:02PM","Cost":"0.3 INR"}
                     """.formatted(UUID);
 
-            List<DeliveryReceipt> receipts = adapter("ENFORCE").parseAndVerify(new DeliveryReceiptRequest(Map.of(),
+            VerifiedReceipts verified = adapter("ENFORCE").parseAndVerify(new DeliveryReceiptRequest(Map.of(),
                     body.getBytes(StandardCharsets.UTF_8), Map.of("token", TOKEN, "ref", "tenant_mp:abc")));
 
-            assertThat(receipts).singleElement().satisfies(r -> {
+            assertThat(verified.scope()).as("the token is the platform's").isSameAs(ReceiptScope.ANY);
+            assertThat(verified.receipts()).singleElement().satisfies(r -> {
                 assertThat(r.providerId()).isEqualTo("smscountry");
                 assertThat(r.providerMessageId()).isEqualTo(UUID);
                 assertThat(r.trackingRef()).isEqualTo("tenant_mp:abc");
@@ -173,14 +209,14 @@ class DeliveryReceiptAdaptersTest {
             String body = "MessageUUID=" + UUID + "&Status=Failed&Number=91XXXXXXXXXX";
 
             assertThat(adapter("ENFORCE").parseAndVerify(new DeliveryReceiptRequest(Map.of(),
-                    body.getBytes(StandardCharsets.UTF_8), Map.of("token", TOKEN))))
+                    body.getBytes(StandardCharsets.UTF_8), Map.of("token", TOKEN))).receipts())
                     .singleElement().extracting(DeliveryReceipt::state).isEqualTo(DeliveryState.FAILED);
         }
 
         @Test
         void readsAReportCarriedInTheQueryString() throws Exception {
             assertThat(adapter("ENFORCE").parseAndVerify(new DeliveryReceiptRequest(Map.of(), new byte[0],
-                    Map.of("token", TOKEN, "MessageUUID", UUID, "Status", "Delivered"))))
+                    Map.of("token", TOKEN, "MessageUUID", UUID, "Status", "Delivered"))).receipts())
                     .singleElement().extracting(DeliveryReceipt::state).isEqualTo(DeliveryState.DELIVERED);
         }
 
@@ -197,7 +233,8 @@ class DeliveryReceiptAdaptersTest {
         @Test
         void aReportWithoutAUuidYieldsNothing() throws Exception {
             assertThat(adapter("ENFORCE").parseAndVerify(new DeliveryReceiptRequest(Map.of(),
-                    "{\"Status\":\"Delivered\"}".getBytes(StandardCharsets.UTF_8), Map.of("token", TOKEN)))).isEmpty();
+                    "{\"Status\":\"Delivered\"}".getBytes(StandardCharsets.UTF_8), Map.of("token", TOKEN))).receipts())
+                    .isEmpty();
         }
     }
 }

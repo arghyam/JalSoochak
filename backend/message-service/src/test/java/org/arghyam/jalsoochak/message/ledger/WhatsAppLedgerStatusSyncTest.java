@@ -37,6 +37,9 @@ import static org.mockito.Mockito.when;
 class WhatsAppLedgerStatusSyncTest {
 
     private static final String PROVIDER = "wa-provider";
+    private static final String CHANGED_COLUMN = "status_changed_at";
+    /** A made-up vendor vocabulary: nothing in the sync may assume any provider's words. */
+    private static final List<String> STATUSES = List.of("QUEUED", "HANDED_OVER", "ARRIVED", "OPENED", "BOUNCED");
 
     @Mock private WhatsAppDeliveryStatusReader reader;
     @Mock private NotificationLedger ledger;
@@ -46,9 +49,11 @@ class WhatsAppLedgerStatusSyncTest {
 
     @BeforeEach
     void setUp() {
-        sync = new WhatsAppLedgerStatusSync(reader, ledger, repository, true, 10, 6, 250, 400, 120, 2, 72);
+        sync = new WhatsAppLedgerStatusSync(Optional.of(reader), ledger, repository, true, 10, 6, 250, 400, 120, 2, 72);
         lenient().when(ledger.isEnabled()).thenReturn(true);
         lenient().when(reader.providerId()).thenReturn(PROVIDER);
+        lenient().when(reader.statusesInProgression()).thenReturn(STATUSES);
+        lenient().when(reader.changedSinceColumn()).thenReturn(Optional.of(CHANGED_COLUMN));
         lenient().when(reader.maxPageSize()).thenReturn(50);
         lenient().when(repository.ledgerSchemas()).thenReturn(List.of("common_schema", "tenant_mp"));
     }
@@ -59,9 +64,9 @@ class WhatsAppLedgerStatusSyncTest {
         when(ledger.applyReceipt(eq("tenant_mp"), any())).thenReturn(1);
 
         WhatsAppLedgerStatusSync.SyncStats stats = sync.apply(List.of(
-                outbound("m1", "SENT", WhatsAppDeliveryOutcome.PENDING),
-                outbound("m1", "READ", WhatsAppDeliveryOutcome.READ),
-                outbound("m2", "DELIVERED", WhatsAppDeliveryOutcome.DELIVERED),
+                outbound("m1", "HANDED_OVER", WhatsAppDeliveryOutcome.PENDING),
+                outbound("m1", "OPENED", WhatsAppDeliveryOutcome.READ),
+                outbound("m2", "ARRIVED", WhatsAppDeliveryOutcome.DELIVERED),
                 inbound("m3")));
 
         ArgumentCaptor<DeliveryReceipt> receipt = ArgumentCaptor.forClass(DeliveryReceipt.class);
@@ -75,7 +80,7 @@ class WhatsAppLedgerStatusSyncTest {
     void aFailureCarriesTheProvidersCode() {
         when(repository.openMessageIds(eq("common_schema"), eq(PROVIDER), anyCollection())).thenReturn(List.of("m9"));
 
-        sync.apply(List.of(new WhatsAppMessageStatus("m9", "gs", "ERROR", 1, true, "OUTBOUND", 5L,
+        sync.apply(List.of(new WhatsAppMessageStatus("m9", "up", "BOUNCED", "1", true, "OUTBOUND", 5L,
                 WhatsAppDeliveryOutcome.DELIVERY_FAILED, "131026", "undeliverable")));
 
         ArgumentCaptor<DeliveryReceipt> receipt = ArgumentCaptor.forClass(DeliveryReceipt.class);
@@ -87,7 +92,7 @@ class WhatsAppLedgerStatusSyncTest {
     void doesNothingWhileTheLedgerIsOff() {
         when(ledger.isEnabled()).thenReturn(false);
 
-        sync.apply(List.of(outbound("m1", "SENT", WhatsAppDeliveryOutcome.PENDING)));
+        sync.apply(List.of(outbound("m1", "HANDED_OVER", WhatsAppDeliveryOutcome.PENDING)));
         sync.syncIncremental(Instant.now());
         sync.sweep();
 
@@ -95,19 +100,49 @@ class WhatsAppLedgerStatusSyncTest {
     }
 
     @Test
-    void readsChangesSinceTheCursor_inProgressionOrder_thenMovesTheCursor() {
+    void readsChangesSinceTheCursor_inTheReadersOrderAndColumn_thenMovesTheCursor() {
         Instant now = Instant.parse("2026-10-05T12:00:00Z");
         Instant cursor = Instant.parse("2026-10-05T11:30:00Z");
-        when(repository.readCursor(WhatsAppLedgerStatusSync.CURSOR_SOURCE)).thenReturn(Optional.of(cursor));
-        when(reader.countMessages(any(), any(), anyString(), eq("updated_at"))).thenReturn(0);
+        String source = PROVIDER + ":" + CHANGED_COLUMN;
+        when(repository.readCursor(source)).thenReturn(Optional.of(cursor));
+        when(reader.countMessages(any(), any(), anyString(), eq(CHANGED_COLUMN))).thenReturn(0);
 
         sync.syncIncremental(now);
 
         InOrder order = inOrder(reader);
-        for (String status : WhatsAppLedgerStatusSync.STATUSES_IN_PROGRESSION) {
-            order.verify(reader).countMessages(cursor.minus(Duration.ofMinutes(10)), now, status, "updated_at");
+        for (String status : STATUSES) {
+            order.verify(reader).countMessages(cursor.minus(Duration.ofMinutes(10)), now, status, CHANGED_COLUMN);
         }
-        verify(repository).writeCursor(WhatsAppLedgerStatusSync.CURSOR_SOURCE, now);
+        verify(repository).writeCursor(source, now);
+    }
+
+    @Test
+    void theCursorIsKeptPerProvider_soASwitchStartsAfresh() {
+        assertThat(WhatsAppLedgerStatusSync.cursorSource("vendor-a", "c"))
+                .isNotEqualTo(WhatsAppLedgerStatusSync.cursorSource("vendor-b", "c"));
+    }
+
+    @Test
+    void aReaderWithNoChangedSinceColumnSkipsTheIncrementalPass() {
+        when(reader.changedSinceColumn()).thenReturn(Optional.empty());
+
+        sync.syncIncremental(Instant.now());
+
+        verify(repository, never()).readCursor(anyString());
+        verify(reader, never()).countMessages(any(), any(), anyString(), anyString());
+    }
+
+    @Test
+    void withNoReaderEveryPassIsOff_andNothingIsAsked() {
+        WhatsAppLedgerStatusSync pushOnly = new WhatsAppLedgerStatusSync(Optional.empty(), ledger, repository,
+                true, 10, 6, 250, 400, 120, 2, 72);
+
+        assertThat(pushOnly.isActive()).isFalse();
+        assertThat(pushOnly.apply(List.of(outbound("m1", "ARRIVED", WhatsAppDeliveryOutcome.DELIVERED))))
+                .isEqualTo(new WhatsAppLedgerStatusSync.SyncStats(0, 0, 0));
+        assertThat(pushOnly.syncIncremental(Instant.now())).isEqualTo(new WhatsAppLedgerStatusSync.SyncStats(0, 0, 0));
+        assertThat(pushOnly.sweep()).isZero();
+        verifyNoInteractions(repository);
     }
 
     @Test
@@ -150,7 +185,7 @@ class WhatsAppLedgerStatusSyncTest {
                 .thenReturn(List.of(
                         new NotificationLedgerRepository.PendingRow("u1", "m1", Instant.now()),
                         new NotificationLedgerRepository.PendingRow("u2", "m2", Instant.now())));
-        when(reader.fetchMessage("m1")).thenReturn(Optional.of(outbound("m1", "DELIVERED", WhatsAppDeliveryOutcome.DELIVERED)));
+        when(reader.fetchMessage("m1")).thenReturn(Optional.of(outbound("m1", "ARRIVED", WhatsAppDeliveryOutcome.DELIVERED)));
         when(reader.fetchMessage("m2")).thenThrow(new RuntimeException("timeout"));
         when(ledger.applyReceipt(eq("tenant_mp"), any())).thenReturn(1);
 
@@ -159,11 +194,11 @@ class WhatsAppLedgerStatusSyncTest {
     }
 
     private static WhatsAppMessageStatus outbound(String id, String bsp, WhatsAppDeliveryOutcome outcome) {
-        return new WhatsAppMessageStatus(id, "gs-" + id, bsp, 880557, true, "OUTBOUND", 42L, outcome, null, null);
+        return new WhatsAppMessageStatus(id, "up-" + id, bsp, "880557", true, "OUTBOUND", 42L, outcome, null, null);
     }
 
     private static WhatsAppMessageStatus inbound(String id) {
-        return new WhatsAppMessageStatus(id, null, "RECEIVED", null, false, "INBOUND", 1L,
+        return new WhatsAppMessageStatus(id, null, "INCOMING", null, false, "INBOUND", 1L,
                 WhatsAppDeliveryOutcome.IGNORED, null, null);
     }
 }

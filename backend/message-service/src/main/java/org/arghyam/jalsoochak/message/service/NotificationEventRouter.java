@@ -1509,7 +1509,7 @@ public class NotificationEventRouter {
             return;
         }
         // result=SENT means the provider ACCEPTED the send — it is not a WhatsApp delivery confirmation.
-        // providerMsgId is what lets the delivery status Gupshup and Meta later report to the provider be
+        // providerMsgId is what lets the delivery status the BSP and Meta later report to the provider be
         // matched back to this officer; see WhatsAppDeliveryReconciliationService. Every new field goes after officer= to preserve
         // the field adjacency the log-counting recipes rely on.
         log.info("[Router/{}] corr={} result=SENT role={} tenant={} officer={}"

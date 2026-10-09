@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.message.channel.provider.DeliveryReceipt;
 import org.arghyam.jalsoochak.message.channel.provider.ProviderAcceptance;
+import org.arghyam.jalsoochak.message.channel.provider.ReceiptScope;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSender;
 import org.arghyam.jalsoochak.message.dto.TenantRef;
 import org.arghyam.jalsoochak.message.service.PiiEncryptionService;
@@ -164,18 +165,28 @@ public class NotificationLedger {
     }
 
     /**
-     * Applies a provider report. Our tracking reference, when the provider echoed it, leads straight
-     * to the row; otherwise the provider's message id is looked up in every ledger schema.
+     * Applies a pushed provider report. Our tracking reference, when the provider echoed it, leads
+     * straight to the row; otherwise the provider's message id is looked up in every ledger schema. Only
+     * schemas {@code scope} allows are touched — a report naming a row outside them is dropped and
+     * counted — and only rows of the report's own provider.
      *
+     * @param scope the schemas the credential that authenticated the report may change
      * @return how many rows changed: 0 when the report was already applied, is older than what the
-     *         row holds, or matches no row
+     *         row holds, matches no row, or names a schema outside {@code scope}
      */
-    public int applyReceipt(DeliveryReceipt receipt) {
-        if (!enabled || receipt == null || receipt.state() == null) {
+    public int applyReceipt(DeliveryReceipt receipt, ReceiptScope scope) {
+        if (!enabled || receipt == null || receipt.state() == null || scope == null) {
             return 0;
         }
         String[] ref = LedgerRef.parseTrackingRef(receipt.trackingRef());
         if (ref != null) {
+            if (!scope.allows(ref[0])) {
+                log.warn("[Ledger] dropped a {} report naming schema={}, outside the schemas its credential"
+                        + " may change ({})", receipt.providerId(), ref[0], scope);
+                meterRegistry.counter("notification.ledger.status.out-of-scope",
+                        "provider", tag(receipt.providerId())).increment();
+                return 0;
+            }
             return apply(ref[0], ref[1], receipt);
         }
         if (receipt.providerMessageId() == null || receipt.providerMessageId().isBlank()) {
@@ -183,6 +194,9 @@ public class NotificationLedger {
         }
         int changed = 0;
         for (String schema : repository.ledgerSchemas()) {
+            if (!scope.allows(schema)) {
+                continue;
+            }
             changed += apply(schema, null, receipt);
             if (changed > 0) {
                 break;

@@ -373,6 +373,8 @@ notifications:
     webhook:
       # SendGrid's Signed Event Webhook public key(s), base64 as the console shows them, comma-separated
       # — one per SendGrid account whose events are pointed at /api/v1/message/delivery-receipts/sendgrid.
+      # The platform account's key goes in bare; a tenant's own account's as <tenant_code>:<key>, so its
+      # events can only change that tenant's rows.
       verification-keys: ${NOTIFICATIONS_EMAIL_WEBHOOK_VERIFICATION_KEYS:}
       mode: ${NOTIFICATIONS_EMAIL_WEBHOOK_MODE:ENFORCE} # ENFORCE | AUDIT | OFF
     # Pull status from SendGrid's Email Activity API, a paid add-on on SendGrid's side.
@@ -444,7 +446,7 @@ whatsapp:
   # ────────────────────────────────────────────────────────────
   # Delivery-status reconciliation (WhatsAppDeliveryReconciliationService)
   #
-  # result=SENT only means the provider ACCEPTED our API call. Gupshup and Meta act afterwards and report
+  # result=SENT only means the provider ACCEPTED our API call. Its BSP and Meta act afterwards and report
   # delivery status back to the provider alone, so a report sent to a number with no WhatsApp account is
   # counted as sent exactly like one that arrived. This job reads that status back and logs it under
   # the [WhatsAppStatus] prefix
@@ -467,20 +469,22 @@ whatsapp:
       # Each status's page budget is sized from the provider's own count (the provider caps a page at
       # 50 whatever page-size asks for); max-pages is the floor and this the ceiling.
       max-pages-cap: ${WHATSAPP_STATUS_RECONCILE_MAX_PAGES_CAP:400}
-      # The provider's dateRange column. inserted_at is when the message row was created and is stable;
-      # updated_at moves on every status change and would let a message drift out of its send window.
-      date-column: ${WHATSAPP_STATUS_RECONCILE_DATE_COLUMN:inserted_at}
+      # The provider's window column, in the status reader's own terms. Blank = the reader's send-time
+      # column, which is stable; a column that moves on every status change would let a message drift out
+      # of its send window.
+      date-column: ${WHATSAPP_STATUS_RECONCILE_DATE_COLUMN:}
       # Blank = derive from the whatsapp.template.daily-report-* ids above. Set explicitly only to
       # reconcile templates this service does not itself send.
       template-ids: ${WHATSAPP_STATUS_RECONCILE_TEMPLATE_IDS:}
-      # Failure codes that are properties of the Gupshup ACCOUNT, not of any recipient. 9999 is
+      # Failure codes that are properties of the provider ACCOUNT, not of any recipient. 9999 is
       # "low balance": it fails every message in flight, so it is reported on its own line instead of
       # being counted as N officer failures, which would read as a mass recipient-data problem.
       account-level-error-codes: ${WHATSAPP_STATUS_RECONCILE_ACCOUNT_LEVEL_ERROR_CODES:9999}
     # Delivery-ledger status sync (WhatsAppLedgerStatusSync), run inside each reconcile pass when
     # notifications.ledger.enabled is on.
     ledger:
-      # Every status change since the last pass, read on the provider's updated_at from a cursor.
+      # Every status change since the last pass, read on the reader's changed-since column from a
+      # per-provider cursor. Skipped for a reader that has none.
       incremental:
         enabled: ${WHATSAPP_STATUS_LEDGER_INCREMENTAL_ENABLED:true}
         overlap-minutes: ${WHATSAPP_STATUS_LEDGER_INCREMENTAL_OVERLAP_MINUTES:10}

@@ -35,6 +35,9 @@ import java.util.stream.Collectors;
  * object or array, a form body, or query parameters — taking {@code MessageUUID}, {@code Status},
  * {@code StatusTime} and {@code Cost} only. The number and message text it may also carry are never
  * read. Pull ({@link SmsCountrySender#lookupStatuses}) covers SMS whether or not this is configured.</p>
+ *
+ * <p>The token is the platform's alone, so its reports may reach any schema ({@link ReceiptScope#ANY});
+ * they still change only SMSCountry rows.</p>
  */
 @Component
 @Slf4j
@@ -66,7 +69,7 @@ public class SmsCountryDeliveryReceiptAdapter implements DeliveryReceiptAdapter 
     }
 
     @Override
-    public List<DeliveryReceipt> parseAndVerify(DeliveryReceiptRequest request) {
+    public VerifiedReceipts parseAndVerify(DeliveryReceiptRequest request) {
         if (mode != Mode.OFF && !tokenMatches(request.query().get(TOKEN_PARAM))) {
             if (mode == Mode.ENFORCE) {
                 throw new ReceiptRejectedException("SMS delivery report token missing or invalid");
@@ -84,7 +87,9 @@ public class SmsCountryDeliveryReceiptAdapter implements DeliveryReceiptAdapter 
             receipts.add(new DeliveryReceipt(r.providerId(), r.providerMessageId(), trackingRef, r.state(),
                     r.providerStatus(), r.errorCode(), r.errorReason(), r.occurredAt(), r.cost(), r.costCurrency()));
         }
-        return receipts;
+        // The token is the platform's: every account built by SmsCountrySenderFactory asks for its reports
+        // at the one configured URL, so a tenant's own account holds no token of its own to scope by.
+        return VerifiedReceipts.unscoped(receipts);
     }
 
     private boolean tokenMatches(String token) {

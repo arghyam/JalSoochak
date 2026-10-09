@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -104,6 +105,19 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
      */
     static final String DEFAULT_DATE_COLUMN = "inserted_at";
 
+    /** The column that moves every time a status arrives — what a "changed since" pass windows on. */
+    static final String CHANGED_SINCE_COLUMN = "updated_at";
+
+    /**
+     * Every outbound {@code bspStatus}, in the order a message moves through them. Glific's
+     * {@code MessageStatusEnum} is {@code CONTACT_OPT_OUT, DELETED, DELIVERED, ENQUEUED, ERROR, PLAYED,
+     * REACHED, READ, RECEIVED, SEEN, SENT} (confirmed by introspection); {@code RECEIVED} and
+     * {@code DELETED} are not deliveries, and {@code REACHED} is broadcast-level, not seen on a direct
+     * template message.
+     */
+    static final List<String> STATUSES_IN_PROGRESSION = List.of(
+            "ENQUEUED", "SENT", "DELIVERED", "READ", "SEEN", "PLAYED", "ERROR", "CONTACT_OPT_OUT");
+
     private final GlificGraphQLClient client;
     private final ObjectMapper objectMapper;
 
@@ -132,6 +146,37 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
     }
 
     @Override
+    public List<String> statusesInProgression() {
+        return STATUSES_IN_PROGRESSION;
+    }
+
+    @Override
+    public Optional<String> changedSinceColumn() {
+        return Optional.of(CHANGED_SINCE_COLUMN);
+    }
+
+    /**
+     * Maps one Glific {@code bspStatus} onto our vocabulary. An unrecognised value yields
+     * {@link WhatsAppDeliveryOutcome#UNKNOWN_STATUS} rather than an exception.
+     */
+    static WhatsAppDeliveryOutcome outcomeOf(String bspStatus) {
+        if (bspStatus == null || bspStatus.isBlank()) {
+            return WhatsAppDeliveryOutcome.UNKNOWN_STATUS;
+        }
+        return switch (bspStatus.trim().toUpperCase(Locale.ROOT)) {
+            case "DELIVERED" -> WhatsAppDeliveryOutcome.DELIVERED;
+            case "READ", "SEEN", "PLAYED" -> WhatsAppDeliveryOutcome.READ;
+            case "ERROR", "CONTACT_OPT_OUT" -> WhatsAppDeliveryOutcome.DELIVERY_FAILED;
+            // ENQUEUED = still at Glific; SENT = Meta has it but has not delivered it;
+            // REACHED = broadcast-level, not expected on a direct HSM.
+            case "ENQUEUED", "SENT", "REACHED" -> WhatsAppDeliveryOutcome.PENDING;
+            // RECEIVED is inbound (contact → us); DELETED was removed at Glific.
+            case "RECEIVED", "DELETED" -> WhatsAppDeliveryOutcome.IGNORED;
+            default -> WhatsAppDeliveryOutcome.UNKNOWN_STATUS;
+        };
+    }
+
+    @Override
     public Optional<WhatsAppMessageStatus> fetchMessage(String messageId) {
         if (messageId == null || messageId.isBlank()) {
             return Optional.empty();
@@ -154,7 +199,8 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
     public List<WhatsAppMessageStatus> fetchMessages(Instant from, Instant to, String bspStatus,
                                                      String dateColumn, int pageSize, int maxPages) {
         List<WhatsAppMessageStatus> all = new ArrayList<>();
-        Map<String, Object> filter = buildFilter(from, to, bspStatus, dateColumn);
+        String column = columnOrDefault(dateColumn);
+        Map<String, Object> filter = buildFilter(from, to, bspStatus, column);
         int effectivePageSize = Math.max(1, Math.min(pageSize, MAX_PAGE_SIZE));
         for (int page = 0; page < maxPages; page++) {
             int offset = page * effectivePageSize;
@@ -164,7 +210,7 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
                             "limit", effectivePageSize,
                             "offset", offset,
                             "order", "DESC",
-                            "orderWith", dateColumn)));
+                            "orderWith", column)));
             JsonNode messages = response.path("messages");
             if (!messages.isArray() || messages.isEmpty()) {
                 return all;
@@ -185,7 +231,7 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
 
     private Map<String, Object> buildFilter(Instant from, Instant to, String bspStatus, String dateColumn) {
         Map<String, Object> dateRange = new LinkedHashMap<>();
-        dateRange.put("column", dateColumn == null || dateColumn.isBlank() ? DEFAULT_DATE_COLUMN : dateColumn);
+        dateRange.put("column", columnOrDefault(dateColumn));
         dateRange.put("from", from.toString());
         dateRange.put("to", to.toString());
         Map<String, Object> filter = new LinkedHashMap<>();
@@ -196,6 +242,10 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
         return filter;
     }
 
+    private static String columnOrDefault(String dateColumn) {
+        return dateColumn == null || dateColumn.isBlank() ? DEFAULT_DATE_COLUMN : dateColumn;
+    }
+
     /** Maps one raw Glific message node onto our record, extracting the failure code and reason. */
     private WhatsAppMessageStatus toStatus(JsonNode node) {
         String bspStatus = node.path("bspStatus").asText(null);
@@ -204,12 +254,12 @@ public class GlificDeliveryStatusReader implements WhatsAppDeliveryStatusReader 
                 node.path("id").asText(null),
                 node.path("bspMessageId").asText(null),
                 bspStatus,
-                node.path("templateId").isNumber() ? node.path("templateId").asInt() : null,
+                node.hasNonNull("templateId") ? node.get("templateId").asText() : null,
                 node.path("isHsm").asBoolean(false),
                 node.path("flow").asText(null),
                 node.path("receiver").path("id").isMissingNode() ? null
                         : parseContactId(node.path("receiver").path("id").asText(null)),
-                WhatsAppDeliveryOutcome.fromBspStatus(bspStatus),
+                outcomeOf(bspStatus),
                 failure.code(),
                 failure.reason());
     }

@@ -6,7 +6,7 @@ package org.arghyam.jalsoochak.message.channel.provider;
  * <p>The {@code messageId} is the reason this type exists. The provider's {@code sendHsmMessage} and
  * {@code createAndSendMessage} both return {@code message { id }} and the service used to parse it
  * and throw it away — yet it is the <em>only</em> handle that ties a report we sent to the delivery
- * status Gupshup and Meta report back to the provider later. Without it, no reconciliation is
+ * status the provider's BSP and Meta report back to it later. Without it, no reconciliation is
  * possible, manual or automated.</p>
  *
  * <p>Acceptance is not delivery: a populated {@code messageId} means the provider created the message

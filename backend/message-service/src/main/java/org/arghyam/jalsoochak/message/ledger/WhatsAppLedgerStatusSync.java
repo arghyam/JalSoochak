@@ -27,34 +27,28 @@ import java.util.Set;
  * <p>Two more passes close the gaps a window over send time leaves:</p>
  * <ol>
  *   <li><b>Incremental</b> ({@link #syncIncremental}) — every message whose status changed since the last
- *       pass, read on the provider's {@code updated_at} from a cursor kept in
+ *       pass, read on the reader's {@code changedSinceColumn()} from a cursor kept per provider in
  *       {@code common_schema.notification_status_sync_state}. Catches a report read the next morning,
  *       long after it left the send-time window. The cursor moves only once a pass completes, minus an
- *       overlap, so a failed pass is read again; a provider that will not filter on {@code updated_at}
- *       leaves the pass a logged no-op and the other passes still run.</li>
+ *       overlap, so a failed pass is read again. A provider with no such column skips this pass; one
+ *       that refuses it leaves the pass a logged no-op, and the other passes still run.</li>
  *   <li><b>Sweep</b> ({@link #sweep}) — rows still pending after {@code sweep-after-minutes}, asked about
  *       one by one, capped per pass.</li>
  * </ol>
  *
- * <p>Statuses are read in the order a message moves through them, so one that advances mid-pass moves
- * into a status not yet read rather than one already read; offset paging can then shift it, but never
- * past the pass.</p>
+ * <p>Statuses are read in the order a message moves through them, as the reader lists them, so one that
+ * advances mid-pass moves into a status not yet read rather than one already read; offset paging can
+ * then shift it, but never past the pass. Every status word and window column comes from the reader:
+ * nothing here knows a provider's vocabulary.</p>
+ *
+ * <p>A WhatsApp provider with no status API has no reader. Every pass here is then off, and its status
+ * arrives only by push, through a {@code DeliveryReceiptAdapter}.</p>
  *
  * <p>Logs ids and counts only.</p>
  */
 @Service
 @Slf4j
 public class WhatsAppLedgerStatusSync {
-
-    static final String CURSOR_SOURCE = "whatsapp:updated_at";
-    private static final String UPDATED_AT = "updated_at";
-
-    /**
-     * Every outbound status, in the order a message moves through them. {@code RECEIVED} and
-     * {@code DELETED} are not deliveries.
-     */
-    public static final List<String> STATUSES_IN_PROGRESSION = List.of(
-            "ENQUEUED", "SENT", "DELIVERED", "READ", "SEEN", "PLAYED", "ERROR", "CONTACT_OPT_OUT");
 
     private final WhatsAppDeliveryStatusReader reader;
     private final NotificationLedger ledger;
@@ -68,8 +62,12 @@ public class WhatsAppLedgerStatusSync {
     private final int sweepMaxPerPass;
     private final int lookbackHours;
 
+    /**
+     * @param reader the provider's status reader; empty for a provider that only pushes status, which
+     *               turns every pass here off
+     */
     public WhatsAppLedgerStatusSync(
-            WhatsAppDeliveryStatusReader reader,
+            Optional<WhatsAppDeliveryStatusReader> reader,
             NotificationLedger ledger,
             NotificationLedgerRepository repository,
             @Value("${whatsapp.status.ledger.incremental.enabled:true}") boolean incrementalEnabled,
@@ -80,7 +78,7 @@ public class WhatsAppLedgerStatusSync {
             @Value("${notifications.ledger.status.sweep-after-minutes:120}") int sweepAfterMinutes,
             @Value("${whatsapp.status.ledger.sweep-max-per-pass:200}") int sweepMaxPerPass,
             @Value("${notifications.ledger.status.lookback-hours:72}") int lookbackHours) {
-        this.reader = reader;
+        this.reader = reader.orElse(null);
         this.ledger = ledger;
         this.repository = repository;
         this.incrementalEnabled = incrementalEnabled;
@@ -91,10 +89,19 @@ public class WhatsAppLedgerStatusSync {
         this.sweepAfterMinutes = sweepAfterMinutes;
         this.sweepMaxPerPass = sweepMaxPerPass;
         this.lookbackHours = lookbackHours;
+        if (this.reader == null) {
+            log.info("[WhatsAppStatus] ledger: no WhatsApp status reader — status arrives by push only");
+        }
     }
 
+    /** Whether the passes run: the ledger is on and the provider can be asked. */
     public boolean isActive() {
-        return ledger.isEnabled();
+        return reader != null && ledger.isEnabled();
+    }
+
+    /** Where the incremental pass keeps its place, one per provider and column so a switch starts afresh. */
+    static String cursorSource(String providerId, String column) {
+        return providerId + ":" + column;
     }
 
     /** What one pass did, for the summary line. */
@@ -150,9 +157,17 @@ public class WhatsAppLedgerStatusSync {
         if (!isActive() || !incrementalEnabled) {
             return new SyncStats(0, 0, 0);
         }
+        Optional<String> changedSince = reader.changedSinceColumn();
+        if (changedSince.isEmpty()) {
+            log.debug("[WhatsAppStatus] ledger: provider={} cannot window on status changes; no incremental pass",
+                    reader.providerId());
+            return new SyncStats(0, 0, 0);
+        }
+        String column = changedSince.get();
+        String cursorSource = cursorSource(reader.providerId(), column);
         Instant from;
         try {
-            from = repository.readCursor(CURSOR_SOURCE)
+            from = repository.readCursor(cursorSource)
                     .map(c -> c.minus(Duration.ofMinutes(overlapMinutes)))
                     .orElse(now.minus(Duration.ofHours(firstRunHours)));
         } catch (Exception e) {
@@ -161,16 +176,16 @@ public class WhatsAppLedgerStatusSync {
         }
         SyncStats total = new SyncStats(0, 0, 0);
         try {
-            for (String status : STATUSES_IN_PROGRESSION) {
-                List<WhatsAppMessageStatus> page = fetchAll(reader, from, now, status, UPDATED_AT, pageSize, maxPagesCap);
+            for (String status : reader.statusesInProgression()) {
+                List<WhatsAppMessageStatus> page = fetchAll(reader, from, now, status, column, pageSize, maxPagesCap);
                 total = total.plus(apply(page));
             }
         } catch (Exception e) {
             log.warn("[WhatsAppStatus] ledger: incremental pass on {} failed, cursor not moved: {}",
-                    UPDATED_AT, e.getMessage());
+                    cursorSource, e.getMessage());
             return total;
         }
-        repository.writeCursor(CURSOR_SOURCE, now);
+        repository.writeCursor(cursorSource, now);
         log.info("[WhatsAppStatus] ledger incremental: window={}→{} seen={} applied={} notInLedger={}",
                 from, now, total.seen(), total.applied(), total.notInLedger());
         return total;

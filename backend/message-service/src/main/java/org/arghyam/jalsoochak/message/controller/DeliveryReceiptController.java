@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.message.channel.provider.DeliveryReceipt;
 import org.arghyam.jalsoochak.message.channel.provider.DeliveryReceiptAdapter;
 import org.arghyam.jalsoochak.message.channel.provider.DeliveryReceiptRequest;
 import org.arghyam.jalsoochak.message.channel.provider.ReceiptRejectedException;
+import org.arghyam.jalsoochak.message.channel.provider.VerifiedReceipts;
 import org.arghyam.jalsoochak.message.ledger.NotificationLedger;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -30,9 +31,13 @@ import java.util.stream.Collectors;
  * Where providers push delivery reports: {@code POST /api/v1/message/delivery-receipts/{providerId}}.
  *
  * <p>Provider-neutral: the path names the provider, the {@link DeliveryReceiptAdapter} with that id
- * authenticates and parses the request, and every report it yields is applied to the delivery ledger.
- * Open at the gateway and in {@code SecurityConfig}, because providers cannot present our JWTs — every
- * adapter verifies its provider's signature or shared secret instead, before reading anything.</p>
+ * authenticates and parses the request, and every report it yields is applied to the delivery ledger,
+ * within the schemas the adapter's credential may change. Open at the gateway and in
+ * {@code SecurityConfig}, because providers cannot present our JWTs — every adapter verifies its
+ * provider's signature or shared secret instead, before reading anything.</p>
+ *
+ * <p>A report that names a provider other than the adapter's is dropped: an adapter speaks for its own
+ * provider's rows and no one else's.</p>
  *
  * <p>The raw body is read before anything else touches the request: a signature covers the exact bytes,
  * and a servlet that parsed a form body into parameters would have consumed them. The query string is
@@ -69,9 +74,9 @@ public class DeliveryReceiptController {
         if (body == null) {
             return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(Map.of("error", "body too large"));
         }
-        List<DeliveryReceipt> receipts;
+        VerifiedReceipts verified;
         try {
-            receipts = adapter.parseAndVerify(new DeliveryReceiptRequest(headers(request), body,
+            verified = adapter.parseAndVerify(new DeliveryReceiptRequest(headers(request), body,
                     parseQuery(request.getQueryString())));
         } catch (ReceiptRejectedException e) {
             log.warn("[Receipts] provider={} rejected: {}", adapter.providerId(), e.getMessage());
@@ -80,9 +85,15 @@ public class DeliveryReceiptController {
             log.warn("[Receipts] provider={} unreadable: {}", adapter.providerId(), e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", "unreadable"));
         }
+        List<DeliveryReceipt> receipts = verified.receipts();
         int applied = 0;
         for (DeliveryReceipt receipt : receipts) {
-            applied += ledger.applyReceipt(receipt);
+            if (!adapter.providerId().equals(receipt.providerId())) {
+                log.warn("[Receipts] provider={} returned a report for provider={}; dropped",
+                        adapter.providerId(), receipt.providerId());
+                continue;
+            }
+            applied += ledger.applyReceipt(receipt, verified.scope());
         }
         log.info("[Receipts] provider={} reports={} applied={}", adapter.providerId(), receipts.size(), applied);
         return ResponseEntity.ok(Map.of("received", receipts.size(), "applied", applied));
