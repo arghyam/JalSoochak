@@ -107,9 +107,10 @@ IFS= read -r -d '' ALLOWED_TOKENS <<'RULES' || true
 # that needs its own transition.
 .  FLOW_VISION_(?:FAILED|REJECTED)
 
-# Rule OCR_PROVIDER_ID — the registry id of the built-in OCR provider. Tenants select a provider by
-# this value in their ocr_provider config, so it is stored data rather than a name we choose.
-.  "flowvision"|OCR_DEFAULT_PROVIDER:flowvision
+# Rule OCR_PROVIDER_ID — the registry ids of the built-in OCR providers, BFM's and ELM's. Tenants select
+# a provider by this value in their ocr_provider or ocr_elm_provider config, so it is stored data rather
+# than a name we choose.
+.  "flowvision"|"flowvision-elm"|OCR_DEFAULT_PROVIDER:flowvision|OCR_ELM_DEFAULT_PROVIDER:flowvision-elm
 
 # Rule TEST_CONTAINER_IMAGE — an integration test runs the object store's own image as its S3
 # endpoint, so it names the image, the image's default credential and its readiness path.

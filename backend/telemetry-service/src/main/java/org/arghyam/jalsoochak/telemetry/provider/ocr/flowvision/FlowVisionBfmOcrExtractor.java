@@ -31,7 +31,7 @@ import java.util.UUID;
  */
 @Component
 @Slf4j
-public class FlowVisionOcrExtractor implements MeterReadingExtractor {
+public class FlowVisionBfmOcrExtractor implements MeterReadingExtractor {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     /** Status FlowVision returns when the photo holds no meter at all (rotated, unrelated, random). */
@@ -42,7 +42,7 @@ public class FlowVisionOcrExtractor implements MeterReadingExtractor {
     private final OcrProviderSettings defaultSettings;
 
     @Autowired
-    public FlowVisionOcrExtractor(
+    public FlowVisionBfmOcrExtractor(
             RestTemplate restTemplate,
             @Value("${ocr.url}") String flowVisionUrl,
             @Value("${ocr.api-key:}") String apiKey,
@@ -57,7 +57,7 @@ public class FlowVisionOcrExtractor implements MeterReadingExtractor {
     }
 
     /** Convenience constructor (no auth) retained for unit tests that stub the endpoint directly. */
-    public FlowVisionOcrExtractor(RestTemplate restTemplate, String flowVisionUrl) {
+    public FlowVisionBfmOcrExtractor(RestTemplate restTemplate, String flowVisionUrl) {
         this(restTemplate, flowVisionUrl, null, OcrProviderSettings.DEFAULT_AUTH_HEADER);
     }
 

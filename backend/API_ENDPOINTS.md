@@ -310,9 +310,9 @@ Both errors below return `400`:
   and MAN), or a photo sent without `confirmed_reading` names a unit other than the channel's standard
   one: OCR reads a meter in its standard unit.
 - `IMAGE_NOT_SUPPORTED_FOR_CHANNEL` — `POST` only. A photo (`reading_url`) sent without
-  `confirmed_reading`, on a channel that can't read photos: PDU, IOT and MAN, and ELM while no OCR
-  provider reads electric meters. A photo sent with `confirmed_reading` is accepted on every channel;
-  the photo is kept and not read.
+  `confirmed_reading`, on a channel that can't read photos: PDU, IOT and MAN, and ELM when no OCR
+  provider is configured for the tenant's electric meters. A photo sent with `confirmed_reading` is
+  accepted on every channel; the photo is kept and not read.
 
 ### Partner ingestion — PDU limits
 

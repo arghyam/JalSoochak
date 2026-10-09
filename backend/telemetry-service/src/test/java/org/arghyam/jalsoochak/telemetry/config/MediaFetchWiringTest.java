@@ -1,6 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.config;
 
-import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionOcrExtractor;
+import org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision.FlowVisionBfmOcrExtractor;
 import org.arghyam.jalsoochak.telemetry.provider.whatsapp.glific.GlificMediaFetcher;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
 import org.arghyam.jalsoochak.telemetry.service.InboundMediaService;
@@ -45,7 +45,7 @@ class MediaFetchWiringTest {
                     StubCollaborators.class)
             .withBean(GlificMediaFetcher.class)
             .withBean(InboundMediaService.class)
-            .withBean(FlowVisionOcrExtractor.class)
+            .withBean(FlowVisionBfmOcrExtractor.class)
             .withPropertyValues("ocr.url=https://flowvision.example/extract");
 
     @Test
@@ -74,8 +74,8 @@ class MediaFetchWiringTest {
 
             // The OCR provider may legitimately sit on an internal address, so it must keep the unguarded
             // client it has always had.
-            FlowVisionOcrExtractor flowVisionOcrExtractor = context.getBean(FlowVisionOcrExtractor.class);
-            assertThat(ReflectionTestUtils.getField(flowVisionOcrExtractor, "restTemplate")).isSameAs(shared);
+            FlowVisionBfmOcrExtractor flowVisionBfmOcrExtractor = context.getBean(FlowVisionBfmOcrExtractor.class);
+            assertThat(ReflectionTestUtils.getField(flowVisionBfmOcrExtractor, "restTemplate")).isSameAs(shared);
         });
     }
 }
