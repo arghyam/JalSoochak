@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -177,21 +178,11 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
     class UpdateSchemeChannel {
 
         @Test
-        void writesTheChannelWhenTheColumnExists() {
-            onColumnsExisting("channel");
+        void writesTheChannelId() {
+            repository.updateSchemeChannel(SCHEMA, 7L, ReadingChannel.ELM);
 
-            repository.updateSchemeChannel(SCHEMA, 7L, 2);
-
+            assertThat(capturedUpdateSql()).contains("SET channel_id = ?");
             assertThat(capturedUpdateArgs()).containsExactly(2, 7L);
-        }
-
-        @Test
-        void failsFastWhenTheColumnIsMissing() {
-            onColumnExists(false);
-
-            assertThatThrownBy(() -> repository.updateSchemeChannel(SCHEMA, 7L, 2))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("channel");
         }
     }
 
@@ -292,13 +283,13 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             onQuery("RETURNING updated_at", row("updated_at", updatedAt));
 
             FlowReadingVersion version = repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
-                    BigDecimal.ZERO, new BigDecimal("90"), "corr-1", null, "", null, 2L, "PDU", "min");
+                    BigDecimal.ZERO, new BigDecimal("90"), "corr-1", null, "", null, 2L, ReadingChannel.PDU, "min");
 
             assertThat(version).isEqualTo(new FlowReadingVersion(5L, updatedAt));
             assertThat(allQuerySql().get(0))
-                    .contains("channel = COALESCE(?, channel)")
+                    .contains("channel_id = COALESCE(?, channel_id)")
                     .contains("submitted_unit = COALESCE(?, submitted_unit)");
-            assertThat(lastQueryArgs()).containsSequence("PDU", "min");
+            assertThat(lastQueryArgs()).containsSequence(3, "min");
         }
 
         /** The row vanished between the placeholder lookup and this write: no version to publish. */
@@ -307,7 +298,7 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             onColumnExists(true);
 
             FlowReadingVersion version = repository.updateFlowReadingFromIngestion(SCHEMA, 5L, READING_AT,
-                    BigDecimal.ZERO, new BigDecimal("90"), "corr-1", null, "", null, 2L, "BFM", "m3");
+                    BigDecimal.ZERO, new BigDecimal("90"), "corr-1", null, "", null, 2L, ReadingChannel.BFM, "m3");
 
             assertThat(version).isEqualTo(new FlowReadingVersion(5L, null));
         }

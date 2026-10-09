@@ -43,6 +43,19 @@ class ReadingChannelTest {
     }
 
     @Test
+    void fromCode_mapsEveryChannelsCodeBack() {
+        for (ReadingChannel channel : ReadingChannel.values()) {
+            assertThat(ReadingChannel.fromCode(channel.getCode())).isEqualTo(channel);
+        }
+    }
+
+    @Test
+    void fromCode_nullOrUnknown_defaultsToBfm() {
+        assertThat(ReadingChannel.fromCode(null)).isEqualTo(ReadingChannel.BFM);
+        assertThat(ReadingChannel.fromCode(99)).isEqualTo(ReadingChannel.BFM);
+    }
+
+    @Test
     void isDeclared_onlyForANonBlankValue() {
         assertThat(ReadingChannel.isDeclared(null)).isFalse();
         assertThat(ReadingChannel.isDeclared("")).isFalse();

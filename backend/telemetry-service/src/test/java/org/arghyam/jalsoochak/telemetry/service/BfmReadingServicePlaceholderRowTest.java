@@ -182,7 +182,7 @@ class BfmReadingServicePlaceholderRowTest {
                 anyString(),
                 any(),
                 anyLong(),
-                eq(ReadingChannel.BFM.name()),
+                eq(ReadingChannel.BFM),
                 eq("m3")
         );
         verify(telemetryTenantRepository, never()).updateFlowReadingChannel(any(), any(), any());
@@ -260,7 +260,7 @@ class BfmReadingServicePlaceholderRowTest {
                 "http://example.com/img.jpg",
                 readingDate,
                 readingAt,
-                "BFM",
+                ReadingChannel.BFM.getCode(),
                 0,
                 null
         );
@@ -298,7 +298,7 @@ class BfmReadingServicePlaceholderRowTest {
                 "http://example.com/img.jpg",
                 readingDate,
                 readingAt,
-                "BFM",
+                ReadingChannel.BFM.getCode(),
                 0,
                 null
         );

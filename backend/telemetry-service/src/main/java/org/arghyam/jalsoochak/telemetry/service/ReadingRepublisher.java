@@ -104,7 +104,10 @@ public class ReadingRepublisher {
                 null,
                 reading.imageUrl(),
                 readingAt,
-                channelCode(reading),
+                // The channel stored at submission, so a correction keeps it and analytics does not
+                // recompute the water quantity with another calculator. NULL on a legacy row, which
+                // analytics treats as BFM.
+                reading.channel(),
                 readingDate,
                 1,
                 0,
@@ -117,7 +120,7 @@ public class ReadingRepublisher {
                 // Taken now rather than kept from the first publish: a corrected reading is calculated
                 // with the pump data current at the time of the correction.
                 calculationParametersSnapshotter.snapshot(
-                        schemaName, tenantId, reading.schemeId(), ReadingChannel.fromChannelValue(reading.channel()))
+                        schemaName, tenantId, reading.schemeId(), ReadingChannel.fromCode(reading.channel()))
         ));
     }
 
@@ -136,19 +139,5 @@ public class ReadingRepublisher {
         return storedExtractedReading == null || storedExtractedReading.signum() == 0
                 ? null
                 : storedExtractedReading;
-    }
-
-    /**
-     * Re-uses the channel persisted on the reading at submission so corrections keep the
-     * original channel (BFM/ELM/PDU...) and analytics does not recompute the water quantity
-     * with a different calculator. Returns {@code null} for legacy rows that never stored a
-     * channel, which analytics treats as the default (BFM).
-     */
-    private static Integer channelCode(TelemetryLatestFlowReadingRecord reading) {
-        String channelValue = reading.channel();
-        if (channelValue == null || channelValue.isBlank()) {
-            return null;
-        }
-        return ReadingChannel.fromChannelValue(channelValue).getCode();
     }
 }

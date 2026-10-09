@@ -38,8 +38,10 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
     private static final String SCHEMA = "tenant_mp";
     /** tenant_master_table id of state code MP, which the repository resolves from {@link #SCHEMA}. */
     private static final int TENANT_ID = 1;
-    private static final int ANALYTICS_BFM = 1;
-    private static final int ANALYTICS_ELM = 2;
+    /** common_schema.channel_master_table ids, the codes flow_reading_table and analytics both store. */
+    private static final int BFM = 1;
+    private static final int ELM = 2;
+    private static final int PDU = 3;
 
     @Autowired PersonSchemeRepository repo;
     @Autowired PiiEncryptionService pii;
@@ -97,11 +99,11 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
     }
 
     private void insertReading(long schemeId, long createdBy, String reading, LocalDateTime readingAt,
-                               String channel) {
+                               Integer channel) {
         jdbc.update("""
                 INSERT INTO tenant_mp.flow_reading_table
                     (scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading,
-                     correlation_id, channel, created_by, updated_by)
+                     correlation_id, channel_id, created_by, updated_by)
                 VALUES (?, ?, ?, ?, ?, 'corr-1', ?, ?, ?)
                 """, schemeId, Timestamp.valueOf(readingAt), readingAt.toLocalDate(),
                 new BigDecimal(reading), new BigDecimal(reading), channel, createdBy, createdBy);
@@ -558,7 +560,7 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
         @Test
         @DisplayName("counts BFM and legacy NULL-channel readings")
         void countsBfmAndLegacyReadings() {
-            insertReading(schemeId, poId, "100", today.minusDays(2).atTime(6, 0), "BFM");
+            insertReading(schemeId, poId, "100", today.minusDays(2).atTime(6, 0), BFM);
             insertReading(schemeId, poId, "101", today.minusDays(1).atTime(6, 0), null);
 
             assertThat(repo.countSchemeReadings(SCHEMA, schemeId)).isEqualTo(2);
@@ -567,10 +569,10 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
                     .isEqualByComparingTo("1");
         }
 
-        @ParameterizedTest(name = "{0}")
-        @ValueSource(strings = {"ELM", "PDU"})
+        @ParameterizedTest(name = "channel_id {0}")
+        @ValueSource(ints = {ELM, PDU})
         @DisplayName("a scheme with only non-BFM readings looks like one with no readings on the scheme screens")
-        void nonBfmOnlySchemeHasNoReadingsOnSchemeScreens(String channel) {
+        void nonBfmOnlySchemeHasNoReadingsOnSchemeScreens(int channel) {
             insertReading(schemeId, poId, "40", today.minusDays(2).atTime(6, 0), channel);
             insertReading(schemeId, poId, "45", today.minusDays(1).atTime(6, 0), channel);
 
@@ -588,10 +590,10 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
             assertThat(repo.listSchemeReadings(SCHEMA, schemeId, 0, 10)).isEmpty();
         }
 
-        @ParameterizedTest(name = "{0}")
-        @ValueSource(strings = {"ELM", "PDU"})
+        @ParameterizedTest(name = "channel_id {0}")
+        @ValueSource(ints = {ELM, PDU})
         @DisplayName("an operator with only non-BFM readings looks like one with no readings on the operator screens")
-        void nonBfmOnlyOperatorHasNoReadingsOnOperatorScreens(String channel) {
+        void nonBfmOnlyOperatorHasNoReadingsOnOperatorScreens(int channel) {
             insertReading(schemeId, poId, "40", today.minusDays(2).atTime(6, 0), channel);
             insertReading(schemeId, poId, "45", today.minusDays(1).atTime(6, 0), channel);
 
@@ -609,9 +611,9 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
         @DisplayName("an ELM reading between two BFM readings is not the later one's previous value")
         void lagSkipsAnElmReadingBetweenTwoBfmReadings() {
             LocalDateTime lastBfmAt = today.minusDays(1).atTime(6, 0);
-            insertReading(schemeId, poId, "100", today.minusDays(3).atTime(6, 0), "BFM");
-            insertReading(schemeId, poId, "5000", today.minusDays(2).atTime(6, 0), "ELM");
-            insertReading(schemeId, poId, "101.25", lastBfmAt, "BFM");
+            insertReading(schemeId, poId, "100", today.minusDays(3).atTime(6, 0), BFM);
+            insertReading(schemeId, poId, "5000", today.minusDays(2).atTime(6, 0), ELM);
+            insertReading(schemeId, poId, "101.25", lastBfmAt, BFM);
 
             PersonSchemeDetailsDTO scheme = schemeRow();
             assertThat(scheme.lastReading()).isEqualByComparingTo("101.25");
@@ -669,7 +671,7 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
         private void insertEarlierBfmDay() {
             LocalDate day = today.minusDays(3);
             insertWaterQuantityDay(schemeId, poId, day, 1250, 1, null);
-            insertAnalyticsReading(schemeId, day.atTime(6, 0), ANALYTICS_BFM);
+            insertAnalyticsReading(schemeId, day.atTime(6, 0), BFM);
         }
 
         @Test
@@ -678,7 +680,7 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
             insertEarlierBfmDay();
             LocalDate elmDay = today.minusDays(1);
             insertWaterQuantityDay(schemeId, poId, elmDay, 9999, 1, null);
-            insertAnalyticsReading(schemeId, elmDay.atTime(6, 0), ANALYTICS_ELM);
+            insertAnalyticsReading(schemeId, elmDay.atTime(6, 0), ELM);
 
             assertThat(lastWaterSupplied()).isEqualByComparingTo("1250");
         }
@@ -689,8 +691,8 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
             insertEarlierBfmDay();
             LocalDate mixedDay = today.minusDays(1);
             insertWaterQuantityDay(schemeId, poId, mixedDay, 9999, 1, null);
-            insertAnalyticsReading(schemeId, mixedDay.atTime(6, 0), ANALYTICS_BFM);
-            insertAnalyticsReading(schemeId, mixedDay.atTime(8, 0), ANALYTICS_ELM);
+            insertAnalyticsReading(schemeId, mixedDay.atTime(6, 0), BFM);
+            insertAnalyticsReading(schemeId, mixedDay.atTime(8, 0), ELM);
 
             assertThat(lastWaterSupplied()).isEqualByComparingTo("1250");
         }
@@ -698,8 +700,8 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
         @Test
         @DisplayName("falls back to flow readings, in litres, when analytics has no day")
         void fallsBackToFlowReadingsInLitres() {
-            insertReading(schemeId, poId, "100", today.minusDays(2).atTime(6, 0), "BFM");
-            insertReading(schemeId, poId, "101.25", today.minusDays(1).atTime(6, 0), "BFM");
+            insertReading(schemeId, poId, "100", today.minusDays(2).atTime(6, 0), BFM);
+            insertReading(schemeId, poId, "101.25", today.minusDays(1).atTime(6, 0), BFM);
 
             assertThat(lastWaterSupplied()).isEqualByComparingTo("1250");
         }
@@ -709,9 +711,9 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
         void fallbackDiffStaysWithinOneScheme() {
             long otherSchemeId = insertScheme("AN-2");
             mapUserToScheme(poId, otherSchemeId);
-            insertReading(schemeId, poId, "100", today.minusDays(3).atTime(6, 0), "BFM");
-            insertReading(otherSchemeId, poId, "5000", today.minusDays(2).atTime(6, 0), "BFM");
-            insertReading(schemeId, poId, "101.25", today.minusDays(1).atTime(6, 0), "BFM");
+            insertReading(schemeId, poId, "100", today.minusDays(3).atTime(6, 0), BFM);
+            insertReading(otherSchemeId, poId, "5000", today.minusDays(2).atTime(6, 0), BFM);
+            insertReading(schemeId, poId, "101.25", today.minusDays(1).atTime(6, 0), BFM);
 
             assertThat(lastWaterSupplied()).isEqualByComparingTo("1250");
         }
@@ -738,7 +740,7 @@ class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
         void countDurationFilterIgnoresANonBfmDay() {
             LocalDate elmDay = today.minusDays(1);
             insertWaterQuantityDay(schemeId, poId, elmDay, 9999, 1, null);
-            insertAnalyticsReading(schemeId, elmDay.atTime(6, 0), ANALYTICS_ELM);
+            insertAnalyticsReading(schemeId, elmDay.atTime(6, 0), ELM);
 
             assertThat(repo.countPumpOperatorsByPerson(SCHEMA, personId, null, null, 7, null, null)).isZero();
 

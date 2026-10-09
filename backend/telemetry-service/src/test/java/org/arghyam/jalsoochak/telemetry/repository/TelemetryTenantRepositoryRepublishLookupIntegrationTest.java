@@ -54,24 +54,26 @@ class TelemetryTenantRepositoryRepublishLookupIntegrationTest {
         jdbcTemplate = new JdbcTemplate(dataSource);
 
         // Returned, and inserted out of order so the ORDER BY is what sorts them.
-        insert(ELM_TO_DAY_MORNING, SCHEME, TO.atTime(9, 0), "ELM", false);
-        insert(PDU_FROM_DAY, SCHEME, FROM.atTime(18, 0), "PDU", false);
-        insert(PDU_TO_DAY_DAWN, SCHEME, TO.atTime(7, 0), "PDU", false);
-        insert(OTHER_SCHEME_PDU, OTHER_SCHEME, TO.atTime(12, 0), "PDU", false);
+        insert(ELM_TO_DAY_MORNING, SCHEME, TO.atTime(9, 0), ReadingChannel.ELM, false);
+        insert(PDU_FROM_DAY, SCHEME, FROM.atTime(18, 0), ReadingChannel.PDU, false);
+        insert(PDU_TO_DAY_DAWN, SCHEME, TO.atTime(7, 0), ReadingChannel.PDU, false);
+        insert(OTHER_SCHEME_PDU, OTHER_SCHEME, TO.atTime(12, 0), ReadingChannel.PDU, false);
         // Never returned: another channel, a row with no reading, a deleted row, and both edges.
-        insert(5L, SCHEME, TO.atTime(10, 0), "BFM", false);
+        insert(5L, SCHEME, TO.atTime(10, 0), ReadingChannel.BFM, false);
         insert(6L, SCHEME, TO.atTime(11, 0), null, false);
-        insert(7L, SCHEME, TO.atTime(13, 0), "ELM", true);
-        insert(8L, SCHEME, TO.plusDays(1).atTime(6, 0), "ELM", false);
-        insert(9L, SCHEME, FROM.minusDays(1).atTime(23, 59), "PDU", false);
+        insert(7L, SCHEME, TO.atTime(13, 0), ReadingChannel.ELM, true);
+        insert(8L, SCHEME, TO.plusDays(1).atTime(6, 0), ReadingChannel.ELM, false);
+        insert(9L, SCHEME, FROM.minusDays(1).atTime(23, 59), ReadingChannel.PDU, false);
     }
 
-    private static void insert(long id, long schemeId, LocalDateTime readingAt, String channel, boolean deleted) {
+    private static void insert(long id, long schemeId, LocalDateTime readingAt, ReadingChannel channel,
+                               boolean deleted) {
         jdbcTemplate.update("INSERT INTO " + SCHEMA + ".flow_reading_table "
                         + "(id, scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
-                        + " correlation_id, channel, created_by, deleted_at) "
+                        + " correlation_id, channel_id, created_by, deleted_at) "
                         + "VALUES (?, ?, ?, ?, 0, 42, ?, ?, ?, ?)",
-                id, schemeId, readingAt, readingAt.toLocalDate(), "corr-" + id, channel, OPERATOR,
+                id, schemeId, readingAt, readingAt.toLocalDate(), "corr-" + id,
+                channel == null ? null : channel.getCode(), OPERATOR,
                 deleted ? LocalDateTime.of(2026, 9, 3, 0, 0) : null);
     }
 

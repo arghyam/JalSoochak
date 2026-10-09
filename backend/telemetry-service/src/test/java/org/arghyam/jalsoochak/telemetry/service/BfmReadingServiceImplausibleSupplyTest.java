@@ -206,7 +206,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
                     any(), any(), any(), anyInt(), any(), any(), any(), any(),
-                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), eq(ReadingChannel.BFM.name()), eq("m3"));
+                    eq(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY), eq(ReadingChannel.BFM), eq("m3"));
         }
 
         @Test

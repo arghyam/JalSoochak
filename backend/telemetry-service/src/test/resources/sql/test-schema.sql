@@ -87,7 +87,7 @@ CREATE TABLE tenant_as.flow_reading_table (
     correlation_id    VARCHAR(255) NOT NULL,
     -- Written by every insert, so createFlowReading can run against this table.
     quantity          NUMERIC,
-    channel           VARCHAR(64),
+    channel_id        INTEGER,
     image_url         TEXT DEFAULT '',
     created_by        INTEGER      NOT NULL,
     created_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
@@ -122,7 +122,7 @@ CREATE TABLE tenant_zz.flow_reading_table (
     correlation_id    VARCHAR(255) NOT NULL,
     -- The columns every insert writes, which a pre-V40 schema already had (V9/V11 for the reasons).
     quantity          NUMERIC,
-    channel           VARCHAR(64),
+    channel_id        INTEGER,
     meter_change_reason  TEXT,
     issue_report_reason  TEXT,
     image_url         TEXT DEFAULT '',

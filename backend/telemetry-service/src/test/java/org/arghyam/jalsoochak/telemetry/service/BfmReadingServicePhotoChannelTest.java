@@ -183,7 +183,7 @@ class BfmReadingServicePhotoChannelTest {
         assertThat(response.isSuccess()).isTrue();
         verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                eq(IMAGE_URL), any(), anyInt(), any(), any(), any(), any(), any(), eq("PDU"), eq("min"));
+                eq(IMAGE_URL), any(), anyInt(), any(), any(), any(), any(), any(), eq(ReadingChannel.PDU), eq("min"));
         verify(bfmOcrExtractor, never()).extractReading(anyString(), any());
         verify(tenantConfigRepository, never()).findConfigValue(any(), startsWith("ocr"));
     }

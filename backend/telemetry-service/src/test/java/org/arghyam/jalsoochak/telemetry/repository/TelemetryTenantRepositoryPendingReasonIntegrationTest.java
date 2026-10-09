@@ -64,7 +64,7 @@ class TelemetryTenantRepositoryPendingReasonIntegrationTest {
                     confirmed_reading   NUMERIC,
                     correlation_id      VARCHAR(255) NOT NULL,
                     quantity            NUMERIC      NOT NULL DEFAULT 0,
-                    channel             VARCHAR(64),
+                    channel_id          INTEGER,
                     meter_change_reason TEXT,
                     issue_report_reason TEXT,
                     image_url           TEXT DEFAULT '',

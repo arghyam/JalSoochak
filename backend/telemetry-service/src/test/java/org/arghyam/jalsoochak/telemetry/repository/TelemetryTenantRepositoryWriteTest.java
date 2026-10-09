@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -115,7 +116,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 508L, "updated_at", UPDATED_AT));
 
             FlowReadingVersion version = repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, "ELM", "kW.h");
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, ReadingChannel.ELM, "kW.h");
 
             assertThat(version).isEqualTo(new FlowReadingVersion(508L, UPDATED_AT));
             assertThat(capturedReturningRowSql())
@@ -129,10 +130,10 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 509L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, "PDU", "min");
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, ReadingChannel.PDU, "min");
 
-            assertThat(capturedReturningRowSql()).contains("quantity, channel, submitted_unit, meter_change_reason");
-            assertThat(capturedReturningRowArgs()).containsSequence("PDU", "min");
+            assertThat(capturedReturningRowSql()).contains("quantity, channel_id, submitted_unit, meter_change_reason");
+            assertThat(capturedReturningRowArgs()).containsSequence(3, "min");
         }
 
         /** A pre-V56 schema has no submitted_unit column: the unit is dropped, the channel is not. */
@@ -142,10 +143,10 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 510L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, "ELM", "kW.h");
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, ReadingChannel.ELM, "kW.h");
 
-            assertThat(capturedReturningRowSql()).doesNotContain("submitted_unit").contains("quantity, channel");
-            assertThat(capturedReturningRowArgs()).contains("ELM").doesNotContain("kW.h");
+            assertThat(capturedReturningRowSql()).doesNotContain("submitted_unit").contains("quantity, channel_id");
+            assertThat(capturedReturningRowArgs()).contains(2).doesNotContain("kW.h");
         }
 
         /** Rows that hold no reading (scheme selection, location) keep a NULL channel, as before. */
@@ -474,10 +475,10 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
 
             FlowReadingVersion version = repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L,
                     READING_AT, BigDecimal.ZERO, new BigDecimal("11"), "corr-1", null, "", null,
-                    0, null, null, null, 3, null, "BFM", "m3");
+                    0, null, null, null, 3, null, ReadingChannel.BFM, "m3");
 
             assertThat(version).isEqualTo(new FlowReadingVersion(606L, UPDATED_AT));
-            assertThat(capturedReturningRowArgs()).containsSequence("BFM", "m3");
+            assertThat(capturedReturningRowArgs()).containsSequence(1, "m3");
         }
 
         @Test
@@ -771,17 +772,18 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
 
         @Test
         void updateFlowReadingChannelIsNoOpForNullReadingId() {
-            repository.updateFlowReadingChannel(SCHEMA, null, "BFM");
+            repository.updateFlowReadingChannel(SCHEMA, null, ReadingChannel.BFM);
 
             Mockito.verify(jdbcTemplate, Mockito.never())
                     .update(ArgumentMatchers.anyString(), ArgumentMatchers.any(Object[].class));
         }
 
         @Test
-        void updateFlowReadingChannelWritesShortCode() {
-            repository.updateFlowReadingChannel(SCHEMA, 5L, "BFM");
+        void updateFlowReadingChannelWritesTheChannelId() {
+            repository.updateFlowReadingChannel(SCHEMA, 5L, ReadingChannel.ELM);
 
-            assertThat(capturedUpdateArgs()).containsExactly("BFM", 5L);
+            assertThat(capturedUpdateSql()).contains("SET channel_id = ?");
+            assertThat(capturedUpdateArgs()).containsExactly(2, 5L);
         }
 
         @Test
