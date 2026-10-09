@@ -5,6 +5,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
@@ -118,6 +119,37 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
                 anyBoolean(),
                 eq(OcrRetryMode.RESILIENT)
         );
+    }
+
+    @Test
+    void processImageIsReportedViaWhatsApp() throws Exception {
+        MeterImageWebhookRequest request = MeterImageWebhookRequest.builder()
+                .contactId("919876543210")
+                .mediaId("media-1")
+                .mediaUrl("https://example.com/meter.jpg")
+                .build();
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+        when(inboundMediaService.downloadImage("media-1", "https://example.com/meter.jpg")).thenReturn(new byte[]{1, 2, 3});
+        when(inboundMediaService.uploadImage("919876543210", new byte[]{1, 2, 3})).thenReturn("https://cdn.example.com/meter.jpg");
+        when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, ReadingTime.today()))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
+                .thenReturn(CreateReadingResponse.builder().success(true).message("ok").qualityStatus("CONFIRMED").build());
+        when(localizationService.localizeMessage("ok", "english")).thenReturn("ok");
+
+        service.processImage(request);
+
+        ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(),
+                anyBoolean(), any(OcrRetryMode.class));
+        assertEquals(ReportingChannel.WHATSAPP, requestCaptor.getValue().getReportedVia());
     }
 
     @Test
@@ -331,6 +363,36 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
                 anyBoolean(), any(OcrRetryMode.class));
 
         assertEquals(true, requestCaptor.getValue().isSupplyPlausibilityChecked());
+    }
+
+    @Test
+    void processCanonicalReadingIsReportedViaTheApi() {
+        CanonicalReadingRequest request = CanonicalReadingRequest.builder()
+                .confirmedReading(new BigDecimal("123.4"))
+                .centreSchemeId("30244993")
+                .phoneNumber("919876543210")
+                .build();
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_assam",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
+                .thenReturn(Optional.of(30244993L));
+        when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(),
+                anyString(), anyBoolean(), any(OcrRetryMode.class)))
+                .thenReturn(CreateReadingResponse.builder().success(true).qualityStatus("CONFIRMED").build());
+
+        service.processCanonicalReading(request, 22);
+
+        ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(),
+                anyBoolean(), any(OcrRetryMode.class));
+        assertEquals(ReportingChannel.API, requestCaptor.getValue().getReportedVia());
     }
 
     /**

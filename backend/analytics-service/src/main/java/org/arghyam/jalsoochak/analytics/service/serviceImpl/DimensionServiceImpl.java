@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
@@ -13,14 +14,13 @@ import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
-import org.arghyam.jalsoochak.analytics.entity.DimScheme;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.entity.DimTenantWaterNorm;
 import org.arghyam.jalsoochak.analytics.entity.DimTenantWorkStatusFilter;
 import org.arghyam.jalsoochak.analytics.entity.DimUser;
 import org.arghyam.jalsoochak.analytics.repository.DimDepartmentLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
-import org.arghyam.jalsoochak.analytics.repository.DimSchemeRepository;
+import org.arghyam.jalsoochak.analytics.repository.DimSchemeWriteRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantWaterNormRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantWorkStatusFilterRepository;
@@ -57,7 +57,7 @@ public class DimensionServiceImpl implements DimensionService {
 
     private final DimTenantRepository dimTenantRepository;
     private final DimUserRepository dimUserRepository;
-    private final DimSchemeRepository dimSchemeRepository;
+    private final DimSchemeWriteRepository dimSchemeWriteRepository;
     private final DimLgdLocationRepository dimLgdLocationRepository;
     private final DimDepartmentLocationRepository dimDepartmentLocationRepository;
     private final DimTenantWaterNormRepository dimTenantWaterNormRepository;
@@ -164,42 +164,28 @@ public class DimensionServiceImpl implements DimensionService {
     @Override
     @Transactional
     public void upsertScheme(SchemeEvent event) {
-        DimScheme scheme = dimSchemeRepository.findTopByTenantIdAndSchemeIdOrderByUpdatedAtDescCreatedAtDesc(
-                        event.getTenantId(), event.getSchemeId())
-                .orElse(DimScheme.builder()
-                        .schemeId(event.getSchemeId())
-                        .createdAt(LocalDateTime.now())
-                        .build());
+        int rows = dimSchemeWriteRepository.upsertDetails(event);
+        log.info("Upserted dim_scheme_table details [tenantId={}, schemeId={}, rows={}]",
+                event.getTenantId(), event.getSchemeId(), rows);
+    }
 
-        scheme.setTenantId(event.getTenantId());
-        scheme.setSchemeName(event.getSchemeName());
-        scheme.setStateSchemeId(event.getStateSchemeId());
-        scheme.setCentreSchemeId(event.getCentreSchemeId());
-        scheme.setLongitude(event.getLongitude());
-        scheme.setLatitude(event.getLatitude());
-
-        scheme.setParentLgdLocationId(event.getParentLgdLocationId());
-        scheme.setLevel1LgdId(event.getLevel1LgdId());
-        scheme.setLevel2LgdId(event.getLevel2LgdId());
-        scheme.setLevel3LgdId(event.getLevel3LgdId());
-        scheme.setLevel4LgdId(event.getLevel4LgdId());
-        scheme.setLevel5LgdId(event.getLevel5LgdId());
-        scheme.setLevel6LgdId(event.getLevel6LgdId());
-
-        scheme.setParentDepartmentLocationId(event.getParentDepartmentLocationId());
-        scheme.setLevel1DeptId(event.getLevel1DeptId());
-        scheme.setLevel2DeptId(event.getLevel2DeptId());
-        scheme.setLevel3DeptId(event.getLevel3DeptId());
-        scheme.setLevel4DeptId(event.getLevel4DeptId());
-        scheme.setLevel5DeptId(event.getLevel5DeptId());
-        scheme.setLevel6DeptId(event.getLevel6DeptId());
-
-        scheme.setOperatingStatus(event.getStatus());
-        scheme.setWorkStatus(event.getWorkStatus());
-        scheme.setUpdatedAt(LocalDateTime.now());
-
-        dimSchemeRepository.save(scheme);
-        log.info("Upserted dim_scheme_table [id={}]", event.getSchemeId());
+    /**
+     * Skips a message missing either list instead of reading it as "none": that would wipe the scheme's
+     * villages or sub-divisions, and a retry cannot add the list.
+     */
+    @Override
+    @Transactional
+    public void replaceSchemeMappings(SchemeMappingsReplacedEvent event) {
+        if (event.getTenantId() == null || event.getSchemeId() == null
+                || event.getVillages() == null || event.getSubDivisions() == null) {
+            log.warn("Skipping dim_scheme_table mappings replace: missing tenantId/schemeId/villages/subDivisions "
+                    + "[tenantId={}, schemeId={}]", event.getTenantId(), event.getSchemeId());
+            return;
+        }
+        int rows = dimSchemeWriteRepository.replaceMappings(event);
+        log.info("Replaced dim_scheme_table mappings [tenantId={}, schemeId={}, villages={}, subDivisions={}, rows={}]",
+                event.getTenantId(), event.getSchemeId(), event.getVillages().size(),
+                event.getSubDivisions().size(), rows);
     }
 
     @Override

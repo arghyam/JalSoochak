@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.service.TenantDetailsService;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
+import org.arghyam.jalsoochak.analytics.scheduler.ScheduledTaskClaim;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
@@ -31,7 +32,8 @@ class TenantDataWarmCacheTaskTest {
                 dimTenantRepository,
                 dimLgdLocationRepository,
                 tenantDetailsService,
-                windowProvider
+                windowProvider,
+                claimReturning(true)
         );
 
         DimTenant tenantA = new DimTenant();
@@ -73,7 +75,8 @@ class TenantDataWarmCacheTaskTest {
                 dimTenantRepository,
                 dimLgdLocationRepository,
                 tenantDetailsService,
-                windowProvider
+                windowProvider,
+                claimReturning(true)
         );
 
         DimTenant tenant = new DimTenant();
@@ -104,7 +107,8 @@ class TenantDataWarmCacheTaskTest {
                 dimTenantRepository,
                 dimLgdLocationRepository,
                 tenantDetailsService,
-                windowProvider
+                windowProvider,
+                claimReturning(true)
         );
 
         DimTenant tenant = new DimTenant();
@@ -116,6 +120,33 @@ class TenantDataWarmCacheTaskTest {
         task.runTask();
 
         verifyNoInteractions(tenantDetailsService);
+    }
+
+    @Test
+    void runTask_skipsWhenAnotherInstanceClaimedTheRun() {
+        DimTenantRepository dimTenantRepository = mock(DimTenantRepository.class);
+        DimLgdLocationRepository dimLgdLocationRepository = mock(DimLgdLocationRepository.class);
+        TenantDetailsService tenantDetailsService = mock(TenantDetailsService.class);
+        DefaultAnalyticsDateWindowProvider windowProvider =
+                new DefaultAnalyticsDateWindowProvider("Asia/Kolkata", 30);
+
+        TenantDataWarmCacheTask task = new TenantDataWarmCacheTask(
+                dimTenantRepository,
+                dimLgdLocationRepository,
+                tenantDetailsService,
+                windowProvider,
+                claimReturning(false)
+        );
+
+        task.runTask();
+
+        verifyNoInteractions(dimTenantRepository, dimLgdLocationRepository, tenantDetailsService);
+    }
+
+    private static ScheduledTaskClaim claimReturning(boolean won) {
+        ScheduledTaskClaim claim = mock(ScheduledTaskClaim.class);
+        when(claim.claimToday("tenant-data-warm-cache")).thenReturn(won);
+        return claim;
     }
 }
 

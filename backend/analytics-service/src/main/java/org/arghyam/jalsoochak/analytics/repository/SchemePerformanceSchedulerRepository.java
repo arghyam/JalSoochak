@@ -76,13 +76,10 @@ public interface SchemePerformanceSchedulerRepository extends JpaRepository<Fact
             -- SchemeRegularityRepository's performance-score queries entirely, inflating the average
             -- by hiding the failures. Scope is the read side's job -- those queries already apply the
             -- {{WS}} work-status policy -- so do not reintroduce a filter here.
-            WHERE NOT EXISTS (
-                  SELECT 1
-                  FROM analytics_schema.fact_scheme_performance_table fp
-                  WHERE fp.scheme_id = ds.scheme_id
-                    AND fp.tenant_id = ds.tenant_id
-                    AND fp.last_water_supply_date = :targetDate
-              )
+            -- One score per (tenant, scheme, day), keyed by uq_fact_scheme_performance (V57). A run on
+            -- another pod at the same time waits on the uncommitted rows of this run, then skips them; if
+            -- this run rolls back, that one inserts them instead.
+            ON CONFLICT (tenant_id, scheme_id, last_water_supply_date) DO NOTHING
             """, nativeQuery = true)
     int insertDailySchemePerformanceScores(@Param("targetDate") LocalDate targetDate);
 }

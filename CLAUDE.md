@@ -184,6 +184,16 @@ must be public and anonymously readable either way.
   environment needs its own approved template (`WHATSAPP_DAILY_REPORT_SO_LINK_TEMPLATE_ID`); set
   `DAILY_REPORT_LINK_BUTTON_BASE_URL` to have that checked at startup.
 
+### Delivery ledger
+
+Every outbound message is recorded in `<tenant>.notification_table` (or `common_schema.notification_table`
+when it has no tenant) by `NotificationLedger` — V63 reshaped the table. A send opens its row before
+calling the provider and closes it with the answer; provider status arrives by pull (WhatsApp reconcile,
+`NotificationStatusSweepService`) and push (`POST /api/v1/message/delivery-receipts/{providerId}`).
+The ledger never throws into a send, stores no address or message text, and is off unless
+`NOTIFICATIONS_LEDGER_ENABLED`. A new send path must record itself — `NotificationEventRouterTest`
+fails until it does. Details: `docs/notification-delivery-ledger.md`.
+
 ### Privacy rule
 
 Phone numbers are PII — log them only at `DEBUG` level. Never include raw phone numbers in

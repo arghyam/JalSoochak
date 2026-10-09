@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.provider.whatsapp.glific;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -387,6 +388,34 @@ class GlificConversationResumeGatewayTest {
                     .containsEntry("message", "Reading recorded.")
                     .containsEntry("correlation_id", "corr-1")
                     .containsEntry("quality_status", "ACCEPTED");
+        }
+
+        @Test
+        void carriesTheErrorCodeSoTheFlowCanBranchOnANoMeterPhoto() throws JsonProcessingException {
+            stubResumeMutation(Map.of("data", Map.of("resumeContactFlow", Map.of("success", true))));
+            CreateReadingResponse noMeter = result();
+            noMeter.setSuccess(false);
+            noMeter.setQualityStatus("REJECTED");
+            noMeter.setErrorCode(TelemetryErrorCode.NO_METER_DETECTED);
+
+            service.resumeReadingsFlow(CONTACT, JOB_ID, noMeter);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> payload = new ObjectMapper().readValue(String.valueOf(
+                    variablesOf(capturedGraphQlRequest("resumeContactFlow")).get("result")), Map.class);
+            assertThat(payload).containsEntry("error_code", "NO_METER_DETECTED");
+        }
+
+        @Test
+        void carriesANullErrorCodeOnSuccess() throws JsonProcessingException {
+            stubResumeMutation(Map.of("data", Map.of("resumeContactFlow", Map.of("success", true))));
+
+            service.resumeReadingsFlow(CONTACT, JOB_ID, result());
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> payload = new ObjectMapper().readValue(String.valueOf(
+                    variablesOf(capturedGraphQlRequest("resumeContactFlow")).get("result")), Map.class);
+            assertThat(payload).containsEntry("error_code", null);
         }
 
         @Test

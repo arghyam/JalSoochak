@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
@@ -15,6 +16,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.ManualReadingMaxValues;
 import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
@@ -30,6 +32,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
+import static org.mockito.Mockito.mock;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -103,7 +106,7 @@ class BfmReadingServiceAssertedReadingTest {
                         null,
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
-                new SubmittedValueCapture(),
+                new SubmittedValueCapture(mock(ManualReadingMaxValues.class)),
                 pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
@@ -128,7 +131,7 @@ class BfmReadingServiceAssertedReadingTest {
                 isNull(), isNull(), isNull(), eq(IngestionSource.NORMAL), isNull(), isNull(), isNull(),
                 eq(RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED),
                 // SUPPLY-PLAUSIBILITY: unchecked path, so the row carries no quarantine marker.
-                isNull(), any(), any());
+                isNull(), any(), any(), eq(ReportingChannel.API));
     }
 
     @Test
@@ -167,7 +170,7 @@ class BfmReadingServiceAssertedReadingTest {
         when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(SCHEME_ID), eq(OPERATOR_ID),
                 any(LocalDate.class))).thenReturn(Optional.empty());
         when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse response = service.createReading(
@@ -182,7 +185,7 @@ class BfmReadingServiceAssertedReadingTest {
         // The image path must not be routed through the tracking/provenance overload.
         verify(repo, org.mockito.Mockito.never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(),
                 anyLong(), any(), any(), any(), anyString(), any(), any(), any(), anyInt(), any(), any(),
-                any(), any(), any(), any(), any());
+                any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -229,6 +232,7 @@ class BfmReadingServiceAssertedReadingTest {
                 .operatorId(OPERATOR_ID)
                 .readingValue(value)
                 .externallyAsserted(true)
+                .reportedVia(ReportingChannel.API)
                 .build();
     }
 
@@ -237,7 +241,7 @@ class BfmReadingServiceAssertedReadingTest {
                 any(LocalDate.class))).thenReturn(Optional.empty());
         when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(99L, null));
     }
 }

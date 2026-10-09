@@ -70,6 +70,14 @@ class SmsCountrySenderFactoryTest {
     }
 
     @Test
+    void builtSender_recordsTheFactorysWireNameInTheLedger() {
+        SmsSender sender = factory.create(settings("SENDER-A", "pe-a", "tmpl-a", "hdr-a", "A says {otp}"),
+                secrets(TENANT_A_KEY, TENANT_A_TOKEN));
+
+        assertThat(sender.providerId()).isEqualTo(factory.providerId().getWireName());
+    }
+
+    @Test
     void secretNameConstants_matchTheOnesTheProviderTypeDeclares() {
         // The factory duplicates the names because the enum is a copy of tenant-service's, which is
         // what the secret store writes against. If the two drift, every configured tenant falls back.

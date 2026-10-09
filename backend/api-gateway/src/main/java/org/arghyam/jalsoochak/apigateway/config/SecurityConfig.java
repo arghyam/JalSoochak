@@ -76,8 +76,13 @@ public class SecurityConfig {
     /** scheme-service's public scheme lookups. */
     private static final String[] SCHEME_SERVICE_PUBLIC = {"/api/v1/public/**"};
 
-    /** message-service's welcome trigger, called by the chatbot flow. */
-    private static final String[] MESSAGE_SERVICE_PUBLIC = {"/api/v1/message/trigger-welcome-message"};
+    /**
+     * message-service's welcome trigger, called by the chatbot flow, and the endpoint messaging providers
+     * push delivery reports to — authenticated there by each provider's signature or shared token.
+     */
+    private static final String[] MESSAGE_SERVICE_PUBLIC = {
+            "/api/v1/message/trigger-welcome-message",
+            "/api/v1/message/delivery-receipts/**"};
 
     /**
      * analytics-service publishes its dashboards anonymously, GET only, and narrows that further to its

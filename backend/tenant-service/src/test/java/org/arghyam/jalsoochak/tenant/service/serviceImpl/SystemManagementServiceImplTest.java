@@ -5,9 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -224,6 +226,58 @@ class SystemManagementServiceImplTest {
             assertTrue(configValue instanceof WaterSupplyThresholdConfigDTO);
             assertEquals(20.0, ((WaterSupplyThresholdConfigDTO) configValue).getUndersupplyThresholdPercent());
             assertEquals(30.0, ((WaterSupplyThresholdConfigDTO) configValue).getOversupplyThresholdPercent());
+        }
+
+        @Test
+        @DisplayName("MANUAL_READING_MAX_VALUE is stored for tenant-0 with upper-case channel codes")
+        void setSystemConfigs_ManualReadingMaxValue_StoresUpperCaseChannels() throws Exception {
+            Map<SystemConfigKeyEnum, JsonNode> newConfigs = new HashMap<>();
+            newConfigs.put(SystemConfigKeyEnum.MANUAL_READING_MAX_VALUE,
+                    objectMapper.readTree("{\"maxValues\":{\"elm\":\"9999999\"}}"));
+            SetSystemConfigRequestDTO request = SetSystemConfigRequestDTO.builder().configs(newConfigs).build();
+
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("admin-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("admin-uuid")).thenReturn(Optional.of(1));
+            ArgumentCaptor<String> serialized = ArgumentCaptor.forClass(String.class);
+            when(tenantCommonRepository.upsertConfig(eq(0),
+                    eq(SystemConfigKeyEnum.MANUAL_READING_MAX_VALUE.name()), serialized.capture(), eq(1)))
+                    .thenAnswer(inv -> Optional.of(ConfigDTO.builder()
+                            .configKey(SystemConfigKeyEnum.MANUAL_READING_MAX_VALUE.name())
+                            .configValue(inv.getArgument(2))
+                            .build()));
+
+            systemManagementService.setSystemConfigs(request);
+
+            assertEquals("{\"maxValues\":{\"ELM\":9999999}}", serialized.getValue());
+        }
+
+        @Test
+        @DisplayName("MANUAL_READING_MAX_VALUE with an unknown channel is rejected before it reaches the database")
+        void setSystemConfigs_ManualReadingMaxValue_UnknownChannel_Rejected() throws Exception {
+            Map<SystemConfigKeyEnum, JsonNode> newConfigs = new HashMap<>();
+            newConfigs.put(SystemConfigKeyEnum.MANUAL_READING_MAX_VALUE,
+                    objectMapper.readTree("{\"maxValues\":{\"XYZ\":10}}"));
+            SetSystemConfigRequestDTO request = SetSystemConfigRequestDTO.builder().configs(newConfigs).build();
+
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("admin-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("admin-uuid")).thenReturn(Optional.of(1));
+
+            assertThrows(InvalidConfigValueException.class, () -> systemManagementService.setSystemConfigs(request));
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("MANUAL_READING_MAX_VALUE of null is rejected before it reaches the database")
+        void setSystemConfigs_ManualReadingMaxValue_Null_Rejected() throws Exception {
+            Map<SystemConfigKeyEnum, JsonNode> newConfigs = new HashMap<>();
+            newConfigs.put(SystemConfigKeyEnum.MANUAL_READING_MAX_VALUE, objectMapper.readTree("null"));
+            SetSystemConfigRequestDTO request = SetSystemConfigRequestDTO.builder().configs(newConfigs).build();
+
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("admin-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("admin-uuid")).thenReturn(Optional.of(1));
+
+            assertThrows(InvalidConfigValueException.class, () -> systemManagementService.setSystemConfigs(request));
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
         }
 
         @Test

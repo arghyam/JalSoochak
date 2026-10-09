@@ -55,6 +55,13 @@ spring:
       password: ${REDIS_PASSWORD:}
       database: ${REDIS_DATABASE:0}
 
+  task:
+    scheduling:
+      shutdown:
+        # Let an in-flight notification job finish on SIGTERM rather than interrupting it mid-send.
+        await-termination: true
+        await-termination-period: 20s # inside Kubernetes' default 30 s termination grace
+
   kafka:
     bootstrap-servers: localhost:9092
     consumer:
@@ -100,6 +107,13 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+
+# ────────────────────────────────────────────────────────────── # Notification Job Scheduler # ──────────────────────────────────────────────────────────────
+# Every pod checks once a minute (IST) which tenant jobs below are due; a row in
+# common_schema.scheduled_job_run_table lets exactly one pod run each job once per period.
+notification-scheduler:
+  enabled: ${NOTIFICATION_SCHEDULER_ENABLED:true} # kill switch for all four jobs on this pod
+  grace: ${NOTIFICATION_SCHEDULER_GRACE:15m} # a job may still start this long after its slot; later, it is skipped for the day
 
 # ────────────────────────────────────────────────────────────── # Nudge & Escalation Scheduler Configuration # ──────────────────────────────────────────────────────────────
 # Fallback defaults used when a tenant has no row in tenant_config_master_table

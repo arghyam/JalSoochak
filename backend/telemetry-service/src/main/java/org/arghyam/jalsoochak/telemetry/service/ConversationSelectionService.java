@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
@@ -388,7 +389,8 @@ public class ConversationSelectionService {
                     operatorWithSchema.schemaName(),
                     selectedScheme.id(),
                     operatorWithSchema.operator().id(),
-                    ReadingTime.now()
+                    ReadingTime.now(),
+                    ReportingChannel.WHATSAPP
             );
 
             String schemeName = selectedScheme.name();

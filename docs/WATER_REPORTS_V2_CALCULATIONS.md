@@ -41,8 +41,8 @@ operational schema at render time, immediately before drawing the PDF.
 
 ```
 tenant-service                        analytics-service                   message-service
- TenantSchedulerManager                AnalyticsKafkaConsumer              KafkaConsumer
-  └ one CronTrigger per tenant (IST)    ├ DAILY_REPORT_REQUEST              └ NotificationEventRouter
+ NotificationJobScheduler              AnalyticsKafkaConsumer              KafkaConsumer
+  └ IST tick, one claim per run         ├ DAILY_REPORT_REQUEST              └ NotificationEventRouter
  DailySituationReportSchedulerService   │  └ DailySituationReportService       ├ resolve PII (tenant schema)
  WeeklySituationReportSchedulerService  └ WEEKLY_REPORT_REQUEST               ├ DailyReportPdfService
   └ publish <X>_REPORT_REQUEST             └ WeeklySituationReportService     │ WeeklyReportPdfService  (PDFBox)
@@ -220,7 +220,7 @@ So an IST calendar day `D` maps to the half-open UTC interval
 day.atStartOfDay(ZoneId.of("Asia/Kolkata")).withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime()
 ```
 
-All scheduling runs in `Asia/Kolkata` (`CronTrigger` with an explicit `TimeZone`).
+All scheduling runs in `Asia/Kolkata`: the scheduler ticks on an IST cron and builds each slot on the IST date.
 
 ---
 
@@ -589,9 +589,19 @@ cannot open.
 
 ### 7.1 Schedules — per tenant
 
-Both crons are stored in `common_schema.tenant_config_master_table` and read at schedule time, with
-`application.yml` as the fallback. `TenantSchedulerManager` holds one `ScheduledFuture` per job per
-tenant and re-schedules on config change without a restart.
+Both schedules are stored in `common_schema.tenant_config_master_table`, with `application.yml` as the
+fallback for a missing row or an out-of-range value. `NotificationJobScheduler` re-reads them every
+minute on every pod, so a change applies within a minute without a restart.
+
+- **Once per period.** A due run is claimed by a row in `common_schema.scheduled_job_run_table`, so
+  exactly one pod runs it. The period is the IST date for the daily report, and the first day of the
+  reported week for the weekly report, so moving `dayOfWeek` within a week cannot send that week twice.
+  A failed run is not retried.
+- **Grace.** A run may still start up to `notification-scheduler.grace` (default 15 minutes) after its
+  slot; a slot missed by more than that is skipped for the period.
+- **Kill switch.** `NOTIFICATION_SCHEDULER_ENABLED=false` stops the scheduled jobs on that pod.
+
+`docs/notification-flows.md` §1 has the full claim and failure rules.
 
 | Config key                     | JSON                                                                                 | Default                                 |
 | ------------------------------ | ------------------------------------------------------------------------------------ | --------------------------------------- |
@@ -600,9 +610,9 @@ tenant and re-schedules on config change without a restart.
 
 `dayOfWeek` and `weekStartDay` both follow the cron convention 0–7 where both 0 and 7 are Sunday; 1 is
 Monday. `schedule` is when the job fires, `weekStartDay` is which seven days it covers — they are
-independent, and the scheduler WARNs when they differ. Written
+independent, and each weekly run WARNs when they differ. Written
 through `PUT /api/v1/tenants/{tenantId}/config`, which requires `SUPER_USER`, or `STATE_ADMIN` on
-one's own tenant.
+one's own tenant, and rejects a null value or an out-of-range field with 400.
 
 ### 7.2 Thresholds
 

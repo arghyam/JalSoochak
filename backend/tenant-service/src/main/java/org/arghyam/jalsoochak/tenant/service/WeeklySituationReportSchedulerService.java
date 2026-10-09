@@ -10,7 +10,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -23,7 +22,7 @@ import java.util.UUID;
  * officer to {@code common-topic}, asking analytics-service to compute that officer's Weekly Water
  * Service Situation Report KPIs (which message-service then renders and delivers).
  *
- * <p>Called by {@link TenantSchedulerManager} on each tenant's individual weekly schedule. Unlike the
+ * <p>Called by {@link NotificationJobScheduler} on each tenant's individual weekly schedule. Unlike the
  * daily report, both Section Officers and Sub-Divisional Officers receive this one — they get
  * different layouts, resolved downstream from {@code officerUserType}.</p>
  *
@@ -40,8 +39,6 @@ import java.util.UUID;
 public class WeeklySituationReportSchedulerService {
 
     private static final String COMMON_TOPIC = "common-topic";
-    /** Supply dates are stored on the IST calendar day, so week boundaries must be found in IST. */
-    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private static final String SDO_ROLE = "SUB_DIVISIONAL_OFFICER";
     private static final int DAYS_IN_WEEK = 7;
 
@@ -52,9 +49,13 @@ public class WeeklySituationReportSchedulerService {
     @Value("${weekly-report.officer.user-types:SECTION_OFFICER,SUB_DIVISIONAL_OFFICER}")
     private String officerUserTypesCsv;
 
-    public void processWeeklyReportsForTenant(String schema, int tenantId, DayOfWeek weekStartDay) {
-        LocalDate weekEnd = lastCompletedWeekEnd(LocalDate.now(IST), weekStartDay);
-        LocalDate weekStart = weekEnd.minusDays(DAYS_IN_WEEK - 1L);
+    /**
+     * @param runDate the IST day the run is for; the reported week is the last one completed before it
+     */
+    public void processWeeklyReportsForTenant(String schema, int tenantId, DayOfWeek weekStartDay,
+            LocalDate runDate) {
+        LocalDate weekStart = reportedWeekStart(runDate, weekStartDay);
+        LocalDate weekEnd = weekStart.plusDays(DAYS_IN_WEEK - 1L);
         LocalDate previousWeekEnd = weekEnd.minusDays(DAYS_IN_WEEK);
         LocalDate previousWeekStart = weekStart.minusDays(DAYS_IN_WEEK);
 
@@ -110,6 +111,15 @@ public class WeeklySituationReportSchedulerService {
         log.info("[WeeklyReportJob] corr={} done: tenant={} schema={} week={}..{} requested={} officer(s)"
                         + " requestedByRole={} tookMs={}",
                 correlationId, tenantId, schema, weekStart, weekEnd, count, requestedByRole, tookMs);
+    }
+
+    /**
+     * The first day of the week a run on {@code runDate} reports on: the last complete week before
+     * it, starting on {@code weekStartDay}. Also the period a weekly run is claimed under, so the
+     * claim and the report always name the same week.
+     */
+    static LocalDate reportedWeekStart(LocalDate runDate, DayOfWeek weekStartDay) {
+        return lastCompletedWeekEnd(runDate, weekStartDay).minusDays(DAYS_IN_WEEK - 1L);
     }
 
     /**

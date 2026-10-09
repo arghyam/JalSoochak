@@ -129,3 +129,52 @@ CREATE TABLE tenant_test.flow_reading_table (
     created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- ── Delivery ledger (V63) ─────────────────────────────────────────────────────
+-- The notification tables in their shape BEFORE V63, as V30 provisions them in every tenant schema.
+-- NotificationLedgerRepositoryIntegrationTest then applies the real V63 shaping function, read from
+-- backend/database, so these tests run against the migration itself rather than a copy of it.
+CREATE TABLE common_schema.channel_master_table (
+    id           INTEGER      PRIMARY KEY,
+    title        VARCHAR(255) NOT NULL UNIQUE,
+    channel_type INTEGER
+);
+
+INSERT INTO common_schema.channel_master_table (id, title, channel_type)
+VALUES (6, 'WHATSAPP', 2), (8, 'EMAIL', 2), (9, 'SMS', 2);
+
+CREATE TABLE tenant_test.notification_table (
+    id            SERIAL       PRIMARY KEY,
+    uuid          VARCHAR(36)  NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
+    user_id       INTEGER      NOT NULL REFERENCES tenant_test.user_table(id),
+    message       TEXT,
+    seen_status   BOOLEAN      NOT NULL DEFAULT FALSE,
+    channel       INTEGER      NOT NULL,
+    message_blob  TEXT         NOT NULL,
+    message_type  VARCHAR(50)  NOT NULL,
+    created_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
+    deleted_at    TIMESTAMP,
+    deleted_by    INTEGER
+);
+
+CREATE TABLE common_schema.notification_table (
+    id            SERIAL       PRIMARY KEY,
+    uuid          VARCHAR(36)  NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
+    user_id       INTEGER      NOT NULL,
+    message       TEXT,
+    seen_status   BOOLEAN      NOT NULL DEFAULT FALSE,
+    channel       INTEGER      NOT NULL,
+    message_blob  TEXT         NOT NULL,
+    message_type  VARCHAR(50)  NOT NULL,
+    created_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
+    deleted_at    TIMESTAMP,
+    deleted_by    INTEGER
+);
+
+CREATE TABLE common_schema.notification_status_sync_state (
+    source      VARCHAR(64)  PRIMARY KEY,
+    cursor_at   TIMESTAMP    NOT NULL,
+    updated_at  TIMESTAMP    NOT NULL DEFAULT NOW()
+);

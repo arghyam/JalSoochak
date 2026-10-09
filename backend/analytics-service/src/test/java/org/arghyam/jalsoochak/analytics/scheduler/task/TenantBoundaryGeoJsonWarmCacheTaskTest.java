@@ -4,7 +4,9 @@ import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
+import org.arghyam.jalsoochak.analytics.scheduler.ScheduledTaskClaim;
 import org.arghyam.jalsoochak.analytics.service.TenantDetailsService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,6 +46,8 @@ class TenantBoundaryGeoJsonWarmCacheTaskTest {
     private DimLgdLocationRepository dimLgdLocationRepository;
     @Mock
     private TenantDetailsService tenantDetailsService;
+    @Mock
+    private ScheduledTaskClaim scheduledTaskClaim;
 
     @InjectMocks
     private TenantBoundaryGeoJsonWarmCacheTask task;
@@ -58,6 +62,11 @@ class TenantBoundaryGeoJsonWarmCacheTaskTest {
         DimLgdLocation location = new DimLgdLocation();
         location.setLgdId(lgdId);
         return location;
+    }
+
+    @BeforeEach
+    void claimTheRun() {
+        when(scheduledTaskClaim.claimToday("tenant-boundaries-warm-cache")).thenReturn(true);
     }
 
     @Test
@@ -78,6 +87,15 @@ class TenantBoundaryGeoJsonWarmCacheTaskTest {
 
         verify(tenantDetailsService).getTenantBoundaryGeoJson(1, 101);
         verify(tenantDetailsService).getTenantBoundaryGeoJson(2, 201);
+    }
+
+    @Test
+    void skipsWhenAnotherInstanceClaimedTheRun() {
+        when(scheduledTaskClaim.claimToday("tenant-boundaries-warm-cache")).thenReturn(false);
+
+        task.runTask();
+
+        verifyNoInteractions(dimTenantRepository, dimLgdLocationRepository, tenantDetailsService);
     }
 
     @Test

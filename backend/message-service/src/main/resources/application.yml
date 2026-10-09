@@ -354,11 +354,57 @@ notifications:
     dry-run: ${NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN:false}
   sms:
     dry-run: ${NOTIFICATIONS_SMS_DRY_RUN:false}
+    # Where SMSCountry should push each OTP's delivery report (DeliveryReceiptController). Include the
+    # shared token: https://<public-host>/api/v1/message/delivery-receipts/smscountry?token=<secret>.
+    # Blank asks for none; delivery status then comes from the status sweep's lookups alone.
+    delivery-report:
+      url: ${NOTIFICATIONS_SMS_DELIVERY_REPORT_URL:}
+    webhook:
+      # SHA-256 hex of the token(s) in the URL above, comma-separated. Never the token itself.
+      token-hashes: ${NOTIFICATIONS_SMS_WEBHOOK_TOKEN_HASHES:}
+      mode: ${NOTIFICATIONS_SMS_WEBHOOK_MODE:ENFORCE} # ENFORCE | AUDIT | OFF
 
 # ──────────────────────────────────────────────────────────────
 # WhatsApp provider API (HSM templates)
 # ──────────────────────────────────────────────────────────────
 
+  # Delivery status for account emails (DeliveryReceiptController, NotificationStatusSweepService).
+  email:
+    webhook:
+      # SendGrid's Signed Event Webhook public key(s), base64 as the console shows them, comma-separated
+      # — one per SendGrid account whose events are pointed at /api/v1/message/delivery-receipts/sendgrid.
+      # The platform account's key goes in bare; a tenant's own account's as <tenant_code>:<key>, so its
+      # events can only change that tenant's rows.
+      verification-keys: ${NOTIFICATIONS_EMAIL_WEBHOOK_VERIFICATION_KEYS:}
+      mode: ${NOTIFICATIONS_EMAIL_WEBHOOK_MODE:ENFORCE} # ENFORCE | AUDIT | OFF
+    # Pull status from SendGrid's Email Activity API, a paid add-on on SendGrid's side.
+    status-lookup:
+      enabled: ${NOTIFICATIONS_EMAIL_STATUS_LOOKUP_ENABLED:false}
+  # The outbound delivery ledger: one notification_table row per message per recipient (V63).
+  # Off until V63 has been applied to this environment's database.
+  ledger:
+    enabled: ${NOTIFICATIONS_LEDGER_ENABLED:false}
+    retention-days: ${NOTIFICATIONS_LEDGER_RETENTION_DAYS:180}
+    events:
+      # NOTIFICATION_DELIVERY_UPDATED snapshots on message-service-topic, for analytics-service.
+      enabled: ${NOTIFICATIONS_LEDGER_EVENTS_ENABLED:true}
+    status:
+      # Rows still PENDING this long become UNRESOLVED (a late report can still settle them).
+      lookback-hours: ${NOTIFICATIONS_LEDGER_STATUS_LOOKBACK_HOURS:72}
+      sweep-after-minutes: ${NOTIFICATIONS_LEDGER_STATUS_SWEEP_AFTER_MINUTES:120} # WhatsApp per-message lookups
+      email-sms-sweep-after-minutes: ${NOTIFICATIONS_LEDGER_STATUS_EMAIL_SMS_SWEEP_AFTER_MINUTES:5}
+      sweep-interval-ms: ${NOTIFICATIONS_LEDGER_STATUS_SWEEP_INTERVAL_MS:900000}
+      sweep-initial-delay-ms: ${NOTIFICATIONS_LEDGER_STATUS_SWEEP_INITIAL_DELAY_MS:300000}
+      sweep-max-per-provider: ${NOTIFICATIONS_LEDGER_STATUS_SWEEP_MAX_PER_PROVIDER:200}
+      expire-batch: ${NOTIFICATIONS_LEDGER_STATUS_EXPIRE_BATCH:5000}
+    purge:
+      batch-size: ${NOTIFICATIONS_LEDGER_PURGE_BATCH_SIZE:5000}
+      max-batches-per-schema: ${NOTIFICATIONS_LEDGER_PURGE_MAX_BATCHES:20}
+      interval-ms: ${NOTIFICATIONS_LEDGER_PURGE_INTERVAL_MS:3600000}
+      initial-delay-ms: ${NOTIFICATIONS_LEDGER_PURGE_INITIAL_DELAY_MS:600000}
+    stats:
+      # One [NotificationStats] line per tenant/type/channel/provider for the previous IST day.
+      cron: ${NOTIFICATIONS_LEDGER_STATS_CRON:0 30 9 * * *}
 whatsapp:
   api-url: ${WHATSAPP_API_URL:https://api.arghyam.glific.com/api}
   auth-url: ${WHATSAPP_AUTH_URL:https://api.arghyam.glific.com/api/v1/session}
@@ -400,7 +446,7 @@ whatsapp:
   # ────────────────────────────────────────────────────────────
   # Delivery-status reconciliation (WhatsAppDeliveryReconciliationService)
   #
-  # result=SENT only means the provider ACCEPTED our API call. Gupshup and Meta act afterwards and report
+  # result=SENT only means the provider ACCEPTED our API call. Its BSP and Meta act afterwards and report
   # delivery status back to the provider alone, so a report sent to a number with no WhatsApp account is
   # counted as sent exactly like one that arrived. This job reads that status back and logs it under
   # the [WhatsAppStatus] prefix
@@ -420,16 +466,32 @@ whatsapp:
       # Hard stop per status so a pathological window cannot consume the whole throttle budget.
       # Hitting it is logged at WARN — truncated results would silently under-report delivery.
       max-pages: ${WHATSAPP_STATUS_RECONCILE_MAX_PAGES:40}
-      # The provider's dateRange column. inserted_at is when the message row was created and is stable;
-      # updated_at moves on every status change and would let a message drift out of its send window.
-      date-column: ${WHATSAPP_STATUS_RECONCILE_DATE_COLUMN:inserted_at}
+      # Each status's page budget is sized from the provider's own count (the provider caps a page at
+      # 50 whatever page-size asks for); max-pages is the floor and this the ceiling.
+      max-pages-cap: ${WHATSAPP_STATUS_RECONCILE_MAX_PAGES_CAP:400}
+      # The provider's window column, in the status reader's own terms. Blank = the reader's send-time
+      # column, which is stable; a column that moves on every status change would let a message drift out
+      # of its send window.
+      date-column: ${WHATSAPP_STATUS_RECONCILE_DATE_COLUMN:}
       # Blank = derive from the whatsapp.template.daily-report-* ids above. Set explicitly only to
       # reconcile templates this service does not itself send.
       template-ids: ${WHATSAPP_STATUS_RECONCILE_TEMPLATE_IDS:}
-      # Failure codes that are properties of the Gupshup ACCOUNT, not of any recipient. 9999 is
+      # Failure codes that are properties of the provider ACCOUNT, not of any recipient. 9999 is
       # "low balance": it fails every message in flight, so it is reported on its own line instead of
       # being counted as N officer failures, which would read as a mass recipient-data problem.
       account-level-error-codes: ${WHATSAPP_STATUS_RECONCILE_ACCOUNT_LEVEL_ERROR_CODES:9999}
+    # Delivery-ledger status sync (WhatsAppLedgerStatusSync), run inside each reconcile pass when
+    # notifications.ledger.enabled is on.
+    ledger:
+      # Every status change since the last pass, read on the reader's changed-since column from a
+      # per-provider cursor. Skipped for a reader that has none.
+      incremental:
+        enabled: ${WHATSAPP_STATUS_LEDGER_INCREMENTAL_ENABLED:true}
+        overlap-minutes: ${WHATSAPP_STATUS_LEDGER_INCREMENTAL_OVERLAP_MINUTES:10}
+        first-run-hours: ${WHATSAPP_STATUS_LEDGER_INCREMENTAL_FIRST_RUN_HOURS:6}
+      max-pages-cap: ${WHATSAPP_STATUS_LEDGER_MAX_PAGES_CAP:400}
+      # Per-message lookups for rows still pending after notifications.ledger.status.sweep-after-minutes.
+      sweep-max-per-pass: ${WHATSAPP_STATUS_LEDGER_SWEEP_MAX_PER_PASS:200}
 
 # ──────────────────────────────────────────────────────────────
 # Per-tenant messaging provider secrets and endpoint policy

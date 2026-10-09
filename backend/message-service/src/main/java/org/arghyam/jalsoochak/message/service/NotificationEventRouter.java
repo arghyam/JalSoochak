@@ -1,6 +1,8 @@
 package org.arghyam.jalsoochak.message.service;
 
+import org.arghyam.jalsoochak.message.channel.provider.ProviderAcceptance;
 import org.arghyam.jalsoochak.message.channel.provider.ReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.provider.SmsSendResult;
 import org.arghyam.jalsoochak.message.channel.provider.SmsSender;
 import org.arghyam.jalsoochak.message.channel.provider.TenantChannelProviders;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppSendResult;
@@ -19,6 +21,13 @@ import org.arghyam.jalsoochak.message.event.InviteEmailEvent;
 import org.arghyam.jalsoochak.message.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.message.event.WhatsAppContactRegisteredEvent;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
+import org.arghyam.jalsoochak.message.ledger.DispatchStatus;
+import org.arghyam.jalsoochak.message.ledger.LedgerChannel;
+import org.arghyam.jalsoochak.message.ledger.LedgerEntry;
+import org.arghyam.jalsoochak.message.ledger.LedgerOutcome;
+import org.arghyam.jalsoochak.message.ledger.LedgerRef;
+import org.arghyam.jalsoochak.message.ledger.NotificationLedger;
+import org.arghyam.jalsoochak.message.ledger.NotificationType;
 import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,6 +39,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -137,6 +147,7 @@ public class NotificationEventRouter {
     private final JdbcTemplate jdbcTemplate;
     private final PiiEncryptionService piiEncryptionService;
     private final TenantRefResolver tenantRefResolver;
+    private final NotificationLedger ledger;
 
     @Value("${escalation.report.dir:/tmp/escalation-reports/}")
     private String reportDir;
@@ -205,8 +216,17 @@ public class NotificationEventRouter {
         long userId = root.path("userId").asLong(0);
         long storedId = root.path("whatsappConnectionId").asLong(0);
 
+        LedgerEntry.LedgerEntryBuilder entry = whatsAppEntry(NotificationType.NUDGE, "NUDGE",
+                tenantSchema, root.path("tenantId").asInt(0))
+                .userId(userId > 0 ? userId : null)
+                .userType("PUMP_OPERATOR")
+                .recipient(phone.isBlank() ? null : phone)
+                .subjectDate(parseIsoDate(root.path("nudgeDate").asText("")))
+                .metadata(Map.of("nudgeDate", root.path("nudgeDate").asText("")));
+
         if (storedId <= 0 && phone.isBlank()) {
             log.warn("[Router/NUDGE] recipientPhone and whatsappConnectionId are both missing, skipping");
+            ledger.recordOutcome(entry.build(), LedgerOutcome.failed(DispatchStatus.SKIPPED_NO_CONTACT, null, null, null));
             return;
         }
 
@@ -228,17 +248,25 @@ public class NotificationEventRouter {
             }
         }
 
+        LedgerRef ref = ledger.open(entry.contactRef(contactId > 0 ? String.valueOf(contactId) : null).build());
         NudgeSendOutcome outcome = whatsAppChannel.sendNudgeViaFlow(contactId, operatorName, todayDate);
         switch (outcome) {
             case SENT -> {
+                // A flow start returns no message id, so the provider cannot be asked about it later.
+                ledger.close(ref, LedgerOutcome.acceptedUntracked("flow_started"));
                 log.info("[Router/NUDGE] → FLOW INITIATED");
                 log.debug("[Router/NUDGE] phone={} → FLOW INITIATED", phone);
             }
-            case NOT_SENT -> throw new IllegalStateException(
-                    "[Router/NUDGE] WhatsApp nudge flow was not started");
+            case NOT_SENT -> {
+                ledger.close(ref, LedgerOutcome.failed(DispatchStatus.FAILED_DELIVERY, "SEND", null, null));
+                throw new IllegalStateException("[Router/NUDGE] WhatsApp nudge flow was not started");
+            }
             // Every flow start re-sends the template, so a retry here could nudge the operator twice.
-            case UNKNOWN -> log.warn("[Router/NUDGE] userId={} flow start outcome unknown, not retrying"
-                    + " to avoid a duplicate nudge", userId);
+            case UNKNOWN -> {
+                ledger.close(ref, LedgerOutcome.failed(DispatchStatus.DELIVERY_UNCONFIRMED, "TIMEOUT", null, null));
+                log.warn("[Router/NUDGE] userId={} flow start outcome unknown, not retrying"
+                        + " to avoid a duplicate nudge", userId);
+            }
         }
     }
 
@@ -389,23 +417,34 @@ public class NotificationEventRouter {
                 failed++;
                 continue;
             }
+            LedgerEntry.LedgerEntryBuilder entry = whatsAppEntry(NotificationType.WELCOME, "SEND_WELCOME_MESSAGE",
+                    tenantSchema, tenantId)
+                    .recipient(phone)
+                    .metadata(welcomeFlowId.isBlank() ? Map.of() : Map.of("flowRef", welcomeFlowId));
+            LedgerRef ref = null;
             try {
                 UserContactInfo info = fetchUserContactInfo(tenantSchema, phone);
+                entry.userId(info.userId());
                 if (info.contactId() == null || info.contactId() <= 0) {
                     log.warn("[Router/WELCOME] No whatsapp_connection_id found in schema={}", tenantSchema);
                     log.debug("[Router/WELCOME] No whatsapp_connection_id for phone={} in schema={}", phone, tenantSchema);
+                    ledger.recordOutcome(entry.build(),
+                            LedgerOutcome.failed(DispatchStatus.SKIPPED_NO_CONTACT, null, null, null));
                     publishWelcomeDlt(tenantSchema, phone, "no_whatsapp_connection_id");
                     failed++;
                     continue;
                 }
+                ref = ledger.open(entry.contactRef(String.valueOf(info.contactId())).build());
                 if (welcomeFlowId.isBlank()) {
                     whatsAppSender.startWelcomeFlow(info.contactId(), info.name(), stateName);
                 } else {
                     whatsAppSender.startWelcomeFlow(info.contactId(), welcomeFlowId, info.name(), stateName);
                 }
+                ledger.close(ref, LedgerOutcome.acceptedUntracked("flow_started"));
                 success++;
             } catch (Exception e) {
                 log.error("[Router/WELCOME] Failed to send welcome message: {}", e.getMessage(), e);
+                ledger.close(ref, LedgerOutcome.failed(DispatchStatus.FAILED_DELIVERY, "SEND", e));
                 publishWelcomeDlt(tenantSchema, phone, e.getMessage());
                 failed++;
             }
@@ -444,29 +483,40 @@ public class NotificationEventRouter {
                 failed++;
                 continue;
             }
+            LedgerEntry.LedgerEntryBuilder entry = whatsAppEntry(NotificationType.WELCOME,
+                    "SEND_WELCOME_MESSAGE_ADMIN", tenantSchema, tenantId)
+                    .recipient(normalized)
+                    .metadata(welcomeFlowId.isBlank() ? Map.of() : Map.of("flowRef", welcomeFlowId));
+            LedgerRef ref = null;
             try {
                 UserContactInfo info = fetchUserContactInfo(tenantSchema, phone);
                 if ((info.contactId() == null || info.contactId() <= 0) && !normalized.equals(phone)) {
                     info = fetchUserContactInfo(tenantSchema, normalized);
                 }
+                entry.userId(info.userId());
                 Long contactId = info.contactId();
                 String name = info.name();
                 if (contactId == null || contactId <= 0) {
                     contactId = whatsAppSender.optIn(normalized);
                     if (contactId == null || contactId <= 0) {
+                        ledger.recordOutcome(entry.build(),
+                                LedgerOutcome.failed(DispatchStatus.SKIPPED_NO_CONTACT, "OPT_IN", null, null));
                         publishWelcomeDlt(tenantSchema, normalized, "optin_failed");
                         failed++;
                         continue;
                     }
                 }
+                ref = ledger.open(entry.contactRef(String.valueOf(contactId)).build());
                 if (welcomeFlowId.isBlank()) {
                     whatsAppSender.startWelcomeFlow(contactId, name, stateName);
                 } else {
                     whatsAppSender.startWelcomeFlow(contactId, welcomeFlowId, name, stateName);
                 }
+                ledger.close(ref, LedgerOutcome.acceptedUntracked("flow_started"));
                 success++;
             } catch (Exception e) {
                 log.error("[Router/WELCOME_ADMIN] Failed to send welcome message: {}", e.getMessage(), e);
+                ledger.close(ref, LedgerOutcome.failed(DispatchStatus.FAILED_DELIVERY, "SEND", e));
                 publishWelcomeDlt(tenantSchema, normalized, e.getMessage());
                 failed++;
             }
@@ -556,9 +606,27 @@ public class NotificationEventRouter {
             // send today (O2-9). Resolved per message so a settings change takes effect without a
             // restart; the lookup is cached, so it costs nothing on the OTP path.
             SmsSender smsSender = channelProviders.smsFor(tenant);
+            LedgerRef ref = ledger.open(LedgerEntry.builder()
+                    .type(NotificationType.LOGIN_OTP)
+                    .channel(LedgerChannel.SMS)
+                    .provider(smsSender.providerId())
+                    .tenantSchema(ledger.schemaFor(tenant))
+                    .tenantId(tenant.id())
+                    .userId(optionalLong(root, "userId"))
+                    .recipient(phone)
+                    .eventType("SEND_LOGIN_OTP")
+                    .metadata(Map.of("otpChannel", "SMS"))
+                    .build());
 
-            // Use reactive flow to avoid blocking the Kafka listener thread
-            smsSender.sendOtp(phone, otp, expiryMinutes)
+            // Use reactive flow to avoid blocking the Kafka listener thread. The ledger write is blocking
+            // JDBC, so the result is moved off the reactor-netty event loop before anything touches it.
+            smsSender.sendOtpForResult(phone, otp, expiryMinutes, trackingRefOf(ref))
+                    .publishOn(Schedulers.boundedElastic())
+                    .doOnNext(result -> ledger.close(ref, result.accepted()
+                            ? LedgerOutcome.accepted(result.acceptance())
+                            : LedgerOutcome.failed(DispatchStatus.PROVIDER_REJECTED, "SEND",
+                                    result.errorCode(), result.errorMessage())))
+                    .map(SmsSendResult::accepted)
                     .doOnNext(sent -> {
                         if (sent) {
                             log.info("[Router/SEND_LOGIN_OTP/SMS] {} → SENT", tenant);
@@ -571,6 +639,7 @@ public class NotificationEventRouter {
                     })
                     .doOnError(e -> {
                         // Retryable failure (5xx, network issue) — log error; exception will propagate to Kafka container
+                        ledger.close(ref, LedgerOutcome.failed(DispatchStatus.FAILED_DELIVERY, "TRANSIENT", e));
                         log.error("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery failed (retryable): {}", e.getMessage());
                         log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → ERROR: {}", phone, e.getMessage());
                     })
@@ -584,6 +653,12 @@ public class NotificationEventRouter {
         } else if ("WHATSAPP".equals(deliveryChannel)) {
             String phone = root.path("officerPhoneNumber").asText("").strip();
             long contactId = root.path(CONTACT_ID_FIELD).asLong(0);
+            TenantRef tenant = resolveTenant(root);
+            LedgerEntry.LedgerEntryBuilder entry = whatsAppEntry(NotificationType.LOGIN_OTP, "SEND_LOGIN_OTP",
+                    ledger.schemaFor(tenant), tenant.id() == null ? 0 : tenant.id())
+                    .userId(optionalLong(root, "userId"))
+                    .recipient(phone.isBlank() ? null : phone)
+                    .metadata(Map.of("otpChannel", "WHATSAPP"));
 
             if (contactId > 0) {
                 // whatsapp_contact_id was provided and valid
@@ -592,14 +667,20 @@ public class NotificationEventRouter {
                 contactId = whatsAppSender.optIn(phone);
                 if (contactId <= 0) {
                     log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] optIn returned invalid contactId {}, skipping", contactId);
+                    ledger.recordOutcome(entry.build(),
+                            LedgerOutcome.failed(DispatchStatus.SKIPPED_NO_CONTACT, "OPT_IN", null, null));
                     return;
                 }
             } else {
                 log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither whatsapp_contact_id nor officerPhoneNumber provided, skipping");
+                ledger.recordOutcome(entry.build(), LedgerOutcome.failed(DispatchStatus.SKIPPED_NO_CONTACT, null, null, null));
                 return;
             }
 
-            boolean sent = whatsAppChannel.sendLoginOtp(contactId, otp);
+            LedgerRef ref = ledger.open(entry.contactRef(String.valueOf(contactId)).build());
+            ReportSendOutcome otpOutcome = whatsAppChannel.sendLoginOtpForOutcome(contactId, otp);
+            ledger.close(ref, outcomeOf(otpOutcome));
+            boolean sent = otpOutcome != null && otpOutcome.accepted();
             if (!sent) {
                 throw new IllegalStateException("[Router/SEND_LOGIN_OTP/WHATSAPP] WhatsApp login OTP delivery failed");
             }
@@ -628,17 +709,19 @@ public class NotificationEventRouter {
             publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "missing_invite_link");
             return;
         }
-        TenantRef tenant = tenantRefResolver.resolve(null, event.getTenantCode());
+        TenantRef tenant = tenantRefResolver.resolve(event.getTenantId(), event.getTenantCode());
+        LedgerEntry ledgerEntry = emailEntry(NotificationType.INVITE, "SEND_INVITE_EMAIL",
+                event.getAdminUserId(), event.getRole());
         try {
             if ("STATE_ADMIN".equalsIgnoreCase(event.getRole())
                     && event.getStateName() != null && !event.getStateName().isBlank()) {
                 accountEmailService.sendStateAdminInviteEmail(
                         tenant, event.getTo(), event.getName(), event.getStateName(),
-                        event.getInviteLink(), event.getExpiryHours());
+                        event.getInviteLink(), event.getExpiryHours(), ledgerEntry);
             } else {
                 accountEmailService.sendInviteEmail(
                         tenant, event.getTo(), event.getName(), event.getRole(),
-                        event.getInviteLink(), event.getExpiryHours());
+                        event.getInviteLink(), event.getExpiryHours(), ledgerEntry);
             }
             log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={} {}",
                     event.getRole(), tenant);
@@ -667,10 +750,12 @@ public class NotificationEventRouter {
             publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "missing_invite_link");
             return;
         }
-        TenantRef tenant = tenantRefResolver.resolve(null, event.getTenantCode());
+        TenantRef tenant = tenantRefResolver.resolve(event.getTenantId(), event.getTenantCode());
         try {
             accountEmailService.sendReinviteEmail(tenant, event.getTo(), event.getName(),
-                    event.getInviteLink(), event.getExpiryHours());
+                    event.getInviteLink(), event.getExpiryHours(),
+                    emailEntry(NotificationType.REINVITE, "SEND_REINVITE_EMAIL", event.getAdminUserId(),
+                            event.getRole()));
             log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={} {}",
                     event.getRole(), tenant);
         } catch (Exception e) {
@@ -701,11 +786,111 @@ public class NotificationEventRouter {
         TenantRef tenant = tenantRefResolver.resolve(event.getTenantId(), event.getTenantCode());
         try {
             accountEmailService.sendPasswordResetEmail(tenant, event.getTo(), event.getResetLink(),
-                    event.getExpiryMinutes());
+                    event.getExpiryMinutes(),
+                    emailEntry(NotificationType.PASSWORD_RESET, "SEND_PASSWORD_RESET_EMAIL",
+                            event.getAdminUserId(), null));
             log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched {}", tenant);
         } catch (Exception e) {
             log.error("[Router/PASSWORD_RESET_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
             publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "email_delivery_error");
+        }
+    }
+
+    // ── Delivery ledger ─────────────────────────────────────────────────────────────────────────────
+    // Every send path opens a ledger row once it knows its recipient and closes it with the outcome;
+    // see NotificationLedger. None of these helpers can throw into a send.
+
+    /** The start of a ledger entry for a WhatsApp send. A tenant id of 0 or less means unknown. */
+    private LedgerEntry.LedgerEntryBuilder whatsAppEntry(NotificationType type, String eventType,
+                                                         String tenantSchema, int tenantId) {
+        // No provider: the ledger takes it from the one WhatsApp sender every tenant shares.
+        return LedgerEntry.builder()
+                .type(type)
+                .channel(LedgerChannel.WHATSAPP)
+                .tenantSchema(tenantSchema == null || tenantSchema.isBlank() ? null : tenantSchema)
+                .tenantId(tenantId > 0 ? tenantId : null)
+                .eventType(eventType);
+    }
+
+    /** A situation report's ledger entry: the officer, their role, the run and the period it covers. */
+    private LedgerEntry.LedgerEntryBuilder reportEntry(NotificationType type, String eventType, String tenantSchema,
+                                                       int tenantId, long officerUserId, String role, String corr,
+                                                       LocalDate period) {
+        return whatsAppEntry(type, eventType, tenantSchema, tenantId)
+                .userId(officerUserId)
+                .userType(role)
+                .correlationId(corr.isBlank() ? null : corr)
+                .subjectDate(period)
+                .metadata(Map.of(type == NotificationType.WEEKLY_REPORT ? "weekStart" : "reportDate",
+                        period.toString()));
+    }
+
+    /**
+     * An account email's ledger entry. {@code AccountEmailService} fills in the tenant, channel, provider
+     * and recipient once it has resolved the tenant's sender.
+     */
+    private static LedgerEntry emailEntry(NotificationType type, String eventType, Long adminUserId, String role) {
+        return LedgerEntry.builder()
+                .type(type)
+                .eventType(eventType)
+                .adminUserId(adminUserId)
+                .userType(role == null || role.isBlank() ? null : role.toUpperCase(Locale.ROOT))
+                .build();
+    }
+
+    /**
+     * A WhatsApp send's outcome as the ledger records it. An ambiguous failure — the provider may hold
+     * the message — is {@code DELIVERY_UNCONFIRMED}, exactly as the report lines tag it.
+     */
+    private static LedgerOutcome outcomeOf(ReportSendOutcome outcome) {
+        if (outcome == null) {
+            return LedgerOutcome.acceptedUntracked(null);
+        }
+        if (!outcome.accepted()) {
+            ReportSendOutcome.Failure failure = outcome.failure();
+            DispatchStatus status = isAmbiguousDelivery(failure.stage())
+                    ? DispatchStatus.DELIVERY_UNCONFIRMED
+                    : DispatchStatus.FAILED_DELIVERY;
+            return LedgerOutcome.failed(status, failure.stage() == null ? null : failure.stage().name(),
+                    failure.errorKey(), failure.message());
+        }
+        return outcomeOf(outcome.result());
+    }
+
+    /**
+     * An accepted send with a message id is trackable. One with neither id nor template is a dry-run
+     * suppression — the adapter's {@code suppressed()} result; one with a template but no id was sent
+     * and cannot be followed up.
+     */
+    private static LedgerOutcome outcomeOf(WhatsAppSendResult result) {
+        if (result == null) {
+            return LedgerOutcome.acceptedUntracked(null);
+        }
+        if (result.hasMessageId()) {
+            return LedgerOutcome.accepted(ProviderAcceptance.of(result.messageId(), "accepted"))
+                    .withTemplateRef(result.templateId());
+        }
+        if (result.templateId() == null || result.templateId().isBlank()) {
+            return LedgerOutcome.suppressed();
+        }
+        return LedgerOutcome.acceptedUntracked(null).withTemplateRef(result.templateId());
+    }
+
+    private static String trackingRefOf(LedgerRef ref) {
+        return ref == null ? null : ref.trackingRef();
+    }
+
+    /** A positive integral field, or {@code null}. */
+    private static Long optionalLong(JsonNode root, String field) {
+        JsonNode node = root.path(field);
+        return node.isIntegralNumber() && node.asLong() > 0 ? node.asLong() : null;
+    }
+
+    private static LocalDate parseIsoDate(String isoDate) {
+        try {
+            return isoDate == null || isoDate.isBlank() ? null : LocalDate.parse(isoDate);
+        } catch (DateTimeParseException e) {
+            return null;
         }
     }
 
@@ -758,7 +943,11 @@ public class NotificationEventRouter {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    record UserContactInfo(Long contactId, String name) {}
+    record UserContactInfo(Long contactId, String name, Long userId) {
+        UserContactInfo(Long contactId, String name) {
+            this(contactId, name, null);
+        }
+    }
 
     /**
      * Looks up both the WhatsApp contact ID and display name for a phone number.
@@ -769,12 +958,13 @@ public class NotificationEventRouter {
         if (byHash.contactId() != null || byHash.name() != null) {
             return byHash;
         }
-        String sql = "SELECT whatsapp_connection_id, title FROM " + tenantSchema
+        String sql = "SELECT id, whatsapp_connection_id, title FROM " + tenantSchema
                 + ".user_table WHERE phone_number = ? LIMIT 1";
         List<UserContactInfo> rows = jdbcTemplate.query(sql,
                 (rs, n) -> new UserContactInfo(
                         rs.getObject("whatsapp_connection_id", Long.class),
-                        piiEncryptionService.safeDecrypt(rs.getString("title"))),
+                        piiEncryptionService.safeDecrypt(rs.getString("title")),
+                        rs.getObject("id", Long.class)),
                 phone);
         return rows.isEmpty() ? new UserContactInfo(null, null) : rows.get(0);
     }
@@ -797,7 +987,7 @@ public class NotificationEventRouter {
     }
 
     private UserContactInfo fetchUserContactInfoByHash(String tenantSchema, String phone) {
-        String sql = "SELECT whatsapp_connection_id, title FROM " + tenantSchema
+        String sql = "SELECT id, whatsapp_connection_id, title FROM " + tenantSchema
                 + ".user_table WHERE phone_number_hash = ? LIMIT 1";
         try {
             for (String candidate : buildPhoneCandidates(phone)) {
@@ -805,7 +995,8 @@ public class NotificationEventRouter {
                 List<UserContactInfo> rows = jdbcTemplate.query(sql,
                         (rs, n) -> new UserContactInfo(
                                 rs.getObject("whatsapp_connection_id", Long.class),
-                                piiEncryptionService.safeDecrypt(rs.getString("title"))),
+                                piiEncryptionService.safeDecrypt(rs.getString("title")),
+                                rs.getObject("id", Long.class)),
                         lookupHash);
                 if (rows != null && !rows.isEmpty()) {
                     return rows.get(0);
@@ -848,8 +1039,17 @@ public class NotificationEventRouter {
         long storedId = root.path("officerWhatsappConnectionId").asLong(0);
         String correlationId = root.path("correlationId").asText("");
 
+        LedgerEntry.LedgerEntryBuilder entry = whatsAppEntry(NotificationType.ESCALATION, "ESCALATION",
+                tenantSchema, tenantId)
+                .userId(officerId > 0 ? officerId : null)
+                .userType(officerUserType.isBlank() ? null : officerUserType)
+                .recipient(officerPhone.isBlank() ? null : officerPhone)
+                .correlationId(correlationId.isBlank() ? null : correlationId)
+                .subjectDate(LocalDate.now(IST));
+
         if (storedId <= 0 && officerPhone.isBlank()) {
             log.warn("[Router/ESCALATION] officerPhone and officerWhatsappConnectionId are both missing, skipping");
+            ledger.recordOutcome(entry.build(), LedgerOutcome.failed(DispatchStatus.SKIPPED_NO_CONTACT, null, null, null));
             return;
         }
 
@@ -866,7 +1066,17 @@ public class NotificationEventRouter {
             return;
         }
 
-        String filename = escalationPdfService.generate(operators, level, officerName, officerUserType, correlationId);
+        LedgerRef ref = ledger.open(entry
+                .contactRef(storedId > 0 ? String.valueOf(storedId) : null)
+                .metadata(Map.of("escalationLevel", level))
+                .build());
+        String filename;
+        try {
+            filename = escalationPdfService.generate(operators, level, officerName, officerUserType, correlationId);
+        } catch (Exception generateEx) {
+            ledger.close(ref, LedgerOutcome.failed(DispatchStatus.FAILED_GENERATION, null, generateEx));
+            throw generateEx;
+        }
         java.nio.file.Path localPath = Paths.get(reportDir, filename);
         String reportUrl;
         try {
@@ -874,6 +1084,7 @@ public class NotificationEventRouter {
         } catch (Exception uploadEx) {
             log.error("[Router/ESCALATION] Storage upload failed, retaining local PDF for recovery: {} — {}",
                     localPath, uploadEx.getMessage());
+            ledger.close(ref, LedgerOutcome.failed(DispatchStatus.FAILED_UPLOAD, null, uploadEx));
             throw uploadEx;
         }
         try {
@@ -899,7 +1110,9 @@ public class NotificationEventRouter {
             }
         }
 
-        boolean sent = whatsAppChannel.sendDocument(contactId, reportUrl);
+        ReportSendOutcome escalationOutcome = whatsAppChannel.sendDocumentForOutcome(contactId, reportUrl);
+        ledger.close(ref, outcomeOf(escalationOutcome));
+        boolean sent = escalationOutcome != null && escalationOutcome.accepted();
         if (!sent) {
             throw new IllegalStateException("[Router/ESCALATION] WhatsApp escalation delivery failed");
         }
@@ -968,10 +1181,15 @@ public class NotificationEventRouter {
             return;
         }
 
+        LocalDate reportDay = LocalDate.parse(kpis.getReportDate());
+        LedgerEntry.LedgerEntryBuilder entry = reportEntry(NotificationType.DAILY_REPORT, "DAILY_REPORT_KPIS",
+                tenantSchema, tenantId, officerUserId, role, corr, reportDay);
+
         OfficerContact officer = resolveOfficerContactById(tenantSchema, officerUserId);
         if (officer.contactId() == null && (officer.phone() == null || officer.phone().isBlank())) {
             log.warn("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_CONTACT role={} tenant={} officer={} schema={}",
                     corr, role, tenantId, officerUserId, tenantSchema);
+            ledger.recordOutcome(entry.build(), LedgerOutcome.failed(DispatchStatus.SKIPPED_NO_CONTACT, null, null, null));
             return;
         }
 
@@ -985,12 +1203,16 @@ public class NotificationEventRouter {
         // stalls the whole partition. Doing it here means the dead end costs no PDF render and no storage
         // upload — the previous order paid for both, then deleted the file and gave up.
         long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
+        entry.recipient(officer.phone());
         if (contactId <= 0 && whatsAppSender.isDailyReportDeliveryEnabled()) {
             log.error("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_CONTACT_ID role={} tenant={} officer={}"
                             + " — WhatsApp opt-in returned no contact id (non-retryable)",
                     corr, role, tenantId, officerUserId);
+            ledger.recordOutcome(entry.build(),
+                    LedgerOutcome.failed(DispatchStatus.SKIPPED_NO_CONTACT, "OPT_IN", null, null));
             return;
         }
+        LedgerRef ref = ledger.open(entry.contactRef(contactId > 0 ? String.valueOf(contactId) : null).build());
 
         List<ReportSchemeRow> noSupplyRows;
         List<ReportSchemeRow> anomalyRows;
@@ -1005,6 +1227,7 @@ public class NotificationEventRouter {
             // terminal state, then rethrow so the event is still retried.
             log.error("[Router/DAILY_REPORT] corr={} result=FAILED_GENERATION role={} tenant={} officer={} — {}",
                     corr, role, tenantId, officerUserId, generateEx.getMessage(), generateEx);
+            ledger.close(ref, LedgerOutcome.failed(DispatchStatus.FAILED_GENERATION, null, generateEx));
             throw generateEx;
         }
         // The PDF now exists on disk. Logged before upload/delivery so a report that is built but never
@@ -1026,6 +1249,7 @@ public class NotificationEventRouter {
             log.error("[Router/DAILY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
                             + " retaining local PDF for recovery: {} — {}",
                     corr, role, tenantId, officerUserId, localPath, uploadEx.getMessage());
+            ledger.close(ref, LedgerOutcome.failed(DispatchStatus.FAILED_UPLOAD, null, uploadEx));
             throw uploadEx;
         }
         deleteLocalReport(localPath, corr, ReportKind.DAILY.tag());
@@ -1033,6 +1257,7 @@ public class NotificationEventRouter {
         ReportLogCtx logCtx = new ReportLogCtx(ReportKind.DAILY, corr, role, tenantId, officerUserId);
         ReportSendOutcome outcome =
                 whatsAppChannel.sendDailyReport(contactId, reportUrl, officerUserType, reportDate, officerName);
+        ledger.close(ref, outcomeOf(outcome));
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
         if (!outcome.accepted()) {
             reportFailedDelivery(logCtx, outcome.failure(), reportDate, loggableUrl(reportUrl));
@@ -1079,21 +1304,29 @@ public class NotificationEventRouter {
             return;
         }
 
+        LedgerEntry.LedgerEntryBuilder entry = reportEntry(NotificationType.WEEKLY_REPORT, "WEEKLY_REPORT_KPIS",
+                tenantSchema, tenantId, officerUserId, role, corr, LocalDate.parse(kpis.getWeekStart()));
+
         OfficerContact officer = resolveOfficerContactById(tenantSchema, officerUserId);
         if (officer.contactId() == null && (officer.phone() == null || officer.phone().isBlank())) {
             log.warn("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_NO_CONTACT role={} tenant={} officer={} schema={}",
                     corr, role, tenantId, officerUserId, tenantSchema);
+            ledger.recordOutcome(entry.build(), LedgerOutcome.failed(DispatchStatus.SKIPPED_NO_CONTACT, null, null, null));
             return;
         }
 
         String officerName = officer.name() != null ? officer.name() : "Officer";
         long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
+        entry.recipient(officer.phone());
         if (contactId <= 0 && whatsAppSender.isWeeklyReportDeliveryEnabled()) {
             log.error("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_NO_CONTACT_ID role={} tenant={} officer={}"
                             + " — WhatsApp opt-in returned no contact id (non-retryable)",
                     corr, role, tenantId, officerUserId);
+            ledger.recordOutcome(entry.build(),
+                    LedgerOutcome.failed(DispatchStatus.SKIPPED_NO_CONTACT, "OPT_IN", null, null));
             return;
         }
+        LedgerRef ref = ledger.open(entry.contactRef(contactId > 0 ? String.valueOf(contactId) : null).build());
 
         boolean sdo = "SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType);
         List<ReportSchemeRow> noSupplyRows;
@@ -1114,6 +1347,7 @@ public class NotificationEventRouter {
         } catch (Exception generateEx) {
             log.error("[Router/WEEKLY_REPORT] corr={} result=FAILED_GENERATION role={} tenant={} officer={} — {}",
                     corr, role, tenantId, officerUserId, generateEx.getMessage(), generateEx);
+            ledger.close(ref, LedgerOutcome.failed(DispatchStatus.FAILED_GENERATION, null, generateEx));
             throw generateEx;
         }
         log.info("[Router/WEEKLY_REPORT] corr={} result=GENERATED role={} tenant={} officer={}"
@@ -1135,6 +1369,7 @@ public class NotificationEventRouter {
             log.error("[Router/WEEKLY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
                             + " retaining local PDF for recovery: {} — {}",
                     corr, role, tenantId, officerUserId, localPath, uploadEx.getMessage());
+            ledger.close(ref, LedgerOutcome.failed(DispatchStatus.FAILED_UPLOAD, null, uploadEx));
             throw uploadEx;
         }
         deleteLocalReport(localPath, corr, ReportKind.WEEKLY.tag());
@@ -1145,6 +1380,7 @@ public class NotificationEventRouter {
         ReportLogCtx logCtx = new ReportLogCtx(ReportKind.WEEKLY, corr, role, tenantId, officerUserId);
         ReportSendOutcome outcome =
                 whatsAppChannel.sendWeeklyReport(contactId, reportUrl, officerUserType, weekStart, officerName);
+        ledger.close(ref, outcomeOf(outcome));
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
         if (!outcome.accepted()) {
             reportFailedDelivery(logCtx, outcome.failure(), weekStart, loggableUrl(reportUrl));
@@ -1273,7 +1509,7 @@ public class NotificationEventRouter {
             return;
         }
         // result=SENT means the provider ACCEPTED the send — it is not a WhatsApp delivery confirmation.
-        // providerMsgId is what lets the delivery status Gupshup and Meta later report to the provider be
+        // providerMsgId is what lets the delivery status the BSP and Meta later report to the provider be
         // matched back to this officer; see WhatsAppDeliveryReconciliationService. Every new field goes after officer= to preserve
         // the field adjacency the log-counting recipes rely on.
         log.info("[Router/{}] corr={} result=SENT role={} tenant={} officer={}"

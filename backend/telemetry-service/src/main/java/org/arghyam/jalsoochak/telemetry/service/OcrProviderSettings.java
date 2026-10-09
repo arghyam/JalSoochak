@@ -16,7 +16,7 @@ public record OcrProviderSettings(
         String authHeaderName
 ) {
 
-    /** Provider id of the built-in OCR extractor and the default when a tenant configures none. */
+    /** Provider id of BFM's built-in OCR extractor, and BFM's default when a tenant configures none. */
     public static final String DEFAULT_PROVIDER_ID = "flowvision";
 
     /** Header used to carry {@link #apiKey()} when no per-tenant override is set. */

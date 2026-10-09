@@ -20,6 +20,6 @@ public final class OcrFixtures {
     public static OcrProviderRegistry registryWithBfmDefault(MeterReadingExtractor bfmDefault) {
         when(bfmDefault.providerId()).thenReturn(OcrProviderSettings.DEFAULT_PROVIDER_ID);
         when(bfmDefault.channel()).thenReturn(ReadingChannel.BFM);
-        return new OcrProviderRegistry(List.of(bfmDefault), OcrProviderSettings.DEFAULT_PROVIDER_ID);
+        return new OcrProviderRegistry(List.of(bfmDefault), OcrProviderSettings.DEFAULT_PROVIDER_ID, null);
     }
 }

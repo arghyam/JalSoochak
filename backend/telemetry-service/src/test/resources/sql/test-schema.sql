@@ -102,6 +102,8 @@ CREATE TABLE tenant_as.flow_reading_table (
     issue_report_reason  TEXT,
     -- V56. Absent on tenant_zz, so the insert's column probe is exercised both ways.
     submitted_unit    VARCHAR(16),
+    -- V61. Absent on tenant_zz, as submitted_unit is.
+    reported_via_id   INTEGER,
     deleted_at        TIMESTAMP
 );
 

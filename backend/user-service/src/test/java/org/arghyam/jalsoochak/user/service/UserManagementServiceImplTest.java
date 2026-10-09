@@ -386,6 +386,7 @@ class UserManagementServiceImplTest {
             when(userCommonRepository.findAdminUserByEmail("new@example.com")).thenReturn(Optional.empty());
             // adminLevelId lookup for the invited role
             when(userCommonRepository.findUserTypeIdByName("SUPER_USER")).thenReturn(Optional.of(1));
+            when(userCommonRepository.createAdminUserPending(eq("new@example.com"), anyString(), eq(0), eq(1), eq(1))).thenReturn(11L);
             when(tokenService.generateRawToken()).thenReturn("raw-invite-token");
             when(tokenService.hash("raw-invite-token")).thenReturn("invite-hash");
             when(inviteProperties.expiryHours()).thenReturn(24);
@@ -409,6 +410,9 @@ class UserManagementServiceImplTest {
             verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(captor.capture());
             // Super users belong to no tenant, so the event carries none and falls back to the system default
             assertNull(captor.getValue().getTenantCode());
+            // tenantId 0 (platform) is emitted as null, never 0
+            assertNull(captor.getValue().getTenantId());
+            assertEquals(11L, captor.getValue().getAdminUserId());
         }
 
         @Test
@@ -585,6 +589,9 @@ class UserManagementServiceImplTest {
             verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(captor.capture());
             assertEquals("Madhya Pradesh", captor.getValue().getStateName());
             assertEquals("MP", captor.getValue().getTenantCode());
+            assertEquals(1, captor.getValue().getTenantId());
+            // Id of the PENDING admin row created for the invitee
+            assertEquals(10L, captor.getValue().getAdminUserId());
         }
 
         @Test
@@ -951,7 +958,11 @@ class UserManagementServiceImplTest {
 
             verify(userCommonRepository).insertToken(
                     eq("pending@example.com"), eq("new-hash"), eq("INVITE"), anyString(), any(), eq(1));
-            verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(any(InviteEmailEvent.class));
+            ArgumentCaptor<InviteEmailEvent> captor = ArgumentCaptor.forClass(InviteEmailEvent.class);
+            verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(captor.capture());
+            // Super-user target (tenantId 0): no tenant, but the existing admin row id is attributed
+            assertNull(captor.getValue().getTenantId());
+            assertEquals(7L, captor.getValue().getAdminUserId());
         }
 
         @Test
@@ -1030,6 +1041,8 @@ class UserManagementServiceImplTest {
             verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(captor.capture());
             assertEquals("Madhya Pradesh", captor.getValue().getStateName());
             assertEquals("MP", captor.getValue().getTenantCode());
+            assertEquals(1, captor.getValue().getTenantId());
+            assertEquals(7L, captor.getValue().getAdminUserId());
         }
 
         @Test

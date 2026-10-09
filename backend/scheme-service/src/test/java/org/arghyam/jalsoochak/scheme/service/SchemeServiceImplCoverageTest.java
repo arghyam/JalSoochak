@@ -63,6 +63,9 @@ class SchemeServiceImplCoverageTest {
     @Captor
     ArgumentCaptor<Map<String, Object>> payloadCaptor;
 
+    @Captor
+    ArgumentCaptor<String> keyCaptor;
+
     @BeforeEach
     void setUp() {
         TenantContext.setSchema("tenant_ka");
@@ -256,7 +259,7 @@ class SchemeServiceImplCoverageTest {
         when(schemeDbRepository.updateSchemeStatusesById("tenant_ka", 77, 2, 1, 10)).thenReturn(true);
         when(schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds("tenant_ka", List.of(77)))
                 .thenReturn(List.of(
-                        new SchemeDbRepository.SchemeAnalyticsRow(77, "101", "201", "Scheme Updated", 11.11, 22.22, 2, 1, 501, 601)
+                        new SchemeDbRepository.SchemeAnalyticsRow(77, "101", "201", "Scheme Updated", 10, 12, 30, 11.11, 22.22, 2, 1)
                 ));
 
         SchemeStatusUpdateRequestDTO request = new SchemeStatusUpdateRequestDTO();
@@ -266,14 +269,22 @@ class SchemeServiceImplCoverageTest {
         schemeService.updateSchemeStatuses("ka", 77, request);
 
         verify(schemeDbRepository).updateSchemeStatusesById("tenant_ka", 77, 2, 1, 10);
-        verify(kafkaProducer).publishJson(eq("scheme-service-topic"), payloadCaptor.capture());
+        verify(kafkaProducer).publishJson(eq("scheme-service-topic"), eq("200:77"), payloadCaptor.capture());
         assertThat(payloadCaptor.getValue())
                 .containsEntry("eventType", "SCHEME_UPDATED")
                 .containsEntry("schemeId", 77)
                 .containsEntry("tenantId", 200)
                 .containsEntry("status", 1)
                 .containsEntry("operating_status", 1)
-                .containsEntry("work_status", 2);
+                .containsEntry("work_status", 2)
+                .containsEntry("fhtcCount", 10)
+                .containsEntry("plannedFhtc", 12)
+                .containsEntry("houseHoldCount", 30)
+                .doesNotContainKeys(
+                        "parentLgdLocationId", "level1LgdId", "level2LgdId", "level3LgdId",
+                        "level4LgdId", "level5LgdId", "level6LgdId",
+                        "parentDepartmentLocationId", "level1DeptId", "level2DeptId", "level3DeptId",
+                        "level4DeptId", "level5DeptId", "level6DeptId");
     }
 
     @Test
@@ -319,8 +330,8 @@ class SchemeServiceImplCoverageTest {
         when(chunkProcessor.updateSchemesChunk(eq("tenant_ka"), anyList())).thenReturn(1);
         when(schemeDbRepository.findSchemeAnalyticsRowsByStateSchemeIds(eq("tenant_ka"), anyList()))
                 .thenReturn(List.of(
-                        new SchemeDbRepository.SchemeAnalyticsRow(99, "101", "201", "Scheme New", 11.11, 22.22, 2, 1, 501, 601),
-                        new SchemeDbRepository.SchemeAnalyticsRow(77, "102", "ABC", "Scheme Existing Updated", 33.33, 44.44, 1, 0, 502, null)
+                        new SchemeDbRepository.SchemeAnalyticsRow(99, "101", "201", "Scheme New", 10, 12, 30, 11.11, 22.22, 2, 1),
+                        new SchemeDbRepository.SchemeAnalyticsRow(77, "102", "ABC", "Scheme Existing Updated", 9, 10, 21, 33.33, 44.44, 1, 0)
                 ));
 
         String csv = """
@@ -337,7 +348,8 @@ class SchemeServiceImplCoverageTest {
 
         verify(chunkProcessor).insertSchemesChunk(eq("tenant_ka"), anyList());
         verify(chunkProcessor).updateSchemesChunk(eq("tenant_ka"), anyList());
-        verify(kafkaProducer, times(2)).publishJson(eq("scheme-service-topic"), payloadCaptor.capture());
+        verify(kafkaProducer, times(2)).publishJson(eq("scheme-service-topic"), keyCaptor.capture(), payloadCaptor.capture());
+        assertThat(keyCaptor.getAllValues()).containsExactlyInAnyOrder("200:99", "200:77");
         assertThat(payloadCaptor.getAllValues())
                 .anySatisfy(payload -> {
                     assertThat(payload.get("eventType")).isEqualTo("SCHEME_UPDATED");
@@ -351,6 +363,9 @@ class SchemeServiceImplCoverageTest {
                     assertThat(payload.get("centreSchemeId")).isEqualTo(0);
                     assertThat(payload.get("operating_status")).isEqualTo(0);
                     assertThat(payload.get("work_status")).isEqualTo(1);
+                    assertThat(payload.get("fhtcCount")).isEqualTo(9);
+                    assertThat(payload.get("plannedFhtc")).isEqualTo(10);
+                    assertThat(payload.get("houseHoldCount")).isEqualTo(21);
                 });
     }
 

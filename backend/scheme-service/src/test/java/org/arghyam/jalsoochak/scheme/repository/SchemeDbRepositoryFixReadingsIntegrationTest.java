@@ -61,8 +61,9 @@ class SchemeDbRepositoryFixReadingsIntegrationTest {
         repository = new SchemeDbRepository(jdbcTemplate);
 
         schemeId = jdbcTemplate.queryForObject(
-                "INSERT INTO tenant_mp.scheme_master_table (state_scheme_id, scheme_name) "
-                        + "VALUES ('SS-1', 'Fix Readings Scheme') RETURNING id",
+                "INSERT INTO tenant_mp.scheme_master_table "
+                        + "(state_scheme_id, centre_scheme_id, scheme_name, work_status, operating_status) "
+                        + "VALUES ('SS-1', 'CS-1', 'Fix Readings Scheme', 1, 1) RETURNING id",
                 Integer.class);
         jdbcTemplate.update(
                 "INSERT INTO tenant_mp.user_scheme_mapping_table (user_id, scheme_id, status) VALUES (?, ?, 1)",

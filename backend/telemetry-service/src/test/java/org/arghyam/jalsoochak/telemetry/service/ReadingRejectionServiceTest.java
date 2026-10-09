@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -81,7 +82,7 @@ class ReadingRejectionServiceTest {
 
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.getMessage()).isEqualTo(ReadingRejectionService.REJECTED_MESSAGE);
-        verify(bfmReadingService).resetLatestConfirmedReadingByPhone(PHONE, TENANT);
+        verify(bfmReadingService).resetLatestConfirmedReadingByPhone(PHONE, TENANT, ReportingChannel.WHATSAPP);
     }
 
     @Test
@@ -93,7 +94,7 @@ class ReadingRejectionServiceTest {
 
         assertThat(response.isSuccess()).isFalse();
         assertThat(response.getMessage()).isEqualTo(ReadingRejectionService.NOTHING_TO_REJECT_MESSAGE);
-        verify(bfmReadingService, never()).resetLatestConfirmedReadingByPhone(anyString(), any());
+        verify(bfmReadingService, never()).resetLatestConfirmedReadingByPhone(anyString(), any(), any());
     }
 
     @Test

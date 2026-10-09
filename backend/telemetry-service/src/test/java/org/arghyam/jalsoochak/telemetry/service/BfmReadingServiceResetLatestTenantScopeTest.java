@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
@@ -124,7 +125,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
                 .thenReturn(Optional.of(reading()));
 
-        service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID);
+        service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID, ReportingChannel.API);
 
         verify(readingRepublisher).republish(CALLER_SCHEMA, CALLER_TENANT_ID, 99L);
         verifyNoInteractions(telemetryEventPublisher);
@@ -137,12 +138,12 @@ class BfmReadingServiceResetLatestTenantScopeTest {
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
                 .thenReturn(Optional.of(reading()));
 
-        CreateReadingResponse response = service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID);
+        CreateReadingResponse response = service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID, ReportingChannel.API);
 
         assertTrue(response.isSuccess());
         assertEquals(BigDecimal.ZERO, response.getMeterReading());
         // The reset has no unit field, so its 0 is in the row's standard unit.
-        verify(telemetryTenantRepository).updateConfirmedReading(CALLER_SCHEMA, 99L, BigDecimal.ZERO, 1L, null, "m3");
+        verify(telemetryTenantRepository).updateConfirmedReading(CALLER_SCHEMA, 99L, BigDecimal.ZERO, 1L, null, "m3", ReportingChannel.API);
     }
 
     /**
@@ -165,7 +166,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                         READING_DATE, READING_AT, ReadingChannel.BFM.getCode(),
                         QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY, READING_AT)));
 
-        service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID);
+        service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID, ReportingChannel.API);
 
         verify(telemetryTenantRepository).applyQuarantineReason(CALLER_SCHEMA, 99L, QuarantineReason.NONE);
     }
@@ -178,7 +179,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
                 .thenReturn(Optional.of(reading()));
 
-        service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID);
+        service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID, ReportingChannel.API);
 
         verify(telemetryTenantRepository).applyQuarantineReason(CALLER_SCHEMA, 99L, QuarantineReason.NONE);
     }
@@ -190,7 +191,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
                 .thenReturn(Optional.of(reading()));
 
-        CreateReadingResponse response = service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID);
+        CreateReadingResponse response = service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID, ReportingChannel.API);
 
         // The reset overwrites the only copy of the confirmed reading; without the prior value on the
         // response there is nothing to write to the audit log and nothing to restore from.
@@ -205,10 +206,10 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                 .thenReturn(new TelemetryOperatorWithSchema(OTHER_SCHEMA, operator(OTHER_TENANT_ID)));
 
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID));
+                () -> service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID, ReportingChannel.API));
 
         assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
         verifyNoInteractions(readingRepublisher);
     }
 
@@ -219,12 +220,12 @@ class BfmReadingServiceResetLatestTenantScopeTest {
         when(operatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
                 .thenReturn(new TelemetryOperatorWithSchema(OTHER_SCHEMA, operator(OTHER_TENANT_ID)));
         ResponseStatusException crossTenant = assertThrows(ResponseStatusException.class,
-                () -> service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID));
+                () -> service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID, ReportingChannel.API));
 
         when(operatorContextService.resolveOperatorWithSchema("918888888888", CALLER_TENANT_ID))
                 .thenThrow(new IllegalStateException("No operator found for contactId 918888888888"));
         ResponseStatusException unknown = assertThrows(ResponseStatusException.class,
-                () -> service.resetLatestConfirmedReadingByPhone("918888888888", CALLER_TENANT_ID));
+                () -> service.resetLatestConfirmedReadingByPhone("918888888888", CALLER_TENANT_ID, ReportingChannel.API));
 
         assertEquals(crossTenant.getStatusCode(), unknown.getStatusCode());
         assertEquals(crossTenant.getReason(), unknown.getReason());
@@ -236,7 +237,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                 .thenThrow(new IllegalStateException("No operator found for contactId"));
 
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID));
+                () -> service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID, ReportingChannel.API));
 
         assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
     }
@@ -246,17 +247,17 @@ class BfmReadingServiceResetLatestTenantScopeTest {
         // No caller should reach the destructive path unscoped; an absent tenant is a 401, not a
         // silent cross-tenant search.
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> service.resetLatestConfirmedReadingByPhone(PHONE, null));
+                () -> service.resetLatestConfirmedReadingByPhone(PHONE, null, ReportingChannel.API));
 
         assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
         verifyNoInteractions(operatorContextService);
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any(), any(), any());
     }
 
     @Test
     void blankContactIdIsRejectedBeforeAnyLookup() {
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> service.resetLatestConfirmedReadingByPhone("  ", CALLER_TENANT_ID));
+                () -> service.resetLatestConfirmedReadingByPhone("  ", CALLER_TENANT_ID, ReportingChannel.API));
 
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatusCode());
         verifyNoInteractions(operatorContextService);
@@ -270,7 +271,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                 .thenReturn(Optional.empty());
 
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID));
+                () -> service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID, ReportingChannel.API));
 
         assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
         verifyNoInteractions(readingRepublisher);

@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,6 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -80,5 +84,23 @@ class TelemetryTenantRepositoryCacheTest {
         verify(jdbcTemplate, times(2))
                 .queryForObject(any(String.class), eq(Boolean.class), eq("tenant_up"), eq("user_table"), eq("language_id"));
         assertEquals(Optional.empty(), repository.findUserLanguageId("tenant_up", 11L));
+    }
+
+    @Test
+    void reportedViaColumnAbsenceIsNotCachedSoAMigrationIsSeenOnTheNextWrite() {
+        // Lenient, as the write also checks columns this test leaves absent.
+        lenient().when(jdbcTemplate.queryForObject(any(String.class), eq(Boolean.class),
+                eq("tenant_up"), eq("flow_reading_table"), eq("reported_via_id")))
+                .thenReturn(Boolean.FALSE, Boolean.TRUE);
+
+        repository.updateConfirmedReading("tenant_up", 5L, BigDecimal.TEN, 1L, null, null, ReportingChannel.API);
+        verify(jdbcTemplate, never()).update(contains("reported_via_id"), any(Object[].class));
+
+        repository.updateConfirmedReading("tenant_up", 5L, BigDecimal.TEN, 1L, null, null, ReportingChannel.API);
+        repository.updateConfirmedReading("tenant_up", 5L, BigDecimal.TEN, 1L, null, null, ReportingChannel.API);
+
+        verify(jdbcTemplate, times(2)).update(contains("reported_via_id = ?"), any(Object[].class));
+        verify(jdbcTemplate, times(2)).queryForObject(any(String.class), eq(Boolean.class),
+                eq("tenant_up"), eq("flow_reading_table"), eq("reported_via_id"));
     }
 }

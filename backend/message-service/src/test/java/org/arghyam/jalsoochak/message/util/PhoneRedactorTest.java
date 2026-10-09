@@ -31,7 +31,7 @@ class PhoneRedactorTest {
     }
 
     /**
-     * The real reason this exists: Gupshup's failure payload puts the recipient's number in
+     * The real reason this exists: the WhatsApp provider's failure payload puts the recipient's number in
      * {@code destination}, so anything derived from that payload must come out masked.
      */
     @Test

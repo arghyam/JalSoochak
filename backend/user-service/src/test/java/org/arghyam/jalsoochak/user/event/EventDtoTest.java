@@ -71,6 +71,41 @@ class EventDtoTest {
         }
 
         @Test
+        @DisplayName("recipient fields are omitted from JSON when null")
+        void recipientFieldsOmittedFromJsonWhenNull() throws Exception {
+            InviteEmailEvent event = InviteEmailEvent.builder()
+                    .eventType("SEND_INVITE_EMAIL")
+                    .to("super@example.com")
+                    .role("SUPER_USER")
+                    .inviteLink("https://example.com/invite")
+                    .expiryHours(24)
+                    .build();
+
+            assertThat(new ObjectMapper().writeValueAsString(event))
+                    .doesNotContain("tenantId")
+                    .doesNotContain("adminUserId");
+        }
+
+        @Test
+        @DisplayName("recipient fields are emitted as tenantId and adminUserId when set")
+        void recipientFieldsEmittedWhenSet() {
+            InviteEmailEvent event = InviteEmailEvent.builder()
+                    .eventType("SEND_INVITE_EMAIL")
+                    .to("sa@example.com")
+                    .role("STATE_ADMIN")
+                    .inviteLink("https://example.com/invite")
+                    .expiryHours(24)
+                    .tenantId(7)
+                    .adminUserId(42L)
+                    .build();
+
+            JsonNode json = new ObjectMapper().valueToTree(event);
+
+            assertThat(json.path("tenantId").asInt()).isEqualTo(7);
+            assertThat(json.path("adminUserId").asLong()).isEqualTo(42L);
+        }
+
+        @Test
         @DisplayName("stateName is null when not set (non-STATE_ADMIN role)")
         void stateNameIsNullByDefault() {
             InviteEmailEvent event = InviteEmailEvent.builder()
@@ -181,7 +216,24 @@ class EventDtoTest {
 
             assertThat(new ObjectMapper().writeValueAsString(event))
                     .doesNotContain("tenantId")
-                    .doesNotContain("tenantCode");
+                    .doesNotContain("tenantCode")
+                    .doesNotContain("adminUserId");
+        }
+
+        @Test
+        @DisplayName("adminUserId is emitted when set")
+        void adminUserIdEmittedWhenSet() {
+            ResetPasswordEmailEvent event = ResetPasswordEmailEvent.builder()
+                    .eventType("SEND_PASSWORD_RESET_EMAIL")
+                    .to("admin@example.com")
+                    .resetLink("https://example.com/reset")
+                    .expiryMinutes(30)
+                    .adminUserId(42L)
+                    .build();
+
+            JsonNode json = new ObjectMapper().valueToTree(event);
+
+            assertThat(json.path("adminUserId").asLong()).isEqualTo(42L);
         }
 
         @Test
@@ -317,6 +369,37 @@ class EventDtoTest {
 
             assertThat(new ObjectMapper().writeValueAsString(event))
                     .doesNotContain("whatsapp_contact_id");
+        }
+
+        @Test
+        @DisplayName("userId is omitted from JSON when null")
+        void userIdOmittedFromJsonWhenNull() throws Exception {
+            SendLoginOtpEvent event = SendLoginOtpEvent.builder()
+                    .eventType("SEND_LOGIN_OTP")
+                    .officerPhoneNumber("91XXXXXXXXXX")
+                    .otp("123456")
+                    .expiryMinutes(5)
+                    .deliveryChannel("SMS")
+                    .build();
+
+            assertThat(new ObjectMapper().writeValueAsString(event)).doesNotContain("userId");
+        }
+
+        @Test
+        @DisplayName("userId is emitted under userId when set")
+        void userIdEmittedWhenSet() {
+            SendLoginOtpEvent event = SendLoginOtpEvent.builder()
+                    .eventType("SEND_LOGIN_OTP")
+                    .officerPhoneNumber("91XXXXXXXXXX")
+                    .otp("123456")
+                    .expiryMinutes(5)
+                    .deliveryChannel("SMS")
+                    .userId(10L)
+                    .build();
+
+            JsonNode json = new ObjectMapper().valueToTree(event);
+
+            assertThat(json.path("userId").asLong()).isEqualTo(10L);
         }
 
         @Test

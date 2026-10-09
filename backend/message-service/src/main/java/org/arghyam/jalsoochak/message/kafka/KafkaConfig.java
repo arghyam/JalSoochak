@@ -176,7 +176,7 @@ public class KafkaConfig {
      * keeping the last four digits so two records can still be told apart.
      *
      * <p>Delegates to {@link PhoneRedactor}, which the WhatsApp delivery-status reader also uses: a
-     * Gupshup failure payload carries the recipient's raw number in its {@code destination} field, so
+     * provider's failure payload carries the recipient's raw number in its {@code destination} field, so
      * the same masking is needed there. Kept as a method here so this class's existing callers and
      * tests are unaffected.</p>
      */

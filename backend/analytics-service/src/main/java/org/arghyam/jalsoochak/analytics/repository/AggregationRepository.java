@@ -44,9 +44,9 @@ import java.util.stream.Collectors;
  * {@code ALL}, is built before any filter (all hierarchies/levels), so schemes outside
  * the filter in force are still stored per region and their status counts are real.</p>
  *
- * <p><b>Scheme status:</b> {@code dim_scheme_table} holds one row per mapping, and the
- * dimension writer rewrites only the row it finds last, so a fanned-out scheme's new
- * status sits on that row alone. Status (daily snapshot, region breakdowns and the
+ * <p><b>Scheme status:</b> {@code dim_scheme_table} holds one row per mapping. Status is
+ * now written to all of them, but rows left by the earlier one-row writer can still hold an
+ * old status until the scheme is re-sent. Status (daily snapshot, region breakdowns and the
  * work-status filter itself) is read from that latest-written row ({@link SchemeRegularityRepository#canonicalSchemeRowOrder}),
  * household counts from the row with the most FHTCs
  * ({@link WaterSqlFragments#schemeAttributeRowOrder}), as dev's dashboard queries do.</p>

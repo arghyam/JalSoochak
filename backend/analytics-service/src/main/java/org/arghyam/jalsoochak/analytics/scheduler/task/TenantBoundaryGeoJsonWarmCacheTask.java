@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.service.TenantDetailsService;
+import org.arghyam.jalsoochak.analytics.scheduler.ScheduledTaskClaim;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -28,6 +29,7 @@ public class TenantBoundaryGeoJsonWarmCacheTask implements AnalyticsScheduledTas
     private final DimTenantRepository dimTenantRepository;
     private final DimLgdLocationRepository dimLgdLocationRepository;
     private final TenantDetailsService tenantDetailsService;
+    private final ScheduledTaskClaim scheduledTaskClaim;
 
     @Override
     public String taskName() {
@@ -39,6 +41,9 @@ public class TenantBoundaryGeoJsonWarmCacheTask implements AnalyticsScheduledTas
             cron = "${analytics.scheduler.common.cron:0 0 0 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
+        if (!scheduledTaskClaim.claimToday(taskName())) {
+            return;
+        }
         log.info("Scheduler START '{}'", taskName());
 
         List<DimTenant> tenants = dimTenantRepository.findByTenantIdGreaterThan(0);

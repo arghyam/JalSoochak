@@ -47,13 +47,16 @@ Sends a WhatsApp nudge to every pump operator who has not submitted a flow readi
 
 ### Trigger
 
-`TenantSchedulerManager` starts on service startup (`@PostConstruct`), reads all active tenants from `common_schema`, and schedules one nudge cron job per tenant using the hour and minute read from `common_schema.tenant_config_master_table`. Missing config falls back to application defaults. The cron expression runs in the **Asia/Kolkata** timezone.
+`NotificationJobScheduler` ticks once a minute in the **Asia/Kolkata** timezone on every tenant-service pod. Each tick re-reads the nudge hour and minute (`PUMP_OPERATOR_REMINDER_NUDGE_TIME` in `common_schema.tenant_config_master_table`) for every tenant except INACTIVE, SUSPENDED, ARCHIVED and REGISTERED ones. A missing row or an out-of-range value falls back to the application default (18:00 IST).
 
-Calling `TenantSchedulerManager.rescheduleForTenant(tenantId, stateCode)` after updating a tenant's config applies the new schedule immediately without a restart.
+- **Due window.** The job is due from its slot on today's IST date until the slot plus `notification-scheduler.grace` (default 15 minutes), which covers a restart or a rolling deploy. A slot missed by more than the grace is skipped for the day.
+- **Once per period.** A due job is claimed with an `INSERT … ON CONFLICT DO NOTHING` into `common_schema.scheduled_job_run_table`, keyed on job type, tenant and period (the IST date). Only the pod whose insert lands runs the job, and it records `SUCCEEDED` or `FAILED` on the row. A failed run, or one left `RUNNING` by a pod that died, is not retried.
+- **Config changes** reach every pod within a minute, without a restart. A failed config read skips the job for that tick without claiming it; the next tick in the window retries.
+- **Kill switch.** `NOTIFICATION_SCHEDULER_ENABLED=false` stops all four scheduled jobs (nudge, escalation, daily and weekly report) on that pod.
 
 ### tenant-service: NudgeSchedulerService
 
-`processNudgesForTenant(schema, tenantId)` is called by the scheduler.
+`processNudgesForTenant(schema, tenantId, runDate)` is called by the scheduler with the slot's IST date.
 
 **Database query** (`NudgeRepository.streamUsersWithNoUploadToday`):
 
@@ -155,11 +158,11 @@ Both thresholds and officer role names are read from tenant config at job execut
 
 ### Trigger
 
-Same `TenantSchedulerManager` as nudges, but a separate cron schedule (`escalation` config key). Runs in **Asia/Kolkata** timezone.
+Same `NotificationJobScheduler`, due window and run table as nudges (§1, Trigger), with its own slot from the `FIELD_STAFF_ESCALATION_RULES` config key (default 18:00 IST).
 
 ### tenant-service: EscalationSchedulerService
 
-`processEscalationsForTenant(schema, tenantId)` runs the following steps:
+`processEscalationsForTenant(schema, tenantId, runDate)` runs the following steps:
 
 1. Loads escalation config from `TenantConfigService` (`level1Days`, `level2Days`, `level1OfficerType`, `level2OfficerType`).
 2. Pre-loads officer rows for both levels in two bulk queries (`NudgeRepository.findAllOfficersByUserType`) to avoid N+1 lookups inside the operator stream.
@@ -385,11 +388,12 @@ All WhatsApp provider and storage properties can be overridden via environment v
 | `whatsapp.status.reconcile.interval-ms`               | `WHATSAPP_STATUS_RECONCILE_INTERVAL_MS`               | No                                | Default `1800000` (30 min) between passes                                                                                                                                                                                                                                                                                                                         |
 | `whatsapp.status.reconcile.initial-delay-ms`          | `WHATSAPP_STATUS_RECONCILE_INITIAL_DELAY_MS`          | No                                | Default `600000` (10 min) after startup                                                                                                                                                                                                                                                                                                                           |
 | `whatsapp.status.reconcile.window-hours`              | `WHATSAPP_STATUS_RECONCILE_WINDOW_HOURS`              | No                                | Default `6`. Rolling look-back, **not** a fixed hour — the daily-report cron is per-tenant configurable, so no single hour suits every tenant. Keep it tight: a wide window costs pages of unrelated traffic                                                                                                                                                      |
-| `whatsapp.status.reconcile.page-size`                 | `WHATSAPP_STATUS_RECONCILE_PAGE_SIZE`                 | No                                | Default `250` messages per provider page                                                                                                                                                                                                                                                                                                                          |
-| `whatsapp.status.reconcile.max-pages`                 | `WHATSAPP_STATUS_RECONCILE_MAX_PAGES`                 | No                                | Default `40`. Hard stop per status so a pathological window cannot consume the whole provider throttle budget. Hitting it logs a `WARN` — truncated results would silently under-report delivery                                                                                                                                                                  |
-| `whatsapp.status.reconcile.date-column`               | `WHATSAPP_STATUS_RECONCILE_DATE_COLUMN`               | No                                | Default `inserted_at`, the column the provider's `dateRange` filters on. `updated_at` moves on every status change and would let a message drift out of its send window                                                                                                                                                                                           |
+| `whatsapp.status.reconcile.page-size`                 | `WHATSAPP_STATUS_RECONCILE_PAGE_SIZE`                 | No                                | Default `250` messages requested per page. The provider caps a page at **50** whatever is asked, and the reader pages in 50s                                                                                                                                                                                                                                                                                                                          |
+| `whatsapp.status.reconcile.max-pages`                 | `WHATSAPP_STATUS_RECONCILE_MAX_PAGES`                 | No                                | Default `40`. The floor of each status's page budget, which is sized from the provider's own count (`ceil(count/50) + 1`). Hitting it logs a `WARN` — truncated results would silently under-report delivery                                                                                                                                                                  |
+| `whatsapp.status.reconcile.max-pages-cap` | `WHATSAPP_STATUS_RECONCILE_MAX_PAGES_CAP` | No | Default `400`. Hard stop per status so a pathological window cannot consume the whole provider throttle budget. A read short of the provider's count logs `complete=false` |
+| `whatsapp.status.reconcile.date-column`               | `WHATSAPP_STATUS_RECONCILE_DATE_COLUMN`               | No                                | Default blank: the status reader's send-time column. A column that moves on every status change would let a message drift out of its send window                                                                                                                                                                                                                  |
 | `whatsapp.status.reconcile.template-ids`              | `WHATSAPP_STATUS_RECONCILE_TEMPLATE_IDS`              | No                                | Blank = derive from the `whatsapp.template.daily-report-*` ids. `MessageFilter` has no `templateId`, so daily reports are separated from nudges/OTPs **client-side** against this list                                                                                                                                                                            |
-| `whatsapp.status.reconcile.account-level-error-codes` | `WHATSAPP_STATUS_RECONCILE_ACCOUNT_LEVEL_ERROR_CODES` | No                                | Default `9999` ("low balance"). Codes that are properties of the Gupshup **account**, not of a recipient — reported on their own `ACCOUNT-LEVEL FAILURE` line and excluded from every per-officer and per-tenant tally, rather than counted as N officer failures                                                                                                 |
+| `whatsapp.status.reconcile.account-level-error-codes` | `WHATSAPP_STATUS_RECONCILE_ACCOUNT_LEVEL_ERROR_CODES` | No                                | Default `9999` ("low balance"). Codes that are properties of the WhatsApp provider **account**, not of a recipient — reported on their own `ACCOUNT-LEVEL FAILURE` line and excluded from every per-officer and per-tenant tally, rather than counted as N officer failures                                                                                       |
 
 > **`storage.endpoint` and `storage.public-base-url` are different addresses.** The endpoint is where this
 > service uploads (internal is correct). The base URL is what the WhatsApp provider registers and Meta
@@ -407,13 +411,18 @@ All WhatsApp provider and storage properties can be overridden via environment v
 > delivery — a public hostname with a private bucket trades Meta's 403 for the store's.
 
 > **Delivery-status reconciliation.** `result=SENT` only means the provider _accepted_ our API call;
-> Gupshup and Meta act afterwards and report delivery status back to the provider alone. A report
+> the provider's BSP and Meta act afterwards and report delivery status back to the provider alone. A report
 > sent to a number with no WhatsApp account is therefore counted as sent exactly like one that
 > arrived. `WhatsAppDeliveryReconciliationService` polls the provider on a rolling window, maps each
 > recipient back to an officer via `user_table.whatsapp_connection_id`, and logs per-message,
 > per-tenant and platform-wide lines under the `[WhatsAppStatus]` prefix — including the officer ids
 > behind every failure, grouped by error code. Off by default because each pass shares the 500 ms
 > provider throttle with live sends.
+>
+> The provider returns at most 50 messages per page, so the reader pages in 50s up to the provider's own
+> count of each status. With `NOTIFICATIONS_LEDGER_ENABLED`, each pass also writes what it reads to the
+> delivery ledger, for every outbound template message rather than reports only; see
+> [notification-delivery-ledger.md](notification-delivery-ledger.md).
 
 > **Daily report `LINK` mode.** The link template's button URL is a fixed prefix plus a variable Meta
 > appends to it, e.g. `https://jalsoochak.jjmbrain.in/minio/{{1}}` with

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Fails when a vendor name (Glific, FlowVision, MinIO) or a state name (Assam) appears anywhere in the
+# Fails when a vendor name (Glific, Gupshup, FlowVision, MinIO) or a state name (Assam) appears anywhere in the
 # tracked tree outside the places the rules below allow. Run from the repository root:
 #
 #   bash .github/scripts/vendor-neutrality-guard.sh
@@ -81,9 +81,9 @@ GUARD_SELF=.github/scripts/vendor-neutrality-guard.sh
 # separated and misspelt forms (FLOW_VISION_FAILED, "Gliffic"). The negative lookahead spares
 # "Assamese", which is a language name in the language seed data, not a state reference.
 #
-# Gupshup is deliberately absent: every reference to it either explains what Glific sits in front
-# of or is the real media host filemanager.gupshup.io on the SSRF allowlist.
-FORBIDDEN_MARKER='glif+ic|flow[\s_-]?vision|minio|assam(?!ese)'
+# Gupshup is the BSP behind the WhatsApp provider; code outside the adapter says "the BSP" instead. Its
+# real media host filemanager.gupshup.io, on the SSRF allowlist, passes under URL_OR_HOST.
+FORBIDDEN_MARKER='glif+ic|gup[\s_-]?shup|flow[\s_-]?vision|minio|assam(?!ese)'
 
 # Tokens removed from a line before the marker is looked for; the rest of the line is still checked.
 # One per line: a Perl regex on the file path, whitespace, then a case-insensitive Perl regex for the
@@ -107,9 +107,10 @@ IFS= read -r -d '' ALLOWED_TOKENS <<'RULES' || true
 # that needs its own transition.
 .  FLOW_VISION_(?:FAILED|REJECTED)
 
-# Rule OCR_PROVIDER_ID — the registry id of the built-in OCR provider. Tenants select a provider by
-# this value in their ocr_provider config, so it is stored data rather than a name we choose.
-.  "flowvision"|OCR_DEFAULT_PROVIDER:flowvision
+# Rule OCR_PROVIDER_ID — the registry ids of the built-in OCR providers, BFM's and ELM's. Tenants select
+# a provider by this value in their ocr_provider or ocr_elm_provider config, so it is stored data rather
+# than a name we choose.
+.  "flowvision"|"flowvision-elm"|OCR_DEFAULT_PROVIDER:flowvision|OCR_ELM_DEFAULT_PROVIDER:flowvision-elm
 
 # Rule TEST_CONTAINER_IMAGE — an integration test runs the object store's own image as its S3
 # endpoint, so it names the image, the image's default credential and its readiness path.

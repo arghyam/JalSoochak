@@ -14,6 +14,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnap
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.service.capture.ManualReadingMaxValues;
 import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimitFixtures;
@@ -69,6 +70,9 @@ class BfmReadingServiceReadingUnitTest {
     private PduDayLimit pduDayLimit;
 
     @Mock
+    private ManualReadingMaxValues manualReadingMaxValues;
+
+    @Mock
     private CalculationParametersSnapshotter calculationParametersSnapshotter;
 
     @Mock
@@ -110,7 +114,7 @@ class BfmReadingServiceReadingUnitTest {
                         null,
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
-                new SubmittedValueCapture(),
+                new SubmittedValueCapture(manualReadingMaxValues),
                 pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
@@ -124,10 +128,10 @@ class BfmReadingServiceReadingUnitTest {
                 any(LocalDate.class))).thenReturn(Optional.empty());
         lenient().when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(99L, null));
         lenient().when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(99L, null));
     }
 
@@ -171,6 +175,21 @@ class BfmReadingServiceReadingUnitTest {
         assertThat(response.getQualityStatus()).isEqualTo("REJECTED");
         assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);
         assertThat(response.getMessage()).isEqualTo(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE);
+        verifyNothingStoredOrPublished();
+    }
+
+    @Test
+    @DisplayName("a value above the channel's configured maximum, after conversion, is refused and nothing is stored or published")
+    void valueAboveTheConfiguredMaximumIsRefused() {
+        when(manualReadingMaxValues.maxFor(TENANT_ID, ReadingChannel.BFM)).thenReturn(Optional.of(BigDecimal.ONE));
+
+        CreateReadingResponse response = service.createReading(
+                assertedValue(ReadingChannel.BFM, "1500", "L"), SCHEMA, operator, CONTACT, false);
+
+        assertThat(response.isSuccess()).isFalse();
+        assertThat(response.getQualityStatus()).isEqualTo("REJECTED");
+        assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);
+        assertThat(response.getMessage()).isEqualTo("Reading can't be more than 1 m³.");
         verifyNothingStoredOrPublished();
     }
 
@@ -304,7 +323,7 @@ class BfmReadingServiceReadingUnitTest {
     private void verifyStored(String value, ReadingChannel channel, String submittedUnit) {
         verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), argThat(sameValue(value)), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any(), eq(channel), eq(submittedUnit));
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), eq(channel), eq(submittedUnit), any());
     }
 
     private void verifyPublished(String value) {
@@ -315,9 +334,9 @@ class BfmReadingServiceReadingUnitTest {
     private void verifyNothingStoredOrPublished() {
         verify(repo, never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any());
+                any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(repo, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any());
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any(), any());
         verifyNoInteractions(telemetryEventPublisher);
     }
 

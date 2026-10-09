@@ -17,8 +17,8 @@ import java.time.DayOfWeek;
  *
  * <p>The two are deliberately not linked: a tenant can report a Thursday–Wednesday week but deliver it
  * on a Friday. Setting them to different days is legal but usually unintended, so
- * {@code TenantSchedulerManager} warns about it — the further the firing day is past the end of the
- * window, the staler the data is on arrival.</p>
+ * {@code NotificationJobScheduler} warns about it when the report runs — the further the firing day
+ * is past the end of the window, the staler the data is on arrival.</p>
  */
 public class WeeklyReportScheduleConfig {
 
@@ -51,8 +51,8 @@ public class WeeklyReportScheduleConfig {
      * <p>Only 0 needs special handling: cron 1–7 already matches ISO-8601 1–7 (Monday–Sunday), and cron
      * additionally accepts 0 as an alias for Sunday.</p>
      *
-     * <p>Callers must range-check first — this throws {@link java.time.DateTimeException} outside 0–7,
-     * and the scheduler treats that as fatal for the whole tenant.</p>
+     * <p>Throws {@link java.time.DateTimeException} outside 0–7. The builder rejects such values, so
+     * the fields of a built config always convert.</p>
      */
     public static DayOfWeek toDayOfWeek(int cronDayOfWeek) {
         return DayOfWeek.of(cronDayOfWeek == 0 ? 7 : cronDayOfWeek);
@@ -74,6 +74,12 @@ public class WeeklyReportScheduleConfig {
         public Builder minute(int minute) { this.minute = minute; return this; }
         public Builder weekStartDay(int weekStartDay) { this.weekStartDay = weekStartDay; return this; }
 
-        public WeeklyReportScheduleConfig build() { return new WeeklyReportScheduleConfig(this); }
+        public WeeklyReportScheduleConfig build() {
+            ScheduleRanges.checkCronDayOfWeek("dayOfWeek", dayOfWeek);
+            ScheduleRanges.checkHour(hour);
+            ScheduleRanges.checkMinute(minute);
+            ScheduleRanges.checkCronDayOfWeek("weekStartDay", weekStartDay);
+            return new WeeklyReportScheduleConfig(this);
+        }
     }
 }

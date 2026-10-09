@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService
 import org.arghyam.jalsoochak.telemetry.service.location.LocationVerdict;
 import org.arghyam.jalsoochak.telemetry.service.location.ReadingSubmission;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
+import org.arghyam.jalsoochak.telemetry.service.capture.ManualReadingMaxValues;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +35,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
+import static org.mockito.Mockito.mock;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -113,10 +115,10 @@ class BfmReadingServiceLocationMismatchTest {
                 .thenReturn(Optional.empty());
         lenient().when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+                any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(READING_ID, null));
         lenient().when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
-                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any()))
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(READING_ID, null));
         lenient().when(locationAffinityService.recordMismatchIfAny(
                 anyString(), any(), any(), any(), any(), any(), any(), any()))
@@ -134,7 +136,7 @@ class BfmReadingServiceLocationMismatchTest {
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
                 null,
-                new SubmittedValueCapture(),
+                new SubmittedValueCapture(mock(ManualReadingMaxValues.class)),
                 pduDayLimit,
                 calculationParametersSnapshotter,
                 locationAffinityService);
@@ -167,7 +169,7 @@ class BfmReadingServiceLocationMismatchTest {
         assertThat(response.getErrorCode()).isNull();
         verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
-                any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any());
+                any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -292,7 +294,7 @@ class BfmReadingServiceLocationMismatchTest {
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
                 null,
-                new SubmittedValueCapture(),
+                new SubmittedValueCapture(mock(ManualReadingMaxValues.class)),
                 pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
