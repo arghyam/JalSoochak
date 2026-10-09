@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
@@ -193,17 +194,19 @@ public class BfmReadingService {
         // uses (scheme-selection placeholder, manual entry, meter-change, issue-report).
         BigDecimal ocrExtractedReading = captured.extractedReading();
         BigDecimal extractedReading = ocrExtractedReading != null ? ocrExtractedReading : BigDecimal.ZERO;
-        // In the channel's standard unit already, so every comparison below and the stored value agree.
+        // In the unit it is stored in already, so every comparison below and the stored value agree.
         BigDecimal confirmedReading = captured.value();
         BigDecimal effectiveConfirmedReading = confirmedReading;
 
-        // A reading is compared only with earlier readings on its own channel: a kWh index is never a
-        // flow meter's previous reading. A PDU reading is one run's duration rather than a running
-        // total, so it has no earlier reading to compare with or to show back at all.
+        // A reading is compared only with earlier readings on its own channel and register: a kWh index
+        // is never a flow meter's previous reading, nor a kVAh index's. A PDU reading is one run's
+        // duration rather than a running total, so it has no earlier reading to compare with or to show
+        // back at all.
+        MeterRegister register = captured.register();
         boolean comparesWithEarlierReadings = resolvedChannel != ReadingChannel.PDU;
         Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt = comparesWithEarlierReadings
                 ? telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
-                        schemaName, request.getSchemeId(), resolvedChannel, null)
+                        schemaName, request.getSchemeId(), resolvedChannel, register, null)
                 : Optional.empty();
 
         // For non-meter-replacement submissions, validate against the latest confirmed reading.
@@ -356,7 +359,8 @@ public class BfmReadingService {
         int confirmedReadingSource = captured.source();
         String rolloverAuditJson = null;
         Optional<RolloverResolutionService.ResolvedReading> rollover =
-                resolveRolloverIfApplicable(schemaName, request, resolvedChannel, ocrResult, isMeterReplaced, latestSnapshotOpt);
+                resolveRolloverIfApplicable(schemaName, request, resolvedChannel, register, ocrResult, isMeterReplaced,
+                        latestSnapshotOpt);
         if (rollover.isPresent()) {
             effectiveConfirmedReading = rollover.get().confirmedReading();
             confirmedReadingSource = rollover.get().source();
@@ -390,6 +394,7 @@ public class BfmReadingService {
                     schemaName,
                     request.getSchemeId(),
                     resolvedChannel,
+                    register,
                     LocalDate.from(readingAt),
                     null).orElse(null);
             Verdict verdict = supplyPlausibilityGuard.assess(
@@ -407,8 +412,8 @@ public class BfmReadingService {
         }
 
         // Written by the insert itself rather than by a later UPDATE, so no stored reading is ever
-        // without its channel. The value is in the channel's standard unit; submitted_unit records the
-        // unit it arrived in.
+        // without its channel. The value is in its stored unit; submitted_unit records the unit it
+        // arrived in, which also tells a kVAh reading's register apart.
         String submittedUnit = captured.submittedUnitCode();
         // Fixed here because a PDU run is written through a callback, inside its day's lock.
         BigDecimal valueToStore = effectiveConfirmedReading;
@@ -613,7 +618,7 @@ public class BfmReadingService {
                 .orElse(null);
         if (lastConfirmedReading == null && comparesWithEarlierReadings) {
             lastConfirmedReading = telemetryTenantRepository
-                    .findLastConfirmedReading(schemaName, request.getSchemeId(), resolvedChannel, readingId)
+                    .findLastConfirmedReading(schemaName, request.getSchemeId(), resolvedChannel, register, readingId)
                     .orElse(null);
         }
 
@@ -627,6 +632,7 @@ public class BfmReadingService {
                 // overriding the AI.
                 ocrExtractedReading,
                 effectiveConfirmedReading,
+                submittedUnit,
                 confidenceLevel,
                 request.getReadingUrl(),
                 readingAt,
@@ -705,6 +711,7 @@ public class BfmReadingService {
             String schemaName,
             CreateReadingRequest request,
             ReadingChannel channel,
+            MeterRegister register,
             OcrReadingResult ocrResult,
             boolean isMeterReplaced,
             Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt) {
@@ -719,7 +726,8 @@ public class BfmReadingService {
             return Optional.empty();
         }
         List<DailyConfirmedReading> dailyHistory = telemetryTenantRepository
-                .findRecentDailyConfirmedReadings(schemaName, request.getSchemeId(), channel, null, ROLLOVER_HISTORY_DAYS);
+                .findRecentDailyConfirmedReadings(
+                        schemaName, request.getSchemeId(), channel, register, null, ROLLOVER_HISTORY_DAYS);
         return Optional.of(rolloverResolutionService.resolve(
                 ocrResult,
                 dailyHistory,
@@ -786,9 +794,10 @@ public class BfmReadingService {
     /**
      * As {@link #updateConfirmedReading(String, String, BigDecimal, Integer)}, with the unit
      * {@code confirmedReading} is given in. The unit is checked against the corrected row's channel and
-     * the value converted to that channel's standard unit, as on a submission.
+     * the value converted to the unit it is stored in, as on a submission.
      *
-     * @param readingUnit the declared unit, unchecked; null or blank means the channel's standard unit
+     * @param readingUnit the declared unit, unchecked; null or blank means the unit the corrected row's
+     *                    register is stored in: kVAh on a kVAh row, the channel's standard unit otherwise
      */
     @Transactional
     public CreateReadingResponse updateConfirmedReading(String correlationId,
@@ -915,8 +924,8 @@ public class BfmReadingService {
      * {@code PUT /readings} — the chatbot confirm path updates the repository directly.
      *
      * @param submittedReading the corrected value, in {@code readingUnit}
-     * @param readingUnit      the unit the caller declared, unchecked; null or blank means the
-     *                         channel's standard unit
+     * @param readingUnit      the unit the caller declared, unchecked; null or blank means the unit
+     *                         the row's register is stored in
      * @param updatedBy        the operator credited with the correction, and the operator the anomaly
      *                         is filed against
      * @param eventTenantId    the tenant for the published event and for the household-size config
@@ -935,7 +944,8 @@ public class BfmReadingService {
         // refused unit, PDU run or PDU day writes nothing, and no anomaly: it is the request that is
         // wrong, not the reading.
         CapturedReading captured;
-        switch (submittedValueCapture.captureCorrection(eventTenantId, channel, submittedReading, readingUnit)) {
+        switch (submittedValueCapture.captureCorrection(eventTenantId, channel,
+                MeterRegister.of(reading.submittedUnit()), submittedReading, readingUnit)) {
             case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
             case CaptureOutcome.Rejected(TelemetryErrorCode errorCode, String rejection) -> {
                 return rejectedCorrection(reading, errorCode, rejection);
@@ -943,7 +953,7 @@ public class BfmReadingService {
             case CaptureOutcome.Retry retry ->
                     throw new IllegalStateException("A submitted value is never retried");
         }
-        // In the channel's standard unit, so the checks below and the stored value agree.
+        // In the unit it is stored in, so the checks below and the stored value agree.
         BigDecimal confirmedReading = captured.value();
 
         // A pre-V40 tenant is skipped rather than checked, as on the submission path: refusing a
@@ -960,7 +970,7 @@ public class BfmReadingService {
             // every correction would look like a tiny delta.
             TelemetryConfirmedReadingSnapshot baseline = telemetryTenantRepository
                     .findLatestConfirmedReadingSnapshotBeforeDate(
-                            schemaName, reading.schemeId(), channel, readingDate, reading.id())
+                            schemaName, reading.schemeId(), channel, captured.register(), readingDate, reading.id())
                     .orElse(null);
             Verdict verdict = supplyPlausibilityGuard.assess(
                     schemaName,
@@ -1161,15 +1171,15 @@ public class BfmReadingService {
                 .findLatestFlowReadingByOperator(schemaName, operator.id())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, OPERATOR_LOOKUP_MISS));
 
-        // The reset has no unit field, so its 0 is in the standard unit of the row's channel, as on
-        // every correction path.
+        // The reset has no unit field, so its 0 stays on the row's register, as on every correction path.
         telemetryTenantRepository.updateConfirmedReading(
                 schemaName,
                 latestReading.id(),
                 BigDecimal.ZERO,
                 operator.id(),
                 null,
-                ReadingChannel.fromCode(latestReading.channel()).standardUnit()
+                ReadingChannel.fromCode(latestReading.channel())
+                        .storedUnit(MeterRegister.of(latestReading.submittedUnit()))
                         .map(ReadingUnit::code)
                         .orElse(null),
                 reportedVia

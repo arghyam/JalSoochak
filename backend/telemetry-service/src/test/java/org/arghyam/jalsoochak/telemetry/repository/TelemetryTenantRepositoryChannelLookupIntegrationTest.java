@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
@@ -21,13 +22,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The lookups by channel against a real PostgreSQL instance. A reading is only ever compared with
- * readings on its own channel, a row with no channel is a legacy BFM row, and a PDU day's minutes add
- * up the scheme's PDU runs that day.
+ * readings on its own channel and register, a row with no channel is a legacy BFM row, a row with no
+ * unit is on the standard register, and a PDU day's minutes add up the scheme's PDU runs that day.
  */
 @Testcontainers
 class TelemetryTenantRepositoryChannelLookupIntegrationTest {
 
     private static final String SCHEMA = "tenant_as";
+    /** Has no {@code submitted_unit} column (pre-V56). */
+    private static final String PRE_UNIT_SCHEMA = "tenant_zz";
+    private static final String KWH = "kW.h";
+    private static final String KVAH = "kV.A.h";
     private static final long SCHEME = 1L;
     private static final long OPERATOR = 9L;
 
@@ -54,6 +59,7 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
     @BeforeEach
     void clean() {
         jdbcTemplate.execute("DELETE FROM " + SCHEMA + ".flow_reading_table");
+        jdbcTemplate.execute("DELETE FROM " + PRE_UNIT_SCHEMA + ".flow_reading_table");
         String key = Base64.getEncoder().encodeToString(new byte[32]);
         repository = new TelemetryTenantRepository(jdbcTemplate, new PiiEncryptionService(key, key));
         repository.invalidateMetadataCaches();
@@ -61,16 +67,24 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
     }
 
     private void insertReading(String reading, LocalDate day, ReadingChannel channel) {
+        insertReading(reading, day, channel, null);
+    }
+
+    private void insertReading(String reading, LocalDate day, ReadingChannel channel, String submittedUnit) {
         LocalDateTime readingAt = day.atTime(6, 0);
         jdbcTemplate.update("INSERT INTO " + SCHEMA + ".flow_reading_table "
                         + "(scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
-                        + " correlation_id, channel_id, created_by) "
-                        + "VALUES (?, ?, ?, 0, ?, 'corr-1', ?, ?)",
-                SCHEME, readingAt, day, new BigDecimal(reading), code(channel), OPERATOR);
+                        + " correlation_id, channel_id, submitted_unit, created_by) "
+                        + "VALUES (?, ?, ?, 0, ?, 'corr-1', ?, ?, ?)",
+                SCHEME, readingAt, day, new BigDecimal(reading), code(channel), submittedUnit, OPERATOR);
     }
 
     private BigDecimal latest(ReadingChannel channel) {
-        return repository.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME, channel, null)
+        return latest(SCHEMA, channel, MeterRegister.STANDARD);
+    }
+
+    private BigDecimal latest(String schema, ReadingChannel channel, MeterRegister register) {
+        return repository.findLatestConfirmedReadingSnapshot(schema, SCHEME, channel, register, null)
                 .map(TelemetryConfirmedReadingSnapshot::confirmedReading)
                 .orElse(null);
     }
@@ -82,9 +96,11 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
 
         assertThat(latest(ReadingChannel.BFM)).isEqualByComparingTo("100");
         assertThat(latest(ReadingChannel.ELM)).isEqualByComparingTo("5000");
-        assertThat(repository.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME, ReadingChannel.PDU, null))
+        assertThat(repository.findLatestConfirmedReadingSnapshot(
+                        SCHEMA, SCHEME, ReadingChannel.PDU, MeterRegister.STANDARD, null))
                 .isEmpty();
-        assertThat(repository.findLastConfirmedReading(SCHEMA, SCHEME, ReadingChannel.BFM, null))
+        assertThat(repository.findLastConfirmedReading(
+                        SCHEMA, SCHEME, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .hasValueSatisfying(value -> assertThat(value).isEqualByComparingTo("100"));
     }
 
@@ -103,10 +119,10 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
         insertReading("5000", today.minusDays(2), ReadingChannel.ELM);
 
         assertThat(repository.findLatestConfirmedReadingSnapshotBeforeDate(
-                        SCHEMA, SCHEME, ReadingChannel.BFM, today.minusDays(1), null))
+                        SCHEMA, SCHEME, ReadingChannel.BFM, MeterRegister.STANDARD, today.minusDays(1), null))
                 .hasValueSatisfying(s -> assertThat(s.confirmedReading()).isEqualByComparingTo("100"));
         assertThat(repository.findLatestConfirmedReadingSnapshotBeforeDate(
-                        SCHEMA, SCHEME, ReadingChannel.ELM, today.minusDays(1), null))
+                        SCHEMA, SCHEME, ReadingChannel.ELM, MeterRegister.STANDARD, today.minusDays(1), null))
                 .hasValueSatisfying(s -> assertThat(s.confirmedReading()).isEqualByComparingTo("5000"));
     }
 
@@ -116,12 +132,77 @@ class TelemetryTenantRepositoryChannelLookupIntegrationTest {
         insertReading("5000", today.minusDays(2), ReadingChannel.ELM);
         insertReading("101", today.minusDays(1), null);
 
-        assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, SCHEME, ReadingChannel.BFM, null, 18))
+        assertThat(repository.findRecentDailyConfirmedReadings(
+                        SCHEMA, SCHEME, ReadingChannel.BFM, MeterRegister.STANDARD, null, 18))
                 .extracting(DailyConfirmedReading::day)
                 .containsExactly(today.minusDays(1), today.minusDays(3));
-        assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, SCHEME, ReadingChannel.ELM, null, 18))
+        assertThat(repository.findRecentDailyConfirmedReadings(
+                        SCHEMA, SCHEME, ReadingChannel.ELM, MeterRegister.STANDARD, null, 18))
                 .extracting(DailyConfirmedReading::day)
                 .containsExactly(today.minusDays(2));
+    }
+
+    @Test
+    void theLatestReadingComesFromTheSameRegisterOnlySkippingBackPastTheOther() {
+        insertReading("4800", today.minusDays(3), ReadingChannel.ELM, KWH);
+        insertReading("5300", today.minusDays(2), ReadingChannel.ELM, KVAH);
+        insertReading("4810", today.minusDays(1), ReadingChannel.ELM, null);
+        insertReading("5320", today, ReadingChannel.ELM, KVAH);
+
+        assertThat(latest(SCHEMA, ReadingChannel.ELM, MeterRegister.STANDARD)).isEqualByComparingTo("4810");
+        assertThat(latest(SCHEMA, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY)).isEqualByComparingTo("5320");
+        assertThat(repository.findLastConfirmedReading(
+                        SCHEMA, SCHEME, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, null))
+                .hasValueSatisfying(value -> assertThat(value).isEqualByComparingTo("5320"));
+    }
+
+    @Test
+    void theBaselineBeforeADateComesFromTheSameRegisterOnly() {
+        insertReading("4800", today.minusDays(3), ReadingChannel.ELM, KWH);
+        insertReading("5300", today.minusDays(2), ReadingChannel.ELM, KVAH);
+        insertReading("4810", today.minusDays(1), ReadingChannel.ELM, KWH);
+
+        assertThat(repository.findLatestConfirmedReadingSnapshotBeforeDate(
+                        SCHEMA, SCHEME, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, today, null))
+                .hasValueSatisfying(s -> assertThat(s.confirmedReading()).isEqualByComparingTo("5300"));
+        assertThat(repository.findLatestConfirmedReadingSnapshotBeforeDate(
+                        SCHEMA, SCHEME, ReadingChannel.ELM, MeterRegister.STANDARD, today.minusDays(1), null))
+                .hasValueSatisfying(s -> assertThat(s.confirmedReading()).isEqualByComparingTo("4800"));
+    }
+
+    @Test
+    void theConsumptionBandHoldsOnlyTheSameRegistersDays() {
+        insertReading("4800", today.minusDays(3), ReadingChannel.ELM, KWH);
+        insertReading("5300", today.minusDays(2), ReadingChannel.ELM, KVAH);
+        insertReading("4810", today.minusDays(1), ReadingChannel.ELM, null);
+
+        assertThat(repository.findRecentDailyConfirmedReadings(
+                        SCHEMA, SCHEME, ReadingChannel.ELM, MeterRegister.STANDARD, null, 18))
+                .extracting(DailyConfirmedReading::day)
+                .containsExactly(today.minusDays(1), today.minusDays(3));
+        assertThat(repository.findRecentDailyConfirmedReadings(
+                        SCHEMA, SCHEME, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, null, 18))
+                .extracting(DailyConfirmedReading::day)
+                .containsExactly(today.minusDays(2));
+    }
+
+    @Test
+    void aSchemaWithNoUnitColumnHoldsStandardRegisterReadingsOnly() {
+        jdbcTemplate.update("INSERT INTO " + PRE_UNIT_SCHEMA + ".flow_reading_table "
+                        + "(scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
+                        + " correlation_id, channel_id, created_by) "
+                        + "VALUES (?, ?, ?, 0, 4800, 'corr-1', ?, ?)",
+                SCHEME, today.minusDays(1).atTime(6, 0), today.minusDays(1), ReadingChannel.ELM.getCode(), OPERATOR);
+
+        assertThat(latest(PRE_UNIT_SCHEMA, ReadingChannel.ELM, MeterRegister.STANDARD)).isEqualByComparingTo("4800");
+        assertThat(latest(PRE_UNIT_SCHEMA, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY)).isNull();
+        assertThat(repository.findLatestConfirmedReadingSnapshotBeforeDate(
+                        PRE_UNIT_SCHEMA, SCHEME, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, today, null))
+                .isEmpty();
+        assertThat(repository.findRecentDailyConfirmedReadings(
+                        PRE_UNIT_SCHEMA, SCHEME, ReadingChannel.ELM, MeterRegister.STANDARD, null, 18))
+                .extracting(DailyConfirmedReading::day)
+                .containsExactly(today.minusDays(1));
     }
 
     private long insertRun(String minutes, LocalDate day, long scheme, ReadingChannel channel) {

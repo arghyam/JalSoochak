@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
@@ -1294,7 +1295,7 @@ public class MeterReadingConversationService {
                         throw new IllegalStateException("A submitted value is never retried");
             }
 
-            // Validation baseline, from readings on the same channel only:
+            // Validation baseline, from readings on the same channel and register only:
             // - If the meter is not replaced, compare against the most recent confirmed reading by default.
             // - If isManualReading=false, compare against the most recent confirmed reading strictly before today.
             // - If the meter is replaced, load latest snapshot for anomaly/audit context only.
@@ -1306,10 +1307,11 @@ public class MeterReadingConversationService {
                 previousSnapshotOpt = Optional.empty();
             } else if (isMeterReplaced || compareWithLatest) {
                 previousSnapshotOpt = telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
-                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, null);
+                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, captured.register(), null);
             } else {
                 previousSnapshotOpt = telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate(
-                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, today, null);
+                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, captured.register(), today,
+                        null);
             }
 
             BigDecimal effectiveConfirmedReading = captured.value();
@@ -1850,10 +1852,12 @@ public class MeterReadingConversationService {
             TelemetryLatestFlowReadingRecord targetDayRecord = targetDayRecordOpt.get();
 
             // The corrected value follows the rules of the target row's channel, as a submission on it
-            // would. WhatsApp has no unit field, so the value is in that channel's standard unit.
+            // would. WhatsApp has no unit field, so the value stays on the row's register: kVAh on a kVAh
+            // row, the channel's standard unit otherwise.
             ReadingChannel channel = ReadingChannel.fromCode(targetDayRecord.channel());
             CapturedReading captured;
-            switch (submittedValueCapture.captureCorrection(tenantId, channel, readingValue, null)) {
+            switch (submittedValueCapture.captureCorrection(tenantId, channel,
+                    MeterRegister.of(targetDayRecord.submittedUnit()), readingValue, null)) {
                 case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
                 case CaptureOutcome.Rejected rejected -> {
                     return rejectedManualReading(rejected.message(), languageKey, request.getContactId(), readingValue);

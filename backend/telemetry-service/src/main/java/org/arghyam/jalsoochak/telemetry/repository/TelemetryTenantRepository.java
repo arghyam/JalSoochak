@@ -2,7 +2,9 @@ package org.arghyam.jalsoochak.telemetry.repository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
 import org.springframework.beans.factory.annotation.Value;
@@ -1482,19 +1484,23 @@ public class TelemetryTenantRepository {
     public Optional<BigDecimal> findLastConfirmedReading(String schemaName,
                                                          Long schemeId,
                                                          ReadingChannel channel,
+                                                         MeterRegister register,
                                                          Long excludeReadingId) {
-        return findLatestConfirmedReadingSnapshot(schemaName, schemeId, channel, excludeReadingId)
+        return findLatestConfirmedReadingSnapshot(schemaName, schemeId, channel, register, excludeReadingId)
                 .map(TelemetryConfirmedReadingSnapshot::confirmedReading);
     }
 
     /**
-     * The scheme's latest confirmed reading on {@code channel}, a NULL channel being a legacy BFM row.
-     * Only a reading of the same channel is comparable: a kWh index is never a flow meter's previous
-     * reading, or the other way round.
+     * The scheme's latest confirmed reading on {@code channel} and {@code register}, a NULL channel being
+     * a legacy BFM row. Only a reading of the same channel and register is comparable: a kWh index is
+     * never a flow meter's previous reading, and a kVAh index is never a kWh one's. A reading on the other
+     * register in between is skipped, not treated as the end of the history: the comparisons made with
+     * this one (duplicate photo, rollover, the last reading shown back) hold across it.
      */
     public Optional<TelemetryConfirmedReadingSnapshot> findLatestConfirmedReadingSnapshot(String schemaName,
                                                                                           Long schemeId,
                                                                                           ReadingChannel channel,
+                                                                                          MeterRegister register,
                                                                                           Long excludeReadingId) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
@@ -1509,6 +1515,7 @@ public class TelemetryTenantRepository {
         List<Object> params = new ArrayList<>();
         params.add(schemeId);
         params.add(channel.getCode());
+        appendRegisterFilter(sql, params, schemaName, register);
         if (excludeReadingId != null) {
             sql.append(" AND id <> ?");
             params.add(excludeReadingId);
@@ -1534,12 +1541,13 @@ public class TelemetryTenantRepository {
      * id DESC} tiebreak collapses multiple readings on the same day to the latest one directly in SQL.
      * Fetch a few extra days (~16) so 14 consecutive-day deltas survive diffing.
      *
-     * <p>Readings on {@code channel} only, a NULL channel being a legacy BFM row, so the band is never
-     * built from another kind of meter's values.
+     * <p>Readings on {@code channel} and {@code register} only, a NULL channel being a legacy BFM row, so
+     * the band is never built from another kind of meter's values, or from the meter's other register.
      */
     public List<DailyConfirmedReading> findRecentDailyConfirmedReadings(String schemaName,
                                                                         Long schemeId,
                                                                         ReadingChannel channel,
+                                                                        MeterRegister register,
                                                                         Long excludeReadingId,
                                                                         int days) {
         validateSchemaName(schemaName);
@@ -1560,6 +1568,7 @@ public class TelemetryTenantRepository {
         params.add(schemeId);
         params.add(channel.getCode());
         params.add(days);
+        appendRegisterFilter(sql, params, schemaName, register);
         if (excludeReadingId != null) {
             sql.append(" AND id <> ?");
             params.add(excludeReadingId);
@@ -1634,6 +1643,36 @@ public class TelemetryTenantRepository {
     }
 
     /**
+     * Limits a lookup to the readings on {@code register}, which {@code submitted_unit} tells apart
+     * ({@link MeterRegister#of}). A pre-V56 schema records no unit, so every reading there is on the
+     * standard register.
+     */
+    private void appendRegisterFilter(StringBuilder sql, List<Object> params, String schemaName,
+                                      MeterRegister register) {
+        if (!columnExists(schemaName, "flow_reading_table", SUBMITTED_UNIT_COLUMN)) {
+            if (register != MeterRegister.STANDARD) {
+                sql.append(" AND FALSE");
+            }
+            return;
+        }
+        sql.append(switch (register) {
+            case STANDARD -> " AND " + SUBMITTED_UNIT_COLUMN + " IS DISTINCT FROM ?";
+            case APPARENT_ENERGY -> " AND " + SUBMITTED_UNIT_COLUMN + " = ?";
+        });
+        params.add(ReadingUnit.KILOVOLT_AMPERE_HOUR.code());
+    }
+
+    /**
+     * The {@code submitted_unit} select expression, degrading to a typed NULL on a pre-V56 schema, which
+     * recorded no unit: every reading there is in its channel's standard unit.
+     */
+    private String submittedUnitColumn(String schemaName) {
+        return columnExists(schemaName, "flow_reading_table", SUBMITTED_UNIT_COLUMN)
+                ? SUBMITTED_UNIT_COLUMN
+                : "NULL::varchar";
+    }
+
+    /**
      * The column holding the OCR provider's own correlation id, or {@code null} on a pre-V32 schema that
      * has none.
      */
@@ -1688,14 +1727,17 @@ public class TelemetryTenantRepository {
     }
 
     /**
-     * Returns the latest confirmed reading on {@code channel} strictly before {@code cutoffDateExclusive},
-     * a NULL channel being a legacy BFM row. This is useful when validations should ignore any readings
-     * submitted "today". Analytics measures a day's volume from the same channel's earlier reading, so
-     * this is the baseline it uses too.
+     * Returns the latest confirmed reading on {@code channel} and {@code register} strictly before
+     * {@code cutoffDateExclusive}, a NULL channel being a legacy BFM row. This is useful when validations
+     * should ignore any readings submitted "today". Analytics measures a day's volume from the same
+     * channel's earlier reading, so on the standard register this is the baseline it uses too; analytics
+     * has no baseline at all when that reading is on the other register, where this skips back to the
+     * register's own.
      */
     public Optional<TelemetryConfirmedReadingSnapshot> findLatestConfirmedReadingSnapshotBeforeDate(String schemaName,
                                                                                                     Long schemeId,
                                                                                                     ReadingChannel channel,
+                                                                                                    MeterRegister register,
                                                                                                     LocalDate cutoffDateExclusive,
                                                                                                     Long excludeReadingId) {
         validateSchemaName(schemaName);
@@ -1717,6 +1759,7 @@ public class TelemetryTenantRepository {
         params.add(schemeId);
         params.add(channel.getCode());
         params.add(cutoffTimeExclusive);
+        appendRegisterFilter(sql, params, schemaName, register);
         if (excludeReadingId != null) {
             sql.append(" AND id <> ?");
             params.add(excludeReadingId);
@@ -1929,13 +1972,14 @@ public class TelemetryTenantRepository {
                 ? "(correlation_id = ? OR " + ocrCorrelationColumn + " = ?)"
                 : "correlation_id = ?";
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS reading_time, %s AS quarantine_reason, updated_at
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS submitted_unit, %s AS reading_time, %s AS quarantine_reason, updated_at
                 FROM %s.flow_reading_table
                 WHERE %s
                   AND deleted_at IS NULL
                 ORDER BY reading_date DESC, %s DESC NULLS LAST, id DESC
                 LIMIT 1
-                """, timeColumn, quarantineReasonColumn(schemaName), schemaName, predicate, timeColumn);
+                """, submittedUnitColumn(schemaName), timeColumn, quarantineReasonColumn(schemaName), schemaName,
+                predicate, timeColumn);
         Object[] args = hasOcrCorrelationId
                 ? new Object[]{correlationId, correlationId}
                 : new Object[]{correlationId};
@@ -1953,11 +1997,11 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS reading_time, %s AS quarantine_reason, updated_at
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS submitted_unit, %s AS reading_time, %s AS quarantine_reason, updated_at
                 FROM %s.flow_reading_table
                 WHERE id = ?
                   AND deleted_at IS NULL
-                """, timeColumn, quarantineReasonColumn(schemaName), schemaName);
+                """, submittedUnitColumn(schemaName), timeColumn, quarantineReasonColumn(schemaName), schemaName);
         List<TelemetryLatestFlowReadingRecord> rows = jdbcTemplate.query(
                 sql, (rs, n) -> mapLatestFlowReadingRecord(rs), readingId);
         return rows.stream().findFirst();
@@ -2128,13 +2172,14 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS reading_time, %s AS quarantine_reason, updated_at
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS submitted_unit, %s AS reading_time, %s AS quarantine_reason, updated_at
                 FROM %s.flow_reading_table
                 WHERE created_by = ?
                   AND deleted_at IS NULL
                 ORDER BY reading_date DESC, %s DESC NULLS LAST, id DESC
                 LIMIT 1
-                """, timeColumn, quarantineReasonColumn(schemaName), schemaName, timeColumn);
+                """, submittedUnitColumn(schemaName), timeColumn, quarantineReasonColumn(schemaName), schemaName,
+                timeColumn);
         List<TelemetryLatestFlowReadingRecord> rows = jdbcTemplate.query(
                 sql, (rs, n) -> mapLatestFlowReadingRecord(rs), operatorId);
         return rows.stream().findFirst();
@@ -2153,6 +2198,7 @@ public class TelemetryTenantRepository {
                 rs.getObject("reading_date", LocalDate.class),
                 rs.getObject("reading_time", LocalDateTime.class),
                 toInteger(rs.getObject("channel_id")),
+                rs.getString("submitted_unit"),
                 toInteger(rs.getObject("quarantine_reason")),
                 rs.getObject("updated_at", LocalDateTime.class)
         );
@@ -2170,7 +2216,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS reading_time, %s AS quarantine_reason, updated_at
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS submitted_unit, %s AS reading_time, %s AS quarantine_reason, updated_at
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND created_by = ?
@@ -2179,7 +2225,8 @@ public class TelemetryTenantRepository {
                   AND deleted_at IS NULL
                 ORDER BY reading_date DESC, %s DESC, id DESC
                 LIMIT 1
-                """, timeColumn, quarantineReasonColumn(schemaName), schemaName, timeColumn);
+                """, submittedUnitColumn(schemaName), timeColumn, quarantineReasonColumn(schemaName), schemaName,
+                timeColumn);
         List<TelemetryLatestFlowReadingRecord> rows = jdbcTemplate.query(
                 sql, (rs, n) -> mapLatestFlowReadingRecord(rs), schemeId, operatorId, beforeDate);
         return rows.stream().findFirst();
@@ -2409,7 +2456,7 @@ public class TelemetryTenantRepository {
      * As {@link #updateConfirmedReading(String, Long, BigDecimal, Long, Integer)}, and also sets
      * {@code submitted_unit}, the unit the corrected value arrived in, and {@code reported_via_id}, the
      * channel the correction came through, in the same UPDATE. {@code confirmedReading} is already in
-     * the channel's standard unit. A {@code null} unit or channel leaves the column as it is, and each is
+     * the unit it is stored in. A {@code null} unit or channel leaves the column as it is, and each is
      * dropped on a schema that has no column for it (pre-V56 and pre-V61).
      */
     public void updateConfirmedReading(String schemaName, Long readingId, BigDecimal confirmedReading,

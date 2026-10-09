@@ -105,6 +105,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                 READING_DATE,
                 READING_AT,
                 ReadingChannel.BFM.getCode(),
+                null,
                 0,
                 READING_AT
         );
@@ -164,6 +165,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                         new BigDecimal("1450"),
                         "",
                         READING_DATE, READING_AT, ReadingChannel.BFM.getCode(),
+                        null,
                         QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY, READING_AT)));
 
         service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID, ReportingChannel.API);

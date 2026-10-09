@@ -299,7 +299,7 @@ class TelemetryEventPublisherTest {
         @Test
         void publishesTheReadingWithItsDerivedDate() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L,
-                    new BigDecimal("1234"), new BigDecimal("1234"), new BigDecimal("0.92"),
+                    new BigDecimal("1234"), new BigDecimal("1234"), null, new BigDecimal("0.92"),
                     "https://storage.example.org/img.jpg", LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, "flow-corr-1",
                     99L, LocalDateTime.of(2026, 3, 1, 6, 31, 5, 123_456_000), null);
 
@@ -332,7 +332,7 @@ class TelemetryEventPublisherTest {
                             new BigDecimal("40"), new BigDecimal("7.5"), "HP", new BigDecimal("0.85"),
                             new BigDecimal("5"), new BigDecimal("0.9"))));
 
-            publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
+            publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null, null,
                     null, LocalDateTime.of(2026, 3, 1, 6, 30), 2, DATE, 1, 0, null, 99L, null, snapshot);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
@@ -353,9 +353,20 @@ class TelemetryEventPublisherTest {
             assertThat(pump.get("powerFactor").decimalValue()).isEqualByComparingTo("0.9");
         }
 
+        /** Analytics reads the unit under this exact name to tell a kVAh reading from a kWh one. */
+        @Test
+        void carriesTheSubmittedUnitUnderTheContractsName() {
+            publisher.publishMeterReadingRecorded(17, 7L, 11L, null, new BigDecimal("5310.4"), "kV.A.h", null,
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 2, DATE, 1, 0, null, 99L, null, null);
+
+            MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
+            assertThat(event.getSubmittedUnit()).isEqualTo("kV.A.h");
+            assertThat(new ObjectMapper().valueToTree(event).get("submittedUnit").asText()).isEqualTo("kV.A.h");
+        }
+
         @Test
         void leavesTheVersionNullWhenItIsNotKnown() {
-            publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
+            publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null, null,
                     null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null, 99L, null, null);
 
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getSourceUpdatedAt()).isNull();
@@ -363,7 +374,7 @@ class TelemetryEventPublisherTest {
 
         @Test
         void fallsBackToTheReadingTimestampsDateWhenNoReadingDateIsGiven() {
-            publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
+            publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null, null,
                     null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, null, 1, 0, null, null, null, null);
 
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getReadingDate()).isEqualTo("2026-03-01");
@@ -375,7 +386,7 @@ class TelemetryEventPublisherTest {
             // m3. Rounding here cost up to 0.5 m3 per reading, i.e. up to 1000 L on the daily delta
             // analytics derives from two of them.
             publisher.publishMeterReadingRecorded(17, 7L, 11L,
-                    new BigDecimal("1247.8"), new BigDecimal("1235.55"), null,
+                    new BigDecimal("1247.8"), new BigDecimal("1235.55"), null, null,
                     null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null, null, null, null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
@@ -385,7 +396,7 @@ class TelemetryEventPublisherTest {
 
         @Test
         void carriesNullReadingsThrough() {
-            publisher.publishMeterReadingRecorded(17, 7L, 11L, null, null, null,
+            publisher.publishMeterReadingRecorded(17, 7L, 11L, null, null, null, null,
                     null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0, null, null, null, null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
@@ -395,7 +406,7 @@ class TelemetryEventPublisherTest {
 
         @Test
         void leavesTheDateNullWhenNeitherIsGiven() {
-            publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null,
+            publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN, null, null,
                     null, null, 1, null, 1, 0, null, null, null, null);
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
@@ -413,6 +424,7 @@ class TelemetryEventPublisherTest {
         })
         void normalisesModelConfidenceToAWholePercentage(String confidence, int expected) {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN,
+                    null,
                     new BigDecimal(confidence), null, null, 1, DATE, 1, 0, null, null, null, null);
 
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isEqualTo(expected);
@@ -421,11 +433,13 @@ class TelemetryEventPublisherTest {
         @Test
         void treatsAMissingOrNegativeConfidenceAsUnknown() {
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN,
+                    null,
                     null, null, null, 1, DATE, 1, 0, null, null, null, null);
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isNull();
 
             org.mockito.Mockito.reset(kafkaProducer);
             publisher.publishMeterReadingRecorded(17, 7L, 11L, BigDecimal.TEN, BigDecimal.TEN,
+                    null,
                     new BigDecimal("-1"), null, null, 1, DATE, 1, 0, null, null, null, null);
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getConfidence()).isNull();
         }
@@ -433,7 +447,7 @@ class TelemetryEventPublisherTest {
         @Test
         void publishesAPrebuiltEventAsItIs() {
             MeterReadingEvent event = TelemetryEventPublisher.meterReadingRecordedEvent(17, 7L, 11L,
-                    BigDecimal.TEN, BigDecimal.TEN, null, null, LocalDateTime.of(2026, 3, 1, 6, 30), 2, DATE,
+                    BigDecimal.TEN, BigDecimal.TEN, null, null, null, LocalDateTime.of(2026, 3, 1, 6, 30), 2, DATE,
                     1, 0, null, 99L, null, null);
 
             publisher.publishMeterReadingRecorded(event);
@@ -445,7 +459,7 @@ class TelemetryEventPublisherTest {
         @Test
         void waitsForTheAcknowledgementAndReportsIt() {
             MeterReadingEvent event = TelemetryEventPublisher.meterReadingRecordedEvent(17, 7L, 11L,
-                    BigDecimal.TEN, BigDecimal.TEN, null, null, LocalDateTime.of(2026, 3, 1, 6, 30), 2, DATE,
+                    BigDecimal.TEN, BigDecimal.TEN, null, null, null, LocalDateTime.of(2026, 3, 1, 6, 30), 2, DATE,
                     1, 0, null, 99L, null, null);
             when(kafkaProducer.publishJsonAndAwait(TOPIC, event, TelemetryEventPublisher.ACKNOWLEDGEMENT_TIMEOUT))
                     .thenReturn(true, false);

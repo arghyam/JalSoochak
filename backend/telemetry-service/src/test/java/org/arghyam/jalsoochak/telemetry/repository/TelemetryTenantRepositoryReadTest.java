@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -464,7 +465,8 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     "created_at", LocalDateTime.of(2026, 3, 1, 7, 30)));
 
             Optional<TelemetryConfirmedReadingSnapshot> snapshot =
-                    repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, ReadingChannel.BFM, null);
+                    repository.findLatestConfirmedReadingSnapshot(
+                            SCHEMA, 5L, ReadingChannel.BFM, MeterRegister.STANDARD, null);
 
             assertThat(snapshot).isPresent();
             assertThat(snapshot.get().confirmedReading()).isEqualByComparingTo("1234.50");
@@ -477,7 +479,8 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     row("confirmed_reading", new BigDecimal("10"), "created_at", null));
 
             Optional<TelemetryConfirmedReadingSnapshot> snapshot =
-                    repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, ReadingChannel.BFM, null);
+                    repository.findLatestConfirmedReadingSnapshot(
+                            SCHEMA, 5L, ReadingChannel.BFM, MeterRegister.STANDARD, null);
 
             assertThat(snapshot).isPresent();
             assertThat(snapshot.get().createdAt()).isNull();
@@ -488,7 +491,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             onQuery("confirmed_reading > 0",
                     row("confirmed_reading", new BigDecimal("10"), "created_at", null));
 
-            repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, ReadingChannel.BFM, 99L);
+            repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, ReadingChannel.BFM, MeterRegister.STANDARD, 99L);
 
             assertThat(allQuerySql()).anySatisfy(sql -> assertThat(sql).contains("id <> ?"));
         }
@@ -498,14 +501,16 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             onQuery("confirmed_reading > 0", row(
                     "confirmed_reading", new BigDecimal("88.00"), "created_at", null));
 
-            assertThat(repository.findLastConfirmedReading(SCHEMA, 5L, ReadingChannel.BFM, null))
+            assertThat(repository.findLastConfirmedReading(
+                    SCHEMA, 5L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                     .hasValueSatisfying(v -> assertThat(v).isEqualByComparingTo("88.00"));
         }
 
         @Test
         void findLatestConfirmedReadingSnapshotBeforeDateRequiresCutoff() {
             assertThatThrownBy(() ->
-                    repository.findLatestConfirmedReadingSnapshotBeforeDate(SCHEMA, 5L, ReadingChannel.BFM, null, null))
+                    repository.findLatestConfirmedReadingSnapshotBeforeDate(
+                            SCHEMA, 5L, ReadingChannel.BFM, MeterRegister.STANDARD, null, null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("cutoffDateExclusive");
         }
@@ -517,7 +522,7 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     "created_at", LocalDateTime.of(2026, 2, 1, 6, 0)));
 
             assertThat(repository.findLatestConfirmedReadingSnapshotBeforeDate(
-                    SCHEMA, 5L, ReadingChannel.BFM, LocalDate.of(2026, 2, 2), 7L)).isPresent();
+                    SCHEMA, 5L, ReadingChannel.BFM, MeterRegister.STANDARD, LocalDate.of(2026, 2, 2), 7L)).isPresent();
         }
 
         @Test
@@ -539,9 +544,12 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
 
         @Test
         void findRecentDailyConfirmedReadingsGuardsInvalidArguments() {
-            assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, null, ReadingChannel.BFM, null, 14)).isEmpty();
-            assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, ReadingChannel.BFM, null, 0)).isEmpty();
-            assertThat(repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, ReadingChannel.BFM, null, -1)).isEmpty();
+            assertThat(repository.findRecentDailyConfirmedReadings(
+                    SCHEMA, null, ReadingChannel.BFM, MeterRegister.STANDARD, null, 14)).isEmpty();
+            assertThat(repository.findRecentDailyConfirmedReadings(
+                    SCHEMA, 5L, ReadingChannel.BFM, MeterRegister.STANDARD, null, 0)).isEmpty();
+            assertThat(repository.findRecentDailyConfirmedReadings(
+                    SCHEMA, 5L, ReadingChannel.BFM, MeterRegister.STANDARD, null, -1)).isEmpty();
         }
 
         @Test
@@ -551,7 +559,8 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     row("reading_date", LocalDate.of(2026, 3, 1), "confirmed_reading", new BigDecimal("100")));
 
             List<DailyConfirmedReading> readings =
-                    repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, ReadingChannel.BFM, 9L, 16);
+                    repository.findRecentDailyConfirmedReadings(
+                            SCHEMA, 5L, ReadingChannel.BFM, MeterRegister.STANDARD, 9L, 16);
 
             assertThat(readings).hasSize(2);
             assertThat(readings.get(0).day()).isEqualTo(LocalDate.of(2026, 3, 2));
@@ -590,10 +599,11 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             onQuery("DISTINCT ON (reading_date)",
                     row("reading_date", LocalDate.of(2026, 3, 1), "confirmed_reading", new BigDecimal("10")));
 
-            repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, ReadingChannel.BFM, null);
+            repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, ReadingChannel.BFM, MeterRegister.STANDARD, null);
             repository.findLatestConfirmedReadingSnapshotBeforeDate(
-                    SCHEMA, 5L, ReadingChannel.BFM, LocalDate.of(2026, 3, 2), null);
-            repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, ReadingChannel.BFM, null, 16);
+                    SCHEMA, 5L, ReadingChannel.BFM, MeterRegister.STANDARD, LocalDate.of(2026, 3, 2), null);
+            repository.findRecentDailyConfirmedReadings(
+                    SCHEMA, 5L, ReadingChannel.BFM, MeterRegister.STANDARD, null, 16);
         }
 
         @Test
@@ -627,6 +637,85 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
             runEveryBaselineLookup();
 
             assertThat(allQuerySql()).noneSatisfy(sql -> assertThat(sql).contains("quarantine_reason"));
+        }
+
+        @Test
+        void baselineQueriesLeaveOutKvahReadingsOnTheStandardRegister() {
+            onColumnsExisting("submitted_unit");
+
+            runEveryBaselineLookup();
+
+            assertThat(allQuerySql())
+                    .filteredOn(sql -> sql.contains("flow_reading_table"))
+                    .hasSize(3)
+                    .allSatisfy(sql -> assertThat(sql).contains("submitted_unit IS DISTINCT FROM ?"));
+            assertThat(lastQueryArgs()).contains("kV.A.h");
+        }
+
+        @Test
+        void aKvahBaselineQueryKeepsKvahReadingsOnly() {
+            onColumnsExisting("submitted_unit");
+            onQuery("confirmed_reading > 0",
+                    row("confirmed_reading", new BigDecimal("5300"), "created_at", null));
+
+            assertThat(repository.findLatestConfirmedReadingSnapshot(
+                    SCHEMA, 5L, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, 7L)).isPresent();
+
+            assertThat(allQuerySql()).anySatisfy(sql -> assertThat(sql).contains("submitted_unit = ?"));
+            assertThat(lastQueryArgs()).containsExactly(5L, ReadingChannel.ELM.getCode(), "kV.A.h", 7L);
+        }
+
+        @Test
+        void baselineQueriesOnASchemaWithNoUnitsTakeEveryReadingAsStandardAndNoneAsKvah() {
+            onColumnExists(false);
+
+            runEveryBaselineLookup();
+            repository.findLatestConfirmedReadingSnapshot(
+                    SCHEMA, 5L, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, null);
+
+            List<String> lookups = allQuerySql().stream()
+                    .filter(sql -> sql.contains("flow_reading_table"))
+                    .toList();
+            assertThat(lookups).hasSize(4);
+            assertThat(lookups.subList(0, 3)).noneSatisfy(sql -> assertThat(sql).contains("submitted_unit"));
+            assertThat(lookups.get(3)).contains("AND FALSE");
+        }
+
+        @Test
+        void correctionLookupsCarryTheSubmittedUnit() {
+            onColumnsExisting("submitted_unit");
+            onQuery("flow_reading_table", row(
+                    "id", 99L, "scheme_id", 10L, "created_by", 1L, "correlation_id", "corr-1",
+                    "extracted_reading", new BigDecimal("0"), "confirmed_reading", new BigDecimal("5300"),
+                    "image_url", "", "reading_date", LocalDate.of(2026, 3, 3),
+                    "reading_time", LocalDateTime.of(2026, 3, 3, 6, 0), "channel_id", 2,
+                    "submitted_unit", "kV.A.h"));
+
+            assertThat(repository.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
+                    .hasValueSatisfying(r -> assertThat(r.submittedUnit()).isEqualTo("kV.A.h"));
+            assertThat(repository.findFlowReadingById(SCHEMA, 99L))
+                    .hasValueSatisfying(r -> assertThat(r.submittedUnit()).isEqualTo("kV.A.h"));
+            assertThat(repository.findLatestFlowReadingByOperator(SCHEMA, 1L))
+                    .hasValueSatisfying(r -> assertThat(r.submittedUnit()).isEqualTo("kV.A.h"));
+            assertThat(repository.findLatestCompletedFlowReadingBeforeDate(SCHEMA, 10L, 1L, LocalDate.of(2026, 3, 4)))
+                    .hasValueSatisfying(r -> assertThat(r.submittedUnit()).isEqualTo("kV.A.h"));
+            assertThat(allQuerySql()).allSatisfy(sql ->
+                    assertThat(sql).contains("submitted_unit AS submitted_unit"));
+        }
+
+        @Test
+        void correctionLookupsReadNullSubmittedUnitOnASchemaWithNoUnits() {
+            onColumnExists(false);
+            onQuery("flow_reading_table", row(
+                    "id", 99L, "scheme_id", 10L, "created_by", 1L, "correlation_id", "corr-1",
+                    "extracted_reading", new BigDecimal("0"), "confirmed_reading", new BigDecimal("150"),
+                    "image_url", "", "reading_date", LocalDate.of(2026, 3, 3),
+                    "reading_time", LocalDateTime.of(2026, 3, 3, 6, 0), "channel_id", 1));
+
+            assertThat(repository.findFlowReadingById(SCHEMA, 99L))
+                    .hasValueSatisfying(r -> assertThat(r.submittedUnit()).isNull());
+            assertThat(allQuerySql()).anySatisfy(sql ->
+                    assertThat(sql).contains("NULL::varchar AS submitted_unit"));
         }
 
         @Test

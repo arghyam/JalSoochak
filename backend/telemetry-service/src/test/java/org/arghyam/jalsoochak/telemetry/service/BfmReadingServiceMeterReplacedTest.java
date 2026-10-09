@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
@@ -100,7 +101,8 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, ReadingChannel.BFM, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
+                schemaName, 10L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
@@ -178,7 +180,8 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, ReadingChannel.BFM, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
+                schemaName, 10L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("800"), ReadingTime.now().minusDays(1))));
 
         when(tenantConfigRepository.findConfigValue(1, "TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD"))
@@ -245,7 +248,8 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, ReadingChannel.BFM, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
+                schemaName, 10L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
 
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.from(readingAt)))

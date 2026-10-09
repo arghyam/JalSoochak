@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
@@ -153,7 +154,8 @@ class BfmReadingServicePlaceholderRowTest {
                         .build()
         );
 
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, ReadingChannel.BFM, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
+                schemaName, 10L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
@@ -222,7 +224,8 @@ class BfmReadingServicePlaceholderRowTest {
                         .adjustedReading(new BigDecimal("123"))
                         .build()
         );
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, ReadingChannel.BFM, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
+                schemaName, 10L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
                 schemaName, 10L, 1L, ReadingTime.today())).thenReturn(Optional.empty());
@@ -309,6 +312,7 @@ class BfmReadingServicePlaceholderRowTest {
                 readingDate,
                 readingAt,
                 ReadingChannel.BFM.getCode(),
+                null,
                 0,
                 null
         );
@@ -347,6 +351,7 @@ class BfmReadingServicePlaceholderRowTest {
                 readingDate,
                 readingAt,
                 ReadingChannel.BFM.getCode(),
+                null,
                 0,
                 null
         );

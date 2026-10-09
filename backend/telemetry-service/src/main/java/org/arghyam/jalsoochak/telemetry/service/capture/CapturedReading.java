@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service.capture;
 
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 
@@ -8,8 +9,8 @@ import java.math.BigDecimal;
 /**
  * A reading ready for the submission pipeline.
  *
- * @param value            the reading in the channel's standard unit, which is what
- *                         {@code confirmed_reading} holds
+ * @param value            the reading in {@code submittedUnit}'s stored unit, which is what
+ *                         {@code confirmed_reading} holds: the channel's standard unit, or kVAh
  * @param submittedUnit    the unit the value arrived in; null for a channel with no units defined
  *                         (IOT, MAN)
  * @param extractedReading what OCR read off the photo; null when nothing was extracted
@@ -30,5 +31,10 @@ public record CapturedReading(
     /** The code {@code submitted_unit} stores; null when there is no unit. */
     public String submittedUnitCode() {
         return submittedUnit == null ? null : submittedUnit.code();
+    }
+
+    /** The register the reading was taken from, and so the only one its earlier readings come from. */
+    public MeterRegister register() {
+        return submittedUnit == null ? MeterRegister.STANDARD : submittedUnit.register();
     }
 }

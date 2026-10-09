@@ -101,6 +101,8 @@ public class ReadingRepublisher {
                 reading.createdBy(),
                 publishableExtractedReading(reading.extractedReading()),
                 reading.confirmedReading(),
+                // What tells analytics a kVAh reading from a kWh one; null on a pre-V56 row.
+                reading.submittedUnit(),
                 null,
                 reading.imageUrl(),
                 readingAt,

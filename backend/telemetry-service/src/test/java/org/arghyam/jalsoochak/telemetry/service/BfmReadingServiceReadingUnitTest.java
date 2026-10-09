@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
@@ -121,7 +122,8 @@ class BfmReadingServiceReadingUnitTest {
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);
-        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, ReadingChannel.BFM, null))
+        lenient().when(repo.findLatestConfirmedReadingSnapshot(
+                SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
                         new BigDecimal("0.5"), ReadingTime.now().minusDays(1))));
         lenient().when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(SCHEME_ID), eq(OPERATOR_ID),
@@ -237,14 +239,15 @@ class BfmReadingServiceReadingUnitTest {
 
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.getLastConfirmedReading()).isNull();
-        verify(repo, never()).findLatestConfirmedReadingSnapshot(any(), any(), any(), any());
-        verify(repo, never()).findLastConfirmedReading(any(), any(), any(), any());
+        verify(repo, never()).findLatestConfirmedReadingSnapshot(any(), any(), any(), any(), any());
+        verify(repo, never()).findLastConfirmedReading(any(), any(), any(), any(), any());
     }
 
     @Test
     @DisplayName("an ELM submission is compared with the scheme's ELM readings only")
     void elmSubmissionIsComparedWithElmReadingsOnly() {
-        when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, ReadingChannel.ELM, null))
+        when(repo.findLatestConfirmedReadingSnapshot(
+                SCHEMA, SCHEME_ID, ReadingChannel.ELM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
                         new BigDecimal("4800"), ReadingTime.now().minusDays(1))));
 
@@ -252,7 +255,55 @@ class BfmReadingServiceReadingUnitTest {
                 assertedValue(ReadingChannel.ELM, "4821.5", null), SCHEMA, operator, CONTACT, false);
 
         assertThat(response.getLastConfirmedReading()).isEqualByComparingTo("4800");
-        verify(repo, never()).findLatestConfirmedReadingSnapshot(any(), any(), eq(ReadingChannel.BFM), any());
+        verify(repo, never()).findLatestConfirmedReadingSnapshot(
+                any(), any(), eq(ReadingChannel.BFM), eq(MeterRegister.STANDARD), any());
+    }
+
+    @Test
+    @DisplayName("a kVAh reading is stored and published as it is, with kV.A.h recorded as the submitted unit")
+    void kvahIsStoredAsItIs() {
+        CreateReadingResponse response = service.createReading(
+                assertedValue(ReadingChannel.ELM, "5310.4", "kVAh"), SCHEMA, operator, CONTACT, false);
+
+        assertThat(response.isSuccess()).isTrue();
+        assertThat(response.getMeterReading()).isEqualByComparingTo("5310.4");
+        verifyStored("5310.4", ReadingChannel.ELM, "kV.A.h");
+        verifyPublished("5310.4", "kV.A.h");
+    }
+
+    @Test
+    @DisplayName("a kVAh reading is compared with the scheme's kVAh readings only, and a kWh one with kWh readings")
+    void elmSubmissionIsComparedWithItsOwnRegistersReadingsOnly() {
+        when(repo.findLatestConfirmedReadingSnapshot(
+                SCHEMA, SCHEME_ID, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, null))
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
+                        new BigDecimal("5300"), ReadingTime.now().minusDays(1))));
+        lenient().when(repo.findLatestConfirmedReadingSnapshot(
+                SCHEMA, SCHEME_ID, ReadingChannel.ELM, MeterRegister.STANDARD, null))
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
+                        new BigDecimal("4800"), ReadingTime.now().minusDays(1))));
+
+        CreateReadingResponse kvah = service.createReading(
+                assertedValue(ReadingChannel.ELM, "5310.4", "kVAh"), SCHEMA, operator, CONTACT, false);
+        CreateReadingResponse kwh = service.createReading(
+                assertedValue(ReadingChannel.ELM, "4821.5", "kWh"), SCHEMA, operator, CONTACT, false);
+
+        assertThat(kvah.getLastConfirmedReading()).isEqualByComparingTo("5300");
+        assertThat(kwh.getLastConfirmedReading()).isEqualByComparingTo("4800");
+    }
+
+    @Test
+    @DisplayName("a kVAh reading above ELM's configured maximum is refused, stating the maximum in kVAh")
+    void kvahAboveTheConfiguredMaximumIsRefused() {
+        when(manualReadingMaxValues.maxFor(TENANT_ID, ReadingChannel.ELM))
+                .thenReturn(Optional.of(new BigDecimal("9999")));
+
+        CreateReadingResponse response = service.createReading(
+                assertedValue(ReadingChannel.ELM, "10000", "kVAh"), SCHEMA, operator, CONTACT, false);
+
+        assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);
+        assertThat(response.getMessage()).isEqualTo("Reading can't be more than 9999 kVAh.");
+        verifyNothingStoredOrPublished();
     }
 
     @Test
@@ -327,8 +378,14 @@ class BfmReadingServiceReadingUnitTest {
     }
 
     private void verifyPublished(String value) {
+        verifyPublished(value, null);
+    }
+
+    /** @param submittedUnit null matches any unit */
+    private void verifyPublished(String value, String submittedUnit) {
         verify(telemetryEventPublisher).publishMeterReadingRecorded(any(), any(), any(), any(),
-                argThat(sameValue(value)), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                argThat(sameValue(value)), submittedUnit == null ? any() : eq(submittedUnit),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     private void verifyNothingStoredOrPublished() {

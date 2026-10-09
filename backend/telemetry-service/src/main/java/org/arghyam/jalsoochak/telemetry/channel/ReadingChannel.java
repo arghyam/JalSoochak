@@ -56,6 +56,18 @@ public enum ReadingChannel {
     }
 
     /**
+     * The unit {@code confirmed_reading} is stored in for a reading on {@code register}: the
+     * {@linkplain #standardUnit() standard unit}, or kVAh on an electricity meter's apparent-energy
+     * register. Empty for IOT and MAN, and for a register the channel doesn't have.
+     */
+    public Optional<ReadingUnit> storedUnit(MeterRegister register) {
+        return switch (register) {
+            case STANDARD -> standardUnit();
+            case APPARENT_ENERGY -> this == ELM ? Optional.of(ReadingUnit.KILOVOLT_AMPERE_HOUR) : Optional.empty();
+        };
+    }
+
+    /**
      * Whether a meter photo can be read for this channel. BFM and ELM meters show a reading that OCR
      * can extract; a PDU reading is a run duration that is always typed in, and IOT and MAN have no
      * reading defined yet.

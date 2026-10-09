@@ -2,6 +2,8 @@ package org.arghyam.jalsoochak.telemetry.channel;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ReadingChannelTest {
@@ -115,6 +117,22 @@ class ReadingChannelTest {
     void unsupportedDeclarationMessage_namesTheAllowedSetAndNothingTheCallerSent() {
         assertThat(ReadingChannel.unsupportedDeclarationMessage())
                 .isEqualTo("Unsupported channel. Allowed values are: BFM, ELM, PDU, IOT, MAN");
+    }
+
+    @Test
+    void storedUnit_onTheStandardRegisterIsTheStandardUnit() {
+        for (ReadingChannel channel : ReadingChannel.values()) {
+            assertThat(channel.storedUnit(MeterRegister.STANDARD)).isEqualTo(channel.standardUnit());
+        }
+    }
+
+    @Test
+    void storedUnit_onTheApparentEnergyRegisterIsKvahForElmOnly() {
+        assertThat(ReadingChannel.ELM.storedUnit(MeterRegister.APPARENT_ENERGY))
+                .contains(ReadingUnit.KILOVOLT_AMPERE_HOUR);
+        assertThat(ReadingChannel.BFM.storedUnit(MeterRegister.APPARENT_ENERGY)).isEqualTo(Optional.empty());
+        assertThat(ReadingChannel.PDU.storedUnit(MeterRegister.APPARENT_ENERGY)).isEqualTo(Optional.empty());
+        assertThat(ReadingChannel.IOT.storedUnit(MeterRegister.APPARENT_ENERGY)).isEqualTo(Optional.empty());
     }
 
     @Test
