@@ -1,6 +1,6 @@
 # Entity-Relationship Diagrams
 
-These diagrams show the PostgreSQL schema as left by the Flyway migrations in `backend/database/` (common and tenant schemas, up to V55) and `backend/analytics-service/src/main/resources/db/migration/` (analytics warehouse, up to V55). Table and column descriptions are in [Database Design](database-design.md).
+These diagrams show the PostgreSQL schema as left by the Flyway migrations in `backend/database/` (common and tenant schemas, up to V60) and `backend/analytics-service/src/main/resources/db/migration/` (analytics warehouse, up to V55). Table and column descriptions are in [Database Design](database-design.md).
 
 **Reading the diagrams**
 
@@ -111,7 +111,7 @@ erDiagram
     language_master ||--o{ language_alias : "spelled as"
 ```
 
-Two common tables have no relationships and are not drawn: `channel_master_table` (submission and notification channels) and `common_schema.language_master_table` (a language list with labels and locale codes, which the services do not read). Each tenant schema has its own `language_master_table`, which is the one the services use; see the tenant schema section below.
+Two common tables are not drawn. `channel_master_table` (submission and notification channels) is referenced only from the tenant schemas, by `scheme_master_table.channel_id` and `flow_reading_table.channel_id`. `common_schema.language_master_table` (a language list with labels and locale codes, which the services do not read) has no relationships. Each tenant schema has its own `language_master_table`, which is the one the services use; see the tenant schema section below.
 
 ## Tenant schema (`tenant_<stateCode>`)
 
@@ -155,7 +155,7 @@ erDiagram
         int fhtc_count
         int planned_fhtc
         int house_hold_count
-        int channel
+        int channel_id "common_schema.channel_master_table"
         int work_status
         int operating_status
         double k_factor
@@ -231,6 +231,7 @@ erDiagram
         varchar uuid
         int scheme_id FK
         int created_by FK "submitting operator"
+        int channel_id "common_schema.channel_master_table"
         timestamp observation_time
         date reading_date
         numeric extracted_reading "OCR value"

@@ -92,6 +92,11 @@ point. A `PERIOD_AMOUNT` reading is one run on its own, so a day's amount is the
 Analytics holds the kind (`ReadingChannel.kind()`); telemetry holds the units and whether a photo can
 be read (`standardUnit()`, `supportsImageReading()`).
 
+The codes are also the reading channels' ids in `common_schema.channel_master_table`. A tenant stores
+them in `flow_reading_table.channel_id` and `scheme_master_table.channel_id`, both keys into that
+table. A NULL `channel_id` on a reading row is a BFM reading from before the channel was recorded, or
+a row with no reading (placeholder, location, meter change).
+
 `flow_reading_table.confirmed_reading` always holds the channel's standard unit, because many
 queries do arithmetic on it directly. Nothing forces a scheme onto one channel.
 
@@ -101,10 +106,18 @@ queries do arithmetic on it directly. Nothing forces a scheme onto one channel.
 | --- | --- |
 | V56 `add_submitted_unit_to_flow_reading_table` | `flow_reading_table.submitted_unit VARCHAR(16)`, nullable since old rows have none. Column comments on `extracted_reading`, `confirmed_reading` and `submitted_unit` |
 | V57 `default_asset_pump_registry_status_to_active` | `asset_pump_registry_table.status` gets `DEFAULT 1`. Column comments give the unit each pump rating must be entered in |
+| V58 `add_channel_id_to_flow_reading_and_scheme_master_tables` | Seeds `channel_master_table` with ids 1–5 = BFM, ELM, PDU, IOT, MAN. `channel_id INTEGER` on both tables, keyed to `channel_master_table` (`NOT VALID` on `flow_reading_table`), and a trigger keeping `flow_reading_table.channel` and `channel_id` in step while pods writing either serve |
+| V59 `fill_flow_reading_channel_id_and_validate_its_key` | Fills `flow_reading_table.channel_id` from `channel` in batches, then validates its key. A NULL `channel` stays NULL |
+| V60 `drop_channel_from_flow_reading_and_scheme_master_tables` | Drops the trigger, its function and both `channel` columns, from existing tenant schemas and from provisioning |
 
-Both follow V54: existing tenant schemas first, then the `create_tenant_schema` wrapper, under a
+V56 and V57 follow V54: existing tenant schemas first, then the `create_tenant_schema` wrapper, under a
 `SHARE` lock on `tenant_master_table` so no tenant is provisioned in between. Both were checked on a
 scratch database only, per the project's rule for simple column changes.
+
+V58–V60 came after this branch, in releases of their own (§13). They replace the text
+`flow_reading_table.channel` and the integer `scheme_master_table.channel`, which held a list position
+rather than a code, with `channel_id`. As in V55, they run outside Flyway's transaction, with a commit
+per tenant table and a 3 s `lock_timeout` with retries.
 
 Already on `dev` before this branch: the pump table rename (V52), the pump and motor ratings (V53) and
 `scheme_master_table.k_factor` (V54).
@@ -553,7 +566,7 @@ as if ELM and PDU readings didn't exist. Legacy NULL-channel rows count as BFM.
 
 | Where | Change |
 | --- | --- |
-| user-service `PersonSchemeRepository` (scheme list, scheme view, pump-operator list and readings) | Every `flow_reading_table` read keeps `COALESCE(fr.channel, 'BFM') = 'BFM'`, inside the CTE and **before** `LAG`, so an ELM or PDU value is never a BFM reading's previous one. Covers readings, water supplied, reporting rate and last submission time |
+| user-service `PersonSchemeRepository` (scheme list, scheme view, pump-operator list and readings) | Every `flow_reading_table` read keeps `COALESCE(fr.channel_id, 1) = 1`, inside the CTE and **before** `LAG`, so an ELM or PDU value is never a BFM reading's previous one. Covers readings, water supplied, reporting rate and last submission time |
 | The same, pump-operator list's analytics branch | Skips days whose latest `fact_meter_reading_table` reading is not BFM — the day-channel rule of §6.3, looked up at query time |
 | The same, pump-operator list's flow-reading fallback | Returns **litres** (`ROUND((confirmed_reading − prev_confirmed) × 1000)`), like the analytics value it stands in for, so the `COALESCE` of the two no longer mixes units |
 | scheme-service `SchemeDbRepository` fix-readings list | Each scheme's latest BFM reading |
@@ -667,6 +680,18 @@ telemetry's events against an old analytics would be inserted as new rows on eve
 telemetry rolled back after this release sends events without identity again, and corrections then
 add fact rows, as they did before.
 
+**Channel columns (V58–V60).** Released after this branch, in three steps, each live everywhere before
+the next starts:
+
+1. V58 and V59.
+2. telemetry-, user- and scheme-service reading and writing only `channel_id`, once V59 has finished:
+   `SELECT conrelid::regclass, convalidated FROM pg_constraint WHERE conname = 'fk_flow_channel'` is
+   true for every tenant.
+3. V60, once no pod from before step 2 serves.
+
+Unlike the migrations above, V60 is not additive: it drops columns that services from before step 2
+read, so those services can't be redeployed once it has run.
+
 ---
 
 ## 14. Effects on existing numbers (accepted)
@@ -726,9 +751,8 @@ export JAVA_HOME=<local JDK 21>
 
 - **No ELM OCR model.** ELM photos are rejected. When an extractor is added, ELM also needs a default
   provider in `OcrProviderRegistry`.
-- **ELM and PDU over WhatsApp (phase 6) are not built.** `/selected/channel` still writes a list
-  position into `scheme_master_table.channel`, there is no PDU minutes flow, and a WhatsApp manual
-  value from a PDU operator overwrites their latest row today instead of adding a run.
+- **ELM and PDU over WhatsApp (phase 6) are not built.** There is no PDU minutes flow, and a WhatsApp
+  manual value from a PDU operator overwrites their latest row today instead of adding a run.
 - **Pump ratings and `k_factor` are entered by SQL.** Nothing validates their units at entry.
 - **Saving configuration doesn't recalculate.** Readings stored before it stay without a total until
   someone runs §7.

@@ -52,7 +52,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 * `fhtc_count (int)`, `planned_fhtc (int)`, `house_hold_count (int)`
 * `state_scheme_code (varchar, the State system's public scheme code)`
 * `latitude / longitude (double)`
-* `channel (int, the scheme's reading channel)`
+* `channel_id (int, FK to common_schema.channel_master_table: the reading channel chosen in the WhatsApp channel selection; NULL until one is chosen)`
 * `work_status (int)`, `operating_status (int)`
 
 * **`scheme_lgd_mapping_table` / `scheme_department_mapping_table`** — scheme ↔ location links
@@ -67,6 +67,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 * `observation_time (timestamp)`, `reading_date (date, daily de-duplication)`
 * `extracted_reading (numeric, OCR-extracted value)`, `confirmed_reading (numeric, operator value)`, `confirmed_reading_source (smallint, as extracted / rollover-resolved)`
 * `ai_confidence_percentage (numeric)`, `quantity (numeric, delta vs previous reading)`
+* `channel_id (int, FK to common_schema.channel_master_table: 1 BFM, 2 ELM, 3 PDU, 4 IOT, 5 MAN; NULL on rows with no reading and on BFM readings from before the channel was recorded)`
 * `image_url (text)`, `latitude / longitude (double, submission location)`, `correlation_id / ocr_correlation_id (varchar)`
 * `meter_change_reason (text)`, `issue_report_reason (text)` — set on meter-change and issue-report rows
 * `ingestion_source (smallint, bitmask: 0 = normal; non-zero when the scheme or phone was not found and the lenient path recorded it)`
@@ -75,7 +76,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 ### 10.5 Messaging & Nudge Configuration
 
 * Notification templates and language keys live in `tenant_config_master_table` (`nudge_message_<lang>`, `escalation_message_<lang>`, `language_<id>`); the WhatsApp conversation's screens, prompts and options live under `WHATSAPP_MESSAGE_TEMPLATES`.
-* **`channel_master_table`** (common schema) — submission/notification channel definitions.
+* **`channel_master_table`** (common schema) — submission/notification channel definitions. The reading channels are ids 1–5 (BFM, ELM, PDU, IOT, MAN), the codes `scheme_master_table.channel_id` and `flow_reading_table.channel_id` hold.
 * **`language_master`** / **`language_alias`** (common schema) — canonical languages with locale codes, and the spellings that resolve to them; each tenant schema also carries its own `language_master_table`.
 * **`notification_table`** (tenant schema) — a per-user notification table provisioned in every tenant schema; no service writes to it yet.
 
