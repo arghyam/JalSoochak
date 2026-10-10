@@ -3,7 +3,9 @@ package org.arghyam.jalsoochak.message.service;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.text.TextPosition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -125,6 +127,25 @@ class EscalationPdfServiceTest {
     }
 
     @Test
+    void generate_longOfficerName_titleWrapsWithinPageWidth() throws Exception {
+        List<OperatorEscalationDetail> operators = List.of(buildOperator("Op", "S", 3, "2024-01-08"));
+        // A realistic long office name that overflows a single title line on A4.
+        String longOfficeName =
+                "Executive Engineer Public Health Engineering Department Sub Division Office Guwahati";
+
+        String filename = service.generate(operators, 2, longOfficeName, "DISTRICT_OFFICER", "test-corr-id");
+
+        // The full name must still be present in the extracted text (nothing dropped)...
+        String pdfText = extractText(tempDir.resolve(filename));
+        assertThat(pdfText).contains("Guwahati");
+
+        // ...and no glyph may extend past the page's right margin (i.e. it wrapped, not clipped).
+        float rightMargin = PDRectangle.A4.getWidth() - 50f; // MARGIN = 50
+        assertThat(maxTextRightEdge(tempDir.resolve(filename)))
+                .isLessThanOrEqualTo(rightMargin + 1f); // 1pt tolerance for float rounding
+    }
+
+    @Test
     void generate_pdfTitleFallsBackToLevelN_whenOfficerUserTypeIsNull() throws Exception {
         List<OperatorEscalationDetail> operators = List.of(buildOperator("Op", "S", 3, "2024-01-08"));
 
@@ -224,5 +245,25 @@ class EscalationPdfServiceTest {
         try (PDDocument doc = Loader.loadPDF(pdfPath.toFile())) {
             return new PDFTextStripper().getText(doc);
         }
+    }
+
+    /** Returns the largest right-edge x-coordinate of any rendered glyph in the PDF. */
+    private float maxTextRightEdge(Path pdfPath) throws Exception {
+        float[] max = {0f};
+        try (PDDocument doc = Loader.loadPDF(pdfPath.toFile())) {
+            PDFTextStripper stripper = new PDFTextStripper() {
+                @Override
+                protected void writeString(String text, List<TextPosition> textPositions) {
+                    for (TextPosition tp : textPositions) {
+                        float right = tp.getXDirAdj() + tp.getWidthDirAdj();
+                        if (right > max[0]) {
+                            max[0] = right;
+                        }
+                    }
+                }
+            };
+            stripper.getText(doc);
+        }
+        return max[0];
     }
 }

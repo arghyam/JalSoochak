@@ -75,11 +75,12 @@ public class EscalationPdfService {
             PDPageContentStream cs = new PDPageContentStream(doc, page);
             float y = PAGE_HEIGHT - MARGIN;
 
-            // Title
-            y = writeLine(cs, boldFont, 14,
-                    String.format("Jalmitra Escalations — %s — %s Officer: %s",
-                            dateStr, roleLabel, officerName),
-                    MARGIN, y);
+            // Title on its own line, then the date/role/office-name metadata on a full-width line
+            // below it. Both wrap so a long office name is never clipped at the page edge.
+            y = writeWrappedLine(cs, boldFont, 14, "Jalmitra Escalations", MARGIN, y, CONTENT_WIDTH);
+            y = writeWrappedLine(cs, boldFont, 11,
+                    String.format("%s — %s Officer: %s", dateStr, roleLabel, officerName),
+                    MARGIN, y, CONTENT_WIDTH);
             y -= LINE_HEIGHT;
 
             for (int i = 0; i < operators.size(); i++) {
@@ -126,6 +127,80 @@ public class EscalationPdfService {
         cs.showText(text != null ? text : "");
         cs.endText();
         return y - LINE_HEIGHT;
+    }
+
+    /**
+     * Writes {@code text} at {@code x}, wrapping onto additional lines so that no line exceeds
+     * {@code maxWidth}. PDFBox does not wrap automatically, so without this a long value (e.g. a
+     * lengthy office name in the title) would run off the right edge of the page and be clipped.
+     *
+     * @return the y position below the last line written
+     */
+    private float writeWrappedLine(PDPageContentStream cs, PDType1Font font, float size,
+                                    String text, float x, float y, float maxWidth) throws IOException {
+        for (String line : wrapText(font, size, text != null ? text : "", maxWidth)) {
+            cs.beginText();
+            cs.setFont(font, size);
+            cs.newLineAtOffset(x, y);
+            cs.showText(line);
+            cs.endText();
+            y -= LINE_HEIGHT;
+        }
+        return y;
+    }
+
+    /**
+     * Greedily splits {@code text} into lines that each fit within {@code maxWidth} for the given
+     * font/size. Words are kept intact where possible; a single word wider than {@code maxWidth}
+     * (e.g. no spaces) is hard-broken character by character so it still fits.
+     */
+    private List<String> wrapText(PDType1Font font, float fontSize, String text, float maxWidth)
+            throws IOException {
+        List<String> lines = new java.util.ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (String word : text.split(" ")) {
+            if (word.isEmpty()) {
+                continue;
+            }
+            String candidate = current.length() == 0 ? word : current + " " + word;
+            if (stringWidth(font, fontSize, candidate) <= maxWidth) {
+                current.setLength(0);
+                current.append(candidate);
+                continue;
+            }
+            if (current.length() > 0) {
+                lines.add(current.toString());
+                current.setLength(0);
+            }
+            if (stringWidth(font, fontSize, word) <= maxWidth) {
+                current.append(word);
+            } else {
+                // Word alone is wider than the line — hard-break it across lines.
+                StringBuilder piece = new StringBuilder();
+                for (int i = 0; i < word.length(); i++) {
+                    char c = word.charAt(i);
+                    if (piece.length() > 0
+                            && stringWidth(font, fontSize, piece.toString() + c) > maxWidth) {
+                        lines.add(piece.toString());
+                        piece.setLength(0);
+                    }
+                    piece.append(c);
+                }
+                current.append(piece);
+            }
+        }
+        if (current.length() > 0) {
+            lines.add(current.toString());
+        }
+        if (lines.isEmpty()) {
+            lines.add("");
+        }
+        return lines;
+    }
+
+    /** Width of {@code text} in points for the given font and size. */
+    private float stringWidth(PDType1Font font, float fontSize, String text) throws IOException {
+        return font.getStringWidth(text) / 1000f * fontSize;
     }
 
     private float writeLabelValue(PDPageContentStream cs,
