@@ -1038,7 +1038,12 @@ public class BfmReadingService {
                 .build();
     }
 
-    /** {@code extracted_reading} is 0 on every row whose value didn't come from OCR. */
+    /**
+     * {@code extracted_reading} is 0 on every row whose value didn't come from OCR, the rule
+     * {@link ReadingRepublisher} also uses. So an OCR read of 0 doesn't count, and a row written before
+     * that 0 was introduced holds the typed value and does. {@code image_url} is no signal: a reading
+     * submitted with both a value and a photo URL stores the URL but is never read by OCR.
+     */
     private static boolean isReadFromPhoto(TelemetryLatestFlowReadingRecord reading) {
         return reading.extractedReading() != null && reading.extractedReading().signum() != 0;
     }
