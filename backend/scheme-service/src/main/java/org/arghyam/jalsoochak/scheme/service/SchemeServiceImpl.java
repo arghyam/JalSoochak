@@ -1311,6 +1311,11 @@ public class SchemeServiceImpl implements SchemeService {
         }
     }
 
+    @Override
+    public int publishSchemeMappingsReplaced(String schemaName, Integer tenantId, List<Integer> schemeIds) {
+        return publishSchemeMappingsReplacedEvents(schemaName, tenantId, schemeIds);
+    }
+
     /**
      * Sends each scheme's details with its full lists of villages and sub-divisions, from which analytics
      * rebuilds the scheme's rows. Both lists are always sent; an empty one means the scheme has none.

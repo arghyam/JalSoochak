@@ -63,6 +63,43 @@ public class PiiEncryptionService {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> Arrays.fill(hmacKeyBytes, (byte) 0)));
     }
 
+    /** Whether both keys are configured. Without them nothing can be encrypted, so no PII may be written. */
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    /**
+     * Encrypts trimmed plaintext as base64(IV || ciphertext || tag) — the format {@link #decrypt} and
+     * every other service's copy read.
+     *
+     * @throws IllegalStateException when the keys are not configured; writing PII in the clear is never
+     *                               an acceptable fallback
+     */
+    public String encrypt(String plaintext) {
+        if (!enabled) {
+            throw new IllegalStateException("PII encryption keys are not configured");
+        }
+        if (plaintext == null) return null;
+        try {
+            byte[] iv = new byte[IV_LENGTH_BYTES];
+            rng.nextBytes(iv);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, aesKey, new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+            byte[] ciphertextAndTag = cipher.doFinal(plaintext.trim().getBytes(UTF_8));
+            byte[] output = new byte[IV_LENGTH_BYTES + ciphertextAndTag.length];
+            System.arraycopy(iv, 0, output, 0, IV_LENGTH_BYTES);
+            System.arraycopy(ciphertextAndTag, 0, output, IV_LENGTH_BYTES, ciphertextAndTag.length);
+            return Base64.getEncoder().encodeToString(output);
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("AES-GCM encryption failed", e);
+        }
+    }
+
+    /** {@code user_table.title_hash}: HMAC of the lower-cased, trimmed name, as UserTenantRepository computes it. */
+    public String titleHash(String title) {
+        return hmac(title == null ? "" : title.trim().toLowerCase(java.util.Locale.ROOT));
+    }
+
     public String decrypt(String encoded) {
         if (!enabled) {
             return null;

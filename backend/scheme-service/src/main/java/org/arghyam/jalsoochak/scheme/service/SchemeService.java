@@ -63,4 +63,12 @@ public interface SchemeService {
      * sub-divisions, so analytics can bring the scheme's rows back in line with them.
      */
     SchemeAnalyticsResyncResponseDTO resyncSchemesToAnalytics();
+
+    /**
+     * Sends {@code SCHEME_MAPPINGS_REPLACED} for the given schemes of one tenant, read from the committed
+     * tenant rows. Used by the state sync after its transaction commits.
+     *
+     * @return the number of messages handed to Kafka
+     */
+    int publishSchemeMappingsReplaced(String schemaName, Integer tenantId, List<Integer> schemeIds);
 }

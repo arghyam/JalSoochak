@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.RegularityThresholdUpdatedEven
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeReadingsReassignedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SubmissionRejectedEvent;
@@ -30,6 +31,7 @@ import org.arghyam.jalsoochak.analytics.service.DimensionService;
 import org.arghyam.jalsoochak.analytics.service.DailySituationReportService;
 import org.arghyam.jalsoochak.analytics.service.WeeklySituationReportService;
 import org.arghyam.jalsoochak.analytics.service.FactService;
+import org.arghyam.jalsoochak.analytics.service.SchemeReassignmentService;
 import org.arghyam.jalsoochak.analytics.service.NotificationDeliveryIngestionService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,6 +54,7 @@ public class AnalyticsKafkaConsumer {
     private final ObjectMapper objectMapper;
     private final DimensionService dimensionService;
     private final FactService factService;
+    private final SchemeReassignmentService schemeReassignmentService;
     private final DailySituationReportService dailySituationReportService;
     private final WeeklySituationReportService weeklySituationReportService;
     private final KafkaProducer kafkaProducer;
@@ -136,6 +139,10 @@ public class AnalyticsKafkaConsumer {
                     SchemeMappingsReplacedEvent event =
                             objectMapper.readValue(message, SchemeMappingsReplacedEvent.class);
                     dimensionService.replaceSchemeMappings(event);
+                }
+                case "SCHEME_READINGS_REASSIGNED" -> {
+                    SchemeReadingsReassignedEvent event = objectMapper.readValue(message, SchemeReadingsReassignedEvent.class);
+                    schemeReassignmentService.reassign(event);
                 }
                 case "LGD_LOCATION_CREATED", "LGD_LOCATION_UPDATED" -> {
                     LgdLocationEvent event = objectMapper.readValue(message, LgdLocationEvent.class);
