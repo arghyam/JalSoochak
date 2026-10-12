@@ -3,7 +3,9 @@ package org.arghyam.jalsoochak.scheme.service;
 import org.arghyam.jalsoochak.scheme.config.TenantContext;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.exception.FileValidationException;
+import org.arghyam.jalsoochak.scheme.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository;
+import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository.MappedLocation;
 import org.arghyam.jalsoochak.scheme.repository.SchemeLgdMappingCreateRecord;
 import org.arghyam.jalsoochak.scheme.repository.SchemeSubdivisionMappingCreateRecord;
 import org.junit.jupiter.api.AfterEach;
@@ -26,6 +28,7 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -33,6 +36,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -44,6 +48,9 @@ class SchemeMappingUploadTest {
     @Mock
     SchemeUploadChunkProcessor chunkProcessor;
 
+    @Mock
+    KafkaProducer kafkaProducer;
+
     @InjectMocks
     SchemeServiceImpl schemeService;
 
@@ -52,6 +59,9 @@ class SchemeMappingUploadTest {
 
     @Captor
     ArgumentCaptor<List<SchemeSubdivisionMappingCreateRecord>> deptRowsCaptor;
+
+    @Captor
+    ArgumentCaptor<Map<String, Object>> payloadCaptor;
 
     @BeforeEach
     void setUp() {
@@ -173,5 +183,138 @@ class SchemeMappingUploadTest {
                 });
 
         verify(schemeDbRepository).findSchemeIdsByStateSchemeIds(eq("tenant_ka"), anyList());
+    }
+
+    @Test
+    void uploadSchemeMappings_sendsTheSchemesDetailsWithItsVillagesAndSubDivisions() {
+        stubOneSchemeMappedToOneVillageAndSubDivision();
+        MappedLocation village = new MappedLocation(501, 1, 11, 111, 1111, 11111, 501);
+        MappedLocation subDivision = new MappedLocation(1001, 2, 22, 222, 1001, null, null);
+        when(schemeDbRepository.findSchemeVillagesBySchemeIds("tenant_ka", List.of(1)))
+                .thenReturn(Map.of(1, List.of(village)));
+        when(schemeDbRepository.findSchemeSubDivisionsBySchemeIds("tenant_ka", List.of(1)))
+                .thenReturn(Map.of(1, List.of(subDivision)));
+
+        schemeService.uploadSchemeMappings(mappingFile("""
+                state_scheme_id,village_lgd_code,sub_division_name
+                SS-1,VLG-001,Bengaluru North
+                """));
+
+        verify(kafkaProducer).publishJson(eq("scheme-service-topic"), eq("200:1"), payloadCaptor.capture());
+        verifyNoMoreInteractions(kafkaProducer);
+        assertThat(payloadCaptor.getValue())
+                .containsEntry("eventType", "SCHEME_MAPPINGS_REPLACED")
+                .containsEntry("schemeId", 1)
+                .containsEntry("tenantId", 200)
+                .containsEntry("schemeName", "Scheme One")
+                .containsEntry("stateSchemeId", 101)
+                .containsEntry("status", 1)
+                .containsEntry("work_status", 2)
+                .containsEntry("fhtcCount", 10)
+                .containsEntry("plannedFhtc", 12)
+                .containsEntry("houseHoldCount", 30)
+                .containsEntry("villages", List.of(village))
+                .containsEntry("subDivisions", List.of(subDivision));
+    }
+
+    @Test
+    void uploadSchemeMappings_sendsAnEmptyListRatherThanNoneForASchemeWithoutSubDivisions() {
+        stubOneSchemeMappedToOneVillageAndSubDivision();
+
+        schemeService.uploadSchemeMappings(mappingFile("""
+                state_scheme_id,village_lgd_code,sub_division_name
+                SS-1,VLG-001,Bengaluru North
+                """));
+
+        verify(kafkaProducer).publishJson(eq("scheme-service-topic"), eq("200:1"), payloadCaptor.capture());
+        assertThat(payloadCaptor.getValue())
+                .containsEntry("villages", List.of())
+                .containsEntry("subDivisions", List.of());
+    }
+
+    @Test
+    void uploadSchemeMappings_sendsOnlyTheSchemesWhoseMappingsChanged() {
+        when(schemeDbRepository.findTenantIdByUserId("tenant_ka", 10)).thenReturn(200);
+        when(schemeDbRepository.findSchemeIdsByStateSchemeIds(eq("tenant_ka"), anyList()))
+                .thenReturn(Map.of("ss-1", 1, "ss-2", 2));
+        when(schemeDbRepository.findLgdIdsByCodes(eq("tenant_ka"), anyList()))
+                .thenReturn(Map.of("vlg-001", 501, "vlg-002", 502));
+        when(schemeDbRepository.findDepartmentIdsByTitles(eq("tenant_ka"), anyList()))
+                .thenReturn(Map.of("bengaluru north", 1001));
+        when(schemeDbRepository.findSchemeLgdMappingsBySchemeIds(eq("tenant_ka"), anyList()))
+                .thenReturn(Map.of(2, Set.of(502)));
+        when(schemeDbRepository.findSchemeDepartmentMappingsBySchemeIds(eq("tenant_ka"), anyList()))
+                .thenReturn(Map.of(2, Set.of(1001)));
+        when(schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds("tenant_ka", List.of(1)))
+                .thenReturn(List.of(schemeOne()));
+
+        schemeService.uploadSchemeMappings(mappingFile("""
+                state_scheme_id,village_lgd_code,sub_division_name
+                SS-1,VLG-001,Bengaluru North
+                SS-2,VLG-002,Bengaluru North
+                """));
+
+        verify(schemeDbRepository).findSchemeVillagesBySchemeIds("tenant_ka", List.of(1));
+        verify(schemeDbRepository).findSchemeSubDivisionsBySchemeIds("tenant_ka", List.of(1));
+        verify(kafkaProducer).publishJson(eq("scheme-service-topic"), eq("200:1"), payloadCaptor.capture());
+        verifyNoMoreInteractions(kafkaProducer);
+    }
+
+    @Test
+    void uploadSchemeMappings_takesTheTenantFromTheSchemaWhenTheUploaderHasNone() {
+        stubOneSchemeWithNewMappings();
+        when(schemeDbRepository.findTenantIdByUserId("tenant_ka", 10)).thenReturn(null);
+        when(schemeDbRepository.findTenantIdBySchemaName("tenant_ka")).thenReturn(200);
+        when(schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds("tenant_ka", List.of(1)))
+                .thenReturn(List.of(schemeOne()));
+
+        schemeService.uploadSchemeMappings(mappingFile("""
+                state_scheme_id,village_lgd_code,sub_division_name
+                SS-1,VLG-001,Bengaluru North
+                """));
+
+        verify(kafkaProducer).publishJson(eq("scheme-service-topic"), eq("200:1"), payloadCaptor.capture());
+        assertThat(payloadCaptor.getValue()).containsEntry("tenantId", 200);
+    }
+
+    @Test
+    void uploadSchemeMappings_savesTheMappingsButSendsNothingWhenTheTenantIsUnknown() {
+        stubOneSchemeWithNewMappings();
+        when(schemeDbRepository.findTenantIdByUserId("tenant_ka", 10)).thenReturn(null);
+
+        SchemeUploadResponseDTO res = schemeService.uploadSchemeMappings(mappingFile("""
+                state_scheme_id,village_lgd_code,sub_division_name
+                SS-1,VLG-001,Bengaluru North
+                """));
+
+        assertThat(res.getUploadedRows()).isEqualTo(1);
+        verify(chunkProcessor).insertMappingsChunk(eq("tenant_ka"), anyList(), anyList());
+        verify(schemeDbRepository).findTenantIdBySchemaName("tenant_ka");
+        verifyNoInteractions(kafkaProducer);
+    }
+
+    private void stubOneSchemeMappedToOneVillageAndSubDivision() {
+        when(schemeDbRepository.findTenantIdByUserId("tenant_ka", 10)).thenReturn(200);
+        stubOneSchemeWithNewMappings();
+        when(schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds("tenant_ka", List.of(1)))
+                .thenReturn(List.of(schemeOne()));
+    }
+
+    /** Scheme SS-1, with no mappings yet, mapped to one village and sub-division by the upload. */
+    private void stubOneSchemeWithNewMappings() {
+        when(schemeDbRepository.findSchemeIdsByStateSchemeIds(eq("tenant_ka"), anyList()))
+                .thenReturn(Map.of("ss-1", 1));
+        when(schemeDbRepository.findLgdIdsByCodes(eq("tenant_ka"), anyList()))
+                .thenReturn(Map.of("vlg-001", 501));
+        when(schemeDbRepository.findDepartmentIdsByTitles(eq("tenant_ka"), anyList()))
+                .thenReturn(Map.of("bengaluru north", 1001));
+    }
+
+    private static SchemeDbRepository.SchemeAnalyticsRow schemeOne() {
+        return new SchemeDbRepository.SchemeAnalyticsRow(1, "101", "201", "Scheme One", 10, 12, 30, 11.11, 22.22, 2, 1);
+    }
+
+    private static MockMultipartFile mappingFile(String csv) {
+        return new MockMultipartFile("file", "scheme-mappings.csv", "text/csv", csv.getBytes(StandardCharsets.UTF_8));
     }
 }

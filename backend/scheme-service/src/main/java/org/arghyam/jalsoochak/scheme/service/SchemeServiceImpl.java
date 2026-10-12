@@ -14,6 +14,7 @@ import org.arghyam.jalsoochak.scheme.config.SchemeSecurityEvaluator;
 import org.arghyam.jalsoochak.scheme.config.TenantContext;
 import org.arghyam.jalsoochak.scheme.config.properties.StorageProperties;
 import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeAnalyticsResyncResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusBreakdownDTO;
@@ -413,6 +414,26 @@ public class SchemeServiceImpl implements SchemeService {
                 reportGenerationLocks.remove(lockKey, lock);
             }
         }
+    }
+
+    @Override
+    public SchemeAnalyticsResyncResponseDTO resyncSchemesToAnalytics() {
+        String schemaName = requireTenantSchema();
+        int actorUserId = resolveCurrentUserId(schemaName);
+        Integer tenantId = schemeDbRepository.findTenantIdBySchemaName(schemaName);
+        if (tenantId == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        }
+
+        List<Integer> schemeIds = schemeDbRepository.findAllSchemeIds(schemaName);
+        int sent = publishSchemeMappingsReplacedEvents(schemaName, tenantId, schemeIds);
+        log.info("Analytics resync of {} by user {}: sent {} of {} schemes",
+                schemaName, actorUserId, sent, schemeIds.size());
+
+        return SchemeAnalyticsResyncResponseDTO.builder()
+                .totalSchemes(schemeIds.size())
+                .sentSchemes(sent)
+                .build();
     }
 
     private void saveReportRecord(
@@ -1234,10 +1255,14 @@ public class SchemeServiceImpl implements SchemeService {
         }
         insertMappingsInChunks(schemaName, lgd, dept);
         if (!schemesToClear.isEmpty()) {
-            List<SchemeDbRepository.SchemeAnalyticsRow> updatedSchemes =
-                    schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds(schemaName, new ArrayList<>(rowsByScheme.keySet()));
-            if (!updatedSchemes.isEmpty()) {
-                publishSchemeDimensionEventsFromRows(tenantId, updatedSchemes);
+            // The uploader's row may carry no tenant; the schema still names one.
+            Integer eventTenantId = tenantId != null
+                    ? tenantId : schemeDbRepository.findTenantIdBySchemaName(schemaName);
+            if (eventTenantId == null) {
+                log.warn("No tenant found for {}; {} schemes with changed mappings not sent to analytics",
+                        schemaName, schemesToClear.size());
+            } else {
+                publishSchemeMappingsReplacedEvents(schemaName, eventTenantId, schemesToClear);
             }
         }
 
@@ -1281,37 +1306,67 @@ public class SchemeServiceImpl implements SchemeService {
             return;
         }
         for (SchemeDbRepository.SchemeAnalyticsRow row : rows) {
-            Integer parentLgd = row.parentLgdId() != null ? row.parentLgdId() : 0;
-            Integer parentDept = row.parentDepartmentId();
-            int deptLevelFallback = parentDept != null ? parentDept : 0;
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("eventType", "SCHEME_UPDATED");
-            payload.put("schemeId", row.schemeId());
-            payload.put("tenantId", tenantId);
-            payload.put("schemeName", row.schemeName());
-            payload.put("stateSchemeId", safeParseInt(row.stateSchemeId()));
-            payload.put("centreSchemeId", safeParseInt(row.centreSchemeId()));
-            payload.put("longitude", row.longitude());
-            payload.put("latitude", row.latitude());
-            payload.put("parentLgdLocationId", parentLgd);
-            payload.put("level1LgdId", parentLgd);
-            payload.put("level2LgdId", parentLgd);
-            payload.put("level3LgdId", parentLgd);
-            payload.put("level4LgdId", parentLgd);
-            payload.put("level5LgdId", parentLgd);
-            payload.put("level6LgdId", parentLgd);
-            payload.put("parentDepartmentLocationId", parentDept);
-            payload.put("level1DeptId", deptLevelFallback);
-            payload.put("level2DeptId", deptLevelFallback);
-            payload.put("level3DeptId", deptLevelFallback);
-            payload.put("level4DeptId", deptLevelFallback);
-            payload.put("level5DeptId", deptLevelFallback);
-            payload.put("level6DeptId", deptLevelFallback);
-            payload.put("status", row.operatingStatus());
-            payload.put("operating_status", row.operatingStatus());
-            payload.put("work_status", row.workStatus());
-            kafkaProducer.publishJson(SCHEME_TOPIC, payload);
+            Map<String, Object> payload = schemeDetailsPayload("SCHEME_UPDATED", tenantId, row);
+            kafkaProducer.publishJson(SCHEME_TOPIC, schemeEventKey(tenantId, row.schemeId()), payload);
         }
+    }
+
+    /**
+     * Sends each scheme's details with its full lists of villages and sub-divisions, from which analytics
+     * rebuilds the scheme's rows. Both lists are always sent; an empty one means the scheme has none.
+     *
+     * @return the number of messages handed to Kafka
+     */
+    private int publishSchemeMappingsReplacedEvents(String schemaName, Integer tenantId, List<Integer> schemeIds) {
+        if (tenantId == null || schemeIds == null || schemeIds.isEmpty()) {
+            return 0;
+        }
+        int sent = 0;
+        for (int i = 0; i < schemeIds.size(); i += CHUNK_SIZE) {
+            List<Integer> chunk = schemeIds.subList(i, Math.min(i + CHUNK_SIZE, schemeIds.size()));
+            Map<Integer, List<SchemeDbRepository.MappedLocation>> villages =
+                    schemeDbRepository.findSchemeVillagesBySchemeIds(schemaName, chunk);
+            Map<Integer, List<SchemeDbRepository.MappedLocation>> subDivisions =
+                    schemeDbRepository.findSchemeSubDivisionsBySchemeIds(schemaName, chunk);
+            for (SchemeDbRepository.SchemeAnalyticsRow row
+                    : schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds(schemaName, chunk)) {
+                Map<String, Object> payload = schemeDetailsPayload("SCHEME_MAPPINGS_REPLACED", tenantId, row);
+                payload.put("villages", villages.getOrDefault(row.schemeId(), List.of()));
+                payload.put("subDivisions", subDivisions.getOrDefault(row.schemeId(), List.of()));
+                if (kafkaProducer.publishJson(SCHEME_TOPIC, schemeEventKey(tenantId, row.schemeId()), payload)) {
+                    sent++;
+                }
+            }
+        }
+        return sent;
+    }
+
+    private Map<String, Object> schemeDetailsPayload(
+            String eventType,
+            Integer tenantId,
+            SchemeDbRepository.SchemeAnalyticsRow row
+    ) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("eventType", eventType);
+        payload.put("schemeId", row.schemeId());
+        payload.put("tenantId", tenantId);
+        payload.put("schemeName", row.schemeName());
+        payload.put("stateSchemeId", safeParseInt(row.stateSchemeId()));
+        payload.put("centreSchemeId", safeParseInt(row.centreSchemeId()));
+        payload.put("longitude", row.longitude());
+        payload.put("latitude", row.latitude());
+        payload.put("fhtcCount", row.fhtcCount());
+        payload.put("plannedFhtc", row.plannedFhtc());
+        payload.put("houseHoldCount", row.houseHoldCount());
+        payload.put("status", row.operatingStatus());
+        payload.put("operating_status", row.operatingStatus());
+        payload.put("work_status", row.workStatus());
+        return payload;
+    }
+
+    /** Keys every message about a scheme the same way, so analytics applies them in the order sent. */
+    private static String schemeEventKey(Integer tenantId, Integer schemeId) {
+        return tenantId + ":" + schemeId;
     }
 
     private Integer safeParseInt(String value) {

@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.scheduler.task;
 
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
+import org.arghyam.jalsoochak.analytics.scheduler.ScheduledTaskClaim;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -20,6 +21,7 @@ public class NationalDashboardRefreshTask implements AnalyticsScheduledTask {
     private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
 
     private final SchemeRegularityService schemeRegularityService;
+    private final ScheduledTaskClaim scheduledTaskClaim;
 
     @Value("${analytics.scheduler.national-dashboard.lookback-days:30}")
     private int lookbackDays;
@@ -34,6 +36,9 @@ public class NationalDashboardRefreshTask implements AnalyticsScheduledTask {
             cron = "${analytics.scheduler.common.cron:0 0 0 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
+        if (!scheduledTaskClaim.claimToday(taskName())) {
+            return;
+        }
         log.info("Scheduler START '{}'", taskName());
         int sanitizedLookbackDays = Math.max(0, lookbackDays);
         // Anchor to yesterday (IST): at the midnight run, that is the day that just completed.

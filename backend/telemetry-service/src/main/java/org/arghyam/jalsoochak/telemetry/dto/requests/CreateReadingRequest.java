@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.dto.requests;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -66,6 +67,13 @@ public class CreateReadingRequest {
      * channel's standard unit, when the reading is captured.
      */
     private String readingUnit;
+
+    /**
+     * The channel the submission reached the service through, written to
+     * {@code flow_reading_table.reported_via_id}. Set by each entry point; null leaves the column NULL on
+     * a new row and as it is on a reused placeholder row.
+     */
+    private ReportingChannel reportedVia;
 
     /**
      * LOCATION-AFFINITY: where the submission says it was made, when the coordinates arrive

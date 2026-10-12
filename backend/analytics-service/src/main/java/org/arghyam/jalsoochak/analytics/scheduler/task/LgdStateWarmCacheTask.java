@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
+import org.arghyam.jalsoochak.analytics.scheduler.ScheduledTaskClaim;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -33,6 +34,7 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
 
     private final DimLgdLocationRepository dimLgdLocationRepository;
     private final SchemeRegularityService schemeRegularityService;
+    private final ScheduledTaskClaim scheduledTaskClaim;
 
     @Override
     public String taskName() {
@@ -44,6 +46,9 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
             cron = "${analytics.scheduler.common.cron:0 0 0 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
+        if (!scheduledTaskClaim.claimToday(taskName())) {
+            return;
+        }
         log.info("Scheduler START '{}'", taskName());
         int sanitizedLookbackDays = Math.max(1, lookbackDays);
         // Stable 30-day window ending yesterday (IST): [end-29, end]

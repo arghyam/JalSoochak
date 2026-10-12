@@ -13,6 +13,8 @@ import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.RegularityThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent.Location;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterQuantityEvent;
@@ -156,6 +158,63 @@ class AnalyticsKafkaConsumerTest {
         ArgumentCaptor<SchemeEvent> captor = ArgumentCaptor.forClass(SchemeEvent.class);
         verify(dimensionService).upsertScheme(captor.capture());
         assertThat(captor.getValue().getWorkStatus()).isEqualTo(4);
+    }
+
+    @Test
+    void consumeSchemeEvents_schemeUpdated_bindsFhtcCounts() {
+        String message = """
+                {"eventType":"SCHEME_UPDATED","schemeId":1001,"tenantId":1,
+                 "fhtcCount":30,"plannedFhtc":40,"houseHoldCount":50}
+                """;
+
+        consumer.consumeSchemeEvents(message);
+
+        ArgumentCaptor<SchemeEvent> captor = ArgumentCaptor.forClass(SchemeEvent.class);
+        verify(dimensionService).upsertScheme(captor.capture());
+        assertThat(captor.getValue().getFhtcCount()).isEqualTo(30);
+        assertThat(captor.getValue().getPlannedFhtc()).isEqualTo(40);
+        assertThat(captor.getValue().getHouseHoldCount()).isEqualTo(50);
+    }
+
+    @Test
+    void consumeSchemeEvents_schemeUpdatedInTheOldFormat_isAppliedWithoutItsLocation() {
+        // Messages sent before the details/mappings split still carry one village and sub-division.
+        String message = """
+                {"eventType":"SCHEME_UPDATED","schemeId":1001,"tenantId":1,"status":1,"work_status":2,
+                 "parentLgdLocationId":101,"level1LgdId":101,"level6LgdId":101,
+                 "parentDepartmentLocationId":201,"level1DeptId":201,"level6DeptId":201}
+                """;
+
+        consumer.consumeSchemeEvents(message);
+
+        ArgumentCaptor<SchemeEvent> captor = ArgumentCaptor.forClass(SchemeEvent.class);
+        verify(dimensionService).upsertScheme(captor.capture());
+        assertThat(captor.getValue().getWorkStatus()).isEqualTo(2);
+        assertThat(captor.getValue().getFhtcCount()).isNull();
+    }
+
+    @Test
+    void consumeSchemeEvents_schemeMappingsReplaced_bindsTheListsAndTheDetails() {
+        String message = """
+                {"eventType":"SCHEME_MAPPINGS_REPLACED","schemeId":1001,"tenantId":1,"schemeName":"Scheme-A",
+                 "status":1,"work_status":4,"fhtcCount":30,
+                 "villages":[{"id":101,"level1Id":100,"level2Id":101}],
+                 "subDivisions":[{"id":201,"level1Id":200,"level2Id":201},{"id":202,"level1Id":200,"level2Id":202}]}
+                """;
+
+        consumer.consumeSchemeEvents(message);
+
+        ArgumentCaptor<SchemeMappingsReplacedEvent> captor = ArgumentCaptor.forClass(SchemeMappingsReplacedEvent.class);
+        verify(dimensionService).replaceSchemeMappings(captor.capture());
+        SchemeMappingsReplacedEvent event = captor.getValue();
+        assertThat(event.getSchemeName()).isEqualTo("Scheme-A");
+        assertThat(event.getWorkStatus()).isEqualTo(4);
+        assertThat(event.getFhtcCount()).isEqualTo(30);
+        assertThat(event.getVillages()).containsExactly(new Location(101, 100, 101, null, null, null, null));
+        assertThat(event.getSubDivisions()).containsExactly(
+                new Location(201, 200, 201, null, null, null, null),
+                new Location(202, 200, 202, null, null, null, null));
+        verifyNoMoreInteractions(dimensionService);
     }
 
     @Test

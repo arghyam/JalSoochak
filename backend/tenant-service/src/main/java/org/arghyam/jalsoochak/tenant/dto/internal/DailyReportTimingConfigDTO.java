@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 
 /**
  * DTO for the Daily Water Service Situation Report schedule.
@@ -23,6 +24,19 @@ public final class DailyReportTimingConfigDTO implements ConfigValueDTO {
     @NotNull(message = "Daily report configuration is required")
     @Valid
     private DailyReport dailyReport;
+
+    /**
+     * Range-checks the schedule via {@link ScheduleConfigDTO#validateRanges(String)}. Null-tolerant:
+     * an absent {@code dailyReport}, {@code schedule} or field means "use the application default".
+     *
+     * @throws InvalidConfigValueException if an explicitly supplied field is out of range
+     */
+    public void validateSchedule() {
+        ScheduleConfigDTO schedule = dailyReport == null ? null : dailyReport.getSchedule();
+        if (schedule != null) {
+            schedule.validateRanges("DAILY_SITUATION_REPORT_TIME");
+        }
+    }
 
     @Data
     @Builder

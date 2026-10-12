@@ -5,6 +5,8 @@ import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEve
 import org.arghyam.jalsoochak.analytics.dto.event.UserSchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent.Location;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
@@ -12,14 +14,13 @@ import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
-import org.arghyam.jalsoochak.analytics.entity.DimScheme;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.entity.DimTenantWaterNorm;
 import org.arghyam.jalsoochak.analytics.entity.DimTenantWorkStatusFilter;
 import org.arghyam.jalsoochak.analytics.entity.DimUser;
 import org.arghyam.jalsoochak.analytics.repository.DimDepartmentLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
-import org.arghyam.jalsoochak.analytics.repository.DimSchemeRepository;
+import org.arghyam.jalsoochak.analytics.repository.DimSchemeWriteRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantWaterNormRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantWorkStatusFilterRepository;
@@ -56,7 +57,7 @@ class DimensionServiceImplTest {
     @Mock
     private DimUserRepository dimUserRepository;
     @Mock
-    private DimSchemeRepository dimSchemeRepository;
+    private DimSchemeWriteRepository dimSchemeWriteRepository;
     @Mock
     private DimLgdLocationRepository dimLgdLocationRepository;
     @Mock
@@ -165,48 +166,64 @@ class DimensionServiceImplTest {
     }
 
     @Test
-    void upsertScheme_mapsHierarchyAndSaves() {
-        SchemeEvent event = new SchemeEvent();
-        event.setSchemeId(1001);
-        event.setTenantId(1);
-        event.setSchemeName("Scheme-A");
-        event.setStateSchemeId(10);
-        event.setCentreSchemeId(20);
-        event.setParentLgdLocationId(100);
-        event.setLevel1LgdId(100);
-        event.setLevel2LgdId(101);
-        event.setParentDepartmentLocationId(200);
-        event.setLevel1DeptId(200);
-        event.setLevel2DeptId(201);
-        event.setStatus(1);
-        when(dimSchemeRepository.findTopByTenantIdAndSchemeIdOrderByUpdatedAtDescCreatedAtDesc(1, 1001))
-                .thenReturn(Optional.empty());
-
-        service.upsertScheme(event);
-
-        ArgumentCaptor<DimScheme> captor = ArgumentCaptor.forClass(DimScheme.class);
-        verify(dimSchemeRepository, times(1)).save(captor.capture());
-        assertThat(captor.getValue().getSchemeId()).isEqualTo(1001);
-        assertThat(captor.getValue().getLevel2LgdId()).isEqualTo(101);
-        assertThat(captor.getValue().getLevel2DeptId()).isEqualTo(201);
-    }
-
-    @Test
-    void upsertScheme_persistsWorkStatus() {
+    void upsertScheme_writesTheDetailsToEveryRowOfTheScheme() {
         SchemeEvent event = new SchemeEvent();
         event.setSchemeId(1001);
         event.setTenantId(1);
         event.setSchemeName("Scheme-A");
         event.setStatus(1);
         event.setWorkStatus(4);
-        when(dimSchemeRepository.findTopByTenantIdAndSchemeIdOrderByUpdatedAtDescCreatedAtDesc(1, 1001))
-                .thenReturn(Optional.empty());
+        event.setFhtcCount(30);
+        when(dimSchemeWriteRepository.upsertDetails(event)).thenReturn(2);
 
         service.upsertScheme(event);
 
-        ArgumentCaptor<DimScheme> captor = ArgumentCaptor.forClass(DimScheme.class);
-        verify(dimSchemeRepository, times(1)).save(captor.capture());
-        assertThat(captor.getValue().getWorkStatus()).isEqualTo(4);
+        verify(dimSchemeWriteRepository, times(1)).upsertDetails(event);
+        verifyNoInteractions(jdbcTemplate);
+    }
+
+    @Test
+    void replaceSchemeMappings_replacesTheSchemesRows() {
+        SchemeMappingsReplacedEvent event = schemeMappings(List.of(new Location()), List.of());
+        when(dimSchemeWriteRepository.replaceMappings(event)).thenReturn(1);
+
+        service.replaceSchemeMappings(event);
+
+        verify(dimSchemeWriteRepository, times(1)).replaceMappings(event);
+        verifyNoInteractions(jdbcTemplate);
+    }
+
+    @Test
+    void replaceSchemeMappings_skips_whenTheVillagesAreMissing() {
+        service.replaceSchemeMappings(schemeMappings(null, List.of()));
+
+        verifyNoInteractions(dimSchemeWriteRepository, jdbcTemplate);
+    }
+
+    @Test
+    void replaceSchemeMappings_skips_whenTheSubDivisionsAreMissing() {
+        service.replaceSchemeMappings(schemeMappings(List.of(), null));
+
+        verifyNoInteractions(dimSchemeWriteRepository, jdbcTemplate);
+    }
+
+    @Test
+    void replaceSchemeMappings_skips_whenTheSchemeIdIsMissing() {
+        SchemeMappingsReplacedEvent event = schemeMappings(List.of(), List.of());
+        event.setSchemeId(null);
+
+        service.replaceSchemeMappings(event);
+
+        verifyNoInteractions(dimSchemeWriteRepository, jdbcTemplate);
+    }
+
+    private static SchemeMappingsReplacedEvent schemeMappings(List<Location> villages, List<Location> subDivisions) {
+        SchemeMappingsReplacedEvent event = new SchemeMappingsReplacedEvent();
+        event.setSchemeId(1001);
+        event.setTenantId(1);
+        event.setVillages(villages);
+        event.setSubDivisions(subDivisions);
+        return event;
     }
 
     @Test

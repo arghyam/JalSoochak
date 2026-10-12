@@ -12,8 +12,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Unit tests for the cron-to-ISO day conversion and the builder defaults that decide a tenant's
- * reporting window when the config omits it.
+ * Unit tests for the cron-to-ISO day conversion, the builder's range checks, and the builder defaults
+ * that decide a tenant's reporting window when the config omits it.
  */
 class WeeklyReportScheduleConfigTest {
 
@@ -60,6 +60,37 @@ class WeeklyReportScheduleConfigTest {
 
         assertThat(cfg.getWeekStartDay()).isEqualTo(1);
         assertThat(cfg.getWeekStartDayOfWeek()).isEqualTo(DayOfWeek.MONDAY);
+    }
+
+    @ParameterizedTest(name = "dayOfWeek={0} hour={1} minute={2} weekStartDay={3}")
+    @CsvSource({
+            "-1, 9, 0, 1",
+            "8, 9, 0, 1",
+            "1, -1, 0, 1",
+            "1, 24, 0, 1",
+            "1, 9, -1, 1",
+            "1, 9, 60, 1",
+            "1, 9, 0, -1",
+            "1, 9, 0, 8"
+    })
+    @DisplayName("the builder rejects each out-of-range field, so a built config always converts")
+    void builderRejectsOutOfRangeFields(int dayOfWeek, int hour, int minute, int weekStartDay) {
+        WeeklyReportScheduleConfig.Builder builder = WeeklyReportScheduleConfig.builder()
+                .dayOfWeek(dayOfWeek).hour(hour).minute(minute).weekStartDay(weekStartDay);
+
+        assertThatThrownBy(builder::build).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("the builder accepts both ends of every range")
+    void builderAcceptsRangeBounds() {
+        WeeklyReportScheduleConfig low = WeeklyReportScheduleConfig.builder()
+                .dayOfWeek(0).hour(0).minute(0).weekStartDay(0).build();
+        WeeklyReportScheduleConfig high = WeeklyReportScheduleConfig.builder()
+                .dayOfWeek(7).hour(23).minute(59).weekStartDay(7).build();
+
+        assertThat(low.getWeekStartDayOfWeek()).isEqualTo(DayOfWeek.SUNDAY);
+        assertThat(high.getWeekStartDayOfWeek()).isEqualTo(DayOfWeek.SUNDAY);
     }
 
     @Test

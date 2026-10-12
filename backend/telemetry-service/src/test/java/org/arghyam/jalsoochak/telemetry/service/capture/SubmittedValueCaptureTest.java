@@ -11,12 +11,23 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class SubmittedValueCaptureTest {
 
-    private final SubmittedValueCapture capture = new SubmittedValueCapture();
+    /** Unstubbed, it returns no maximum for any channel. */
+    private final ManualReadingMaxValues maxValues = mock(ManualReadingMaxValues.class);
+
+    private final SubmittedValueCapture capture = new SubmittedValueCapture(maxValues);
+
+    private void maximum(ReadingChannel channel, String max) {
+        when(maxValues.maxFor(1, channel)).thenReturn(Optional.of(new BigDecimal(max)));
+    }
 
     @Test
     @DisplayName("with no unit declared the value is taken as the channel's standard unit")
@@ -165,17 +176,93 @@ class SubmittedValueCaptureTest {
     @Test
     @DisplayName("a correction follows the same unit and limit rules, and is marked MANUAL")
     void correctionFollowsTheSameRules() {
-        CapturedReading reading = captured(capture.captureCorrection(ReadingChannel.BFM, new BigDecimal("1500"), "L"));
+        CapturedReading reading = captured(capture.captureCorrection(1, ReadingChannel.BFM, new BigDecimal("1500"), "L"));
         assertThat(reading.value()).isEqualByComparingTo("1.5");
         assertThat(reading.submittedUnit()).isEqualTo(ReadingUnit.LITRE);
         assertThat(reading.submittedUnitCode()).isEqualTo("L");
         assertThat(reading.source()).isEqualTo(RolloverResolutionService.SOURCE_MANUAL);
 
-        assertThat(capture.captureCorrection(ReadingChannel.PDU, new BigDecimal("25"), "h"))
+        assertThat(capture.captureCorrection(1, ReadingChannel.PDU, new BigDecimal("25"), "h"))
                 .isEqualTo(new CaptureOutcome.Rejected(
                         TelemetryErrorCode.ABNORMAL_READING, SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE));
-        assertThat(capture.captureCorrection(ReadingChannel.PDU, new BigDecimal("1.5"), "m3"))
+        assertThat(capture.captureCorrection(1, ReadingChannel.PDU, new BigDecimal("1.5"), "m3"))
                 .isInstanceOf(CaptureOutcome.Rejected.class);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "BFM, 50000,   49999.999",
+            "BFM, 50000,   50000",
+            "ELM, 9999999, 9999999.00",
+            "PDU, 720,     720"
+    })
+    @DisplayName("a value up to the channel's configured maximum is captured")
+    void valueUpToTheMaximumIsCaptured(ReadingChannel channel, String max, String value) {
+        maximum(channel, max);
+
+        assertThat(captured(capture.capture(input(channel, value, null, false))).value())
+                .isEqualByComparingTo(value);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "BFM, 50000,   50000.001, Reading can't be more than 50000 m³.",
+            "ELM, 9999999, 10000000,  Reading can't be more than 9999999 kWh.",
+            "PDU, 720,     721,       Reading can't be more than 720 minutes.",
+            "MAN, 12.50,   13,        Reading can't be more than 12.5."
+    })
+    @DisplayName("a value above the channel's configured maximum is rejected, stating the maximum")
+    void valueAboveTheMaximumIsRejected(ReadingChannel channel, String max, String value, String message) {
+        maximum(channel, max);
+
+        assertThat(capture.capture(input(channel, value, null, false)))
+                .isEqualTo(new CaptureOutcome.Rejected(TelemetryErrorCode.ABNORMAL_READING, message));
+    }
+
+    @Test
+    @DisplayName("the maximum is compared after conversion to the channel's standard unit")
+    void maximumIsComparedInTheStandardUnit() {
+        maximum(ReadingChannel.BFM, "100");
+
+        // 99,000 L is 99 m3 and 101,000 L is 101 m3.
+        assertThat(captured(capture.capture(input(ReadingChannel.BFM, "99000", "L", true))).value())
+                .isEqualByComparingTo("99");
+        assertThat(capture.capture(input(ReadingChannel.BFM, "101000", "L", true)))
+                .isInstanceOf(CaptureOutcome.Rejected.class);
+    }
+
+    @Test
+    @DisplayName("a configured maximum is looked up for the submission's own tenant and channel")
+    void maximumIsTheSubmissionsOwn() {
+        when(maxValues.maxFor(any(), any())).thenReturn(Optional.empty());
+        when(maxValues.maxFor(2, ReadingChannel.BFM)).thenReturn(Optional.of(BigDecimal.TEN));
+
+        assertThat(capture.capture(input(ReadingChannel.BFM, "11", null, false)))
+                .isInstanceOf(CaptureOutcome.Captured.class);
+        assertThat(capture.captureCorrection(2, ReadingChannel.BFM, new BigDecimal("11"), null))
+                .isInstanceOf(CaptureOutcome.Rejected.class);
+        assertThat(capture.captureCorrection(2, ReadingChannel.ELM, new BigDecimal("11"), null))
+                .isInstanceOf(CaptureOutcome.Captured.class);
+    }
+
+    @Test
+    @DisplayName("a PDU run longer than a day keeps its own message whatever maximum is configured")
+    void pduDayLimitComesFirst() {
+        when(maxValues.maxFor(1, ReadingChannel.PDU)).thenReturn(Optional.of(new BigDecimal("720")));
+
+        assertThat(capture.capture(input(ReadingChannel.PDU, "1500", null, false)))
+                .isEqualTo(new CaptureOutcome.Rejected(
+                        TelemetryErrorCode.ABNORMAL_READING, SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE));
+    }
+
+    @Test
+    @DisplayName("a correction above the configured maximum is rejected like a submission")
+    void correctionAboveTheMaximumIsRejected() {
+        maximum(ReadingChannel.BFM, "50000");
+
+        assertThat(capture.captureCorrection(1, ReadingChannel.BFM, new BigDecimal("50001"), null))
+                .isEqualTo(new CaptureOutcome.Rejected(
+                        TelemetryErrorCode.ABNORMAL_READING, "Reading can't be more than 50000 m³."));
     }
 
     private static CapturedReading captured(CaptureOutcome outcome) {

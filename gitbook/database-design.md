@@ -68,6 +68,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 * `extracted_reading (numeric, OCR-extracted value)`, `confirmed_reading (numeric, operator value)`, `confirmed_reading_source (smallint, as extracted / rollover-resolved)`
 * `ai_confidence_percentage (numeric)`, `quantity (numeric, delta vs previous reading)`
 * `channel_id (int, FK to common_schema.channel_master_table: 1 BFM, 2 ELM, 3 PDU, 4 IOT, 5 MAN; NULL on rows with no reading and on BFM readings from before the channel was recorded)`
+* `reported_via_id (int, FK to common_schema.channel_master_table: 6 WHATSAPP, 7 API; how the row was reported, replaced by each later write of the reading; NULL on rows written before V61)`
 * `image_url (text)`, `latitude / longitude (double, submission location)`, `correlation_id / ocr_correlation_id (varchar)`
 * `meter_change_reason (text)`, `issue_report_reason (text)` — set on meter-change and issue-report rows
 * `ingestion_source (smallint, bitmask: 0 = normal; non-zero when the scheme or phone was not found and the lenient path recorded it)`
@@ -76,7 +77,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 ### 10.5 Messaging & Nudge Configuration
 
 * Notification templates and language keys live in `tenant_config_master_table` (`nudge_message_<lang>`, `escalation_message_<lang>`, `language_<id>`); the WhatsApp conversation's screens, prompts and options live under `WHATSAPP_MESSAGE_TEMPLATES`.
-* **`channel_master_table`** (common schema) — submission/notification channel definitions. The reading channels are ids 1–5 (BFM, ELM, PDU, IOT, MAN), the codes `scheme_master_table.channel_id` and `flow_reading_table.channel_id` hold.
+* **`channel_master_table`** (common schema) — submission/notification channel definitions. The reading channels (`channel_type` 1) are ids 1–5 (BFM, ELM, PDU, IOT, MAN), the codes `scheme_master_table.channel_id` and `flow_reading_table.channel_id` hold. The reporting channels (`channel_type` 2) are ids 6 WHATSAPP and 7 API, the codes `flow_reading_table.reported_via_id` holds.
 * **`language_master`** / **`language_alias`** (common schema) — canonical languages with locale codes, and the spellings that resolve to them; each tenant schema also carries its own `language_master_table`.
 * **`notification_table`** (tenant schema) — a per-user notification table provisioned in every tenant schema; no service writes to it yet.
 

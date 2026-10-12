@@ -297,6 +297,10 @@ public class GlificConversationResumeGateway implements ConversationResumeGatewa
         resultPayload.put("correlation_id", result != null ? result.getCorrelationId() : null);
         resultPayload.put("meter_reading", result != null ? result.getMeterReading() : null);
         resultPayload.put("quality_status", result != null ? result.getQualityStatus() : null);
+        // Lets the flow tell a no-meter photo (NO_METER_DETECTED) from an unreadable one without
+        // matching on the localized message text.
+        resultPayload.put("error_code", result != null && result.getErrorCode() != null
+                ? result.getErrorCode().code() : null);
         resultPayload.put("quality_confidence", result != null ? result.getQualityConfidence() : null);
         resultPayload.put("last_confirmed_reading", result != null ? result.getLastConfirmedReading() : null);
         // LOCATION-AFFINITY: the same flag the synchronous /location response carries, so a flow

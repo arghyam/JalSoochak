@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.RegularityThresholdUpdatedEven
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SubmissionRejectedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEscalationEvent;
@@ -127,6 +128,11 @@ public class AnalyticsKafkaConsumer {
                 case "SCHEME_CREATED", "SCHEME_UPDATED" -> {
                     SchemeEvent event = objectMapper.readValue(message, SchemeEvent.class);
                     dimensionService.upsertScheme(event);
+                }
+                case "SCHEME_MAPPINGS_REPLACED" -> {
+                    SchemeMappingsReplacedEvent event =
+                            objectMapper.readValue(message, SchemeMappingsReplacedEvent.class);
+                    dimensionService.replaceSchemeMappings(event);
                 }
                 case "LGD_LOCATION_CREATED", "LGD_LOCATION_UPDATED" -> {
                     LgdLocationEvent event = objectMapper.readValue(message, LgdLocationEvent.class);

@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 
 /**
  * DTO for pump operator reminder nudge configuration.
@@ -21,7 +22,20 @@ public final class NudgeTimingConfigDTO implements ConfigValueDTO {
     @NotNull(message = "Nudge configuration is required")
     @Valid
     private Nudge nudge;
-    
+
+    /**
+     * Range-checks the schedule via {@link ScheduleConfigDTO#validateRanges(String)}. Null-tolerant:
+     * an absent {@code nudge}, {@code schedule} or field means "use the application default".
+     *
+     * @throws InvalidConfigValueException if an explicitly supplied field is out of range
+     */
+    public void validateSchedule() {
+        ScheduleConfigDTO schedule = nudge == null ? null : nudge.getSchedule();
+        if (schedule != null) {
+            schedule.validateRanges("PUMP_OPERATOR_REMINDER_NUDGE_TIME");
+        }
+    }
+
     @Data
     @Builder
     @AllArgsConstructor

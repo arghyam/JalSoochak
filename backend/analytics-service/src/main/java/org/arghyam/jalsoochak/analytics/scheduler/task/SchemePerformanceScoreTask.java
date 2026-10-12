@@ -29,7 +29,8 @@ public class SchemePerformanceScoreTask implements AnalyticsScheduledTask {
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
         log.info("Scheduler START '{}'", taskName());
-        LocalDate targetDate = LocalDate.now(IST_ZONE);
+        // The cron fires at midnight IST, so score the day that just completed; today has no data yet.
+        LocalDate targetDate = LocalDate.now(IST_ZONE).minusDays(1);
         log.info("Running scheduled task '{}' for date {}", taskName(), targetDate);
         int insertedRows = schemePerformanceSchedulerService.insertDailySchemePerformanceScores(targetDate);
         log.info("Completed scheduled task '{}' for date {} with insertedRows={}", taskName(), targetDate, insertedRows);

@@ -28,11 +28,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Since V24 the table is unique on
  * {@code (tenant_id, scheme_id, parent_lgd_location_id, parent_department_location_id)}, so one scheme
- * legitimately spans many rows. {@code DimensionServiceImpl} nevertheless rewrites a single row per
- * scheme — the one found by {@code findTopByTenantIdAndSchemeIdOrderByUpdatedAtDescCreatedAtDesc} — so
- * a multi-row scheme whose status was ever updated carries the new status on one row and the stale one
- * on the rest. Aggregates that group over the raw rows then count that scheme once per distinct value,
- * and the status buckets sum to more than the scheme total.
+ * legitimately spans many rows. {@link DimSchemeWriteRepository} writes a scheme's status to all of
+ * them, but an earlier writer rewrote only the latest row, so a multi-row scheme updated back then can
+ * carry the new status on one row and the stale one on the rest until scheme-service re-sends it.
+ * Aggregates that group over the raw rows would count that scheme once per distinct value, and the
+ * status buckets would sum to more than the scheme total.
  *
  * <p>Scheme 1 is seeded exactly that way: two rows, the fresher one carrying the current status. Every
  * assertion below states that the dashboard sees one scheme, with the freshest row's status.
@@ -212,7 +212,7 @@ class SchemeRegularitySchemeFanoutIntegrationTest {
         // Scheme 1, row 1 — the older mapping, left holding the superseded status.
         insertSchemeRow(1, "Scheme Fanned Out", 101, 201, STALE_WORK_STATUS, STALE_OPERATING_STATUS,
                 "2026-01-01 00:00:00");
-        // Scheme 1, row 2 — the row DimensionServiceImpl rewrites, holding the current status.
+        // Scheme 1, row 2 — the row the earlier writer rewrote, holding the current status.
         insertSchemeRow(1, "Scheme Fanned Out", 102, 202, CURRENT_WORK_STATUS, CURRENT_OPERATING_STATUS,
                 "2026-02-01 00:00:00");
         // Scheme 2 — a single-row scheme, unaffected by the fan-out.

@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.tenant.service;
 
+import org.arghyam.jalsoochak.tenant.config.DailyReportScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.WeeklyReportScheduleConfig;
@@ -7,14 +8,24 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.function.Function;
+import java.util.stream.Stream;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -44,6 +55,8 @@ class TenantConfigServiceTest {
         ReflectionTestUtils.setField(service, "defaultLevel2Days", 7);
         ReflectionTestUtils.setField(service, "defaultLevel1OfficerType", "SECTION_OFFICER");
         ReflectionTestUtils.setField(service, "defaultLevel2OfficerType", "DISTRICT_OFFICER");
+        ReflectionTestUtils.setField(service, "defaultDailyReportHour", 16);
+        ReflectionTestUtils.setField(service, "defaultDailyReportMinute", 0);
         ReflectionTestUtils.setField(service, "defaultWeeklyReportDayOfWeek", 1);
         ReflectionTestUtils.setField(service, "defaultWeeklyReportHour", 9);
         ReflectionTestUtils.setField(service, "defaultWeeklyReportMinute", 0);
@@ -272,6 +285,121 @@ class TenantConfigServiceTest {
                 .thenThrow(new EmptyResultDataAccessException(1));
 
         assertThat(service.getWeeklyReportConfig(TENANT_ID).getWeekStartDay()).isEqualTo(1);
+    }
+
+    // ── validateDefaults ────────────────────────────────────────────────────────
+
+    @Test
+    void validateDefaults_acceptsUsableDefaults() {
+        assertThatCode(service::validateDefaults).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest(name = "{0}={1}")
+    @CsvSource({
+            "defaultNudgeHour, 24, nudge.schedule",
+            "defaultNudgeMinute, 60, nudge.schedule",
+            "defaultEscalationHour, -1, escalation",
+            "defaultEscalationMinute, 60, escalation",
+            "defaultLevel1Days, -1, escalation",
+            "defaultLevel2Days, 2, escalation",          // below level 1's 3 days
+            "defaultDailyReportHour, 25, daily-report.schedule",
+            "defaultDailyReportMinute, -1, daily-report.schedule",
+            "defaultWeeklyReportDayOfWeek, 8, weekly-report",
+            "defaultWeeklyReportHour, 24, weekly-report",
+            "defaultWeeklyReportMinute, 60, weekly-report",
+            "defaultWeeklyReportWeekStartDay, 9, weekly-report"
+    })
+    void validateDefaults_refusesAnUnusableDefault_namingItsPropertyGroup(String field, int value,
+            String propertyGroup) {
+        ReflectionTestUtils.setField(service, field, value);
+
+        assertThatThrownBy(service::validateDefaults)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("Invalid default in " + propertyGroup + ".*: ")
+                .hasCauseInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void validateDefaults_refusesABlankEscalationOfficerType() {
+        ReflectionTestUtils.setField(service, "defaultLevel2OfficerType", " ");
+
+        assertThatThrownBy(service::validateDefaults)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("Invalid default in escalation.*: Officer types must be configured");
+    }
+
+    // ── out-of-range values and failed reads ────────────────────────────────────
+
+    @Test
+    void getNudgeConfig_returnsDefaults_whenHourOutOfRange() {
+        // The tenant runs at the default time rather than not at all.
+        stubNudgeJson(TENANT_ID, "{\"nudge\":{\"schedule\":{\"hour\":25,\"minute\":30}}}");
+
+        NudgeScheduleConfig cfg = service.getNudgeConfig(TENANT_ID);
+
+        assertThat(cfg.getHour()).isEqualTo(8);
+        assertThat(cfg.getMinute()).isEqualTo(0);
+    }
+
+    @Test
+    void getDailyReportConfig_returnsDefaults_whenMinuteOutOfRange() {
+        when(jdbcTemplate.queryForObject(any(String.class), eq(String.class), eq(TENANT_ID),
+                eq("DAILY_SITUATION_REPORT_TIME")))
+                .thenReturn("{\"dailyReport\":{\"schedule\":{\"hour\":17,\"minute\":60}}}");
+
+        DailyReportScheduleConfig cfg = service.getDailyReportConfig(TENANT_ID);
+
+        assertThat(cfg.getHour()).isEqualTo(16);
+        assertThat(cfg.getMinute()).isEqualTo(0);
+    }
+
+    @Test
+    void getWeeklyReportConfig_returnsDefaults_whenDayOfWeekOutOfRange() {
+        stubWeeklyReportJson(TENANT_ID,
+                "{\"weeklyReport\":{\"schedule\":{\"dayOfWeek\":8,\"hour\":7,\"minute\":45}}}");
+
+        WeeklyReportScheduleConfig cfg = service.getWeeklyReportConfig(TENANT_ID);
+
+        assertThat(cfg.getDayOfWeek()).isEqualTo(1);
+        assertThat(cfg.getHour()).isEqualTo(9);
+        assertThat(cfg.getMinute()).isEqualTo(0);
+    }
+
+    @Test
+    void getWeeklyReportConfig_returnsDefaults_whenWeekStartDayOutOfRange() {
+        stubWeeklyReportJson(TENANT_ID,
+                "{\"weeklyReport\":{\"schedule\":{\"dayOfWeek\":4,\"hour\":7,\"minute\":45},\"weekStartDay\":9}}");
+
+        WeeklyReportScheduleConfig cfg = service.getWeeklyReportConfig(TENANT_ID);
+
+        assertThat(cfg.getWeekStartDay()).isEqualTo(1);
+        assertThat(cfg.getDayOfWeek()).isEqualTo(1);
+        assertThat(cfg.getHour()).isEqualTo(9);
+    }
+
+    static Stream<Arguments> everyConfigRead() {
+        return Stream.of(
+                Arguments.of("PUMP_OPERATOR_REMINDER_NUDGE_TIME",
+                        (Function<TenantConfigService, Object>) s -> s.getNudgeConfig(TENANT_ID)),
+                Arguments.of("FIELD_STAFF_ESCALATION_RULES",
+                        (Function<TenantConfigService, Object>) s -> s.getEscalationConfig(TENANT_ID)),
+                Arguments.of("DAILY_SITUATION_REPORT_TIME",
+                        (Function<TenantConfigService, Object>) s -> s.getDailyReportConfig(TENANT_ID)),
+                Arguments.of("WEEKLY_SITUATION_REPORT_TIME",
+                        (Function<TenantConfigService, Object>) s -> s.getWeeklyReportConfig(TENANT_ID)));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("everyConfigRead")
+    void propagatesAFailedRead_insteadOfFallingBackToTheDefaults(String key,
+            Function<TenantConfigService, Object> read) {
+        // The scheduler re-reads config every minute. Turning a brief database error into the defaults
+        // would run a tenant with a custom time at the default time and claim its day.
+        DataAccessResourceFailureException failure = new DataAccessResourceFailureException("connection refused");
+        when(jdbcTemplate.queryForObject(any(String.class), eq(String.class), eq(TENANT_ID), eq(key)))
+                .thenThrow(failure);
+
+        assertThatThrownBy(() -> read.apply(service)).isSameAs(failure);
     }
 
     private void stubWeeklyReportJson(int tenantId, String json) {

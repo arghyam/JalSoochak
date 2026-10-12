@@ -25,5 +25,6 @@ public sealed interface ConfigValueDTO permits
         ElmFormulaConfigDTO,
         EmailProviderConfigDTO,
         SmsProviderConfigDTO,
-        MessagingAllowedHostsConfigDTO {
+        MessagingAllowedHostsConfigDTO,
+        ManualReadingMaxValueConfigDTO {
 }

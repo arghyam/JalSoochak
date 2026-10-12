@@ -253,6 +253,88 @@ class FlowVisionOcrExtractorTest {
         assertEquals(0, new java.math.BigDecimal("0.91").compareTo(pos.alternateConfidence()));
     }
 
+    @Test
+    void extractReadingFlagsNoMeterOnFlowVisionNoMeterResponse() {
+        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
+        restTemplate.enqueue(new ResponseEntity<>(buildNoMeterResponse(), HttpStatus.OK));
+
+        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+
+        OcrReadingResult result = service.extractReading("https://image-url", null);
+
+        assertNotNull(result);
+        assertTrue(result.isNoMeter());
+        // data.meterReading is free text on this response; it must not be parsed or kept.
+        assertNull(result.getAdjustedReading());
+        assertNull(result.getRawMeterReading());
+        assertNull(result.getQualityConfidence());
+        assertNull(result.getRejectionReason());
+        assertEquals("NOMETER", result.getQualityStatus());
+        assertEquals("f32d0c7d-ebc4-4b2d-84d0-5fb334b5490e", result.getCorrelationId());
+        assertEquals("550e8200-e29b-41e4-a715-446565440007", result.getRequestId());
+    }
+
+    @Test
+    void extractReadingOrThrowReturnsNoMeterRatherThanFailingOnTheTextReading() {
+        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
+        restTemplate.enqueue(new ResponseEntity<>(buildNoMeterResponse(), HttpStatus.OK));
+
+        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+
+        OcrReadingResult result = service.extractReadingOrThrow("https://image-url", null);
+
+        assertTrue(result.isNoMeter());
+        assertEquals(1, restTemplate.getCallCount());
+    }
+
+    @Test
+    void extractReadingDoesNotFlagNoMeterOnOrdinaryFailure() {
+        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
+        restTemplate.enqueue(new ResponseEntity<>(Map.of(
+                "result", Map.of("status", "FAILED", "correlationId", "corr-rejected")
+        ), HttpStatus.OK));
+
+        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+
+        OcrReadingResult result = service.extractReading("https://image-url", null);
+
+        assertFalse(result.isNoMeter());
+        assertEquals("REJECTED", result.getQualityStatus());
+    }
+
+    @Test
+    void extractReadingDoesNotFlagNoMeterOnSuccess() {
+        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
+        restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("123.4", "black"), HttpStatus.OK));
+
+        FlowVisionOcrExtractor service = new FlowVisionOcrExtractor(restTemplate, FLOW_VISION_URL);
+
+        assertFalse(service.extractReading("https://image-url", null).isNoMeter());
+    }
+
+    /** FlowVision's response to a rotated or unrelated photo, as returned in production. */
+    private static Map<String, Object> buildNoMeterResponse() {
+        Map<String, Object> data = new java.util.HashMap<>();
+        data.put("meterReading", "No digits detected in the image");
+        data.put("hasRollover", false);
+        data.put("processingTime", 0.804018);
+        data.put("qualityStatus", "good");
+        data.put("qualityConfidence", 0.7286360263824463);
+        data.put("lastDigitColor", "unknown");
+        data.put("colorConfidence", 0.0);
+        Map<String, Object> result = new java.util.HashMap<>();
+        result.put("status", "NOMETER");
+        result.put("correlationId", "f32d0c7d-ebc4-4b2d-84d0-5fb334b5490e");
+        result.put("data", data);
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("id", "550e8200-e29b-41e4-a715-446565440007");
+        body.put("ts", "2026-10-06T06:27:38.090705");
+        body.put("responseCode", "OK");
+        body.put("statusCode", 200);
+        body.put("result", result);
+        return body;
+    }
+
     private static Map<String, Object> buildRolloverResponse(String meterReading,
                                                              String lastDigitColor,
                                                              List<Map<String, Object>> rolloverPositions) {

@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -16,6 +17,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import org.arghyam.jalsoochak.telemetry.service.capture.ManualReadingMaxValues;
 import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
@@ -32,6 +34,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
+import static org.mockito.Mockito.mock;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
@@ -39,6 +42,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -112,7 +116,7 @@ class BfmReadingServicePlaceholderRowTest {
                         ocrReadingsRetryService,
                         ocrProviderResolver,
                         OcrFixtures.registryWithBfmDefault(defaultOcrExtractor)),
-                new SubmittedValueCapture(),
+                new SubmittedValueCapture(mock(ManualReadingMaxValues.class)),
                 pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
@@ -132,6 +136,7 @@ class BfmReadingServicePlaceholderRowTest {
                 .schemeId(10L)
                 .operatorId(1L)
                 .readingUrl("http://example.com/img.jpg")
+                .reportedVia(ReportingChannel.WHATSAPP)
                 .build();
 
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
@@ -160,7 +165,7 @@ class BfmReadingServicePlaceholderRowTest {
         when(readingChannelResolver.resolve(schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
         when(telemetryTenantRepository.updateFlowReadingFromIngestion(anyString(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                anyString(), any(), anyLong(), any(), any()))
+                anyString(), any(), anyLong(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(99L, null));
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
@@ -170,7 +175,8 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         assertEquals("corr-1", resp.getCorrelationId());
 
-        // The resolved channel is written onto the reused row by its short code, with its standard unit.
+        // The resolved channel is written onto the reused row by its short code, with its standard unit
+        // and the channel the submission was reported through.
         verify(telemetryTenantRepository).updateFlowReadingFromIngestion(
                 anyString(),
                 eq(99L),
@@ -183,13 +189,55 @@ class BfmReadingServicePlaceholderRowTest {
                 any(),
                 anyLong(),
                 eq(ReadingChannel.BFM),
-                eq("m3")
+                eq("m3"),
+                eq(ReportingChannel.WHATSAPP)
         );
         verify(telemetryTenantRepository, never()).updateFlowReadingChannel(any(), any(), any());
         verify(telemetryTenantRepository, never()).createFlowReading(
                 anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(),
-                any(), any()
+                any(), any(), any()
         );
+    }
+
+    @Test
+    void createReadingInsertsANewRowWithTheChannelItWasReportedThrough() {
+        String schemaName = "tenant_test";
+        TelemetryOperator operator = new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null);
+        CreateReadingRequest request = CreateReadingRequest.builder()
+                .schemeId(10L)
+                .operatorId(1L)
+                .readingUrl("http://example.com/img.jpg")
+                .reportedVia(ReportingChannel.WHATSAPP)
+                .build();
+
+        when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
+        when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
+        when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
+        when(defaultOcrExtractor.extractReading("http://example.com/img.jpg", null)).thenReturn(
+                OcrReadingResult.builder()
+                        .requestId("request-1")
+                        .correlationId("corr-1")
+                        .qualityStatus("GOOD")
+                        .qualityConfidence(new BigDecimal("0.95"))
+                        .adjustedReading(new BigDecimal("123"))
+                        .build()
+        );
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, ReadingChannel.BFM, null))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
+                schemaName, 10L, 1L, ReadingTime.today())).thenReturn(Optional.empty());
+        when(readingChannelResolver.resolve(schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
+        when(telemetryTenantRepository.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FlowReadingVersion(100L, null));
+
+        CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
+
+        assertEquals(true, resp.isSuccess());
+        verify(telemetryTenantRepository).createFlowReading(eq(schemaName), eq(10L), eq(1L), any(LocalDateTime.class),
+                any(BigDecimal.class), eq(new BigDecimal("123")), anyString(), eq("corr-1"),
+                eq("http://example.com/img.jpg"), isNull(), eq(ReadingChannel.BFM), eq("m3"),
+                eq(ReportingChannel.WHATSAPP));
     }
 
     @Test
@@ -277,7 +325,7 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals("corr-1", resp.getCorrelationId());
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.API);
         verify(readingRepublisher).republish(schemaName, 22, 99L);
     }
 
@@ -314,7 +362,7 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals("corr-1", resp.getCorrelationId());
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L,
-                RolloverResolutionService.SOURCE_MANUAL, "m3");
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.API);
         verify(readingRepublisher).republish(schemaName, 22, 99L);
     }
 }

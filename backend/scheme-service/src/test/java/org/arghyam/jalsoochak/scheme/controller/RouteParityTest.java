@@ -49,7 +49,9 @@ class RouteParityTest {
             "POST /api/v1/scheme/schemes/upload",
             "POST /api/v1/scheme/schemes/mappings/upload",
             "GET /api/v1/scheme/schemes/download",
-            "GET /api/v1/scheme/schemes/mappings/download"
+            "GET /api/v1/scheme/schemes/mappings/download",
+            // Analytics resync
+            "POST /api/v1/scheme/schemes/analytics-resync"
     );
 
     @Test

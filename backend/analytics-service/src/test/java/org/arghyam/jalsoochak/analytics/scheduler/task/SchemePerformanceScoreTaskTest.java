@@ -25,12 +25,12 @@ class SchemePerformanceScoreTaskTest {
     private SchemePerformanceScoreTask schemePerformanceScoreTask;
 
     @Test
-    void runTask_insertsSchemePerformanceForIstToday() {
-        LocalDate todayIst = LocalDate.now(IST_ZONE);
-        when(schemePerformanceSchedulerService.insertDailySchemePerformanceScores(todayIst)).thenReturn(10);
+    void runTask_insertsSchemePerformanceForIstYesterday() {
+        LocalDate yesterdayIst = LocalDate.now(IST_ZONE).minusDays(1);
+        when(schemePerformanceSchedulerService.insertDailySchemePerformanceScores(yesterdayIst)).thenReturn(10);
 
         schemePerformanceScoreTask.runTask();
 
-        verify(schemePerformanceSchedulerService).insertDailySchemePerformanceScores(todayIst);
+        verify(schemePerformanceSchedulerService).insertDailySchemePerformanceScores(yesterdayIst);
     }
 }
