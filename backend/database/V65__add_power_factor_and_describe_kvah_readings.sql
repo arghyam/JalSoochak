@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: V64 - power_factor on asset_pump_registry_table, and kVAh
+-- Migration: V65 - power_factor on asset_pump_registry_table, and kVAh
 --                  in the flow_reading_table column comments
 -- ------------------------------------------------------------
 --   asset_pump_registry_table

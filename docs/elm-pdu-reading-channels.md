@@ -117,7 +117,7 @@ that only scale one quantity (BFM's `L` and `m3`, PDU's `h` and `min`) share a r
 | V58 `add_channel_id_to_flow_reading_and_scheme_master_tables` | Seeds `channel_master_table` with ids 1–5 = BFM, ELM, PDU, IOT, MAN. `channel_id INTEGER` on both tables, keyed to `channel_master_table` (`NOT VALID` on `flow_reading_table`), and a trigger keeping `flow_reading_table.channel` and `channel_id` in step while pods writing either serve |
 | V59 `fill_flow_reading_channel_id_and_validate_its_key` | Fills `flow_reading_table.channel_id` from `channel` in batches, then validates its key. A NULL `channel` stays NULL |
 | V60 `drop_channel_from_flow_reading_and_scheme_master_tables` | Drops the trigger, its function and both `channel` columns, from existing tenant schemas and from provisioning |
-| V64 `add_power_factor_and_describe_kvah_readings` | `asset_pump_registry_table.power_factor FLOAT`, nullable. The comments on `flow_reading_table`'s `extracted_reading`, `confirmed_reading` and `submitted_unit` now cover `kV.A.h` |
+| V65 `add_power_factor_and_describe_kvah_readings` | `asset_pump_registry_table.power_factor FLOAT`, nullable. The comments on `flow_reading_table`'s `extracted_reading`, `confirmed_reading` and `submitted_unit` now cover `kV.A.h` |
 
 V56 and V57 follow V54: existing tenant schemas first, then the `create_tenant_schema` wrapper, under a
 `SHARE` lock on `tenant_master_table` so no tenant is provisioned in between. Both were checked on a
@@ -128,7 +128,7 @@ V58–V60 came after this branch, in releases of their own (§13). They replace 
 rather than a code, with `channel_id`. As in V55, they run outside Flyway's transaction, with a commit
 per tenant table and a 3 s `lock_timeout` with retries.
 
-V64 came later still, for kVAh readings (§3.1, §13). Like V56 and V57 it runs in one transaction under
+V65 came later still, for kVAh readings (§3.1, §13). Like V56 and V57 it runs in one transaction under
 the `SHARE` lock on `tenant_master_table`.
 
 Already on `dev` before this branch: the pump table rename (V52), the pump and motor ratings (V53) and
@@ -754,9 +754,9 @@ the next starts:
 Unlike the migrations above, V60 is not additive: it drops columns that services from before step 2
 read, so those services can't be redeployed once it has run.
 
-**kVAh readings (tenant V64, analytics V60).** Also released after this branch, in this order:
+**kVAh readings (tenant V65, analytics V60).** Also released after this branch, in this order:
 
-1. Tenant V64, so telemetry's snapshot can read `power_factor`.
+1. Tenant V65, so telemetry's snapshot can read `power_factor`.
 2. analytics-service (runs its V60). An analytics without it would ignore `submittedUnit` and calculate
    a kVAh index as kWh; with it, a missing unit still means kWh, so it is safe ahead of telemetry.
 3. telemetry-service.
