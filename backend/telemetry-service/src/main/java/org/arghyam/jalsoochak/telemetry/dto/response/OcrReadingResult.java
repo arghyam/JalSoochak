@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.dto.response;
 
 import lombok.Builder;
 import lombok.Data;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -11,6 +12,12 @@ import java.util.List;
 public class OcrReadingResult {
 
     private BigDecimal adjustedReading;
+
+    /**
+     * The unit {@code adjustedReading} was read in; null means the channel's standard unit. Set only by
+     * a provider that reads more than one register: the ELM provider reads kWh or kVAh.
+     */
+    private ReadingUnit readingUnit;
 
     private String requestId;
 

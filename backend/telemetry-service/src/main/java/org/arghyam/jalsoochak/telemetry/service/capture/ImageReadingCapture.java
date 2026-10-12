@@ -21,8 +21,10 @@ import org.arghyam.jalsoochak.telemetry.service.RolloverResolutionService;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Captures a reading from a meter photo through OCR.
@@ -34,9 +36,13 @@ import java.util.UUID;
  *
  * <p>A photo that can't be read is rejected and recorded as an unreadable-image anomaly, once per
  * attempt. A photo with no meter in it at all (the provider's no-meter verdict) is rejected as
- * {@code NO_METER_DETECTED} and recorded as its own anomaly type instead; a temporary OCR outage asks the submitter to retry. OCR reads the meter in the channel's
- * standard unit, so a {@code reading_unit} other than that one is rejected before any OCR setting is
- * read: it would describe a {@code confirmed_reading} that wasn't sent.
+ * {@code NO_METER_DETECTED} and recorded as its own anomaly type instead; a temporary OCR outage asks the submitter to retry.
+ *
+ * <p>The reading is stored in the unit OCR read it in: the one the provider names (an ELM photo shows
+ * kWh or kVAh), or else the channel's standard unit. It is stored as read, so OCR only ever reads a
+ * unit {@code confirmed_reading} is stored in, and a {@code reading_unit} that isn't one (L or kL) is
+ * rejected before any OCR setting is read. A declared unit must also be the one OCR read: a kWh
+ * declaration on a photo of the kVAh register is rejected rather than stored on the wrong register.
  */
 @Component
 @RequiredArgsConstructor
@@ -63,7 +69,8 @@ public class ImageReadingCapture implements ReadingCapture {
         if (!input.channel().supportsImageReading()) {
             return imageNotSupported(input);
         }
-        Optional<CaptureOutcome> unitRejection = rejectUnitOtherThanStandard(input);
+        Optional<ReadingUnit> declaredUnit = ReadingUnit.parseFor(input.channel(), input.readingUnit());
+        Optional<CaptureOutcome> unitRejection = rejectUnitAPhotoIsNotReadIn(input, declaredUnit);
         if (unitRejection.isPresent()) {
             return unitRejection.get();
         }
@@ -98,9 +105,13 @@ public class ImageReadingCapture implements ReadingCapture {
                     ocrResult.getAdjustedReading(),
                     ocrResult.getQualityConfidence(),
                     sanitizeLogValue(ocrResult.getQualityStatus()));
+            ReadingUnit readUnit = readUnit(ocrResult, input.channel());
+            if (declaredUnit.isPresent() && declaredUnit.get() != readUnit) {
+                return unitNotTheOneRead(input, declaredUnit.get(), readUnit);
+            }
             return new CaptureOutcome.Captured(new CapturedReading(
                     ocrResult.getAdjustedReading(),
-                    input.channel().standardUnit().orElse(null),
+                    readUnit,
                     ocrResult.getAdjustedReading(),
                     ocrResult.getQualityConfidence(),
                     RolloverResolutionService.SOURCE_AS_EXTRACTED,
@@ -122,27 +133,53 @@ public class ImageReadingCapture implements ReadingCapture {
     }
 
     /**
-     * A photo-only submission may name the channel's standard unit, which changes nothing, but no
-     * other: OCR has no way to read a meter in litres or hours.
+     * A photo-only submission may name a unit OCR reads the channel's meter in, but no other: OCR has no
+     * way to read a meter in litres.
      */
-    private static Optional<CaptureOutcome> rejectUnitOtherThanStandard(CaptureInput input) {
+    private static Optional<CaptureOutcome> rejectUnitAPhotoIsNotReadIn(CaptureInput input,
+                                                                       Optional<ReadingUnit> declared) {
         if (!ReadingUnit.isDeclared(input.readingUnit())) {
             return Optional.empty();
         }
         ReadingChannel channel = input.channel();
-        Optional<ReadingUnit> declared = ReadingUnit.parseFor(channel, input.readingUnit());
         if (declared.isEmpty()) {
             return Optional.of(new CaptureOutcome.Rejected(
                     TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED,
                     ReadingUnit.unsupportedMessage(channel)));
         }
-        if (declared.equals(channel.standardUnit())) {
+        if (isReadFromPhotos(declared.get())) {
             return Optional.empty();
         }
+        String photoUnits = Arrays.stream(ReadingUnit.values())
+                .filter(unit -> unit.channel() == channel && isReadFromPhotos(unit))
+                .map(ReadingUnit::code)
+                .collect(Collectors.joining(" or "));
         return Optional.of(new CaptureOutcome.Rejected(
                 TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED,
                 "reading_unit applies only to confirmed_reading. A meter photo for channel " + channel.name()
-                        + " is read in " + channel.standardUnit().map(ReadingUnit::code).orElseThrow() + "."));
+                        + " is read in " + photoUnits + "."));
+    }
+
+    /** OCR's value is stored as it is read, so a photo is only ever read in a unit readings are stored in. */
+    private static boolean isReadFromPhotos(ReadingUnit unit) {
+        return unit.storedUnit() == unit;
+    }
+
+    /** The photo shows another register than the one declared. Not an unreadable image, so no anomaly. */
+    private static CaptureOutcome unitNotTheOneRead(CaptureInput input, ReadingUnit declared, ReadingUnit read) {
+        log.info("readings_ocr unit_mismatch operatorId={} schemeId={} declared={} read={}",
+                input.operatorId(), input.schemeId(), declared.code(), read.code());
+        return new CaptureOutcome.Rejected(
+                TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED,
+                "reading_unit is " + declared.code() + ", but the meter photo shows a reading in "
+                        + read.code() + ".");
+    }
+
+    /** The unit OCR read the meter in: the one the provider named, or else the channel's standard unit. */
+    private static ReadingUnit readUnit(OcrReadingResult ocrResult, ReadingChannel channel) {
+        return Optional.ofNullable(ocrResult.getReadingUnit())
+                .or(channel::standardUnit)
+                .orElse(null);
     }
 
     /**

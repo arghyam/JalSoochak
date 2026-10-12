@@ -58,9 +58,10 @@ public enum TelemetryErrorCode {
     CHANNEL_NOT_SUPPORTED("CHANNEL_NOT_SUPPORTED"),
 
     /**
-     * The submission's {@code reading_unit} is not one of the units its reading channel accepts, or a
-     * unit other than the channel's standard unit came with a photo and no {@code confirmed_reading}.
-     * Rejected rather than ignored, so a value is never stored in the wrong unit.
+     * The submission's {@code reading_unit} is not one of the units its reading channel accepts, or it
+     * came with a photo and no {@code confirmed_reading} and is not the unit OCR read the photo in (a
+     * photo is read in m3 for BFM, and in kWh or kVAh for ELM). Rejected rather than ignored, so a value
+     * is never stored in the wrong unit.
      */
     READING_UNIT_NOT_SUPPORTED("READING_UNIT_NOT_SUPPORTED"),
 

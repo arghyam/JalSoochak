@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service.capture;
 
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -184,19 +186,69 @@ class ImageReadingCaptureTest {
         verifyNoInteractions(bfmOcrExtractor, tenantOcrExtractor, ocrReadingsRetryService);
     }
 
-    @Test
-    @DisplayName("an ELM photo is read by the ELM provider once one exists, in kW.h")
-    void elmPhotoIsReadByTheElmProvider() {
+    @ParameterizedTest
+    @EnumSource(value = ReadingUnit.class, names = {"KILOWATT_HOUR", "KILOVOLT_AMPERE_HOUR"})
+    @DisplayName("an ELM photo is read by the ELM provider, in the unit it read and on that unit's register")
+    void elmPhotoIsReadByTheElmProvider(ReadingUnit readUnit) {
+        OcrReadingResult ocr = readable("812.4", "0.9");
+        ocr.setReadingUnit(readUnit);
         when(ocrProviderRegistry.get(ReadingChannel.ELM, null)).thenReturn(Optional.of(elmOcrExtractor));
-        when(elmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(readable("812.4", "0.9"));
+        when(elmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(ocr);
 
         CaptureOutcome outcome = capture.capture(input(ReadingChannel.ELM, null, OcrRetryMode.NONE));
 
         assertThat(outcome).isInstanceOf(CaptureOutcome.Captured.class);
         CapturedReading reading = ((CaptureOutcome.Captured) outcome).reading();
         assertThat(reading.value()).isEqualByComparingTo("812.4");
-        assertThat(reading.submittedUnit()).isEqualTo(ReadingUnit.KILOWATT_HOUR);
+        assertThat(reading.extractedReading()).isEqualByComparingTo("812.4");
+        assertThat(reading.submittedUnit()).isEqualTo(readUnit);
+        assertThat(reading.register()).isEqualTo(readUnit.register());
         verifyNoInteractions(bfmOcrExtractor);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"' kWh ', KILOWATT_HOUR", "kV.A.h, KILOVOLT_AMPERE_HOUR"})
+    @DisplayName("an ELM photo may name the unit OCR reads it in")
+    void elmPhotoNamingTheUnitItIsReadInIsCaptured(String declared, ReadingUnit readUnit) {
+        OcrReadingResult ocr = readable("812.4", "0.9");
+        ocr.setReadingUnit(readUnit);
+        when(ocrProviderRegistry.get(ReadingChannel.ELM, null)).thenReturn(Optional.of(elmOcrExtractor));
+        when(elmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(ocr);
+
+        CaptureOutcome outcome = capture.capture(input(ReadingChannel.ELM, declared, OcrRetryMode.NONE));
+
+        assertThat(((CaptureOutcome.Captured) outcome).reading().submittedUnit()).isEqualTo(readUnit);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "kWh, KILOVOLT_AMPERE_HOUR, 'reading_unit is kW.h, but the meter photo shows a reading in kV.A.h.'",
+            "kVAh, KILOWATT_HOUR, 'reading_unit is kV.A.h, but the meter photo shows a reading in kW.h.'"})
+    @DisplayName("an ELM photo naming the other register's unit is rejected after the read, with no anomaly")
+    void elmPhotoNamingAnotherUnitThanTheOneReadIsRejected(String declared, ReadingUnit readUnit, String message) {
+        OcrReadingResult ocr = readable("812.4", "0.9");
+        ocr.setReadingUnit(readUnit);
+        when(ocrProviderRegistry.get(ReadingChannel.ELM, null)).thenReturn(Optional.of(elmOcrExtractor));
+        when(elmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(ocr);
+
+        CaptureOutcome outcome = capture.capture(input(ReadingChannel.ELM, declared, OcrRetryMode.NONE));
+
+        assertThat(outcome).isEqualTo(new CaptureOutcome.Rejected(
+                TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED, message));
+        verifyNoInteractions(telemetryTenantRepository, telemetryEventPublisher);
+    }
+
+    @Test
+    @DisplayName("an ELM reading whose provider names no unit is in the channel's standard unit, kW.h")
+    void elmPhotoWithNoUnitIsReadInKwh() {
+        when(ocrProviderRegistry.get(ReadingChannel.ELM, null)).thenReturn(Optional.of(elmOcrExtractor));
+        when(elmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(readable("812.4", "0.9"));
+
+        CaptureOutcome outcome = capture.capture(input(ReadingChannel.ELM, null, OcrRetryMode.NONE));
+
+        CapturedReading reading = ((CaptureOutcome.Captured) outcome).reading();
+        assertThat(reading.submittedUnit()).isEqualTo(ReadingUnit.KILOWATT_HOUR);
+        assertThat(reading.register()).isEqualTo(MeterRegister.STANDARD);
     }
 
     @Test

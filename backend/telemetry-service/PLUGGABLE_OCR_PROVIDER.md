@@ -17,7 +17,7 @@ tenant that names no ELM provider is rejected like a PDU one.
 |------|------|
 | `MeterReadingExtractor` | Strategy interface — one bean per provider. `providerId()`, `channel()` + settings-aware `extractReading` / `extractReadingOrThrow`. No bean is `@Primary`; nothing injects a single extractor. |
 | `FlowVisionBfmOcrExtractor` | Built-in BFM provider (`providerId = "flowvision"`). Applies the endpoint + auth header from the supplied `OcrProviderSettings`, or its global `ocr.*` config when they are `null`. |
-| `FlowVisionElmOcrExtractor` | Built-in ELM provider. Reads the kWh register, on its own `elmOcrRestTemplate` sized for a 20–30 s read. Applies the tenant's `ocr_elm_*` settings, or its global `ocr.elm.*` config for any that are unset. |
+| `FlowVisionElmOcrExtractor` | Built-in ELM provider. Reads the kWh or kVAh register and names the unit in `OcrReadingResult.readingUnit`; any other unit is a rejection. Reads on its own `elmOcrRestTemplate` sized for a 20–30 s read. Applies the tenant's `ocr_elm_*` settings, or its global `ocr.elm.*` config for any that are unset. |
 | `OcrProviderSettings` | Resolved per-tenant config: provider id, endpoint URL, API key, auth header. |
 | `OcrProviderResolver` | Reads a tenant's config keys for the channel → `OcrProviderSettings` (or `null` = use the channel's default provider with its own config). |
 | `OcrProviderRegistry` | Indexes all `MeterReadingExtractor` beans by channel and id. `get(channel, providerId)` returns the tenant's provider for that channel, else the channel's default, else empty. An `ocr.elm.default-provider` that isn't registered for ELM fails startup. |
@@ -93,6 +93,9 @@ read). With `OCR_ELM_DEFAULT_PROVIDER` blank, startup doesn't need it.
 ## Adding a new provider
 
 1. Implement `MeterReadingExtractor` (map the vendor's response onto `OcrReadingResult`); annotate `@Service`.
+   Leave `readingUnit` null when the meter is read in the channel's standard unit. A provider that reads
+   another register sets it to that register's unit (ELM: `KILOVOLT_AMPERE_HOUR`). The value is stored as
+   read, so it must be a unit readings are stored in, never one that needs converting (L, kL).
 2. Give it a unique `providerId()` (e.g. `"gemini-vision"`) and the `channel()` whose meters it reads.
 3. Point a tenant's provider key for that channel (`ocr_provider` or `ocr_elm_provider`) at that id (plus
    the channel's URL / API key keys as needed).
