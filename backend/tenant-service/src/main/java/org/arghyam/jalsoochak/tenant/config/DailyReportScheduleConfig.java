@@ -25,6 +25,10 @@ public class DailyReportScheduleConfig {
         public Builder hour(int hour) { this.hour = hour; return this; }
         public Builder minute(int minute) { this.minute = minute; return this; }
 
-        public DailyReportScheduleConfig build() { return new DailyReportScheduleConfig(this); }
+        public DailyReportScheduleConfig build() {
+            ScheduleRanges.checkHour(hour);
+            ScheduleRanges.checkMinute(minute);
+            return new DailyReportScheduleConfig(this);
+        }
     }
 }

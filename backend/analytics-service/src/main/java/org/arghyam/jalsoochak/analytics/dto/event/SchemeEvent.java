@@ -5,6 +5,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * A scheme's details: everything about it except which villages and sub-divisions it serves. They
+ * apply to every row the scheme has in {@code dim_scheme_table}. Older messages also carry one village
+ * and sub-division; those fields are ignored.
+ */
 @Data
 @NoArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -19,24 +24,14 @@ public class SchemeEvent {
     private Double longitude;
     private Double latitude;
 
-    private Integer parentLgdLocationId;
-    private Integer level1LgdId;
-    private Integer level2LgdId;
-    private Integer level3LgdId;
-    private Integer level4LgdId;
-    private Integer level5LgdId;
-    private Integer level6LgdId;
-
-    private Integer parentDepartmentLocationId;
-    private Integer level1DeptId;
-    private Integer level2DeptId;
-    private Integer level3DeptId;
-    private Integer level4DeptId;
-    private Integer level5DeptId;
-    private Integer level6DeptId;
-
+    /** Operating status. */
     private Integer status;
 
     @JsonProperty("work_status")
     private Integer workStatus;
+
+    /** FHTC counts. Null when the message does not carry them, which keeps the stored values. */
+    private Integer fhtcCount;
+    private Integer plannedFhtc;
+    private Integer houseHoldCount;
 }

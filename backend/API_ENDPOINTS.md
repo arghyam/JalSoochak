@@ -141,7 +141,6 @@ Set the following environment variables before running the Telemetry services:
 | PATCH | `/api/v1/scheme/schemes/{schemeId}/status?tenantCode={tenantCode}` | Update scheme work/operating status (one or both) |
 | POST | `/api/v1/scheme/schemes/upload` | Bulk upload schemes (CSV) |
 | POST | `/api/v1/scheme/schemes/mappings/upload` | Bulk upload scheme mappings (CSV) |
-| POST | `/api/v1/scheme/schemes/dimensions/republish?tenantCode={tenantCode}` | SUPER_USER / the tenant's STATE_ADMIN. Re-sends every live scheme to analytics as `SCHEME_DIMENSION_REPLACED` (one-off backfill of `dim_scheme_table`); returns `{schemes, failed}` |
 
 ### State master-data sync (`scheme-service`)
 
@@ -324,9 +323,9 @@ Both errors below return `400`:
   and MAN), or a photo sent without `confirmed_reading` names a unit other than the channel's standard
   one: OCR reads a meter in its standard unit.
 - `IMAGE_NOT_SUPPORTED_FOR_CHANNEL` — `POST` only. A photo (`reading_url`) sent without
-  `confirmed_reading`, on a channel that can't read photos: PDU, IOT and MAN, and ELM while no OCR
-  provider reads electric meters. A photo sent with `confirmed_reading` is accepted on every channel;
-  the photo is kept and not read.
+  `confirmed_reading`, on a channel that can't read photos: PDU, IOT and MAN, and ELM when no OCR
+  provider is configured for the tenant's electric meters. A photo sent with `confirmed_reading` is
+  accepted on every channel; the photo is kept and not read.
 
 ### Partner ingestion — PDU limits
 

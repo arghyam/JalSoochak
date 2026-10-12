@@ -62,6 +62,9 @@ public class DateDimensionServiceImpl implements DateDimensionService {
         int month = date.getMonthValue();
         // Indian fiscal year: Apr–Mar
         int fiscalYear = month >= 4 ? date.getYear() : date.getYear() - 1;
+        // Weeks run Sunday -> Saturday. DayOfWeek: Mon=1..Sun=7, so value % 7 gives
+        // days since the preceding Sunday (Sun->0, Mon->1, ... Sat->6).
+        LocalDate weekStart = date.minusDays(dow.getValue() % 7);
 
         return DimDate.builder()
                 .dateKey(dateKey)
@@ -72,6 +75,8 @@ public class DateDimensionServiceImpl implements DateDimensionService {
                 .quarter((month - 1) / 3 + 1)
                 .year(date.getYear())
                 .week(date.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR))
+                .weekStartDate(weekStart)
+                .weekEndDate(weekStart.plusDays(6))
                 .isWeekend(dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY)
                 .fiscalYear(fiscalYear)
                 .build();

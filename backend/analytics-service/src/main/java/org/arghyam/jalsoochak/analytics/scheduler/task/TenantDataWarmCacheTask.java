@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.service.TenantDetailsService;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
+import org.arghyam.jalsoochak.analytics.scheduler.ScheduledTaskClaim;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -32,6 +33,7 @@ public class TenantDataWarmCacheTask implements AnalyticsScheduledTask {
     private final DimLgdLocationRepository dimLgdLocationRepository;
     private final TenantDetailsService tenantDetailsService;
     private final DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
+    private final ScheduledTaskClaim scheduledTaskClaim;
 
     @Override
     public String taskName() {
@@ -43,6 +45,9 @@ public class TenantDataWarmCacheTask implements AnalyticsScheduledTask {
             cron = "${analytics.scheduler.common.cron:0 0 0 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
+        if (!scheduledTaskClaim.claimToday(taskName())) {
+            return;
+        }
         log.info("Scheduler START '{}'", taskName());
         DefaultAnalyticsDateWindowProvider.DateWindow window =
                 defaultAnalyticsDateWindowProvider.defaultWindow();

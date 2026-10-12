@@ -18,7 +18,6 @@ import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
 import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
-import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
 import org.junit.jupiter.api.AfterEach;
@@ -62,9 +61,6 @@ public class TenantManagementServiceSingleTenantModeTest {
     private ApplicationEventPublisher eventPublisher;
 
     @Mock
-    private TenantSchedulerManager schedulerManager;
-
-    @Mock
     private ObjectStorageService objectStorageService;
 
     @Mock
@@ -86,7 +82,6 @@ public class TenantManagementServiceSingleTenantModeTest {
                 appProperties,
                 tenantDefaults,
                 eventPublisher,
-                schedulerManager,
                 objectStorageService,
                 systemManagementService,
                 apiKeyService);

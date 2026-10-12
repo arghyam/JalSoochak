@@ -26,7 +26,9 @@ import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.DailyReportTimingConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ElmFormulaConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.EscalationRulesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageConfigDTO;
@@ -34,6 +36,8 @@ import org.arghyam.jalsoochak.tenant.dto.internal.LanguageListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
+import org.arghyam.jalsoochak.tenant.dto.internal.ManualReadingMaxValueConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.NudgeTimingConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
@@ -74,7 +78,6 @@ import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
 import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantManagementService;
-import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
 import org.arghyam.jalsoochak.tenant.util.TenantConstants;
@@ -103,7 +106,6 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     private final AppProperties appProperties;
     private final TenantDefaultsProperties tenantDefaults;
     private final ApplicationEventPublisher eventPublisher;
-    private final TenantSchedulerManager schedulerManager;
     private final ObjectStorageService objectStorageService;
     private final SystemManagementService systemManagementService;
     private final ApiKeyService apiKeyService;
@@ -371,12 +373,33 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 }
             }
 
+            // Schedule keys: enforced validation for JsonNode-bound configs (bean validation does not run
+            // on treeToValue). Checked before the upsert: an out-of-range value that reached the DB would
+            // be accepted with a 200, then silently run on the default schedule.
+            if (key == TenantConfigKeyEnum.PUMP_OPERATOR_REMINDER_NUDGE_TIME) {
+                if (dto == null) {
+                    throw new InvalidConfigValueException("PUMP_OPERATOR_REMINDER_NUDGE_TIME must not be null");
+                }
+                ((NudgeTimingConfigDTO) dto).validateSchedule();
+            }
+
+            if (key == TenantConfigKeyEnum.FIELD_STAFF_ESCALATION_RULES) {
+                if (dto == null) {
+                    throw new InvalidConfigValueException("FIELD_STAFF_ESCALATION_RULES must not be null");
+                }
+                ((EscalationRulesConfigDTO) dto).validateSchedule();
+            }
+
+            if (key == TenantConfigKeyEnum.DAILY_SITUATION_REPORT_TIME) {
+                if (dto == null) {
+                    throw new InvalidConfigValueException("DAILY_SITUATION_REPORT_TIME must not be null");
+                }
+                ((DailyReportTimingConfigDTO) dto).validateSchedule();
+            }
+
             if (key == TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME) {
-                // Enforced validation for JsonNode-bound configs (bean validation does not run on
-                // treeToValue). Checked before the upsert: an out-of-range value that reached the DB would
-                // make the post-commit reschedule throw, leaving persisted config that unschedules every
-                // job for this tenant on the next startup. The cron fields carry the same risk as
-                // weekStartDay — validateScheduleConfig rejects all four alike — so both are checked.
+                // Same as the schedule keys above, plus weekStartDay: out of range, it would silently
+                // report on the default week.
                 WeeklyReportTimingConfigDTO weeklyDto = (WeeklyReportTimingConfigDTO) dto;
                 if (weeklyDto == null) {
                     throw new InvalidConfigValueException("WEEKLY_SITUATION_REPORT_TIME must not be null");
@@ -392,6 +415,15 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                     throw new InvalidConfigValueException("ELM_WATER_QUANTITY_FORMULA must not be null");
                 }
                 ((ElmFormulaConfigDTO) dto).validatedFormula();
+            }
+
+            if (key == TenantConfigKeyEnum.TENANT_MANUAL_READING_MAX_VALUE) {
+                // null and {} bind without error; stored, they would read as "no limit" without saying so.
+                if (dto == null) {
+                    throw new InvalidConfigValueException("TENANT_MANUAL_READING_MAX_VALUE must not be null");
+                }
+                ManualReadingMaxValueConfigDTO maxValuesDto = (ManualReadingMaxValueConfigDTO) dto;
+                maxValuesDto.setMaxValues(maxValuesDto.validatedMaxValues());
             }
 
             if (key.getType() == ConfigType.GENERIC) {
@@ -417,31 +449,6 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 String schemaName = "tenant_" + tenant.getStateCode().toLowerCase();
                 handleSpecializedConfig(schemaName, key, dto, currentUserId);
                 results.put(key, dto);
-            }
-        }
-
-        // Only reschedule when a schedule-bearing key was actually updated, and defer
-        // the call to after the transaction commits so a bad schedule config cannot
-        // roll back an otherwise-valid config write (e.g. SUPPORTED_LANGUAGES).
-        Set<TenantConfigKeyEnum> scheduleKeys = EnumSet.of(
-                TenantConfigKeyEnum.PUMP_OPERATOR_REMINDER_NUDGE_TIME,
-                TenantConfigKeyEnum.FIELD_STAFF_ESCALATION_RULES,
-                TenantConfigKeyEnum.DAILY_SITUATION_REPORT_TIME,
-                TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME);
-        boolean hasScheduleKey = request.getConfigs().keySet().stream()
-                .anyMatch(scheduleKeys::contains);
-        if (hasScheduleKey) {
-            final int finalTenantId = tenantId;
-            final String finalStateCode = tenant.getStateCode();
-            if (TransactionSynchronizationManager.isSynchronizationActive()) {
-                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        schedulerManager.rescheduleForTenant(finalTenantId, finalStateCode);
-                    }
-                });
-            } else {
-                schedulerManager.rescheduleForTenant(finalTenantId, finalStateCode);
             }
         }
 

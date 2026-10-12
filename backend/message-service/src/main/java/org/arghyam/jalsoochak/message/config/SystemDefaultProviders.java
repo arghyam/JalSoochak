@@ -52,7 +52,8 @@ public class SystemDefaultProviders {
     @Bean
     @ConditionalOnProperty(name = "notification.mail.provider", havingValue = "sendgrid", matchIfMissing = true)
     public EmailSender systemDefaultSendGridSender(MailProperties mailProperties,
-            WebClient.Builder webClientBuilder) {
+            WebClient.Builder webClientBuilder,
+            @Value("${notifications.email.status-lookup.enabled:false}") boolean statusLookupEnabled) {
         MailProperties.SendGrid sendgrid = mailProperties.sendgrid();
         if (sendgrid == null) {
             throw new IllegalStateException(
@@ -80,7 +81,13 @@ public class SystemDefaultProviders {
                         templates.defaultInvitation(),
                         templates.superUserInvitation(),
                         templates.stateAdminInvitation()));
-        return new SendGridMailSender(settings, webClientBuilder);
+        return new SendGridMailSender(settings, webClientBuilder, statusLookupEnabled);
+    }
+
+    /** As the bean method, with the delivery-status lookup off. */
+    public EmailSender systemDefaultSendGridSender(MailProperties mailProperties,
+            WebClient.Builder webClientBuilder) {
+        return systemDefaultSendGridSender(mailProperties, webClientBuilder, false);
     }
 
     /**
@@ -115,7 +122,8 @@ public class SystemDefaultProviders {
     @ConditionalOnProperty(name = "notification.sms.provider", havingValue = "smscountry", matchIfMissing = true)
     public SmsSender systemDefaultSmsSender(WebClient.Builder webClientBuilder,
             SmsCountryProperties properties,
-            @Value("${notifications.sms.dry-run:false}") boolean dryRun) {
+            @Value("${notifications.sms.dry-run:false}") boolean dryRun,
+            @Value("${notifications.sms.delivery-report.url:}") String deliveryReportUrl) {
         if (properties.senderId() == null || properties.senderId().isBlank()) {
             throw new IllegalStateException(
                     "smscountry.sender-id must not be blank; set SMSCOUNTRY_SENDER_ID");
@@ -132,7 +140,13 @@ public class SystemDefaultProviders {
                 // a property: the message must match a DLT registration, so changing it is a
                 // registration change, not a restart.
                 SmsProviderSettings.SmsCountry.DEFAULT_OTP_TEMPLATE);
-        return new SmsCountrySender(webClientBuilder, settings, dryRun);
+        return new SmsCountrySender(webClientBuilder, settings, dryRun, deliveryReportUrl);
+    }
+
+    /** As the bean method, asking for no pushed delivery reports. */
+    public SmsSender systemDefaultSmsSender(WebClient.Builder webClientBuilder,
+            SmsCountryProperties properties, boolean dryRun) {
+        return systemDefaultSmsSender(webClientBuilder, properties, dryRun, null);
     }
 
     /**

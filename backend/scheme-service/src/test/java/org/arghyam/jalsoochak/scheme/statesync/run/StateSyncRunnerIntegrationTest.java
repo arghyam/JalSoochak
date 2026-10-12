@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.scheme.statesync.run;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.scheme.kafka.KafkaProducer;
+import org.arghyam.jalsoochak.scheme.service.SchemeService;
 import org.arghyam.jalsoochak.scheme.statesync.StateSyncIntegrationTestBase;
 import org.arghyam.jalsoochak.scheme.statesync.config.StateSyncProperties.Mode;
 import org.arghyam.jalsoochak.scheme.statesync.model.UpstreamNode;
@@ -40,6 +41,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
 
     private FakeSource source;
     private KafkaProducer kafka;
+    private SchemeService schemeService;
     private StateSyncRunRepository runRepository;
     private StateSyncRunner runner;
 
@@ -47,13 +49,16 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
     void setUp() {
         source = new FakeSource();
         kafka = mock(KafkaProducer.class);
-        when(kafka.publishJson(anyString(), org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        when(kafka.publishJson(anyString(), anyString(), org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        schemeService = mock(SchemeService.class);
+        when(schemeService.publishSchemeMappingsReplaced(anyString(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyList())).thenAnswer(inv -> ((List<?>) inv.getArgument(2)).size());
         runRepository = new StateSyncRunRepository(jdbc, new ObjectMapper().findAndRegisterModules());
         StateSyncTenantRepository tenantRepository = new StateSyncTenantRepository(jdbc);
         StaticListableBeanFactory beans = new StaticListableBeanFactory(Map.of("source", source));
         runner = new StateSyncRunner(properties, beans.getBeanProvider(StateMasterDataSource.class), runRepository,
                 tenantRepository, new HierarchyReconciler(tenantRepository), pii,
-                new StateSyncEventPublisher(kafka, new org.arghyam.jalsoochak.scheme.kafka.SchemeDimensionEvents(jdbc)),
+                new StateSyncEventPublisher(kafka, schemeService),
                 new DataSourceTransactionManager(dataSource));
 
         int district = lgd("Dibrugarh", 2, stateLgd, null);
@@ -95,7 +100,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         assertThat(count("SELECT COUNT(*) FROM tenant_as.department_location_master_table")).isEqualTo(1);
         assertThat(count("SELECT COUNT(*) FROM tenant_as.lgd_location_master_table WHERE state_lgd_id IS NOT NULL")).isZero();
         assertThat(count("SELECT COUNT(*) FROM tenant_as.user_table")).isEqualTo(1);
-        verify(kafka, never()).publishJson(anyString(), org.mockito.ArgumentMatchers.any());
+        verify(kafka, never()).publishJson(anyString(), anyString(), org.mockito.ArgumentMatchers.any());
         assertThat(runRepository.listRuns(TENANT_ID, 1)).singleElement()
                 .satisfies(r -> assertThat(r.mode()).isEqualTo("DRY_RUN"));
     }
@@ -114,10 +119,11 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         assertThat(runRepository.lastAppliedWatermark(TENANT_ID)).contains(LocalDateTime.of(2026, 9, 20, 11, 47, 13));
 
         ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
-        verify(kafka, atLeastOnce()).publishJson(eq("scheme-service-topic"), events.capture());
+        verify(kafka, atLeastOnce()).publishJson(eq("scheme-service-topic"), anyString(), events.capture());
         assertThat(events.getAllValues()).extracting(e -> String.valueOf(((Map<?, ?>) e).get("eventType")))
-                .contains("SCHEME_DIMENSION_REPLACED", "DEPARTMENT_LOCATION_UPDATED");
-        verify(kafka, atLeastOnce()).publishJson(eq("user-service-topic"), events.capture());
+                .contains("DEPARTMENT_LOCATION_UPDATED");
+        verify(schemeService).publishSchemeMappingsReplaced(SCHEMA, TENANT_ID, List.of(schemeId));
+        verify(kafka, atLeastOnce()).publishJson(eq("user-service-topic"), anyString(), events.capture());
         assertThat(events.getAllValues()).extracting(e -> String.valueOf(((Map<?, ?>) e).get("eventType")))
                 .contains("USER_CREATED", "USER_SCHEME_MAPPINGS_REPLACED");
         assertThat(events.getAllValues()).noneMatch(e -> e.toString().contains("9100000001"));
@@ -152,7 +158,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
                 Integer.class);
         assertThat(count("SELECT COUNT(*) FROM tenant_as.flow_reading_table WHERE scheme_id = ?", real)).isEqualTo(1);
         ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
-        verify(kafka, atLeastOnce()).publishJson(eq("scheme-service-topic"), events.capture());
+        verify(kafka, atLeastOnce()).publishJson(eq("scheme-service-topic"), anyString(), events.capture());
         assertThat(events.getAllValues()).anySatisfy(e -> assertThat((Map<String, Object>) e)
                 .containsEntry("eventType", "SCHEME_READINGS_REASSIGNED")
                 .containsEntry("fromSchemeId", placeholder).containsEntry("toSchemeId", real));
@@ -182,7 +188,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         assertThat(count("SELECT COUNT(*) FROM tenant_as.department_location_master_table")).isEqualTo(1);
         assertThat(runRepository.listRuns(TENANT_ID, 1)).singleElement()
                 .satisfies(r -> assertThat(r.status()).isEqualTo("ABANDONED"));
-        verify(kafka, never()).publishJson(anyString(), org.mockito.ArgumentMatchers.any());
+        verify(kafka, never()).publishJson(anyString(), anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -215,7 +221,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
                 + "scheme_name, work_status, operating_status, is_auto_provisioned) VALUES ('', '8165607', "
                 + "'Auto-provisioned scheme', 0, 0, TRUE) RETURNING id", Integer.class);
         reading(placeholder, LocalDateTime.of(2026, 7, 10, 8, 0));
-        when(kafka.publishJson(eq("scheme-service-topic"), org.mockito.ArgumentMatchers.argThat(
+        when(kafka.publishJson(eq("scheme-service-topic"), anyString(), org.mockito.ArgumentMatchers.argThat(
                 e -> "SCHEME_READINGS_REASSIGNED".equals(((Map<String, Object>) e).get("eventType"))))).thenReturn(false);
 
         RunResult result = runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();

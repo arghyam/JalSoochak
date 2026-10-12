@@ -33,6 +33,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers("/error", "/actuator/health", "/actuator/info").permitAll();
                     auth.requestMatchers("/api/v1/message/trigger-welcome-message").permitAll();
+                    // Provider delivery reports. Not open: each provider's adapter verifies the request
+                    // itself — a signature or a shared token — before anything is read from it.
+                    auth.requestMatchers("/api/v1/message/delivery-receipts/**").permitAll();
                     if (isProd) {
                         auth.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").authenticated();
                     } else {

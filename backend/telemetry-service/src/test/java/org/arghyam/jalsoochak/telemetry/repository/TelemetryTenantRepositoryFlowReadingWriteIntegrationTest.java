@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -64,7 +65,7 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
     private static FlowReadingVersion insert(String schema, ReadingChannel channel, String submittedUnit) {
         return repository().createFlowReading(schema, SCHEME, OPERATOR, READING_AT,
                 BigDecimal.ZERO, new BigDecimal("90"), "corr-" + System.nanoTime(), null, null, null,
-                channel, submittedUnit);
+                channel, submittedUnit, ReportingChannel.WHATSAPP);
     }
 
     private static Map<String, Object> stored(String schema, long id) {
@@ -83,6 +84,7 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
         Map<String, Object> row = stored(MIGRATED_SCHEMA, version.id());
         assertEquals(ReadingChannel.PDU.getCode(), row.get("channel_id"));
         assertEquals("min", row.get("submitted_unit"));
+        assertEquals(ReportingChannel.WHATSAPP.getCode(), row.get("reported_via_id"));
         assertNotNull(version.updatedAt());
         assertEquals(storedVersion(MIGRATED_SCHEMA, version.id()), version.updatedAt());
         assertEquals(version.updatedAt(),
@@ -100,12 +102,47 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
         assertEquals(storedVersion(PRE_V56_SCHEMA, version.id()), version.updatedAt());
     }
 
+    /** A schema that predates V61 still stores the reading; how it was reported is dropped. */
+    @Test
+    void insertDropsHowTheRowWasReportedOnAPreV61Schema() {
+        FlowReadingVersion version = insert(PRE_V56_SCHEMA, ReadingChannel.BFM, null);
+
+        Map<String, Object> row = stored(PRE_V56_SCHEMA, version.id());
+        assertEquals(ReadingChannel.BFM.getCode(), row.get("channel_id"));
+        assertFalse(row.containsKey("reported_via_id"));
+    }
+
+    /**
+     * Every write that replaces the reading records the channel it came through; a write that names
+     * none leaves the channel of the reading it keeps.
+     */
+    @Test
+    void eachWriteOfTheReadingRecordsTheChannelItCameThrough() {
+        long id = insert(MIGRATED_SCHEMA, null, null).id();
+
+        repository().updateFlowReadingFromIngestion(MIGRATED_SCHEMA, id, READING_AT, BigDecimal.ZERO,
+                new BigDecimal("120"), "corr-1", null, "", null, OPERATOR, ReadingChannel.BFM, "m3",
+                ReportingChannel.API);
+        assertEquals(ReportingChannel.API.getCode(), stored(MIGRATED_SCHEMA, id).get("reported_via_id"));
+
+        repository().updateFlowReadingFromIngestion(MIGRATED_SCHEMA, id, READING_AT,
+                BigDecimal.ZERO, new BigDecimal("121"), "corr-1", "", null, OPERATOR);
+        assertEquals(ReportingChannel.API.getCode(), stored(MIGRATED_SCHEMA, id).get("reported_via_id"));
+
+        repository().updateConfirmedReading(MIGRATED_SCHEMA, id, new BigDecimal("130"), OPERATOR, null, null,
+                ReportingChannel.WHATSAPP);
+        assertEquals(ReportingChannel.WHATSAPP.getCode(), stored(MIGRATED_SCHEMA, id).get("reported_via_id"));
+
+        repository().updateConfirmedReading(MIGRATED_SCHEMA, id, new BigDecimal("131"), OPERATOR);
+        assertEquals(ReportingChannel.WHATSAPP.getCode(), stored(MIGRATED_SCHEMA, id).get("reported_via_id"));
+    }
+
     @Test
     void placeholderUpdateWritesTheChannelAndUnitAndKeepsThemWhenGivenNone() {
         long id = insert(MIGRATED_SCHEMA, null, null).id();
 
         FlowReadingVersion version = repository().updateFlowReadingFromIngestion(MIGRATED_SCHEMA, id, READING_AT,
-                BigDecimal.ZERO, new BigDecimal("120"), "corr-1", null, "", null, OPERATOR, ReadingChannel.BFM, "m3");
+                BigDecimal.ZERO, new BigDecimal("120"), "corr-1", null, "", null, OPERATOR, ReadingChannel.BFM, "m3", ReportingChannel.WHATSAPP);
 
         assertEquals(new FlowReadingVersion(id, storedVersion(MIGRATED_SCHEMA, id)), version);
         // The legacy overload passes no channel or unit, which leaves both as they are.
@@ -122,8 +159,8 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
         long migrated = insert(MIGRATED_SCHEMA, ReadingChannel.PDU, "min").id();
         long preV56 = insert(PRE_V56_SCHEMA, ReadingChannel.PDU, null).id();
 
-        repository().updateConfirmedReading(MIGRATED_SCHEMA, migrated, new BigDecimal("120"), OPERATOR, 1, "h");
-        repository().updateConfirmedReading(PRE_V56_SCHEMA, preV56, new BigDecimal("120"), OPERATOR, 1, "h");
+        repository().updateConfirmedReading(MIGRATED_SCHEMA, migrated, new BigDecimal("120"), OPERATOR, 1, "h", ReportingChannel.WHATSAPP);
+        repository().updateConfirmedReading(PRE_V56_SCHEMA, preV56, new BigDecimal("120"), OPERATOR, 1, "h", ReportingChannel.WHATSAPP);
 
         Map<String, Object> row = stored(MIGRATED_SCHEMA, migrated);
         assertEquals(0, new BigDecimal("120").compareTo((BigDecimal) row.get("confirmed_reading")));
@@ -135,7 +172,7 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
     @Test
     void placeholderUpdateOfAMissingRowReturnsNoVersion() {
         FlowReadingVersion version = repository().updateFlowReadingFromIngestion(MIGRATED_SCHEMA, 404_404L,
-                READING_AT, BigDecimal.ZERO, BigDecimal.ONE, "corr-1", null, "", null, OPERATOR, ReadingChannel.BFM, "m3");
+                READING_AT, BigDecimal.ZERO, BigDecimal.ONE, "corr-1", null, "", null, OPERATOR, ReadingChannel.BFM, "m3", ReportingChannel.WHATSAPP);
 
         assertNull(version.updatedAt());
     }
@@ -155,7 +192,7 @@ class TelemetryTenantRepositoryFlowReadingWriteIntegrationTest {
             FlowReadingVersion inserted = insert(MIGRATED_SCHEMA, ReadingChannel.BFM, "m3");
             FlowReadingVersion updated = repository.updateFlowReadingFromIngestion(MIGRATED_SCHEMA,
                     inserted.id(), READING_AT, BigDecimal.ZERO, new BigDecimal("95"), "corr-1", null, "",
-                    null, OPERATOR, ReadingChannel.BFM, "m3");
+                    null, OPERATOR, ReadingChannel.BFM, "m3", ReportingChannel.WHATSAPP);
             repository.updateConfirmedReading(MIGRATED_SCHEMA, inserted.id(), new BigDecimal("96"), OPERATOR);
             LocalDateTime corrected = repository.findFlowReadingById(MIGRATED_SCHEMA, inserted.id())
                     .orElseThrow().updatedAt();

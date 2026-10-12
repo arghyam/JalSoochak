@@ -1,10 +1,10 @@
 package org.arghyam.jalsoochak.message.service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.message.channel.provider.WhatsAppDeliveryStatusReader;
 import org.arghyam.jalsoochak.message.dto.WhatsAppDeliveryOutcome;
 import org.arghyam.jalsoochak.message.dto.WhatsAppMessageStatus;
+import org.arghyam.jalsoochak.message.ledger.WhatsAppLedgerStatusSync;
 import org.arghyam.jalsoochak.message.util.PhoneRedactor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,8 +33,8 @@ import java.util.stream.Collectors;
  * answer to the log. Both the daily and the weekly report are covered, each labelled with
  * {@code report=}.
  *
- * <p>{@code result=SENT} only ever meant "the provider accepted our API call". Gupshup and Meta act
- * after that call returns and report delivery status back to the provider alone, so a report sent to a
+ * <p>{@code result=SENT} only ever meant "the provider accepted our API call". The provider's BSP and
+ * Meta act after that call returns and report delivery status back to the provider alone, so a report sent to a
  * number with no WhatsApp account was counted as sent exactly like one that arrived. This job closes
  * that gap: it pulls a rolling window of messages from the provider, maps each recipient back to an
  * officer, and emits per-message, per-tenant and platform-wide lines under the
@@ -42,7 +42,7 @@ import java.util.stream.Collectors;
  *
  * <h2>Shape of a pass</h2>
  * <ol>
- *   <li>For each {@code bspStatus} of interest, count then page the window
+ *   <li>For each {@code bspStatus} the reader lists, count then page the window
  *       ({@link WhatsAppDeliveryStatusReader}).</li>
  *   <li>Discard anything that is not an outbound HSM on one of our report templates —
  *       {@code MessageFilter} cannot do this server-side.</li>
@@ -59,19 +59,15 @@ import java.util.stream.Collectors;
  * <h2>Privacy</h2>
  * <p>Every line carries ids and statuses only. Names and phone numbers are never read, let alone
  * logged.</p>
+ *
+ * <h2>No reader, no pass</h2>
+ * <p>A WhatsApp provider that only pushes status has no {@link WhatsAppDeliveryStatusReader}. The job
+ * then does nothing: there is no window to pull, and the delivery ledger gets that provider's status by
+ * push instead.</p>
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class WhatsAppDeliveryReconciliationService {
-
-    /**
-     * The statuses worth pulling. Every outbound state the provider can report is here: omitting one would
-     * silently drop those messages from the counts rather than showing them as anything.
-     * {@code RECEIVED} and {@code DELETED} are excluded — inbound and removed, neither is a delivery.
-     */
-    private static final List<String> STATUSES_TO_CHECK = List.of(
-            "ERROR", "CONTACT_OPT_OUT", "DELIVERED", "READ", "SEEN", "PLAYED", "SENT", "ENQUEUED");
 
     private static final String SCHEMA_PATTERN = "^[a-z0-9_]+$";
     private static final String UNKNOWN_ROLE = "UNKNOWN";
@@ -88,8 +84,18 @@ public class WhatsAppDeliveryReconciliationService {
      */
     enum ReportKind { DAILY, WEEKLY, UNKNOWN }
 
+    /** {@code null} for a provider that only pushes status; every pass is then skipped. */
     private final WhatsAppDeliveryStatusReader deliveryStatusReader;
     private final JdbcTemplate jdbcTemplate;
+    private final WhatsAppLedgerStatusSync ledgerSync;
+
+    public WhatsAppDeliveryReconciliationService(Optional<WhatsAppDeliveryStatusReader> deliveryStatusReader,
+                                                 JdbcTemplate jdbcTemplate,
+                                                 WhatsAppLedgerStatusSync ledgerSync) {
+        this.deliveryStatusReader = deliveryStatusReader.orElse(null);
+        this.jdbcTemplate = jdbcTemplate;
+        this.ledgerSync = ledgerSync;
+    }
 
     @Value("${whatsapp.status.reconcile.enabled:false}")
     private boolean enabled;
@@ -103,7 +109,16 @@ public class WhatsAppDeliveryReconciliationService {
     @Value("${whatsapp.status.reconcile.max-pages:40}")
     private int maxPages;
 
-    @Value("${whatsapp.status.reconcile.date-column:inserted_at}")
+    /**
+     * The most pages read for one status. Each status's page budget is sized from the provider's own
+     * count of it — {@code max-pages} is the floor — so a busy window is read to the end instead of
+     * stopping at a fixed page.
+     */
+    @Value("${whatsapp.status.reconcile.max-pages-cap:400}")
+    private int maxPagesCap;
+
+    /** The provider's window column, in its own terms; blank means its send-time column. */
+    @Value("${whatsapp.status.reconcile.date-column:}")
     private String dateColumn;
 
     /** Explicit override; blank means "derive from the configured daily-report template ids". */
@@ -111,7 +126,7 @@ public class WhatsAppDeliveryReconciliationService {
     private String templateIdsCsv;
 
     /**
-     * Failure codes that are properties of the Gupshup <em>account</em>, not of any recipient.
+     * Failure codes that are properties of the provider <em>account</em>, not of any recipient.
      * {@code 9999} ("low balance") fails every message in flight regardless of who it was for, so
      * counting it as N officer failures would read as a mass data problem instead of a billing one.
      */
@@ -152,6 +167,10 @@ public class WhatsAppDeliveryReconciliationService {
         if (!enabled) {
             return;
         }
+        if (deliveryStatusReader == null) {
+            log.debug("[WhatsAppStatus] No WhatsApp status reader — the provider pushes status; skipping this pass.");
+            return;
+        }
         Instant to = Instant.now();
         reconcile(to.minus(Duration.ofHours(windowHours)), to);
     }
@@ -161,6 +180,11 @@ public class WhatsAppDeliveryReconciliationService {
      * a past window (for a retro-check against the provider's console) without waiting for the timer.
      */
     public void reconcile(Instant from, Instant to) {
+        if (deliveryStatusReader == null) {
+            log.warn("[WhatsAppStatus] No WhatsApp status reader — the provider can only push status, so there"
+                    + " is no window to reconcile.");
+            return;
+        }
         long startNanos = System.nanoTime();
         TemplateKinds templates = resolveTemplateKinds();
         if (!templates.conflicts().isEmpty()) {
@@ -170,14 +194,16 @@ public class WhatsAppDeliveryReconciliationService {
                             + " Fix the whatsapp.template.daily-report-* / whatsapp.template.weekly-report-*"
                             + " properties so each id names one report. Skipping this pass.",
                     templates.conflicts());
+            syncLedger(null, to);
             return;
         }
-        Map<Integer, ReportKind> templateKinds = templates.kinds();
+        Map<String, ReportKind> templateKinds = templates.kinds();
         if (templateKinds.isEmpty()) {
             log.warn("[WhatsAppStatus] No report template ids configured — every message in the window"
                     + " would be discarded. Set WHATSAPP_STATUS_RECONCILE_TEMPLATE_IDS or the"
                     + " whatsapp.template.daily-report-* / whatsapp.template.weekly-report-* properties."
                     + " Skipping this pass.");
+            syncLedger(null, to);
             return;
         }
 
@@ -214,6 +240,29 @@ public class WhatsAppDeliveryReconciliationService {
         logTotal(from, to, byTenant.size(), total, scan, unmappedContacts,
                 (System.nanoTime() - startNanos) / 1_000_000L);
         reportAccountLevelFailures(scan);
+        syncLedger(scan, to);
+    }
+
+    /**
+     * Brings the delivery ledger up to date: every outbound template message this pass read, not only
+     * the reports, then the passes that catch what a send-time window misses. Runs after the log
+     * summaries so a ledger problem can never cost them.
+     */
+    private void syncLedger(WindowScan scan, Instant now) {
+        if (ledgerSync == null || !ledgerSync.isActive()) {
+            return;
+        }
+        try {
+            if (scan != null) {
+                WhatsAppLedgerStatusSync.SyncStats window = ledgerSync.apply(scan.outbound());
+                log.info("[WhatsAppStatus] ledger window: seen={} applied={} notInLedger={}",
+                        window.seen(), window.applied(), window.notInLedger());
+            }
+            ledgerSync.syncIncremental(now);
+            ledgerSync.sweep();
+        } catch (Exception e) {
+            log.warn("[WhatsAppStatus] ledger sync failed: {}", e.getMessage(), e);
+        }
     }
 
     // ── Window scan ────────────────────────────────────────────────────────────
@@ -238,10 +287,14 @@ public class WhatsAppDeliveryReconciliationService {
      */
     private record WindowScan(List<WhatsAppMessageStatus> matched, int windowScanned, int discardedInbound,
                               int discardedOtherTemplates, int discardedAccountLevel,
-                              Map<String, Integer> accountLevelFailures) {}
+                              Map<String, Integer> accountLevelFailures,
+                              List<WhatsAppMessageStatus> outbound) {}
 
-    private WindowScan scanWindow(Instant from, Instant to, Map<Integer, ReportKind> templateKinds) {
-        List<WhatsAppMessageStatus> matched = new ArrayList<>();
+    private WindowScan scanWindow(Instant from, Instant to, Map<String, ReportKind> templateKinds) {
+        // Keyed by message id: a message that advanced while the pass ran is read under two statuses,
+        // and the later — more advanced — one is kept.
+        Map<String, WhatsAppMessageStatus> matchedById = new LinkedHashMap<>();
+        List<WhatsAppMessageStatus> outbound = new ArrayList<>();
         Map<String, Integer> accountLevel = new TreeMap<>();
         Set<String> accountLevelCodes = csvToSet(accountLevelErrorCodesCsv);
         int windowScanned = 0;
@@ -249,21 +302,20 @@ public class WhatsAppDeliveryReconciliationService {
         int discardedOtherTemplates = 0;
         int discardedAccountLevel = 0;
 
-        for (String status : STATUSES_TO_CHECK) {
-            int count = deliveryStatusReader.countMessages(from, to, status, dateColumn);
-            if (count == 0) {
-                continue;
-            }
-            List<WhatsAppMessageStatus> page =
-                    deliveryStatusReader.fetchMessages(from, to, status, dateColumn, pageSize, maxPages);
+        for (String status : deliveryStatusReader.statusesInProgression()) {
+            List<WhatsAppMessageStatus> page = WhatsAppLedgerStatusSync.fetchAll(deliveryStatusReader, from, to,
+                    status, dateColumn, pageSize, Math.max(maxPages, maxPagesCap));
             windowScanned += page.size();
             for (WhatsAppMessageStatus message : page) {
+                if (message.isOutboundHsm()) {
+                    outbound.add(message);
+                }
                 if (isAccountLevel(message, accountLevelCodes)) {
                     accountLevel.merge(message.failureKey(), 1, Integer::sum);
                     // Counted on the ACCOUNT-LEVEL FAILURE line and nowhere else. Letting it fall through
                     // would also count it as that officer's failure — the very double-reporting this
                     // classification exists to prevent, and the reading (a mass recipient-data problem)
-                    // that a zero Gupshup balance most invites.
+                    // that a zero provider balance most invites.
                     discardedAccountLevel++;
                     continue;
                 }
@@ -272,12 +324,14 @@ public class WhatsAppDeliveryReconciliationService {
                 } else if (message.templateId() == null || !templateKinds.containsKey(message.templateId())) {
                     discardedOtherTemplates++;
                 } else {
-                    matched.add(message);
+                    String key = message.messageId() != null ? message.messageId() : "#" + matchedById.size();
+                    matchedById.remove(key);
+                    matchedById.put(key, message);
                 }
             }
         }
-        return new WindowScan(matched, windowScanned, discardedInbound, discardedOtherTemplates,
-                discardedAccountLevel, accountLevel);
+        return new WindowScan(new ArrayList<>(matchedById.values()), windowScanned, discardedInbound,
+                discardedOtherTemplates, discardedAccountLevel, accountLevel, outbound);
     }
 
     private static boolean isAccountLevel(WhatsAppMessageStatus message, Set<String> accountLevelCodes) {
@@ -342,9 +396,9 @@ public class WhatsAppDeliveryReconciliationService {
     private record OfficerRow(long contactId, long userId, String role) {}
 
     /**
-     * Active tenants, using the same status filter as {@code TenantSchedulerManager}: everything except
-     * INACTIVE(0), SUSPENDED(4), ARCHIVED(6) and REGISTERED(7). A REGISTERED tenant has no schema at
-     * all, so querying it would throw.
+     * Active tenants, using the same status filter as tenant-service's {@code NotificationJobScheduler}:
+     * everything except INACTIVE(0), SUSPENDED(4), ARCHIVED(6) and REGISTERED(7). A REGISTERED tenant
+     * has no schema at all, so querying it would throw.
      */
     private List<TenantSchemaRef> activeTenants() {
         return jdbcTemplate.query(
@@ -449,7 +503,7 @@ public class WhatsAppDeliveryReconciliationService {
     private void logMessage(OfficerRef officer, WhatsAppMessageStatus message, ReportKind report) {
         if (message.outcome() == WhatsAppDeliveryOutcome.DELIVERY_FAILED) {
             // Redacted again at the point of logging, even though the WhatsAppDeliveryStatusReader adapter
-            // already redacts what it extracts. The reason text originates with Gupshup and is the one field
+            // already redacts what it extracts. The reason text originates with the BSP and is the one field
             // here that can carry a phone number; a second pass costs nothing and means a future code
             // path that builds a WhatsAppMessageStatus some other way cannot leak one through this line.
             log.warn("[WhatsAppStatus] result=DELIVERY_FAILED role={} tenant={} officer={} report={}"
@@ -525,7 +579,7 @@ public class WhatsAppDeliveryReconciliationService {
     }
 
     /**
-     * Account-wide failures get their own line, because they are not facts about any officer. A Gupshup
+     * Account-wide failures get their own line, because they are not facts about any officer. A provider
      * balance of zero produces a run in which every message failed for a reason no officer data can
      * explain, and burying that inside {@code failedByCode} reads as a mass recipient problem.
      */
@@ -535,7 +589,7 @@ public class WhatsAppDeliveryReconciliationService {
         }
         scan.accountLevelFailures().forEach((code, count) ->
                 log.error("[WhatsAppStatus] ACCOUNT-LEVEL FAILURE: errorCode={} affected={} message(s) in the"
-                                + " window — this is a Gupshup account condition (e.g. low balance), not an"
+                                + " window — this is a WhatsApp provider account condition (e.g. low balance), not an"
                                 + " officer or recipient problem. Messages counted here include ones outside"
                                 + " the daily-report templates, and are excluded from every per-officer and"
                                 + " per-tenant tally above.",
@@ -556,7 +610,7 @@ public class WhatsAppDeliveryReconciliationService {
      * and the SDO ids fall back to the SO ones at send time, so over-including costs nothing while
      * under-including loses messages.
      */
-    Set<Integer> resolveTemplateIds() {
+    Set<String> resolveTemplateIds() {
         return resolveTemplateKinds().kinds().keySet();
     }
 
@@ -570,11 +624,11 @@ public class WhatsAppDeliveryReconciliationService {
      *                  has no correct label to give, so the pass refuses to run rather than publish
      *                  per-report numbers that are wrong for one of the two
      */
-    record TemplateKinds(Map<Integer, ReportKind> kinds, Map<Integer, Set<ReportKind>> conflicts) {}
+    record TemplateKinds(Map<String, ReportKind> kinds, Map<String, Set<ReportKind>> conflicts) {}
 
     TemplateKinds resolveTemplateKinds() {
-        Map<Integer, ReportKind> byTypedProperty = new LinkedHashMap<>();
-        Map<Integer, Set<ReportKind>> conflicts = new TreeMap<>();
+        Map<String, ReportKind> byTypedProperty = new LinkedHashMap<>();
+        Map<String, Set<ReportKind>> conflicts = new TreeMap<>();
         putTemplateIds(byTypedProperty, conflicts, ReportKind.DAILY, dailyReportSoTemplateId,
                 dailyReportSdoTemplateId, dailyReportSoLinkTemplateId, dailyReportSdoLinkTemplateId);
         putTemplateIds(byTypedProperty, conflicts, ReportKind.WEEKLY, weeklyReportSoLinkTemplateId,
@@ -585,7 +639,7 @@ public class WhatsAppDeliveryReconciliationService {
         // The override decides *which* ids are watched, but the typed properties still say what each one
         // is wherever they name it: an override exists to add an id the properties missed, not to
         // relabel the ones they already carry. Anything they do not name stays UNKNOWN.
-        Map<Integer, ReportKind> overridden = new LinkedHashMap<>();
+        Map<String, ReportKind> overridden = new LinkedHashMap<>();
         for (String value : csvToSet(templateIdsCsv)) {
             parseTemplateId(value).ifPresent(id ->
                     overridden.put(id, byTypedProperty.getOrDefault(id, ReportKind.UNKNOWN)));
@@ -597,7 +651,7 @@ public class WhatsAppDeliveryReconciliationService {
         return new TemplateKinds(overridden, conflicts);
     }
 
-    private void putTemplateIds(Map<Integer, ReportKind> target, Map<Integer, Set<ReportKind>> conflicts,
+    private void putTemplateIds(Map<String, ReportKind> target, Map<String, Set<ReportKind>> conflicts,
                                 ReportKind kind, String... values) {
         for (String value : values) {
             parseTemplateId(value).ifPresent(id -> {
@@ -615,16 +669,12 @@ public class WhatsAppDeliveryReconciliationService {
         }
     }
 
-    private Optional<Integer> parseTemplateId(String value) {
-        if (value == null || value.isBlank()) {
-            return Optional.empty();
-        }
-        try {
-            return Optional.of(Integer.parseInt(value.trim()));
-        } catch (NumberFormatException e) {
-            log.warn("[WhatsAppStatus] Ignoring non-numeric report template id '{}'", value);
-            return Optional.empty();
-        }
+    /**
+     * A configured template id as the provider identifies templates — a number for some, a name for
+     * others — so it is compared as text, trimmed.
+     */
+    private static Optional<String> parseTemplateId(String value) {
+        return value == null || value.isBlank() ? Optional.empty() : Optional.of(value.trim());
     }
 
     private static Set<String> csvToSet(String csv) {

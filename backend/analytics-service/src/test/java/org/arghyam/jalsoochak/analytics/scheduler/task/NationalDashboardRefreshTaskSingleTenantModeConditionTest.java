@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.analytics.scheduler.task;
 
+import org.arghyam.jalsoochak.analytics.scheduler.ScheduledTaskClaim;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -34,6 +35,11 @@ class NationalDashboardRefreshTaskSingleTenantModeConditionTest {
         @org.springframework.context.annotation.Bean
         SchemeRegularityService schemeRegularityService() {
             return mock(SchemeRegularityService.class);
+        }
+
+        @org.springframework.context.annotation.Bean
+        ScheduledTaskClaim scheduledTaskClaim() {
+            return mock(ScheduledTaskClaim.class);
         }
     }
 }

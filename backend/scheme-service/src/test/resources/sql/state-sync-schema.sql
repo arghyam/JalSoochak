@@ -1,4 +1,4 @@
--- Generated with pg_dump from a database migrated through V61 (backend/database) plus
+-- Generated with pg_dump from a database migrated through V64 (backend/database) plus
 -- common_schema.create_tenant_schema('tenant_as'). The state sync writes these tables, so its
 -- integration tests run against their real shape. Regenerate rather than hand-edit; triggers are
 -- dropped (their functions live outside these tables).
@@ -173,7 +173,6 @@ CREATE TABLE tenant_as.flow_reading_table (
     quality_flag character varying(20) DEFAULT 'provisional'::character varying NOT NULL,
     status character varying(20) DEFAULT 'active'::character varying NOT NULL,
     payload_json jsonb,
-    reported_via character varying(50),
     duration integer,
     image_url text DEFAULT ''::text,
     ai_confidence_percentage numeric,
@@ -195,7 +194,8 @@ CREATE TABLE tenant_as.flow_reading_table (
     confirmed_reading_source smallint DEFAULT 0 NOT NULL,
     quarantine_reason smallint DEFAULT 0 NOT NULL,
     submitted_unit character varying(16),
-    channel_id integer
+    channel_id integer,
+    reported_via_id integer
 );
 
 COMMENT ON COLUMN tenant_as.flow_reading_table.extracted_reading IS 'What OCR read off the meter photo, in the channel''s standard unit. 0 when no photo was read.';
@@ -205,6 +205,8 @@ COMMENT ON COLUMN tenant_as.flow_reading_table.confirmed_reading IS 'The reading
 COMMENT ON COLUMN tenant_as.flow_reading_table.submitted_unit IS 'UCUM code of the unit the reading was sent in: m3, kL or L (BFM), kW.h (ELM), min or h (PDU). confirmed_reading holds the value converted to the channel''s standard unit. NULL on rows from before V56, rows with no reading, and IOT and MAN rows.';
 
 COMMENT ON COLUMN tenant_as.flow_reading_table.channel_id IS 'The channel the reading came through, a common_schema.channel_master_table id: 1 BFM, 2 ELM, 3 PDU, 4 IOT, 5 MAN, the codes ReadingChannel publishes. NULL on rows with no reading (placeholder, location and meter-change rows) and on BFM readings from before the channel was recorded.';
+
+COMMENT ON COLUMN tenant_as.flow_reading_table.reported_via_id IS 'How the row was reported, a common_schema.channel_master_table id of channel_type 2: 6 WHATSAPP, 7 API, the codes ReportingChannel uses. Set on every row written and replaced by each later write of the reading. NULL on rows written before V61.';
 
 CREATE SEQUENCE tenant_as.flow_reading_table_id_seq
     AS integer
@@ -699,4 +701,3 @@ ALTER TABLE ONLY tenant_as.user_scheme_mapping_table
 
 ALTER TABLE ONLY tenant_as.user_scheme_mapping_table
     ADD CONSTRAINT fk_user_scheme_user FOREIGN KEY (user_id) REFERENCES tenant_as.user_table(id);
-

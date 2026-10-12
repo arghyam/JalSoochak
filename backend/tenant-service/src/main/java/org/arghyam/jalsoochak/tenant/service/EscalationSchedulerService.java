@@ -12,7 +12,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,7 +19,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Processes escalations for a single tenant. Called by {@link TenantSchedulerManager}
+ * Processes escalations for a single tenant. Called by {@link NotificationJobScheduler}
  * on each tenant's individual schedule.
  *
  * <p>Users who missed &ge; level2Threshold days are escalated to the district
@@ -33,9 +32,6 @@ public class EscalationSchedulerService {
 
     private static final String COMMON_TOPIC = "common-topic";
 
-    /** reading_date is stored on the IST calendar day, so "today"/missed-day math must be IST. */
-    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
-
     /**
      * Sentinel string set on OperatorEscalationDetail.lastRecordedBfmDate when an operator
      * has never uploaded a reading. Must match the value consumed by analytics-service
@@ -47,8 +43,11 @@ public class EscalationSchedulerService {
     private final TenantConfigService tenantConfigService;
     private final KafkaProducer kafkaProducer;
 
+    /**
+     * @param runDate the IST day the run is for; missed days are counted back from it
+     */
     @Transactional(readOnly = true)
-    public void processEscalationsForTenant(String schema, int tenantId) {
+    public void processEscalationsForTenant(String schema, int tenantId, LocalDate runDate) {
         EscalationScheduleConfig cfg = tenantConfigService.getEscalationConfig(tenantId);
         int level1Days = cfg.getLevel1Days();
         int level2Days = cfg.getLevel2Days();
@@ -74,8 +73,7 @@ public class EscalationSchedulerService {
         // Key = "LEVEL_<n>|<phone>" to keep level1 and level2 officers separate
         Map<String, OfficerGroup> officerGroups = new LinkedHashMap<>();
 
-        LocalDate processingDate = LocalDate.now(IST);
-        int total = nudgeRepository.streamUsersWithMissedDays(schema, level1Days, processingDate, row -> {
+        int total = nudgeRepository.streamUsersWithMissedDays(schema, level1Days, runDate, row -> {
             // days_since_last_upload is NULL when the operator has never uploaded
             Number daysSinceObj = (Number) row.get("days_since_last_upload");
             boolean neverUploaded = (daysSinceObj == null);
@@ -133,7 +131,7 @@ public class EscalationSchedulerService {
                     ? ((Number) row.get("user_id")).intValue() : null;
 
             int effectiveDays = neverUploaded ? 0 : daysSinceLastUpload;
-            LocalDate streakStart = neverUploaded ? LocalDate.of(1970, 1, 1) : processingDate.minusDays(effectiveDays);
+            LocalDate streakStart = neverUploaded ? LocalDate.of(1970, 1, 1) : runDate.minusDays(effectiveDays);
             String operatorIdentifier;
             if (userId != null) {
                 operatorIdentifier = userId.toString();

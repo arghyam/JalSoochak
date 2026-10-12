@@ -35,7 +35,7 @@ class KafkaConsumerTest {
     }
 
     /**
-     * Scheme dimensions are owned by analytics-service (SCHEME_DIMENSION_REPLACED). The old
+     * Scheme dimensions are owned by analytics-service (SCHEME_MAPPINGS_REPLACED). The old
      * SCHEME_UPDATED handler here wrote dim_scheme_table with a conflict target and a column the table
      * no longer has, so it only ever failed; it must not come back.
      */

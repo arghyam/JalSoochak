@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
@@ -168,7 +169,7 @@ class MeterReadingConversationServicePromptTest {
                     .thenReturn(List.of("Meter replaced", "Meter not working"));
             when(telemetryTenantRepository.findFirstSchemeForUser(SCHEMA, 11L)).thenReturn(Optional.of(7L));
             when(telemetryTenantRepository.upsertPendingMeterChangeRecord(
-                    anyString(), anyLong(), anyLong(), any(LocalDateTime.class), anyString()))
+                    anyString(), anyLong(), anyLong(), any(LocalDateTime.class), anyString(), any()))
                     .thenReturn("meter-change-abc");
         }
 
@@ -182,7 +183,7 @@ class MeterReadingConversationServicePromptTest {
             service.takeMeterReadingMessage(request(CONTACT, reply));
 
             verify(telemetryTenantRepository).upsertPendingMeterChangeRecord(
-                    eq(SCHEMA), eq(7L), eq(11L), any(LocalDateTime.class), eq("Meter replaced"));
+                    eq(SCHEMA), eq(7L), eq(11L), any(LocalDateTime.class), eq("Meter replaced"), eq(ReportingChannel.WHATSAPP));
         }
 
         @Test
@@ -223,7 +224,7 @@ class MeterReadingConversationServicePromptTest {
 
             assertThat(response.isSuccess()).isFalse();
             verify(telemetryTenantRepository, never()).upsertPendingMeterChangeRecord(
-                    anyString(), anyLong(), anyLong(), any(LocalDateTime.class), anyString());
+                    anyString(), anyLong(), anyLong(), any(LocalDateTime.class), anyString(), any());
         }
 
         @Test

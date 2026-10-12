@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.tenant.enums;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.ManualReadingMaxValueConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.MessagingAllowedHostsConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
@@ -80,7 +81,18 @@ public enum SystemConfigKeyEnum implements ConfigKey {
      * Unset or empty means no tenant may use SMTP. Checked on write by tenant-service and again by
      * message-service immediately before it connects.
      */
-    MESSAGING_PROVIDER_ALLOWED_HOSTS(MessagingAllowedHostsConfigDTO.class);
+    MESSAGING_PROVIDER_ALLOWED_HOSTS(MessagingAllowedHostsConfigDTO.class),
+
+    /**
+     * Platform default for the largest reading value that may be typed in or asserted on each reading
+     * channel, for any tenant that has not set that channel in {@code TENANT_MANUAL_READING_MAX_VALUE}.
+     * Values are in the channel's standard unit (BFM m3, ELM kWh, PDU minutes).
+     * Format: { maxValues: { BFM: "99999999" } }.
+     * <p>
+     * No event is published, so telemetry-service picks up a change when its tenant config cache
+     * expires (telemetry.cache.tenant-config.ttl-ms). Managed by Super User.
+     */
+    MANUAL_READING_MAX_VALUE(ManualReadingMaxValueConfigDTO.class);
 
     private final Class<? extends ConfigValueDTO> dtoClass;
 

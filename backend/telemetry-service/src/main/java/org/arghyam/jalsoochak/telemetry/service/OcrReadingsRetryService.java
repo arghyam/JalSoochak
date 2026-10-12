@@ -28,7 +28,7 @@ public class OcrReadingsRetryService {
     private final CircuitBreakerRegistry circuitBreakerRegistry;
     /** Shared across all providers: a global cap on concurrent OCR calls protecting the ingestion threads. */
     private final Bulkhead bulkhead;
-    /** Retry + circuit breaker for the built-in default provider (the tuned {@value #INSTANCE_NAME} instance). */
+    /** Retry + circuit breaker for BFM's built-in default provider (the tuned {@value #INSTANCE_NAME} instance). */
     private final ResilienceBundle defaultBundle;
     /**
      * Per-provider retry + circuit breaker, isolating one AI backend's failures from another's. Each is
@@ -83,7 +83,7 @@ public class OcrReadingsRetryService {
     }
 
     /**
-     * The resilience bundle keyed on the RESOLVED provider. The built-in provider —
+     * The resilience bundle keyed on the RESOLVED provider. BFM's built-in provider —
      * where unknown/mis-typed ids also degrade — uses the shared, tuned {@value #INSTANCE_NAME} instances;
      * any other registered provider gets its own derived instances so its failures cannot open the default
      * breaker (and a typo cannot spawn a phantom breaker that never matches a real backend).

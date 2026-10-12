@@ -141,8 +141,9 @@ public class UserManagementServiceImpl implements UserManagementService {
                         .orElseThrow(() -> new ResourceNotFoundException(
                                 "Tenant not found for state code: " + request.getTenantCode()));
 
+        Long adminUserId;
         try {
-            userCommonRepository.createAdminUserPending(request.getEmail(), request.getPhoneNumber(), tenantId,
+            adminUserId = userCommonRepository.createAdminUserPending(request.getEmail(), request.getPhoneNumber(), tenantId,
                     adminLevelId, callerRow.id() != null ? callerRow.id().intValue() : null);
         } catch (DuplicateKeyException ex) {
             AdminUserRow existing = userCommonRepository.findAdminUserByEmail(request.getEmail())
@@ -208,6 +209,8 @@ public class UserManagementServiceImpl implements UserManagementService {
                 .stateName(tenantName)
                 // Super users belong to no tenant (tenantId 0) and are served by the system default provider
                 .tenantCode(tenantId != 0 ? request.getTenantCode() : null)
+                .tenantId(tenantId != 0 ? tenantId : null)
+                .adminUserId(adminUserId)
                 .build());
     }
 
@@ -317,6 +320,8 @@ public class UserManagementServiceImpl implements UserManagementService {
                 .stateName(tenantName)
                 // Null for super users (tenantId 0), who are served by the system default provider
                 .tenantCode(tenantCode)
+                .tenantId(target.tenantId() != null && target.tenantId() != 0 ? target.tenantId() : null)
+                .adminUserId(target.id())
                 .build());
     }
 

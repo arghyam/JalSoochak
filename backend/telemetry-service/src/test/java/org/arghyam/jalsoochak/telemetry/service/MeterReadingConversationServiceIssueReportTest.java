@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
@@ -116,7 +117,7 @@ class MeterReadingConversationServiceIssueReportTest {
                 eq(1L),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyString()
+                org.mockito.ArgumentMatchers.anyString(), any()
         );
     }
 
@@ -151,7 +152,7 @@ class MeterReadingConversationServiceIssueReportTest {
                 eq(1L),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(),
-                eq("Meter Replaced")
+                eq("Meter Replaced"), eq(ReportingChannel.WHATSAPP)
         );
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 org.mockito.ArgumentMatchers.anyString(),
@@ -208,7 +209,7 @@ class MeterReadingConversationServiceIssueReportTest {
                 org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyString()
+                org.mockito.ArgumentMatchers.anyString(), any()
         );
     }
 
@@ -276,7 +277,7 @@ class MeterReadingConversationServiceIssueReportTest {
                 org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyString()
+                org.mockito.ArgumentMatchers.anyString(), any()
         );
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 org.mockito.ArgumentMatchers.anyString(),
@@ -356,7 +357,7 @@ class MeterReadingConversationServiceIssueReportTest {
                 org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyString()
+                org.mockito.ArgumentMatchers.anyString(), any()
         );
     }
 
@@ -379,7 +380,7 @@ class MeterReadingConversationServiceIssueReportTest {
                 eq(10L),
                 eq(1L),
                 org.mockito.ArgumentMatchers.any(),
-                eq("No Water Supply")
+                eq("No Water Supply"), any()
         )).thenReturn("corr-telemetry-1");
 
         IntroResponse resp = service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder()
@@ -419,7 +420,7 @@ class MeterReadingConversationServiceIssueReportTest {
                 org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyString()
+                org.mockito.ArgumentMatchers.anyString(), any()
         );
     }
 
@@ -618,7 +619,7 @@ class MeterReadingConversationServiceIssueReportTest {
                 org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyString()
+                org.mockito.ArgumentMatchers.anyString(), any()
         );
         org.mockito.Mockito.verifyNoInteractions(telemetryEventPublisher);
     }
@@ -641,7 +642,7 @@ class MeterReadingConversationServiceIssueReportTest {
                 eq(1L),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(),
-                eq(atCap)
+                eq(atCap), eq(ReportingChannel.WHATSAPP)
         );
     }
 
@@ -672,7 +673,7 @@ class MeterReadingConversationServiceIssueReportTest {
                 org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anyString()
+                org.mockito.ArgumentMatchers.anyString(), any()
         );
         org.mockito.Mockito.verifyNoInteractions(telemetryEventPublisher);
     }
@@ -698,7 +699,7 @@ class MeterReadingConversationServiceIssueReportTest {
                 eq(1L),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(),
-                eq("Motor burnt out, needs repair")
+                eq("Motor burnt out, needs repair"), eq(ReportingChannel.WHATSAPP)
         );
     }
 

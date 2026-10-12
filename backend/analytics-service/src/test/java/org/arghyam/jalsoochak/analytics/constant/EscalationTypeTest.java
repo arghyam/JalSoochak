@@ -38,6 +38,15 @@ class EscalationTypeTest {
         }
 
         @Test
+        @DisplayName("the no-meter-detected anomaly is code 12")
+        void noMeterDetectedIsTwelve() {
+            // Mirrors AnomalyConstants.TYPE_NO_METER_DETECTED in telemetry-service and the "12" entry
+            // in message-service's AnomalyLabels.CODE_TO_NAME; all three are pinned to the literal.
+            assertThat(EscalationType.NO_METER_DETECTED.code).isEqualTo(12);
+            assertThat(EscalationType.fromCode(12)).isEqualTo(EscalationType.NO_METER_DETECTED);
+        }
+
+        @Test
         @DisplayName("codes are unique and contiguous from 1")
         void codesAreUniqueAndContiguous() {
             assertThat(Arrays.stream(EscalationType.values()).map(t -> t.code).toList())
@@ -102,6 +111,15 @@ class EscalationTypeTest {
             // fact_escalation_table rows silently.
             assertThat(EscalationType.WATER_ANOMALIES)
                     .doesNotContain(EscalationType.LOCATION_MISMATCH);
+        }
+
+        @Test
+        @DisplayName("the no-meter-detected anomaly is scoped to the operator and raises no escalation")
+        void noMeterDetectedIsAUserAnomalyWithNoEscalation() {
+            // Raised against the operator who sent the photo, like UNREADABLE_IMAGE; the operator is
+            // told to resend straight away, so there is nobody to escalate to.
+            assertThat(EscalationType.USER_ANOMALIES).contains(EscalationType.NO_METER_DETECTED);
+            assertThat(EscalationType.WATER_ANOMALIES).doesNotContain(EscalationType.NO_METER_DETECTED);
         }
 
         @Test

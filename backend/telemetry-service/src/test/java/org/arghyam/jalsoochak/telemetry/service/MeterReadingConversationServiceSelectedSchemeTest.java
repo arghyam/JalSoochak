@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
@@ -84,7 +85,7 @@ class MeterReadingConversationServiceSelectedSchemeTest {
     void supplyOutageReasonSubmit_recordsAgainstTheSelectedScheme() {
         service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder().contactId(CONTACT).issueReason("1").build());
 
-        verify(telemetryTenantRepository).upsertPendingIssueReportRecord(eq(SCHEMA), eq(SELECTED), eq(OPERATOR), any(), anyString());
+        verify(telemetryTenantRepository).upsertPendingIssueReportRecord(eq(SCHEMA), eq(SELECTED), eq(OPERATOR), any(), anyString(), eq(ReportingChannel.WHATSAPP));
     }
 
     @Test
@@ -101,7 +102,7 @@ class MeterReadingConversationServiceSelectedSchemeTest {
 
         service.meterChangeSubmitMessage(MeterChangeRequest.builder().contactId(CONTACT).reason("1").build());
 
-        verify(telemetryTenantRepository).upsertPendingMeterChangeRecord(eq(SCHEMA), eq(SELECTED), eq(OPERATOR), any(), eq("Meter damaged"));
+        verify(telemetryTenantRepository).upsertPendingMeterChangeRecord(eq(SCHEMA), eq(SELECTED), eq(OPERATOR), any(), eq("Meter damaged"), eq(ReportingChannel.WHATSAPP));
     }
 
     @Test
@@ -110,7 +111,7 @@ class MeterReadingConversationServiceSelectedSchemeTest {
 
         service.takeMeterReadingMessage(MeterChangeRequest.builder().contactId(CONTACT).reason("1").build());
 
-        verify(telemetryTenantRepository).upsertPendingMeterChangeRecord(eq(SCHEMA), eq(SELECTED), eq(OPERATOR), any(), eq("Meter replaced"));
+        verify(telemetryTenantRepository).upsertPendingMeterChangeRecord(eq(SCHEMA), eq(SELECTED), eq(OPERATOR), any(), eq("Meter replaced"), eq(ReportingChannel.WHATSAPP));
     }
 
     @Test

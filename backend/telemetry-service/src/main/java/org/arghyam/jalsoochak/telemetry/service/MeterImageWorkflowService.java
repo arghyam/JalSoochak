@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterImageWebhookRequest;
@@ -109,6 +110,7 @@ public class MeterImageWorkflowService {
                     // Record the reason on the flow_reading_table for meter-replacement submissions.
                     .meterChangeReason(isMeterReplaced ? "METER_REPLACED" : null)
                     .readingTime(null)
+                    .reportedVia(ReportingChannel.WHATSAPP)
                     .build();
 
             CreateReadingResponse response = bfmReadingService.createReading(
@@ -209,6 +211,7 @@ public class MeterImageWorkflowService {
                     // declare a channel, and the stored preference decides as before.
                     .declaredChannel(ReadingChannel.parseStrict(request.getChannel()).orElse(null))
                     .readingUnit(request.getReadingUnit())
+                    .reportedVia(ReportingChannel.API)
                     // LOCATION-AFFINITY: GeoJSON orders coordinates [longitude, latitude] — the
                     // opposite of how they read aloud, and the single easiest thing here to get
                     // backwards. Pinned by MeterImageWorkflowServiceCanonicalReadingTest.

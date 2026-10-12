@@ -20,12 +20,21 @@ import java.util.Objects;
  *
  * <p>The {@code logo_image} key is NOT included here — each channel adapter injects it
  * from {@code MailProperties.logoImageUrl()} so callers never need to supply it.
+ *
+ * <p>{@code trackingRef} is the delivery ledger's opaque reference for this message, or {@code null}.
+ * An adapter whose provider can echo a value back on its delivery reports attaches it; the others
+ * ignore it.
  */
 public record MailRequest(
         String to,
         MailTemplate template,
-        Map<String, Object> templateVariables
+        Map<String, Object> templateVariables,
+        String trackingRef
 ) {
+    public MailRequest(String to, MailTemplate template, Map<String, Object> templateVariables) {
+        this(to, template, templateVariables, null);
+    }
+
     /**
      * Canonical constructor that defensively copies the templateVariables map
      * to ensure immutability and prevent external mutation after construction.

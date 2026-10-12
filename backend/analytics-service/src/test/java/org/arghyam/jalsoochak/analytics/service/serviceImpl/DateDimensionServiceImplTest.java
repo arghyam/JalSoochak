@@ -41,6 +41,25 @@ class DateDimensionServiceImplTest {
     }
 
     @Test
+    void ensureDateExists_setsSundayToSaturdayWeekBounds() {
+        // 2026-01-01 is a Thursday; 2026-01-04 is a Sunday and starts its own week.
+        when(dimDateRepository.existsById(20260101)).thenReturn(false);
+        when(dimDateRepository.existsById(20260104)).thenReturn(false);
+
+        service.ensureDateExists(LocalDate.of(2026, 1, 1));
+        service.ensureDateExists(LocalDate.of(2026, 1, 4));
+
+        ArgumentCaptor<DimDate> captor = ArgumentCaptor.forClass(DimDate.class);
+        verify(dimDateRepository, times(2)).save(captor.capture());
+        DimDate thursday = captor.getAllValues().get(0);
+        assertThat(thursday.getWeekStartDate()).isEqualTo(LocalDate.of(2025, 12, 28));
+        assertThat(thursday.getWeekEndDate()).isEqualTo(LocalDate.of(2026, 1, 3));
+        DimDate sunday = captor.getAllValues().get(1);
+        assertThat(sunday.getWeekStartDate()).isEqualTo(LocalDate.of(2026, 1, 4));
+        assertThat(sunday.getWeekEndDate()).isEqualTo(LocalDate.of(2026, 1, 10));
+    }
+
+    @Test
     void ensureDateExists_whenAlreadyPresent_doesNotSave() {
         when(dimDateRepository.existsById(20260101)).thenReturn(true);
 

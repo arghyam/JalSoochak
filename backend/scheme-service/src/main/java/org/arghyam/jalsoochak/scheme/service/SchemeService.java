@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.scheme.service;
 
+import org.arghyam.jalsoochak.scheme.dto.SchemeAnalyticsResyncResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
@@ -53,15 +54,21 @@ public interface SchemeService {
 
     SchemeUploadResponseDTO uploadSchemeMappings(MultipartFile file);
 
-    /**
-     * Re-sends SCHEME_DIMENSION_REPLACED for every live scheme of the tenant, so analytics rebuilds each
-     * scheme's dim_scheme_table rows from the tenant DB. A one-off backfill; safe to repeat.
-     *
-     * @return "schemes" sent and "failed" events Kafka did not accept
-     */
-    java.util.Map<String, Integer> republishSchemeDimensions(String tenantCode);
-
     ReportLinkResponseDTO downloadSchemesReport();
 
     ReportLinkResponseDTO downloadSchemeMappingsReport();
+
+    /**
+     * Sends every scheme of the caller's tenant to analytics with its details, villages and
+     * sub-divisions, so analytics can bring the scheme's rows back in line with them.
+     */
+    SchemeAnalyticsResyncResponseDTO resyncSchemesToAnalytics();
+
+    /**
+     * Sends {@code SCHEME_MAPPINGS_REPLACED} for the given schemes of one tenant, read from the committed
+     * tenant rows. Used by the state sync after its transaction commits.
+     *
+     * @return the number of messages handed to Kafka
+     */
+    int publishSchemeMappingsReplaced(String schemaName, Integer tenantId, List<Integer> schemeIds);
 }

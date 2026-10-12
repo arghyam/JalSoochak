@@ -32,4 +32,13 @@ public class InviteEmailEvent {
      * are served by the system default provider.
      */
     private String tenantCode;
+
+    /** Id of {@link #tenantCode}'s tenant; null under the same conditions. */
+    private Integer tenantId;
+
+    /**
+     * The invitee's {@code common_schema.tenant_admin_user_master_table} id, for the delivery ledger.
+     * Null for events published before the field existed.
+     */
+    private Long adminUserId;
 }

@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,6 +69,7 @@ class TelemetryTenantRepositoryPendingReasonIntegrationTest {
                     meter_change_reason TEXT,
                     issue_report_reason TEXT,
                     image_url           TEXT DEFAULT '',
+                    reported_via_id     INTEGER,
                     created_by          INTEGER      NOT NULL,
                     created_at          TIMESTAMP    NOT NULL DEFAULT NOW(),
                     updated_by          INTEGER,
@@ -95,18 +97,45 @@ class TelemetryTenantRepositoryPendingReasonIntegrationTest {
     void createIssueReportRecord_leavesTheSchemeSelectionPlaceholderInPlace() {
         insertRow(OTHER_SCHEME, TODAY, "scheme-selection-abc", 0, null, null);
 
-        repository().createIssueReportRecord(SCHEMA, OTHER_SCHEME, OPERATOR, NOW, "issue-report-1", "No power");
+        repository().createIssueReportRecord(SCHEMA, OTHER_SCHEME, OPERATOR, NOW, "issue-report-1", "No power", ReportingChannel.WHATSAPP);
 
         assertThat(repository().findLatestPendingSchemeSelectionForDate(SCHEMA, OPERATOR, TODAY))
                 .hasValueSatisfying(sel -> assertThat(sel.schemeId()).isEqualTo(OTHER_SCHEME));
         assertThat(rowsWhere("issue_report_reason = 'No power'")).hasSize(1);
     }
 
+    // ── how a reason row was reported ───────────────────────────────────────────
+
+    @Test
+    void reasonRowsRecordHowTheyWereReported() {
+        repository().upsertPendingIssueReportRecord(SCHEMA, SCHEME, OPERATOR, NOW, "No power", ReportingChannel.WHATSAPP);
+        repository().upsertPendingMeterChangeRecord(SCHEMA, OTHER_SCHEME, OPERATOR, NOW, "Meter stolen", ReportingChannel.WHATSAPP);
+
+        assertThat(rowsWhere("issue_report_reason = 'No power'"))
+                .singleElement()
+                .satisfies(row -> assertThat(row.get("reported_via_id")).isEqualTo(ReportingChannel.WHATSAPP.getCode()));
+        assertThat(rowsWhere("meter_change_reason = 'Meter stolen'"))
+                .singleElement()
+                .satisfies(row -> assertThat(row.get("reported_via_id")).isEqualTo(ReportingChannel.WHATSAPP.getCode()));
+    }
+
+    /** The reason is added to a reading reported through another channel, which keeps that channel. */
+    @Test
+    void anIssueReportOnTodaysReadingKeepsHowTheReadingWasReported() {
+        long readingId = insertRow(SCHEME, TODAY, "bfm-1", 50, null, null);
+        jdbcTemplate.update("UPDATE tenant_pr.flow_reading_table SET reported_via_id = ? WHERE id = ?",
+                ReportingChannel.API.getCode(), readingId);
+
+        repository().createIssueReportRecord(SCHEMA, SCHEME, OPERATOR, NOW, "issue-report-3", "No power", ReportingChannel.WHATSAPP);
+
+        assertThat(rowById(readingId).get("reported_via_id")).isEqualTo(ReportingChannel.API.getCode());
+    }
+
     @Test
     void createIssueReportRecord_stillAnnotatesTodaysRealReadingRow() {
         long readingId = insertRow(SCHEME, TODAY, "bfm-1", 50, null, null);
 
-        long written = repository().createIssueReportRecord(SCHEMA, SCHEME, OPERATOR, NOW, "issue-report-2", "Meter replaced");
+        long written = repository().createIssueReportRecord(SCHEMA, SCHEME, OPERATOR, NOW, "issue-report-2", "Meter replaced", ReportingChannel.WHATSAPP);
 
         assertThat(written).isEqualTo(readingId);
     }
@@ -115,7 +144,7 @@ class TelemetryTenantRepositoryPendingReasonIntegrationTest {
     void upsertPendingIssueReportRecord_leavesTheSchemeSelectionPlaceholderInPlace() {
         insertRow(OTHER_SCHEME, TODAY, "scheme-selection-abc", 0, null, null);
 
-        repository().upsertPendingIssueReportRecord(SCHEMA, OTHER_SCHEME, OPERATOR, NOW, "No power");
+        repository().upsertPendingIssueReportRecord(SCHEMA, OTHER_SCHEME, OPERATOR, NOW, "No power", ReportingChannel.WHATSAPP);
 
         assertThat(repository().findLatestPendingSchemeSelectionForDate(SCHEMA, OPERATOR, TODAY))
                 .hasValueSatisfying(sel -> assertThat(sel.schemeId()).isEqualTo(OTHER_SCHEME));
@@ -127,7 +156,7 @@ class TelemetryTenantRepositoryPendingReasonIntegrationTest {
     void upsertPendingIssueReportRecord_keepsYesterdaysReasonOnYesterday() {
         long yesterdayId = insertRow(SCHEME, YESTERDAY, "issue-report-old", 0, null, "Pipe burst");
 
-        repository().upsertPendingIssueReportRecord(SCHEMA, SCHEME, OPERATOR, NOW, "No power");
+        repository().upsertPendingIssueReportRecord(SCHEMA, SCHEME, OPERATOR, NOW, "No power", ReportingChannel.WHATSAPP);
 
         Map<String, Object> yesterday = rowById(yesterdayId);
         assertThat(yesterday.get("reading_date").toString()).isEqualTo(YESTERDAY.toString());
@@ -139,7 +168,7 @@ class TelemetryTenantRepositoryPendingReasonIntegrationTest {
     void upsertPendingIssueReportRecord_updatesTodaysReason_whenAnsweredAgainToday() {
         long todayId = insertRow(SCHEME, TODAY, "issue-report-today", 0, null, "Pipe burst");
 
-        String correlation = repository().upsertPendingIssueReportRecord(SCHEMA, SCHEME, OPERATOR, NOW, "No power");
+        String correlation = repository().upsertPendingIssueReportRecord(SCHEMA, SCHEME, OPERATOR, NOW, "No power", ReportingChannel.WHATSAPP);
 
         assertThat(correlation).isEqualTo("issue-report-today");
         assertThat(rowById(todayId).get("issue_report_reason")).isEqualTo("No power");
@@ -150,7 +179,7 @@ class TelemetryTenantRepositoryPendingReasonIntegrationTest {
     void upsertPendingMeterChangeRecord_keepsEarlierDaysMeterChangeRows() {
         long yesterdayId = insertRow(SCHEME, YESTERDAY, "meter-change-old", 0, "Meter damaged", null);
 
-        repository().upsertPendingMeterChangeRecord(SCHEMA, SCHEME, OPERATOR, NOW, "Meter stolen");
+        repository().upsertPendingMeterChangeRecord(SCHEMA, SCHEME, OPERATOR, NOW, "Meter stolen", ReportingChannel.WHATSAPP);
 
         Map<String, Object> yesterday = rowById(yesterdayId);
         assertThat(yesterday.get("deleted_at")).isNull();
@@ -164,7 +193,7 @@ class TelemetryTenantRepositoryPendingReasonIntegrationTest {
         long older = insertRow(SCHEME, TODAY, "meter-change-a", 0, "Meter damaged", null);
         long newer = insertRow(SCHEME, TODAY, "meter-change-b", 0, "Meter damaged", null);
 
-        String correlation = repository().upsertPendingMeterChangeRecord(SCHEMA, SCHEME, OPERATOR, NOW, "Meter stolen");
+        String correlation = repository().upsertPendingMeterChangeRecord(SCHEMA, SCHEME, OPERATOR, NOW, "Meter stolen", ReportingChannel.WHATSAPP);
 
         assertThat(correlation).isEqualTo("meter-change-b");
         assertThat(rowById(newer).get("meter_change_reason")).isEqualTo("Meter stolen");

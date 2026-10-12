@@ -11,7 +11,7 @@ import java.util.Set;
  */
 public class ChannelValidator implements ConstraintValidator<ValidChannelList, java.util.List<String>> {
 
-    private static final Set<String> VALID_CHANNELS = Set.of("BFM", "ELM", "PDU", "IOT", "MAN");
+    public static final Set<String> VALID_CHANNELS = Set.of("BFM", "ELM", "PDU", "IOT", "MAN");
 
     @Override
     public void initialize(ValidChannelList constraintAnnotation) {

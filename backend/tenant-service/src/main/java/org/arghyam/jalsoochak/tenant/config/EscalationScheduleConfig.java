@@ -49,12 +49,8 @@ public class EscalationScheduleConfig {
         }
 
         public EscalationScheduleConfig build() {
-            if (hour < 0 || hour > 23) {
-                    throw new IllegalArgumentException("hour must be in [0,23]");
-                }
-            if (minute < 0 || minute > 59) {
-                    throw new IllegalArgumentException("minute must be in [0,59]");
-                }
+            ScheduleRanges.checkHour(hour);
+            ScheduleRanges.checkMinute(minute);
             if (level1Days < 0 || level2Days < level1Days) {
                     throw new IllegalArgumentException("Invalid escalation thresholds");
                 }

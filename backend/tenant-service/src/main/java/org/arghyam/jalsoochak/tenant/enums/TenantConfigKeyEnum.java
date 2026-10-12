@@ -4,6 +4,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.DateFormatConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ElmFormulaConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.ManualReadingMaxValueConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.EmailProviderConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WhatsAppMessagesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.MessageBrokerConfigDTO;
@@ -295,6 +296,16 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * to readings submitted or corrected after it.
      */
     ELM_WATER_QUANTITY_FORMULA(ConfigType.GENERIC, ElmFormulaConfigDTO.class, false, false, false),
+
+    /**
+     * The largest reading value that may be typed in or asserted on each reading channel, overriding
+     * the system-level {@code MANUAL_READING_MAX_VALUE} channel by channel. Values are in the channel's
+     * standard unit (BFM m3, ELM kWh, PDU minutes). Format: { maxValues: { BFM: "99999999" } }.
+     * <p>
+     * Optional: a channel set at neither level has no limit. telemetry-service reads it when a value
+     * is submitted or corrected, so no event beyond TENANT_CONFIG_UPDATED is published.
+     */
+    TENANT_MANUAL_READING_MAX_VALUE(ConfigType.GENERIC, ManualReadingMaxValueConfigDTO.class, false, false, false),
 
     /**
      * The email account this tenant's own mail is sent through (SendGrid or SMTP), including the

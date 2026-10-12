@@ -20,8 +20,9 @@ import java.util.Optional;
  * for the channel whose meters it reads. A tenant's provider that isn't registered for the channel falls
  * back to the channel's default provider with a warning, so a mis-typed tenant config can never drop a
  * reading. BFM's default is {@code ocr.default-provider} (default
- * {@link OcrProviderSettings#DEFAULT_PROVIDER_ID}); other channels have none until an extractor is
- * written for them, so their photos can't be read yet.
+ * {@link OcrProviderSettings#DEFAULT_PROVIDER_ID}). ELM's is {@code ocr.elm.default-provider}; while it
+ * is blank, only a tenant that names its own ELM provider has its ELM photos read. An ELM default that
+ * isn't registered for ELM fails startup. Other channels have no default, so their photos can't be read.
  */
 @Component
 @Slf4j
@@ -29,10 +30,13 @@ public class OcrProviderRegistry {
 
     private final Map<ReadingChannel, Map<String, MeterReadingExtractor>> extractorsByChannel;
     private final String bfmDefaultProviderId;
+    /** Null when ELM has no default provider. */
+    private final String elmDefaultProviderId;
 
     public OcrProviderRegistry(List<MeterReadingExtractor> extractors,
                                @Value("${ocr.default-provider:" + OcrProviderSettings.DEFAULT_PROVIDER_ID + "}")
-                               String bfmDefaultProviderId) {
+                               String bfmDefaultProviderId,
+                               @Value("${ocr.elm.default-provider:}") String elmDefaultProviderId) {
         Map<ReadingChannel, Map<String, MeterReadingExtractor>> byChannel = new EnumMap<>(ReadingChannel.class);
         for (MeterReadingExtractor extractor : extractors) {
             String id = normalize(extractor.providerId());
@@ -57,7 +61,15 @@ public class OcrProviderRegistry {
         byChannel.forEach((channel, byId) -> frozen.put(channel, Map.copyOf(byId)));
         this.extractorsByChannel = frozen;
         this.bfmDefaultProviderId = normalizeOrDefault(bfmDefaultProviderId);
-        log.info("Registered OCR providers {} (BFM default '{}')", registeredIds(), this.bfmDefaultProviderId);
+        this.elmDefaultProviderId = normalize(elmDefaultProviderId);
+        if (this.elmDefaultProviderId != null
+                && !frozen.getOrDefault(ReadingChannel.ELM, Map.of()).containsKey(this.elmDefaultProviderId)) {
+            throw new IllegalStateException("ocr.elm.default-provider '" + this.elmDefaultProviderId
+                    + "' is not registered for channel ELM; registered: " + registeredIds());
+        }
+        log.info("Registered OCR providers {} (BFM default '{}', ELM default {})", registeredIds(),
+                this.bfmDefaultProviderId,
+                this.elmDefaultProviderId == null ? "none" : "'" + this.elmDefaultProviderId + "'");
     }
 
     /**
@@ -101,7 +113,10 @@ public class OcrProviderRegistry {
     }
 
     private Optional<String> defaultProviderId(ReadingChannel channel) {
-        return channel == ReadingChannel.BFM ? Optional.of(bfmDefaultProviderId) : Optional.empty();
+        if (channel == ReadingChannel.BFM) {
+            return Optional.of(bfmDefaultProviderId);
+        }
+        return channel == ReadingChannel.ELM ? Optional.ofNullable(elmDefaultProviderId) : Optional.empty();
     }
 
     private static String normalize(String providerId) {

@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -37,7 +38,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 501L, "updated_at", UPDATED_AT));
 
             Long id = repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason");
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason", null, null, ReportingChannel.WHATSAPP).id();
 
             assertThat(id).isEqualTo(501L);
             String sql = capturedReturningRowSql();
@@ -51,7 +52,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 502L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason");
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason", null, null, ReportingChannel.WHATSAPP);
 
             String sql = capturedReturningRowSql();
             assertThat(sql).doesNotContain("payload_json").contains("correlation_id, quantity");
@@ -64,7 +65,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 503L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason");
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason", null, null, ReportingChannel.WHATSAPP);
 
             String sql = capturedReturningRowSql();
             assertThat(sql).contains("payload_json")
@@ -78,7 +79,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 504L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason");
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", "ocr-1", "img", "reason", null, null, ReportingChannel.WHATSAPP);
 
             String sql = capturedReturningRowSql();
             assertThat(sql).contains("ocr_correlation_id").doesNotContain("payload_json");
@@ -90,7 +91,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 505L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    BigDecimal.ONE, BigDecimal.ONE, "c", "", null);
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "", null, null, null, ReportingChannel.WHATSAPP);
 
             assertThat(capturedReturningRowSql()).contains("observation_time");
         }
@@ -101,7 +102,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 506L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    BigDecimal.ONE, BigDecimal.ONE, "c", null, null);
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, null, null, null, null, ReportingChannel.WHATSAPP);
 
             assertThat(capturedReturningRowArgs()).contains("");
         }
@@ -116,7 +117,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 508L, "updated_at", UPDATED_AT));
 
             FlowReadingVersion version = repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, ReadingChannel.ELM, "kW.h");
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, ReadingChannel.ELM, "kW.h", ReportingChannel.WHATSAPP);
 
             assertThat(version).isEqualTo(new FlowReadingVersion(508L, UPDATED_AT));
             assertThat(capturedReturningRowSql())
@@ -130,10 +131,35 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 509L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, ReadingChannel.PDU, "min");
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, ReadingChannel.PDU, "min", ReportingChannel.WHATSAPP);
 
-            assertThat(capturedReturningRowSql()).contains("quantity, channel_id, submitted_unit, meter_change_reason");
-            assertThat(capturedReturningRowArgs()).containsSequence(3, "min");
+            assertThat(capturedReturningRowSql())
+                    .contains("quantity, channel_id, submitted_unit, reported_via_id, meter_change_reason");
+            assertThat(capturedReturningRowArgs()).containsSequence(3, "min", 6);
+        }
+
+        @Test
+        void writesHowTheRowWasReportedWithTheRow() {
+            onColumnExists(true);
+            onQuery("INSERT INTO", row("id", 512L, "updated_at", UPDATED_AT));
+
+            repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, ReadingChannel.BFM, "m3", ReportingChannel.API);
+
+            assertThat(capturedReturningRowArgs()).containsSequence(1, "m3", ReportingChannel.API.getCode());
+        }
+
+        /** A pre-V61 schema has no reported_via_id column: how the row was reported is dropped. */
+        @Test
+        void dropsHowTheRowWasReportedOnAPreV61Schema() {
+            onColumnsExisting("payload_json", "submitted_unit");
+            onQuery("INSERT INTO", row("id", 513L, "updated_at", UPDATED_AT));
+
+            repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, ReadingChannel.BFM, "m3", ReportingChannel.API);
+
+            assertThat(capturedReturningRowSql()).doesNotContain("reported_via_id").contains("submitted_unit");
+            assertThat(capturedReturningRowArgs()).doesNotContain(ReportingChannel.API.getCode());
         }
 
         /** A pre-V56 schema has no submitted_unit column: the unit is dropped, the channel is not. */
@@ -143,23 +169,26 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 510L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, ReadingChannel.ELM, "kW.h");
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "img", null, ReadingChannel.ELM, "kW.h", ReportingChannel.WHATSAPP);
 
             assertThat(capturedReturningRowSql()).doesNotContain("submitted_unit").contains("quantity, channel_id");
             assertThat(capturedReturningRowArgs()).contains(2).doesNotContain("kW.h");
         }
 
-        /** Rows that hold no reading (scheme selection, location) keep a NULL channel, as before. */
+        /**
+         * Rows that hold no reading (scheme selection, location) keep a NULL channel, as before, and
+         * still record how they were reported.
+         */
         @Test
-        void legacyOverloadStoresNoChannel() {
+        void rowWithNoReadingStoresNoChannel() {
             onColumnExists(true);
             onQuery("INSERT INTO", row("id", 511L, "updated_at", UPDATED_AT));
 
             Long id = repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    BigDecimal.ZERO, BigDecimal.ZERO, "c", "", null);
+                    BigDecimal.ZERO, BigDecimal.ZERO, "c", null, "", null, null, null, ReportingChannel.WHATSAPP).id();
 
             assertThat(id).isEqualTo(511L);
-            assertThat(capturedReturningRowArgs()).containsSequence("c", null, null, null);
+            assertThat(capturedReturningRowArgs()).containsSequence("c", null, null, null, 6);
         }
 
         @Test
@@ -168,7 +197,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 507L, "updated_at", UPDATED_AT));
 
             repository.createFlowReading(SCHEMA, 7L, 2L, READING_AT,
-                    BigDecimal.ONE, BigDecimal.ONE, "c", "", null);
+                    BigDecimal.ONE, BigDecimal.ONE, "c", null, "", null, null, null, ReportingChannel.WHATSAPP);
 
             assertThat(capturedReturningRowArgs()).contains(LocalDate.of(2026, 3, 1));
         }
@@ -475,7 +504,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
 
             FlowReadingVersion version = repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L,
                     READING_AT, BigDecimal.ZERO, new BigDecimal("11"), "corr-1", null, "", null,
-                    0, null, null, null, 3, null, ReadingChannel.BFM, "m3");
+                    0, null, null, null, 3, null, ReadingChannel.BFM, "m3", ReportingChannel.WHATSAPP);
 
             assertThat(version).isEqualTo(new FlowReadingVersion(606L, UPDATED_AT));
             assertThat(capturedReturningRowArgs()).containsSequence(1, "m3");
@@ -604,7 +633,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
                     "created_by", 2L, "extracted_reading", BigDecimal.ZERO));
 
             String correlationId = repository.upsertPendingMeterChangeRecord(
-                    SCHEMA, 7L, 2L, READING_AT, "Meter replaced");
+                    SCHEMA, 7L, 2L, READING_AT, "Meter replaced", ReportingChannel.WHATSAPP);
 
             assertThat(correlationId).isEqualTo("meter-change-1");
             // The update, plus the cleanup that soft-deletes any other pending rows.
@@ -622,7 +651,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
                     "id", 5L, "correlation_id", "meter-change-1",
                     "created_by", 2L, "extracted_reading", BigDecimal.ZERO));
 
-            repository.upsertPendingMeterChangeRecord(SCHEMA, 7L, 2L, READING_AT, "Meter replaced");
+            repository.upsertPendingMeterChangeRecord(SCHEMA, 7L, 2L, READING_AT, "Meter replaced", ReportingChannel.WHATSAPP);
 
             String cleanup = allUpdateSql().get(1);
             assertThat(cleanup).contains("deleted_at = NOW()").contains("updated_by = ?");
@@ -634,7 +663,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onScalar("INSERT INTO", Number.class, 610L);
 
             String correlationId = repository.upsertPendingMeterChangeRecord(
-                    SCHEMA, 7L, 2L, READING_AT, "Meter replaced");
+                    SCHEMA, 7L, 2L, READING_AT, "Meter replaced", ReportingChannel.WHATSAPP);
 
             assertThat(correlationId).startsWith("meter-change-");
         }
@@ -645,7 +674,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
                     "id", 6L, "correlation_id", "issue-report-1", "created_by", 2L));
 
             String correlationId = repository.upsertPendingIssueReportRecord(
-                    SCHEMA, 7L, 2L, READING_AT, "No water");
+                    SCHEMA, 7L, 2L, READING_AT, "No water", ReportingChannel.WHATSAPP);
 
             assertThat(correlationId).isEqualTo("issue-report-1");
             assertThat(capturedUpdateSql()).contains("issue_report_reason = ?");
@@ -656,7 +685,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onScalar("INSERT INTO", Number.class, 611L);
 
             assertThat(repository.upsertPendingIssueReportRecord(
-                    SCHEMA, 7L, 2L, READING_AT, "No water")).startsWith("issue-report-");
+                    SCHEMA, 7L, 2L, READING_AT, "No water", ReportingChannel.WHATSAPP)).startsWith("issue-report-");
         }
 
         @Test
@@ -697,7 +726,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("SELECT id", row("id", 700L));
 
             assertThat(repository.createIssueReportRecord(
-                    SCHEMA, 7L, 2L, READING_AT, "corr", "No water")).isEqualTo(700L);
+                    SCHEMA, 7L, 2L, READING_AT, "corr", "No water", ReportingChannel.WHATSAPP)).isEqualTo(700L);
             assertThat(capturedUpdateSql()).contains("issue_report_reason = ?");
         }
 
@@ -706,7 +735,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onScalar("INSERT INTO", Number.class, 701L);
 
             assertThat(repository.createIssueReportRecord(
-                    SCHEMA, 7L, 2L, READING_AT, "corr", "No water")).isEqualTo(701L);
+                    SCHEMA, 7L, 2L, READING_AT, "corr", "No water", ReportingChannel.WHATSAPP)).isEqualTo(701L);
         }
 
         @Test
@@ -715,7 +744,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onScalar("INSERT INTO", Number.class, 702L);
 
             assertThat(repository.createMeterChangeReasonRecord(
-                    SCHEMA, 7L, 2L, READING_AT, "corr", "Meter replaced")).isEqualTo(702L);
+                    SCHEMA, 7L, 2L, READING_AT, "corr", "Meter replaced", ReportingChannel.WHATSAPP)).isEqualTo(702L);
             assertThat(capturedInsertSql()).contains("payload_json");
         }
 
@@ -724,9 +753,41 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onColumnExists(false);
             onScalar("INSERT INTO", Number.class, 703L);
 
-            repository.createMeterChangeReasonRecord(SCHEMA, 7L, 2L, READING_AT, "corr", "Meter replaced");
+            repository.createMeterChangeReasonRecord(SCHEMA, 7L, 2L, READING_AT, "corr", "Meter replaced", ReportingChannel.WHATSAPP);
 
-            assertThat(capturedInsertSql()).doesNotContain("payload_json");
+            assertThat(capturedInsertSql()).doesNotContain("payload_json").doesNotContain("reported_via_id");
+        }
+
+        @Test
+        void createMeterChangeReasonRecordWritesHowItWasReported() {
+            onColumnExists(true);
+            onScalar("INSERT INTO", Number.class, 704L);
+
+            repository.createMeterChangeReasonRecord(SCHEMA, 7L, 2L, READING_AT, "corr", "Meter replaced", ReportingChannel.WHATSAPP);
+
+            assertThat(capturedInsertSql()).contains("image_url, reported_via_id, created_by");
+            assertThat(capturedInsertArgs()).containsSequence("corr", "Meter replaced", null, 6, 2L, 2L);
+        }
+
+        @Test
+        void createIssueReportRecordWritesHowANewRowWasReported() {
+            onColumnExists(true);
+            onScalar("INSERT INTO", Number.class, 705L);
+
+            repository.createIssueReportRecord(SCHEMA, 7L, 2L, READING_AT, "corr", "No water", ReportingChannel.WHATSAPP);
+
+            assertThat(capturedInsertArgs()).containsSequence("corr", null, "No water", 6, 2L, 2L);
+        }
+
+        /** The reason is added to a row that may hold a reading, which keeps how that was reported. */
+        @Test
+        void createIssueReportRecordLeavesHowAnExistingRowWasReported() {
+            onColumnExists(true);
+            onQuery("SELECT id", row("id", 700L));
+
+            repository.createIssueReportRecord(SCHEMA, 7L, 2L, READING_AT, "corr", "No water", ReportingChannel.WHATSAPP);
+
+            assertThat(capturedUpdateSql()).doesNotContain("reported_via_id");
         }
     }
 
@@ -749,7 +810,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("correlation_id LIKE ?", row(
                     "id", 5L, "scheme_id", 7L, "correlation_id", "scheme-selection-abc"));
 
-            assertThat(repository.upsertPendingSchemeSelectionRecord(SCHEMA, 9L, 2L, READING_AT))
+            assertThat(repository.upsertPendingSchemeSelectionRecord(SCHEMA, 9L, 2L, READING_AT, ReportingChannel.WHATSAPP))
                     .isEqualTo("scheme-selection-abc");
             assertThat(capturedUpdateSql()).contains("scheme_id = ?");
         }
@@ -759,7 +820,7 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             onQuery("INSERT INTO", row("id", 800L, "updated_at", UPDATED_AT));
 
             String correlationId =
-                    repository.upsertPendingSchemeSelectionRecord(SCHEMA, 9L, 2L, READING_AT);
+                    repository.upsertPendingSchemeSelectionRecord(SCHEMA, 9L, 2L, READING_AT, ReportingChannel.WHATSAPP);
 
             assertThat(correlationId).startsWith("scheme-selection-");
             assertThat(capturedReturningRowArgs()).contains(BigDecimal.ZERO);

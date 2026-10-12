@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.ManualReadingMaxValueConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.MessagingAllowedHostsConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetSystemConfigRequestDTO;
@@ -123,6 +124,16 @@ public class SystemManagementServiceImpl implements SystemManagementService {
                 // throw on every subsequent tenant SMTP settings write, turning one bad super-user
                 // value into a broken endpoint for every state.
                 allowedHostsDto.validatedSmtpHosts();
+            }
+
+            if (key == SystemConfigKeyEnum.MANUAL_READING_MAX_VALUE) {
+                // Enforced validation for JsonNode-bound configs (bean validation does not run on
+                // treeToValue). Channel codes are stored upper-cased, which is how telemetry looks them up.
+                if (dto == null) {
+                    throw new InvalidConfigValueException("MANUAL_READING_MAX_VALUE must not be null");
+                }
+                ManualReadingMaxValueConfigDTO maxValuesDto = (ManualReadingMaxValueConfigDTO) dto;
+                maxValuesDto.setMaxValues(maxValuesDto.validatedMaxValues());
             }
 
             String serialized;

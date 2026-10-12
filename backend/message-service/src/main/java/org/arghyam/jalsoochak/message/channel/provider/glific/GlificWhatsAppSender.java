@@ -45,6 +45,9 @@ import java.util.Map;
 @Slf4j
 public class GlificWhatsAppSender implements WhatsAppSender {
 
+    /** This adapter's identity in the delivery ledger. Never changes once rows carry it. */
+    public static final String PROVIDER_ID = "glific";
+
     private static final String OPTIN_MUTATION = """
             mutation optinContact($phone: String!) {
               optinContact(phone: $phone) {
@@ -358,8 +361,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * @param otp       one-time password for template {@code {{1}}}
      */
     @Override
-    public void sendLoginOtpHsm(Long contactId, String otp) {
-        if (isDryRun(settings.dryRun().whatsapp(), "sendLoginOtpHsm")) return;
+    public WhatsAppSendResult sendLoginOtpHsm(Long contactId, String otp) {
+        if (isDryRun(settings.dryRun().whatsapp(), "sendLoginOtpHsm")) return WhatsAppSendResult.suppressed(null);
         requireContactId(contactId, "sendLoginOtpHsm");
         if (isBlank(settings.templates().loginOtp())) {
             throw new IllegalStateException("whatsapp.template.login-otp-id is not configured");
@@ -370,6 +373,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
                 "parameters", List.of(otp)));
         checkErrors(response, "sendHsmMessage");
         log.debug("[WhatsApp] Login OTP HSM sent to contactId={}", contactId);
+        return new WhatsAppSendResult(optionalMessageId(response, "sendHsmMessage"),
+                settings.templates().loginOtp(), null);
     }
 
     /**
@@ -390,8 +395,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * Template variable {{1}} = operator name, {{2}} = today's date.
      */
     @Override
-    public void sendNudgeHsm(Long contactId, String operatorName, String date) {
-        if (isDryRun(settings.dryRun().nudge(), "sendNudgeHsm")) return;
+    public WhatsAppSendResult sendNudgeHsm(Long contactId, String operatorName, String date) {
+        if (isDryRun(settings.dryRun().nudge(), "sendNudgeHsm")) return WhatsAppSendResult.suppressed(null);
         requireContactId(contactId, "sendNudgeHsm");
         JsonNode response = client.execute(NUDGE_HSM_MUTATION, Map.of(
                 "templateId", settings.templates().nudge(),
@@ -399,6 +404,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
                 "parameters", List.of(operatorName, date)));
         checkErrors(response, "sendHsmMessage");
         log.debug("[WhatsApp] Nudge HSM sent to contactId={}", contactId);
+        return new WhatsAppSendResult(optionalMessageId(response, "sendHsmMessage"),
+                settings.templates().nudge(), null);
     }
 
     /**
@@ -715,6 +722,12 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         return !settings.dryRun().weeklyReport();
     }
 
+    /** The ledger's name for this provider. Stored on every row this adapter sends. */
+    @Override
+    public String providerId() {
+        return PROVIDER_ID;
+    }
+
     /**
      * Sends the escalation document HSM to the officer.
      *
@@ -729,8 +742,10 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * @param documentUrl publicly reachable URL of the escalation PDF
      */
     @Override
-    public void sendEscalationHsm(Long contactId, String documentUrl) {
-        if (isDryRun(settings.dryRun().escalation(), "sendEscalationHsm")) return;
+    public WhatsAppSendResult sendEscalationHsm(Long contactId, String documentUrl) {
+        if (isDryRun(settings.dryRun().escalation(), "sendEscalationHsm")) {
+            return WhatsAppSendResult.suppressed(ReportDeliveryMode.DOCUMENT);
+        }
         // Checked before the media upload so a missing contact id costs no Glific round-trip.
         requireContactId(contactId, "sendEscalationHsm");
 
@@ -753,6 +768,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         checkErrors(response, "createAndSendMessage");
 
         log.debug("[WhatsApp] Escalation HSM sent to contactId={}", contactId);
+        return new WhatsAppSendResult(optionalMessageId(response, "createAndSendMessage"),
+                settings.templates().escalation(), ReportDeliveryMode.DOCUMENT);
     }
 
     /**
@@ -902,6 +919,17 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * {@link WhatsAppSendResult#suppressed} before any mutation runs, and that path keeps its null
      * message id. So a missing id at this point is always the live anomaly, never the dry-run.</p>
      */
+    /**
+     * The message id a mutation returned, or {@code null} if it returned none. For the sends that were
+     * accepted without one before the ledger asked for it — nudge, OTP, escalation: refusing them now,
+     * as {@link #extractMessageId} refuses a report, would turn a quiet anomaly into a retried send.
+     * The ledger records such a send as untracked instead.
+     */
+    private static String optionalMessageId(JsonNode response, String mutationKey) {
+        String id = response.path(mutationKey).path("message").path("id").asText(null);
+        return id == null || id.isBlank() ? null : id;
+    }
+
     private static String extractMessageId(JsonNode response, String mutationKey) {
         String id = response.path(mutationKey).path("message").path("id").asText(null);
         if (id == null || id.isBlank()) {

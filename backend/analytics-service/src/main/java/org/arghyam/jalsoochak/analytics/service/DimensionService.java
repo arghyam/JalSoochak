@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEve
 import org.arghyam.jalsoochak.analytics.dto.event.RegularityThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
@@ -22,8 +23,7 @@ public interface DimensionService {
 
     void upsertScheme(SchemeEvent event);
 
-    /** Makes a scheme's dim_scheme rows exactly the location set the event carries; see SCHEME_DIMENSION_REPLACED. */
-    void replaceSchemeDimension(org.arghyam.jalsoochak.analytics.dto.event.SchemeDimensionReplacedEvent event);
+    void replaceSchemeMappings(SchemeMappingsReplacedEvent event);
 
     void upsertLgdLocation(LgdLocationEvent event);
 

@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.message.dto.SmsProviderSettings;
 import org.arghyam.jalsoochak.message.dto.TenantSecrets;
 import org.arghyam.jalsoochak.message.enums.SmsProviderType;
 import org.arghyam.jalsoochak.message.exception.ProviderNotUsableException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -59,13 +60,28 @@ public class SmsCountrySenderFactory implements SmsSenderFactory {
     private final WebClient.Builder webClientBuilder;
     private final SmsCountryProperties properties;
     private final boolean dryRun;
+    private final String deliveryReportUrl;
 
     public SmsCountrySenderFactory(WebClient.Builder webClientBuilder,
             SmsCountryProperties properties,
-            @Value("${notifications.sms.dry-run:false}") boolean dryRun) {
+            boolean dryRun) {
+        this(webClientBuilder, properties, dryRun, null);
+    }
+
+    /**
+     * @param deliveryReportUrl {@code notifications.sms.delivery-report.url}: where every SMSCountry
+     *                          account built here asks for its delivery reports to be pushed; blank for
+     *                          none
+     */
+    @Autowired
+    public SmsCountrySenderFactory(WebClient.Builder webClientBuilder,
+            SmsCountryProperties properties,
+            @Value("${notifications.sms.dry-run:false}") boolean dryRun,
+            @Value("${notifications.sms.delivery-report.url:}") String deliveryReportUrl) {
         this.webClientBuilder = webClientBuilder;
         this.properties = properties;
         this.dryRun = dryRun;
+        this.deliveryReportUrl = deliveryReportUrl;
     }
 
     @Override
@@ -93,7 +109,7 @@ public class SmsCountrySenderFactory implements SmsSenderFactory {
                 require(block.dltHeaderId(), "smscountry.dltHeaderId"),
                 block.otpTemplateOrDefault());
         // Compiles the OTP template, so an unrenderable one fails here rather than per send.
-        return new SmsCountrySender(webClientBuilder, resolved, dryRun);
+        return new SmsCountrySender(webClientBuilder, resolved, dryRun, deliveryReportUrl);
     }
 
     private static String require(String value, String field) {

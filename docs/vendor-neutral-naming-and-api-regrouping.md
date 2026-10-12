@@ -49,7 +49,7 @@ is named after a storage product at all.
    WhatsAppContactDirectory  ◀── GlificContactDirectory     WhatsAppSender  ◀── GlificWhatsAppSender
    ConversationResumeGateway ◀── GlificConversationResumeGateway
    InboundMediaFetcher       ◀── GlificMediaFetcher         WhatsAppDeliveryStatusReader ◀── GlificDeliveryStatusReader
- MeterReadingExtractor       ◀── FlowVisionOcrExtractor
+ MeterReadingExtractor       ◀── FlowVisionBfmOcrExtractor
 
  message, telemetry, scheme, user, tenant:  storage/ObjectStorageService  ◀──  storage/S3CompatibleStorageService
 ```
