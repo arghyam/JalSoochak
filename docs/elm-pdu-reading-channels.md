@@ -36,7 +36,7 @@ ratings or `k_factor`. Showing ELM or PDU readings on the SO/SDO screens. The IO
 | --- | --- | --- |
 | Water quantity | BFM only. ELM and PDU readings were stored, and their day skipped | BFM, ELM and PDU |
 | Unit of a reading | Implicitly the meter's own | Optional `reading_unit`, converted to the channel's standard unit (kVAh is kept, §3.1); `submitted_unit` records what was sent |
-| OCR provider | Tenant override, else a direct call to the built-in BFM model | Chosen by channel through the registry. ELM and PDU photos are rejected |
+| OCR provider | Tenant override, else a direct call to the built-in BFM model | Chosen by channel through the registry. ELM photos are read by ELM's provider (§4.3); PDU photos are rejected |
 | Fact rows | A new row per publish, so a correction added a second | One row per submission, versioned |
 | Corrections | Two paths worked out water quantities themselves | Every path republishes the stored row; analytics recalculates |
 | Day's total | Worked out from the event | Worked out from stored readings, by channel, under a per-scheme lock |
@@ -83,7 +83,7 @@ has no total; §7 re-sends them once they are.
 | Channel | Code | Kind | Standard unit | `reading_unit` accepted | Photo | Day's water |
 | --- | --- | --- | --- | --- | --- | --- |
 | BFM | 1 | `METER_INDEX` | `m3` | `m3`, `kL`, `L` (also `m³`, `litre`, `liter`) | Yes | (latest − starting point) × 1000 |
-| ELM | 2 | `METER_INDEX` | `kW.h` | `kW.h`, `kV.A.h` (also `kWh`, `kVAh`) | Once an ELM model exists | day's kWh (kVAh × power factor) → formula × `k_factor` |
+| ELM | 2 | `METER_INDEX` | `kW.h` | `kW.h`, `kV.A.h` (also `kWh`, `kVAh`) | Yes (§4.3) | day's kWh (kVAh × power factor) → formula × `k_factor` |
 | PDU | 3 | `PERIOD_AMOUNT` | `min` | `min`, `h` (also `hr`) | Never | Σ runs × Σ active pumps' L/min |
 | IOT, MAN | 4, 5 | none | none | none | No | Not worked out; the day is left alone |
 
@@ -683,7 +683,7 @@ Tenant and scheme go in the WARN line, never in tags.
 | Day has a total, then a correction makes it not calculable | Total removed | `day_total_removed` |
 | Latest reading is ELM (not calculable), BFM reading same day | BFM total kept | `channel_fallback` |
 | First ELM reading on a scheme that read BFM that day | Day keeps the BFM total | — |
-| ELM or PDU photo with no value | 400 `IMAGE_NOT_SUPPORTED_FOR_CHANNEL`; WhatsApp gets it localised | — |
+| PDU photo with no value, or ELM with no ELM OCR provider for the tenant | 400 `IMAGE_NOT_SUPPORTED_FOR_CHANNEL`; WhatsApp gets it localised | — |
 | Photo **and** value, any channel | Value stored; photo kept; no OCR | — |
 | Unit the channel doesn't accept | 400 `READING_UNIT_NOT_SUPPORTED` | — |
 | ELM photo with no value, `reading_unit` not the unit the photo shows | 400 `READING_UNIT_NOT_SUPPORTED` after the read; no anomaly | — |
