@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
@@ -125,7 +126,8 @@ class BfmReadingServiceRolloverTest {
                 new RolloverPosition(2, 2, new BigDecimal("0.55"), 1, new BigDecimal("0.45")));
 
         stubCommon(ocr);
-        when(repo.findRecentDailyConfirmedReadings(eq(SCHEMA), eq(10L), eq(ReadingChannel.BFM), isNull(), anyInt()))
+        when(repo.findRecentDailyConfirmedReadings(
+                eq(SCHEMA), eq(10L), eq(ReadingChannel.BFM), eq(MeterRegister.STANDARD), isNull(), anyInt()))
                 .thenReturn(history(100, 110, 120, 130, 140));
         when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
                 any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any(), any()))
@@ -178,7 +180,7 @@ class BfmReadingServiceRolloverTest {
         assertEquals(0, confirmed.getValue().compareTo(new BigDecimal("250")));
 
         // Common path: no extra history round-trip and no provenance write.
-        verify(repo, never()).findRecentDailyConfirmedReadings(any(), any(), any(), any(), anyInt());
+        verify(repo, never()).findRecentDailyConfirmedReadings(any(), any(), any(), any(), any(), anyInt());
         verify(repo, never()).applyConfirmedReadingSource(any(), any(), anyInt(), any());
     }
 
@@ -190,7 +192,7 @@ class BfmReadingServiceRolloverTest {
                     99L, 10L, 1L, "corr-1",
                     new BigDecimal("250"),  // extracted (model)
                     new BigDecimal("150"),  // confirmed (resolver's value)
-                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), ReadingChannel.BFM.getCode(), 0, null);
+                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), ReadingChannel.BFM.getCode(), null, 0, null);
             when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
                     .thenReturn(Optional.of(reading));
             when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
@@ -217,7 +219,7 @@ class BfmReadingServiceRolloverTest {
                     99L, 10L, 1L, "corr-1",
                     new BigDecimal("250"),  // extracted (model)
                     new BigDecimal("150"),  // confirmed (resolver's value)
-                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), ReadingChannel.BFM.getCode(), 0, null);
+                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), ReadingChannel.BFM.getCode(), null, 0, null);
             when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
                     .thenReturn(Optional.of(reading));
             when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
@@ -259,7 +261,7 @@ class BfmReadingServiceRolloverTest {
         assertEquals(0, confirmed.getValue().compareTo(new BigDecimal("250")), "confirmed_reading left equal to extracted");
 
         // Pre-migration: never fetch trailing history and never write provenance.
-        verify(repo, never()).findRecentDailyConfirmedReadings(any(), any(), any(), any(), anyInt());
+        verify(repo, never()).findRecentDailyConfirmedReadings(any(), any(), any(), any(), any(), anyInt());
         verify(repo, never()).applyConfirmedReadingSource(any(), any(), anyInt(), any());
     }
 
@@ -270,7 +272,7 @@ class BfmReadingServiceRolloverTest {
         when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
         when(repo.isOperatorMappedToScheme(SCHEMA, 1L, 10L)).thenReturn(true);
         when(defaultOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(ocr);
-        when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, 10L, ReadingChannel.BFM, null))
+        when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, 10L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("140"),
                         ReadingTime.now().minusDays(1))));
         when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(10L), eq(1L), any(LocalDate.class)))

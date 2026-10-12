@@ -32,9 +32,9 @@ public sealed interface WaterQuantityOutcome {
         MISSING_FORMULA,
         /** The snapshot lists no active pump. */
         NO_ACTIVE_PUMP,
-        /** No active pump has a value for a parameter the formula needs. */
+        /** No active pump has a value for a parameter the formula, or a kVAh reading, needs. */
         MISSING_PARAMETER,
-        /** A parameter is out of range: zero or negative, or an efficiency above 1. */
+        /** A parameter is out of range: zero or negative, or an efficiency or power factor above 1. */
         INVALID_PARAMETER
     }
 

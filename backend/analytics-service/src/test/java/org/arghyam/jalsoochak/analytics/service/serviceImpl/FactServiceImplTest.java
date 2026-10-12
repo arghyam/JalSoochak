@@ -288,12 +288,13 @@ class FactServiceImplTest {
     }
 
     @Test
-    void ingestMeterReading_carriesTheSubmissionIdentityAndSnapshotIntoTheFactRow() {
+    void ingestMeterReading_carriesTheSubmissionIdentitySnapshotAndUnitIntoTheFactRow() {
         MeterReadingEvent event = readingEvent("40", "2026-01-02");
         event.setSourceReadingId(501L);
         event.setSourceUpdatedAt("2026-01-02T10:15:30.123456");
         CalculationParameters snapshot = new CalculationParameters(1, "F2", new BigDecimal("0.95"), List.of());
         event.setCalculationParameters(snapshot);
+        event.setSubmittedUnit("kV.A.h");
         storedAsNewRow();
 
         service.ingestMeterReading(event);
@@ -304,6 +305,7 @@ class FactServiceImplTest {
         assertThat(captor.getValue().getSourceUpdatedAt())
                 .isEqualTo(LocalDateTime.parse("2026-01-02T10:15:30.123456"));
         assertThat(captor.getValue().getCalculationParameters()).isEqualTo(snapshot);
+        assertThat(captor.getValue().getSubmittedUnit()).isEqualTo("kV.A.h");
     }
 
     @Test
@@ -319,6 +321,7 @@ class FactServiceImplTest {
         assertThat(captor.getValue().getSourceReadingId()).isNull();
         assertThat(captor.getValue().getSourceUpdatedAt()).isNull();
         assertThat(captor.getValue().getCalculationParameters()).isNull();
+        assertThat(captor.getValue().getSubmittedUnit()).isNull();
         verify(waterQuantityRecalculationService)
                 .recalculateAfterReading(1, 11, LocalDate.of(2026, 1, 2));
     }

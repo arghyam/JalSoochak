@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service.capture;
 
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
@@ -176,17 +177,81 @@ class SubmittedValueCaptureTest {
     @Test
     @DisplayName("a correction follows the same unit and limit rules, and is marked MANUAL")
     void correctionFollowsTheSameRules() {
-        CapturedReading reading = captured(capture.captureCorrection(1, ReadingChannel.BFM, new BigDecimal("1500"), "L"));
+        CapturedReading reading = captured(
+                capture.captureCorrection(1, ReadingChannel.BFM, MeterRegister.STANDARD, new BigDecimal("1500"), "L"));
         assertThat(reading.value()).isEqualByComparingTo("1.5");
         assertThat(reading.submittedUnit()).isEqualTo(ReadingUnit.LITRE);
         assertThat(reading.submittedUnitCode()).isEqualTo("L");
         assertThat(reading.source()).isEqualTo(RolloverResolutionService.SOURCE_MANUAL);
 
-        assertThat(capture.captureCorrection(1, ReadingChannel.PDU, new BigDecimal("25"), "h"))
+        assertThat(capture.captureCorrection(1, ReadingChannel.PDU, MeterRegister.STANDARD, new BigDecimal("25"), "h"))
                 .isEqualTo(new CaptureOutcome.Rejected(
                         TelemetryErrorCode.ABNORMAL_READING, SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE));
-        assertThat(capture.captureCorrection(1, ReadingChannel.PDU, new BigDecimal("1.5"), "m3"))
+        assertThat(capture.captureCorrection(
+                1, ReadingChannel.PDU, MeterRegister.STANDARD, new BigDecimal("1.5"), "m3"))
                 .isInstanceOf(CaptureOutcome.Rejected.class);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "kVAh,   kV.A.h",
+            "KVAH,   kV.A.h",
+            "kV.A.h, kV.A.h"
+    })
+    @DisplayName("a kVAh value is kept as it is and recorded under kVAh's UCUM code, on its own register")
+    void kvahValueIsKeptAsItIs(String spelling, String expectedCode) {
+        CapturedReading reading = captured(capture.capture(input(ReadingChannel.ELM, "4821.75", spelling, true)));
+
+        assertThat(reading.value()).isEqualTo(new BigDecimal("4821.75"));
+        assertThat(reading.submittedUnit()).isEqualTo(ReadingUnit.KILOVOLT_AMPERE_HOUR);
+        assertThat(reading.submittedUnitCode()).isEqualTo(expectedCode);
+        assertThat(reading.register()).isEqualTo(MeterRegister.APPARENT_ENERGY);
+    }
+
+    @Test
+    @DisplayName("every unit but kVAh is on the standard register, and so is a reading with no unit")
+    void otherReadingsAreOnTheStandardRegister() {
+        assertThat(captured(capture.capture(input(ReadingChannel.ELM, "4821.75", "kWh", true))).register())
+                .isEqualTo(MeterRegister.STANDARD);
+        assertThat(captured(capture.capture(input(ReadingChannel.BFM, "1500", "L", true))).register())
+                .isEqualTo(MeterRegister.STANDARD);
+        assertThat(captured(capture.capture(input(ReadingChannel.MAN, "12", null, true))).register())
+                .isEqualTo(MeterRegister.STANDARD);
+    }
+
+    @Test
+    @DisplayName("a correction with no unit on a kVAh reading stays in kVAh")
+    void correctionWithNoUnitKeepsTheRowsKvahRegister() {
+        CapturedReading reading = captured(capture.captureCorrection(
+                1, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, new BigDecimal("4821.75"), null));
+
+        assertThat(reading.value()).isEqualTo(new BigDecimal("4821.75"));
+        assertThat(reading.submittedUnit()).isEqualTo(ReadingUnit.KILOVOLT_AMPERE_HOUR);
+    }
+
+    @Test
+    @DisplayName("a correction's declared unit wins over the row's register")
+    void correctionsDeclaredUnitWinsOverTheRowsRegister() {
+        assertThat(captured(capture.captureCorrection(
+                1, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, new BigDecimal("4821.75"), "kWh"))
+                .submittedUnit()).isEqualTo(ReadingUnit.KILOWATT_HOUR);
+        assertThat(captured(capture.captureCorrection(
+                1, ReadingChannel.ELM, MeterRegister.STANDARD, new BigDecimal("4821.75"), "kVAh"))
+                .submittedUnit()).isEqualTo(ReadingUnit.KILOVOLT_AMPERE_HOUR);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "BFM, m3",
+            "ELM, kW.h",
+            "PDU, min"
+    })
+    @DisplayName("a correction with no unit on any other reading is in the channel's standard unit")
+    void correctionWithNoUnitOnTheStandardRegisterIsInTheStandardUnit(ReadingChannel channel, String expectedCode) {
+        CapturedReading reading = captured(capture.captureCorrection(
+                1, channel, MeterRegister.STANDARD, new BigDecimal("45"), null));
+
+        assertThat(reading.submittedUnitCode()).isEqualTo(expectedCode);
     }
 
     @ParameterizedTest
@@ -232,6 +297,22 @@ class SubmittedValueCaptureTest {
     }
 
     @Test
+    @DisplayName("a kVAh value is compared with ELM's maximum as it is, and the maximum stated in kVAh")
+    void kvahValueIsComparedWithTheElmMaximumInKvah() {
+        maximum(ReadingChannel.ELM, "9999999");
+
+        assertThat(captured(capture.capture(input(ReadingChannel.ELM, "9999999", "kVAh", true))).value())
+                .isEqualByComparingTo("9999999");
+        assertThat(capture.capture(input(ReadingChannel.ELM, "10000000", "kVAh", true)))
+                .isEqualTo(new CaptureOutcome.Rejected(
+                        TelemetryErrorCode.ABNORMAL_READING, "Reading can't be more than 9999999 kVAh."));
+        assertThat(capture.captureCorrection(
+                1, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, new BigDecimal("10000000"), null))
+                .isEqualTo(new CaptureOutcome.Rejected(
+                        TelemetryErrorCode.ABNORMAL_READING, "Reading can't be more than 9999999 kVAh."));
+    }
+
+    @Test
     @DisplayName("a configured maximum is looked up for the submission's own tenant and channel")
     void maximumIsTheSubmissionsOwn() {
         when(maxValues.maxFor(any(), any())).thenReturn(Optional.empty());
@@ -239,9 +320,9 @@ class SubmittedValueCaptureTest {
 
         assertThat(capture.capture(input(ReadingChannel.BFM, "11", null, false)))
                 .isInstanceOf(CaptureOutcome.Captured.class);
-        assertThat(capture.captureCorrection(2, ReadingChannel.BFM, new BigDecimal("11"), null))
+        assertThat(capture.captureCorrection(2, ReadingChannel.BFM, MeterRegister.STANDARD, new BigDecimal("11"), null))
                 .isInstanceOf(CaptureOutcome.Rejected.class);
-        assertThat(capture.captureCorrection(2, ReadingChannel.ELM, new BigDecimal("11"), null))
+        assertThat(capture.captureCorrection(2, ReadingChannel.ELM, MeterRegister.STANDARD, new BigDecimal("11"), null))
                 .isInstanceOf(CaptureOutcome.Captured.class);
     }
 
@@ -260,7 +341,8 @@ class SubmittedValueCaptureTest {
     void correctionAboveTheMaximumIsRejected() {
         maximum(ReadingChannel.BFM, "50000");
 
-        assertThat(capture.captureCorrection(1, ReadingChannel.BFM, new BigDecimal("50001"), null))
+        assertThat(capture.captureCorrection(
+                1, ReadingChannel.BFM, MeterRegister.STANDARD, new BigDecimal("50001"), null))
                 .isEqualTo(new CaptureOutcome.Rejected(
                         TelemetryErrorCode.ABNORMAL_READING, "Reading can't be more than 50000 m³."));
     }

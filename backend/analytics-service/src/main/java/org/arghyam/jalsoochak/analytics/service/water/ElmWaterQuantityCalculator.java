@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.analytics.service.water;
 
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.analytics.dto.event.CalculationParameters;
+import org.arghyam.jalsoochak.analytics.enums.MeterRegister;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.arghyam.jalsoochak.analytics.service.water.AveragedPumpParameters.Available;
 import org.arghyam.jalsoochak.analytics.service.water.AveragedPumpParameters.Unavailable;
@@ -9,14 +10,19 @@ import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityOutcome.Reaso
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Water-quantity calculator for electricity meters: the day's kWh through the tenant's chosen
  * {@link ElmVolumeFormula}, times the scheme's {@code k_factor}.
+ *
+ * <p>A day read on the kVAh register is first turned into kWh with the pumps'
+ * {@link PumpParameter#POWER_FACTOR power factor}: kWh = kVAh &times; PF. A kWh day never needs one.
  *
  * <p>There is no default formula. A day whose snapshot names none, or a code no formula has, cannot be
  * calculated, whatever its kWh: the day is left without a total, and the metric shows the tenant's
@@ -61,10 +67,25 @@ public class ElmWaterQuantityCalculator implements WaterQuantityCalculator {
                     kFactor, context.tenantId(), context.schemeId());
             return WaterQuantityOutcome.notDerivable(Reason.INVALID_PARAMETER);
         }
-        return switch (pumpParameterAggregator.average(parameters.pumps(), formula.parameters())) {
+        boolean apparentEnergy = context.register() == MeterRegister.APPARENT_ENERGY;
+        return switch (pumpParameterAggregator.average(parameters.pumps(), pumpParameters(formula, apparentEnergy))) {
             case Unavailable unavailable -> WaterQuantityOutcome.notDerivable(unavailable.reason());
-            case Available pumps -> WaterQuantityOutcome.derived(WaterVolumeUnits.wholeLitres(
-                    formula.litres(context.amount(), pumps).multiply(kFactor)));
+            case Available pumps -> {
+                BigDecimal kilowattHours = apparentEnergy
+                        ? context.amount().multiply(pumps.get(PumpParameter.POWER_FACTOR))
+                        : context.amount();
+                yield WaterQuantityOutcome.derived(WaterVolumeUnits.wholeLitres(
+                        formula.litres(kilowattHours, pumps).multiply(kFactor)));
+            }
         };
+    }
+
+    private static Set<PumpParameter> pumpParameters(ElmVolumeFormula formula, boolean apparentEnergy) {
+        if (!apparentEnergy) {
+            return formula.parameters();
+        }
+        Set<PumpParameter> parameters = EnumSet.of(PumpParameter.POWER_FACTOR);
+        parameters.addAll(formula.parameters());
+        return parameters;
     }
 }

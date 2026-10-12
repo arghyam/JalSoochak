@@ -300,28 +300,51 @@ recorded when the reading was first submitted.
 `POST /api/v1/telemetry/readings`, `POST /api/v1/telemetry/readings/formats/{format}` and
 `PUT /api/v1/telemetry/readings` accept an optional `reading_unit` (`PUT` also accepts `readingUnit`):
 the unit `confirmed_reading` is given in. The value is converted to the channel's standard unit before
-it is stored. Omitted or blank, `confirmed_reading` is taken to be in the standard unit, which is what
-every caller sent before the field existed.
+it is stored, except a kVAh value (below). Omitted or blank, `confirmed_reading` is taken to be in the
+standard unit, which is what every caller sent before the field existed.
 
 | Channel | Accepted `reading_unit` | Also accepted | Standard unit |
 |---------|-------------------------|---------------|---------------|
 | BFM | `m3`, `kL`, `L` | `m³` for `m3`; `litre`, `liter` for `L` | `m3` |
-| ELM | `kW.h` | `kWh` | `kW.h` |
+| ELM | `kW.h`, `kV.A.h` | `kWh` for `kW.h`; `kVAh` for `kV.A.h` | `kW.h` |
 | PDU | `min`, `h` | `hr` for `h` | `min` |
 | IOT, MAN | none | none | none |
 
 Only these spellings are accepted. An alternative spelling is stored as the unit it stands for, so
-`kWh` is stored as `kW.h`. Case and surrounding whitespace are ignored, but other spellings, such as
-plurals like `litres` or `hrs`, are rejected rather than guessed at. The channel is the one the reading
-is recorded under: on `POST`, the declared `channel` or else the operator's
+`kWh` is stored as `kW.h` and `kVAh` as `kV.A.h`. Case and surrounding whitespace are ignored, but other
+spellings, such as plurals like `litres` or `hrs`, are rejected rather than guessed at. The channel is
+the one the reading is recorded under: on `POST`, the declared `channel` or else the operator's
 stored preference; on `PUT`, the channel of the reading being corrected.
 `PATCH /schemes/{id}/yesterday-final-reading` does not take a unit; its value is always in `m3`.
+
+**kVAh readings.** An electricity meter may show apparent energy (kVAh) instead of, or as well as,
+active energy (kWh). Each is its own running total, or register, so a kVAh value is stored in kVAh as
+the meter shows it, and analytics turns the day's kVAh increase into kWh with the scheme's pumps' power
+factor. A reading is compared only with earlier readings on the same register. The day a scheme moves
+from one register to the other is treated like a new meter's first day: its water is what another
+channel measured that day, or else 0.
+
+**Corrections.** A `PUT` with no `reading_unit` is in the unit the corrected reading is stored in: kVAh
+for a kVAh reading, and the channel's standard unit for every other, so a BFM reading sent in `L` is
+corrected in `m3`. A declared `reading_unit` wins, except that a reading read from a photo can't be
+moved to the other register: its OCR value stays in the unit the photo was read in.
+
+**Photos.** A photo sent without `confirmed_reading` is stored in the unit OCR read it in: `m3` for
+BFM, and `kW.h` or `kV.A.h` for ELM, whichever the meter shows. A `reading_unit` sent with it may only
+be one of those units, and on ELM it must be the one the photo shows.
+
+**Responses.** `meterReading` and `lastConfirmedReading` are in the unit the reading is stored in, so
+kVAh for a kVAh reading; the response does not name it. `GET /api/v1/analytics/meter-readings` returns
+each reading's `submittedUnit`, the unit it was sent in (null when none was recorded); its
+`confirmedReading` and `extractedReading` are in kVAh when that is `kV.A.h`, and in the channel's
+standard unit otherwise.
 
 Both errors below return `400`:
 
 - `READING_UNIT_NOT_SUPPORTED` — `reading_unit` is not one of the channel's units (any value, for IOT
-  and MAN), or a photo sent without `confirmed_reading` names a unit other than the channel's standard
-  one: OCR reads a meter in its standard unit.
+  and MAN), or a photo sent without `confirmed_reading` names a unit OCR doesn't read (`L` or `kL`), or
+  one other than the unit the photo shows. The last is found only after the photo is read. On `PUT`, also
+  a unit on the other register from a reading read from a photo.
 - `IMAGE_NOT_SUPPORTED_FOR_CHANNEL` — `POST` only. A photo (`reading_url`) sent without
   `confirmed_reading`, on a channel that can't read photos: PDU, IOT and MAN, and ELM when no OCR
   provider is configured for the tenant's electric meters. A photo sent with `confirmed_reading` is

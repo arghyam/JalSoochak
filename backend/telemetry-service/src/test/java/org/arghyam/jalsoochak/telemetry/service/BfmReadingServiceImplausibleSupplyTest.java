@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
@@ -101,7 +102,8 @@ class BfmReadingServiceImplausibleSupplyTest {
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);
-        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, ReadingChannel.BFM, null))
+        lenient().when(repo.findLatestConfirmedReadingSnapshot(
+                SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
         // createReading reads two tenant configs on every submission for a block that is commented
@@ -146,7 +148,8 @@ class BfmReadingServiceImplausibleSupplyTest {
     private void checkableScheme() {
         when(repo.supportsQuarantine(SCHEMA)).thenReturn(true);
         when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
-                eq(SCHEMA), eq(SCHEME_ID), eq(ReadingChannel.BFM), any(LocalDate.class), isNull()))
+                eq(SCHEMA), eq(SCHEME_ID), eq(ReadingChannel.BFM), eq(MeterRegister.STANDARD),
+                any(LocalDate.class), isNull()))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
         when(repo.findSchemeSupplyCounts(SCHEMA, SCHEME_ID))
                 .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(100, 0, 0)));
@@ -195,7 +198,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             // publishMeterReadingRecorded is the single event that writes fact_meter_reading,
             // fact_operator_attendance and fact_water_quantity. Withholding it is the whole point.
             verify(telemetryEventPublisher, never()).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -358,7 +361,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             submit(SupplyPlausibilityProperties.Mode.AUDIT, "1100", true);
 
             verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(),
                     any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull(), any(), any(), any());
@@ -390,7 +393,7 @@ class BfmReadingServiceImplausibleSupplyTest {
 
             assertThat(response.isSuccess()).isTrue();
             verify(telemetryEventPublisher).publishMeterReadingRecorded(
-                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                    any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -439,7 +442,8 @@ class BfmReadingServiceImplausibleSupplyTest {
         void firstReadingIsAccepted() {
             when(repo.supportsQuarantine(SCHEMA)).thenReturn(true);
             when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
-                    eq(SCHEMA), eq(SCHEME_ID), eq(ReadingChannel.BFM), any(LocalDate.class), isNull())).thenReturn(Optional.empty());
+                    eq(SCHEMA), eq(SCHEME_ID), eq(ReadingChannel.BFM), eq(MeterRegister.STANDARD),
+                    any(LocalDate.class), isNull())).thenReturn(Optional.empty());
 
             CreateReadingResponse response = submit(SupplyPlausibilityProperties.Mode.ENFORCE, "99999", true);
 

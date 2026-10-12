@@ -95,4 +95,14 @@ public class FactMeterReading {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "calculation_parameters")
     private CalculationParameters calculationParameters;
+
+    /**
+     * V60: the UCUM code of the unit the reading was submitted in. The readings are in the channel's
+     * standard unit, except kVAh ({@code kV.A.h}), which is stored as the meter shows it. Null means
+     * the standard unit.
+     *
+     * @see org.arghyam.jalsoochak.analytics.enums.MeterRegister
+     */
+    @Column(name = "submitted_unit")
+    private String submittedUnit;
 }

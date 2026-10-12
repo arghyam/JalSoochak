@@ -36,7 +36,8 @@ class CalculationParametersSnapshotterTest {
     private static final String FORMULA_KEY = "ELM_WATER_QUANTITY_FORMULA";
 
     private static final ActivePump PUMP = new ActivePump(12L, new BigDecimal("500"), new BigDecimal("0.7"),
-            new BigDecimal("40"), new BigDecimal("7.5"), "HP", new BigDecimal("0.85"), new BigDecimal("5"));
+            new BigDecimal("40"), new BigDecimal("7.5"), "HP", new BigDecimal("0.85"), new BigDecimal("5"),
+            new BigDecimal("0.9"));
 
     @Mock
     private SchemeCalculationInputRepository schemeCalculationInputRepository;
@@ -82,7 +83,7 @@ class CalculationParametersSnapshotterTest {
         assertThat(snapshot(ReadingChannel.ELM)).isEqualTo(new CalculationParameters(1, "F2", new BigDecimal("0.95"),
                 List.of(new CalculationParameters.Pump(12L, new BigDecimal("500"), new BigDecimal("0.7"),
                         new BigDecimal("40"), new BigDecimal("7.5"), "HP", new BigDecimal("0.85"),
-                        new BigDecimal("5")))));
+                        new BigDecimal("5"), new BigDecimal("0.9")))));
     }
 
     /**

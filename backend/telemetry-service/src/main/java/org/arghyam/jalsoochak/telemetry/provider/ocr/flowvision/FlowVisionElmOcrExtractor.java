@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.service.MeterReadingExtractor;
 import org.arghyam.jalsoochak.telemetry.service.OcrProviderSettings;
@@ -31,10 +32,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
- * The OCR provider for electricity meters. It reads the cumulative kWh register from an ELM photo.
+ * The OCR provider for electricity meters. It reads the cumulative kWh or kVAh register from an ELM
+ * photo, and the result names the unit it was read in.
  *
  * <p>A read takes 20–30 seconds, so it goes out on its own {@code elmOcrRestTemplate} with a read
  * timeout sized for it ({@code ocr.elm.http.read-timeout-ms}). The request id is derived from the image
@@ -46,8 +49,8 @@ import java.util.UUID;
  * fails startup without {@code ocr.elm.url}. Otherwise an unconfigured deployment would reject every
  * such ELM photo.
  *
- * <p>Only an {@code ACCEPT} in kWh becomes a reading. {@code NOMETER} is a photo without a meter; every
- * other verdict, a kVAh reading included, is a rejection.
+ * <p>Only an {@code ACCEPT} in kWh or kVAh becomes a reading. {@code NOMETER} is a photo without a
+ * meter; every other verdict, a reading in any other unit included, is a rejection.
  */
 @Component
 @Slf4j
@@ -63,8 +66,8 @@ public class FlowVisionElmOcrExtractor implements MeterReadingExtractor {
     private static final String STATUS_NEEDS_REVIEW = "NEEDS_REVIEW";
     private static final String QUALITY_REJECTED = "REJECTED";
     private static final String RESPONSE_CODE_ERROR = "ERROR";
-    private static final String BILLING_UNIT = "kWh";
-    private static final String NOT_KWH_MESSAGE = "Please send a photo of the meter showing its kWh reading.";
+    private static final String UNSUPPORTED_UNIT_MESSAGE =
+            "Please send a photo of the meter showing its kWh or kVAh reading.";
     /** {@code reasons[]} on a NEEDS_REVIEW result are written for staff, so the submitter gets this instead. */
     private static final String NEEDS_REVIEW_MESSAGE =
             "The reading could not be confirmed. Please send another clear photo of the meter.";
@@ -201,9 +204,11 @@ public class FlowVisionElmOcrExtractor implements MeterReadingExtractor {
             log.error("ELM OCR accepted a reading without meterReading imageUrlHash={}", imageUrlHash(imageUrl));
             return null;
         }
-        String unit = text(data.get("unit"));
-        if (!BILLING_UNIT.equalsIgnoreCase(unit)) {
-            return rejected(NOT_KWH_MESSAGE, STATUS_SUCCESS + "/" + unit, data, imageUrl, requestId, correlationId);
+        String unitText = text(data.get("unit"));
+        Optional<ReadingUnit> unit = ReadingUnit.parseFor(ReadingChannel.ELM, unitText);
+        if (unit.isEmpty()) {
+            return rejected(UNSUPPORTED_UNIT_MESSAGE, STATUS_SUCCESS + "/" + unitText, data, imageUrl, requestId,
+                    correlationId);
         }
         BigDecimal reading;
         try {
@@ -215,14 +220,15 @@ public class FlowVisionElmOcrExtractor implements MeterReadingExtractor {
         }
         OcrReadingResult result = OcrReadingResult.builder()
                 .adjustedReading(reading)
+                .readingUnit(unit.get())
                 .rawMeterReading(meterReading)
                 .qualityStatus(STATUS_SUCCESS)
                 .qualityConfidence(lowestConfidence(data.get("reads")))
                 .requestId(requestId)
                 .correlationId(correlationId)
                 .build();
-        log.info("ELM OCR accepted imageUrlHash={} correlationId={} reading={} confidence={}",
-                imageUrlHash(imageUrl), correlationId, reading, result.getQualityConfidence());
+        log.info("ELM OCR accepted imageUrlHash={} correlationId={} reading={} unit={} confidence={}",
+                imageUrlHash(imageUrl), correlationId, reading, unit.get().code(), result.getQualityConfidence());
         return result;
     }
 

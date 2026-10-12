@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
@@ -114,7 +115,8 @@ class BfmReadingServiceAssertedReadingTest {
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);
-        lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, ReadingChannel.BFM, null))
+        lenient().when(repo.findLatestConfirmedReadingSnapshot(
+                SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
                         new BigDecimal("140"), ReadingTime.now().minusDays(1))));
     }
@@ -199,7 +201,7 @@ class BfmReadingServiceAssertedReadingTest {
         // extracted == confirmed, anomalous = extracted <> confirmed). Publishing 0 instead would
         // count every API submission as an operator overriding the AI.
         verify(telemetryEventPublisher).publishMeterReadingRecorded(eq(TENANT_ID), eq(SCHEME_ID),
-                eq(OPERATOR_ID), isNull(), eq(new BigDecimal("150")), isNull(), isNull(),
+                eq(OPERATOR_ID), isNull(), eq(new BigDecimal("150")), any(), isNull(), isNull(),
                 any(LocalDateTime.class), anyInt(), any(LocalDate.class), eq(1), eq(0), any(), any(), any(), any());
     }
 

@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
@@ -136,7 +137,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
         return new TelemetryLatestFlowReadingRecord(
                 READING_ID, SCHEME_ID, OPERATOR_ID, CORRELATION_ID,
                 new BigDecimal("948"), STANDING, "https://img/1.jpg",
-                READING_DATE, READING_AT, ReadingChannel.BFM.getCode(), quarantineReason, null);
+                READING_DATE, READING_AT, ReadingChannel.BFM.getCode(), null, quarantineReason, null);
     }
 
     /** The scheme is migrated, has 100 connections, and has an earlier reading to measure against. */
@@ -145,7 +146,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
         when(repo.findSchemeSupplyCounts(SCHEMA, SCHEME_ID))
                 .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(100, 0, 0)));
         when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
-                SCHEMA, SCHEME_ID, ReadingChannel.BFM, READING_DATE, READING_ID))
+                SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, READING_DATE, READING_ID))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
         when(repo.findLatestFlowReadingByOperator(SCHEMA, OPERATOR_ID))
                 .thenReturn(Optional.of(target(quarantineReason)));
@@ -224,7 +225,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
             correct(SupplyPlausibilityProperties.Mode.ENFORCE, PLAUSIBLE);
 
             verify(repo).findLatestConfirmedReadingSnapshotBeforeDate(
-                    SCHEMA, SCHEME_ID, ReadingChannel.BFM, READING_DATE, READING_ID);
+                    SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, READING_DATE, READING_ID);
         }
     }
 
@@ -421,7 +422,8 @@ class BfmReadingServiceCorrectionOutcomeTest {
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.OFF, IMPLAUSIBLE);
 
             verify(repo, never()).findSchemeSupplyCounts(any(), any());
-            verify(repo, never()).findLatestConfirmedReadingSnapshotBeforeDate(any(), any(), any(), any(), any());
+            verify(repo, never()).findLatestConfirmedReadingSnapshotBeforeDate(
+                    any(), any(), any(), any(), any(), any());
             verify(repo).applyQuarantineReason(SCHEMA, READING_ID, QuarantineReason.NONE);
             assertThat(response.isSuccess()).isTrue();
         }
@@ -441,7 +443,8 @@ class BfmReadingServiceCorrectionOutcomeTest {
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.ENFORCE, IMPLAUSIBLE);
 
-            verify(repo, never()).findLatestConfirmedReadingSnapshotBeforeDate(any(), any(), any(), any(), any());
+            verify(repo, never()).findLatestConfirmedReadingSnapshotBeforeDate(
+                    any(), any(), any(), any(), any(), any());
             assertThat(response.isSuccess()).isTrue();
         }
 
@@ -459,13 +462,15 @@ class BfmReadingServiceCorrectionOutcomeTest {
                     new TelemetryLatestFlowReadingRecord(
                             READING_ID, SCHEME_ID, OPERATOR_ID, CORRELATION_ID,
                             new BigDecimal("948"), STANDING, "https://img/1.jpg",
-                            READING_DATE, READING_AT, ReadingChannel.ELM.getCode(), QuarantineReason.NONE, null)));
+                            READING_DATE, READING_AT, ReadingChannel.ELM.getCode(), null, QuarantineReason.NONE,
+                            null)));
             when(operatorContextService.resolveOperatorWithSchema(CONTACT, TENANT_ID))
                     .thenReturn(new TelemetryOperatorWithSchema(SCHEMA, operator));
 
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.ENFORCE, IMPLAUSIBLE);
 
-            verify(repo, never()).findLatestConfirmedReadingSnapshotBeforeDate(any(), any(), any(), any(), any());
+            verify(repo, never()).findLatestConfirmedReadingSnapshotBeforeDate(
+                    any(), any(), any(), any(), any(), any());
             assertThat(response.isSuccess()).isTrue();
         }
     }
@@ -485,7 +490,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
             when(repo.findSchemeSupplyCounts(SCHEMA, SCHEME_ID))
                     .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(100, 0, 0)));
             when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
-                    SCHEMA, SCHEME_ID, ReadingChannel.BFM, READING_DATE, READING_ID))
+                    SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, READING_DATE, READING_ID))
                     .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
 
             CreateReadingResponse response = service(SupplyPlausibilityProperties.Mode.ENFORCE)

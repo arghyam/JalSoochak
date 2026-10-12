@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
@@ -108,7 +109,8 @@ public class TelemetrySchemeReadingService {
 
             // A correction can't store what a submission on the same channel would have been refused.
             // The target is always a BFM row in m3, as below.
-            if (submittedValueCapture.captureCorrection(tenantId, ReadingChannel.BFM, finalReading, null)
+            if (submittedValueCapture.captureCorrection(
+                    tenantId, ReadingChannel.BFM, MeterRegister.STANDARD, finalReading, null)
                     instanceof CaptureOutcome.Rejected rejected) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, rejected.message());
             }

@@ -35,8 +35,8 @@ ratings or `k_factor`. Showing ELM or PDU readings on the SO/SDO screens. The IO
 | | Before | Now |
 | --- | --- | --- |
 | Water quantity | BFM only. ELM and PDU readings were stored, and their day skipped | BFM, ELM and PDU |
-| Unit of a reading | Implicitly the meter's own | Optional `reading_unit`, converted to the channel's standard unit; `submitted_unit` records what was sent |
-| OCR provider | Tenant override, else a direct call to the built-in BFM model | Chosen by channel through the registry. ELM and PDU photos are rejected |
+| Unit of a reading | Implicitly the meter's own | Optional `reading_unit`, converted to the channel's standard unit (kVAh is kept, §3.1); `submitted_unit` records what was sent |
+| OCR provider | Tenant override, else a direct call to the built-in BFM model | Chosen by channel through the registry. ELM photos are read by ELM's provider (§4.3); PDU photos are rejected |
 | Fact rows | A new row per publish, so a correction added a second | One row per submission, versioned |
 | Corrections | Two paths worked out water quantities themselves | Every path republishes the stored row; analytics recalculates |
 | Day's total | Worked out from the event | Worked out from stored readings, by channel, under a per-scheme lock |
@@ -83,7 +83,7 @@ has no total; §7 re-sends them once they are.
 | Channel | Code | Kind | Standard unit | `reading_unit` accepted | Photo | Day's water |
 | --- | --- | --- | --- | --- | --- | --- |
 | BFM | 1 | `METER_INDEX` | `m3` | `m3`, `kL`, `L` (also `m³`, `litre`, `liter`) | Yes | (latest − starting point) × 1000 |
-| ELM | 2 | `METER_INDEX` | `kW.h` | `kW.h` (also `kWh`) | Once an ELM model exists | day's kWh → formula × `k_factor` |
+| ELM | 2 | `METER_INDEX` | `kW.h` | `kW.h`, `kV.A.h` (also `kWh`, `kVAh`) | Yes (§4.3) | day's kWh (kVAh × power factor) → formula × `k_factor` |
 | PDU | 3 | `PERIOD_AMOUNT` | `min` | `min`, `h` (also `hr`) | Never | Σ runs × Σ active pumps' L/min |
 | IOT, MAN | 4, 5 | none | none | none | No | Not worked out; the day is left alone |
 
@@ -97,8 +97,16 @@ them in `flow_reading_table.channel_id` and `scheme_master_table.channel_id`, bo
 table. A NULL `channel_id` on a reading row is a BFM reading from before the channel was recorded, or
 a row with no reading (placeholder, location, meter change).
 
-`flow_reading_table.confirmed_reading` always holds the channel's standard unit, because many
-queries do arithmetic on it directly. Nothing forces a scheme onto one channel.
+`flow_reading_table.confirmed_reading` holds the channel's standard unit, because many queries do
+arithmetic on it directly. Nothing forces a scheme onto one channel.
+
+**kVAh is the one exception.** An electricity meter may show apparent energy (kVAh) instead of, or as
+well as, active energy (kWh). Each is its own running total, a **register** (`MeterRegister`:
+`STANDARD`, `APPARENT_ENERGY`), and a reading is on the kVAh register exactly when its
+`submitted_unit` is `kV.A.h`. A kVAh reading is stored as the meter shows it: only the pumps' power
+factor turns it into kWh, and converting the cumulative index at capture would add energy that was
+never used whenever a power factor changed. Analytics converts the day's increase instead (§6.4). Units
+that only scale one quantity (BFM's `L` and `m3`, PDU's `h` and `min`) share a register.
 
 ### 3.2 Tenant schema — `backend/database/`
 
@@ -109,6 +117,7 @@ queries do arithmetic on it directly. Nothing forces a scheme onto one channel.
 | V58 `add_channel_id_to_flow_reading_and_scheme_master_tables` | Seeds `channel_master_table` with ids 1–5 = BFM, ELM, PDU, IOT, MAN. `channel_id INTEGER` on both tables, keyed to `channel_master_table` (`NOT VALID` on `flow_reading_table`), and a trigger keeping `flow_reading_table.channel` and `channel_id` in step while pods writing either serve |
 | V59 `fill_flow_reading_channel_id_and_validate_its_key` | Fills `flow_reading_table.channel_id` from `channel` in batches, then validates its key. A NULL `channel` stays NULL |
 | V60 `drop_channel_from_flow_reading_and_scheme_master_tables` | Drops the trigger, its function and both `channel` columns, from existing tenant schemas and from provisioning |
+| V65 `add_power_factor_and_describe_kvah_readings` | `asset_pump_registry_table.power_factor FLOAT`, nullable. The comments on `flow_reading_table`'s `extracted_reading`, `confirmed_reading` and `submitted_unit` now cover `kV.A.h` |
 
 V56 and V57 follow V54: existing tenant schemas first, then the `create_tenant_schema` wrapper, under a
 `SHARE` lock on `tenant_master_table` so no tenant is provisioned in between. Both were checked on a
@@ -118,6 +127,9 @@ V58–V60 came after this branch, in releases of their own (§13). They replace 
 `flow_reading_table.channel` and the integer `scheme_master_table.channel`, which held a list position
 rather than a code, with `channel_id`. As in V55, they run outside Flyway's transaction, with a commit
 per tenant table and a 3 s `lock_timeout` with retries.
+
+V65 came later still, for kVAh readings (§3.1, §13). Like V56 and V57 it runs in one transaction under
+the `SHARE` lock on `tenant_master_table`.
 
 Already on `dev` before this branch: the pump table rename (V52), the pump and motor ratings (V53) and
 `scheme_master_table.k_factor` (V54).
@@ -131,6 +143,7 @@ Already on `dev` before this branch: the pump table rename (V52), the pump and m
 | `motor_power` + `motor_power_unit` | `kW`, `HP` or `bHP` | F2 |
 | `pump_efficiency`, `motor_efficiency` | fraction, 0 to 1 (0.7, not 70) | F3 |
 | `pump_head` | metres | F3 |
+| `power_factor` | fraction, above 0 and at most 1 (0.9, not 90) | ELM, kVAh readings only |
 | `scheme_master_table.k_factor` | multiplier; NULL means 1 | ELM only |
 
 The ratings are plain `FLOAT`s, so nothing stops a wrong unit: a discharge capacity in m³/h instead of
@@ -159,6 +172,12 @@ fact_meter_reading_table
 - `fact_water_quantity_table` gets **no** channel column. A day's channel is looked up at query time
   from its latest reading (§6.3, §9).
 
+`V60__add_submitted_unit_to_fact_meter_reading_table.sql`, after this branch, adds
+`fact_meter_reading_table.submitted_unit VARCHAR(16)`: the tenant row's `submitted_unit`, which tells a
+kVAh reading's register apart (§3.1). Nullable with no default; NULL means the channel's standard unit,
+as on every older row and every event from a telemetry that doesn't send it. `GET
+/api/v1/analytics/meter-readings` returns it as `submittedUnit`.
+
 ---
 
 ## 4. Submission path — `telemetry-service`
@@ -171,9 +190,11 @@ fact_meter_reading_table
    anything is captured, because the channel decides which units are accepted and how a photo is read.
 3. **Capture** (§4.2): a value was sent → `SubmittedValueCapture`; only a photo → `ImageReadingCapture`;
    neither → 400.
-4. **Compare within the channel.** The latest-reading snapshot, the rollover history and the
-   response's `lastConfirmedReading` are read from the same channel only, with a NULL channel counted
-   as BFM. A PDU reading has no earlier reading to compare with, and no `lastConfirmedReading`.
+4. **Compare within the channel and register.** The latest-reading snapshot, the rollover history and
+   the response's `lastConfirmedReading` are read from the same channel only, with a NULL channel
+   counted as BFM, and skip back to the latest reading on the same register (§3.1), so a kWh index is
+   never compared with a kVAh one. A PDU reading has no earlier reading to compare with, and no
+   `lastConfirmedReading`.
 5. The supply-plausibility guard runs for BFM only: it measures a water volume between two meter
    totals.
 6. **Write** the row with its channel and `submitted_unit` in the insert itself (the follow-up
@@ -186,24 +207,38 @@ catch-all around the reading APIs would turn an exception into `PROCESSING_FAILE
 ### 4.2 Capture — `service/capture/`
 
 `ReadingCapture.capture(CaptureInput)` returns a sealed `CaptureOutcome`: `Captured(CapturedReading)`,
-`Rejected(errorCode, message)` or `Retry(message)`. `CapturedReading` holds the value in the standard
-unit, the submitted unit, the extracted value, confidence, provenance and the OCR result.
+`Rejected(errorCode, message)` or `Retry(message)`. `CapturedReading` holds the value in the unit it
+is stored in, the submitted unit (and from it the register), the extracted value, confidence,
+provenance and the OCR result.
 
 **`SubmittedValueCapture`** — a typed or API-asserted value:
 
 - matches `reading_unit` against the channel's units, ignoring case and surrounding spaces and
   accepting the listed alternative spellings, and stores only the UCUM code. Plurals such as `litres`
   are rejected, not guessed at;
-- converts exactly with `BigDecimal` (every factor is a terminating decimal);
+- converts exactly with `BigDecimal` (every factor is a terminating decimal) to the unit the value is
+  stored in (`ReadingUnit.storedUnit()`): the channel's standard unit, or `kV.A.h` as it is;
 - rejects a PDU run over 1,440 minutes;
-- `captureCorrection(channel, value, unit)` applies the same rules to a correction (§5).
+- `captureCorrection(tenantId, channel, rowRegister, value, unit)` applies the same rules to a
+  correction (§5).
 
 A wrong unit is a 400 `READING_UNIT_NOT_SUPPORTED`, and its message never echoes the submitted value.
 
 **`ImageReadingCapture`** — the OCR block, moved as it was, plus two checks before any OCR config is
-read: a channel that can't read photos, and a `reading_unit` other than the channel's standard one
-(OCR reads a meter in its standard unit). Unreadable images still record an anomaly; a channel with
-no provider does not, because the photo is not at fault.
+read: a channel that can't read photos, and a `reading_unit` OCR never reads a meter in. Unreadable
+images still record an anomaly; a channel with no provider does not, because the photo is not at
+fault.
+
+The reading is stored in the unit OCR read it in: the one the provider names in
+`OcrReadingResult.readingUnit`, or else the channel's standard unit. `FlowVisionElmOcrExtractor` names
+`kW.h` or `kV.A.h`, and rejects a reading in any other unit or none; `FlowVisionBfmOcrExtractor` names
+none, so a BFM photo is read in `m3`. A provider that names another channel's unit, or one that needs
+converting (`L`, `kL`), fails the read like an OCR error (`FLOW_VISION_FAILED`, unreadable-image
+anomaly) instead of storing its value in the wrong unit. OCR's value is stored as read, so a declared `reading_unit` must be a unit readings are
+stored in (`unit.storedUnit() == unit`), checked before the read: `m3` for BFM, `kW.h` or `kV.A.h` for
+ELM, and never `L` or `kL`. It must also be the unit the photo shows, checked after the read: a `kW.h`
+declaration on a photo of the kVAh register is a 400 `READING_UNIT_NOT_SUPPORTED`, with no anomaly,
+rather than a reading stored on the wrong register.
 
 A photo sent **with** a value is accepted on every channel: the value is captured, the photo is kept,
 and OCR doesn't run.
@@ -266,7 +301,8 @@ of the sum. `PUT /readings` joins its existing transaction.
   "kFactor": 0.95,
   "pumps": [
     { "pumpId": 12, "pumpDischargeCapacityLpm": 500, "pumpEfficiency": 0.7, "pumpHeadM": 40,
-      "motorPower": 7.5, "motorPowerUnit": "HP", "motorEfficiency": 0.85, "unitsConsumedPerHour": 5 }
+      "motorPower": 7.5, "motorPowerUnit": "HP", "motorEfficiency": 0.85, "unitsConsumedPerHour": 5,
+      "powerFactor": 0.9 }
   ]
 }
 ```
@@ -287,7 +323,7 @@ of the sum. `PUT /readings` joins its existing transaction.
 
 | Path | Endpoint (under `/api/v1/telemetry`) | Channels | Unit field |
 | --- | --- | --- | --- |
-| WhatsApp manual reading | `POST /manual-reading` | any | none: standard unit |
+| WhatsApp manual reading | `POST /manual-reading` | any | none: over the operator's row today, that row's register; else standard unit |
 | WhatsApp update previous reading | `POST /update-previous-reading` | any | none |
 | State-IT correction | `PUT /readings` | any | `reading_unit` (also `readingUnit`) |
 | State-IT reset | `POST /readings/reset-latest` | any | — |
@@ -297,6 +333,15 @@ A correction follows its row's channel's submission rules: the unit, the PDU lim
 `submitted_unit` written. The BFM-only checks stay BFM-only: the supply-plausibility guard and the
 WhatsApp manual reading's maximum (water norm plus oversupply threshold over the last meter total). For
 PDU, a correction changes the one run it targets, not the day.
+
+**A correction with no unit stays on its row's register** (§3.1): on a kVAh row the value is in kVAh,
+and on every other row it is in the channel's standard unit, so a BFM row sent in `L` is corrected in
+`m3`. That covers the WhatsApp update previous reading, `PUT /readings` without `reading_unit`, and the
+reset's 0. A declared `reading_unit` wins, so a `PUT` can move a reading to the other register, except
+one read from a photo: its `extracted_reading` stays in the unit OCR read, so naming the other
+register's unit is a 400 `READING_UNIT_NOT_SUPPORTED`. A WhatsApp manual reading written over the
+operator's row today stays on that row's register too, so a value typed over a kVAh photo is in kVAh.
+One on a pending meter-change row, or opening a row, is in the channel's standard unit, kWh on ELM.
 
 **Every path publishes through `ReadingRepublisher`**, which:
 
@@ -327,13 +372,14 @@ they never reached analytics.
 
 ### 6.1 Event contract
 
-Three additive fields on `MeterReadingEvent`; the analytics copy already ignores unknown properties.
+Additive fields on `MeterReadingEvent`; the analytics copy already ignores unknown properties.
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `sourceReadingId` | `Long` | `flow_reading_table.id` |
 | `sourceUpdatedAt` | `String` | The row's `updated_at` as the database wrote it |
 | `calculationParameters` | `CalculationParameters` | ELM and PDU only; version 1 |
+| `submittedUnit` | `String` | `flow_reading_table.submitted_unit`, added after this branch for kVAh (§3.1). Null means the channel's standard unit |
 
 ### 6.2 Ingestion — `FactServiceImpl.ingestMeterReading`
 
@@ -379,6 +425,9 @@ counts `water_quantity.calculator.missing`.
 
 - The starting point is the latest reading on the same channel before the day, with
   `confirmed_reading > 0`.
+- It is **not used** when it is on the other register (§3.1): kWh and kVAh are different quantities, so
+  a day that switches register is treated like a new meter's first day. Telemetry's lookups skip back
+  to the same register instead (§4.1), because they feed checks, not volumes.
 - It is **not used** when another channel has a reading dated strictly between it and the day. Those
   dates were counted on the other channel; measuring across them would count their water twice.
 - With no starting point, the day is worked out from **another channel's reading that day**, if one
@@ -428,16 +477,21 @@ results are unchanged.
   by `k_factor` (NULL is 1; 0 or less is `INVALID_PARAMETER`). There is no default formula: none, or
   an unknown code, is `MISSING_FORMULA` even for 0 kWh. A new formula is a new `ElmVolumeFormula`
   bean.
+- **A kVAh day**, one whose latest reading is on the kVAh register, is turned into kWh first: kWh =
+  the day's kVAh increase × `power_factor`, averaged over the active pumps like any other parameter.
+  `POWER_FACTOR` is added to the formula's parameters only on a kVAh day, so a kWh day never needs one,
+  and a missing one is `MISSING_PARAMETER` even for 0 kVAh.
 - **`PumpParameterAggregator`** turns the snapshot's pumps into one value per parameter the formula
   asks for. It converts motor power to kW (`kW` as is, `HP × 0.7457`, `bHP × 0.9863 × 0.7457`; any
   other unit, or none, counts as missing and increments `water_quantity.motor_power_unit.unknown`),
-  checks each pump's own value (0 or less, or an efficiency above 1, is `INVALID_PARAMETER`), then
-  averages over the pumps that have one. Parameters are checked in `PumpParameter` order and the first
-  failure is the reason.
+  checks each pump's own value (0 or less, or an efficiency or power factor above 1, is
+  `INVALID_PARAMETER`), then averages over the pumps that have one. Parameters are checked in
+  `PumpParameter` order and the first failure is the reason.
 - **Several active pumps run together.** For F1 and F2 the ratio of two averages equals the ratio of
   the totals. PDU needs the scheme's total rate, so it multiplies the average rate by the number of
   pumps: a pump missing its rate counts at the others' average. F3 is exact only for pumps with the
-  same efficiencies and head.
+  same efficiencies and head, and a kVAh day only for pumps with the same power factor, since the
+  meter's energy can't be split between them.
 - **Rounding:** `BigDecimal` with `MathContext.DECIMAL64`, rounded once, `HALF_UP`, to whole litres
   (`WaterVolumeUnits.wholeLitres`).
 
@@ -445,8 +499,8 @@ results are unchanged.
 | --- | --- |
 | `MISSING_FORMULA` | ELM, and the tenant has no formula, or an unknown one |
 | `NO_ACTIVE_PUMP` | The snapshot lists no active pump |
-| `MISSING_PARAMETER` | No active pump has a value the formula needs |
-| `INVALID_PARAMETER` | A value is 0 or less, an efficiency is above 1, or `k_factor` is 0 or less |
+| `MISSING_PARAMETER` | No active pump has a value the formula, or a kVAh day, needs |
+| `INVALID_PARAMETER` | A value is 0 or less, an efficiency or power factor is above 1, or `k_factor` is 0 or less |
 
 **Worked examples** (k = 1, one pump), used as the tests' expected values:
 
@@ -456,6 +510,7 @@ results are unchanged.
 | F2 | 10 kWh, 500 L/min, 7.5 HP | 53,641 |
 | F2 | 10 kWh, 500 L/min, 7.5 bHP | 54,386 |
 | F3 | 10 kWh, Np 0.70, Nm 0.85, H 40 m | 54,587 |
+| F1, kVAh | 10 kVAh, power factor 0.9, 500 L/min, 5 kWh/h | 54,000 |
 | PDU | 90 min, 500 L/min (a k_factor of 0.9 is ignored) | 45,000 |
 
 ### 6.5 Concurrency
@@ -620,17 +675,21 @@ Tenant and scheme go in the WARN line, never in tags.
 | Situation | Result | Visible as |
 | --- | --- | --- |
 | ELM reading, formula and pumps configured | Day's kWh → litres | — |
+| ELM reading in kVAh, pumps have a power factor | Day's kVAh × power factor → kWh → litres | — |
+| ELM reading in kVAh, no active pump has a power factor | Stored; day has no total | `not_derivable{reason=MISSING_PARAMETER}` |
 | ELM reading, tenant has no formula | Stored; day has no total | `not_derivable{reason=MISSING_FORMULA}` |
 | PDU or ELM reading, scheme has no active pump | Stored; day has no total | `not_derivable{reason=NO_ACTIVE_PUMP}` |
 | A required pump value missing on every pump | Stored; day has no total | `not_derivable{reason=MISSING_PARAMETER}` |
-| Efficiency above 1, a value ≤ 0, or `k_factor` ≤ 0 | Stored; day has no total | `not_derivable{reason=INVALID_PARAMETER}` + WARN |
+| Efficiency or power factor above 1, a value ≤ 0, or `k_factor` ≤ 0 | Stored; day has no total | `not_derivable{reason=INVALID_PARAMETER}` + WARN |
+| A scheme's ELM readings switch between kWh and kVAh | The day is counted like a new meter's first day | — |
 | One of a day's PDU runs can't be calculated | Day has no total | `not_derivable` |
 | Day has a total, then a correction makes it not calculable | Total removed | `day_total_removed` |
 | Latest reading is ELM (not calculable), BFM reading same day | BFM total kept | `channel_fallback` |
 | First ELM reading on a scheme that read BFM that day | Day keeps the BFM total | — |
-| ELM or PDU photo with no value | 400 `IMAGE_NOT_SUPPORTED_FOR_CHANNEL`; WhatsApp gets it localised | — |
+| PDU photo with no value, or ELM with no ELM OCR provider for the tenant | 400 `IMAGE_NOT_SUPPORTED_FOR_CHANNEL`; WhatsApp gets it localised | — |
 | Photo **and** value, any channel | Value stored; photo kept; no OCR | — |
 | Unit the channel doesn't accept | 400 `READING_UNIT_NOT_SUPPORTED` | — |
+| ELM photo with no value, `reading_unit` not the unit the photo shows | 400 `READING_UNIT_NOT_SUPPORTED` after the read; no anomaly | — |
 | PDU run over 1,440 min, or the day's PDU minutes would be | 400 `ABNORMAL_READING`; nothing stored; no anomaly | — |
 | A correction event arrives after a newer one | Dropped | `meter_reading.stale_event` |
 | Event with an unparseable `sourceUpdatedAt` | Straight to `<topic>.DLT` | `meter_reading.source_updated_at.unparseable` |
@@ -649,6 +708,7 @@ No shared module exists, so several types have a copy in each service. Change th
 | --- | --- | --- |
 | `ReadingChannel` | telemetry, analytics | Same codes. Analytics adds `kind()`; telemetry adds `standardUnit()` and `supportsImageReading()` |
 | `CalculationParameters` | telemetry (producer), analytics (consumer) | Same JSON; each keeps only what it needs |
+| `MeterRegister` | telemetry `channel/`, analytics `enums/` | kVAh register exactly when `submitted_unit` is `kV.A.h` |
 | `MeterReadingEvent` new fields | telemetry, analytics | |
 | ELM formula codes `F1`–`F3` | tenant `ElmFormula`, telemetry `CalculationParametersSnapshotter.ELM_FORMULAS`, analytics `ElmVolumeFormula.code()` | A new formula needs all three |
 | The day-channel rule | analytics `WaterQuantityRecalculationService`, user-service `PersonSchemeRepository` | Latest by `reading_at`, then `id`, NULL as BFM |
@@ -693,6 +753,16 @@ the next starts:
 
 Unlike the migrations above, V60 is not additive: it drops columns that services from before step 2
 read, so those services can't be redeployed once it has run.
+
+**kVAh readings (tenant V65, analytics V60).** Also released after this branch, in this order:
+
+1. Tenant V65, so telemetry's snapshot can read `power_factor`.
+2. analytics-service (runs its V60). An analytics without it would ignore `submittedUnit` and calculate
+   a kVAh index as kWh; with it, a missing unit still means kWh, so it is safe ahead of telemetry.
+3. telemetry-service.
+
+Then, for each scheme read in kVAh, enter its active pumps' `power_factor` by SQL and republish (§7) the
+dates already read in kVAh. Both migrations are additive.
 
 ---
 

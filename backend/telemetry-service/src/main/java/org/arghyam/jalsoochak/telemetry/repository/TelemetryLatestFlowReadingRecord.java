@@ -10,6 +10,9 @@ import java.time.LocalDateTime;
  *
  * @param channel the row's {@code channel_id}, a {@link org.arghyam.jalsoochak.telemetry.channel.ReadingChannel}
  *        code; {@code null} on a BFM reading from before the channel was recorded
+ * @param submittedUnit the row's {@code submitted_unit}, which also names its
+ *        {@link org.arghyam.jalsoochak.telemetry.channel.MeterRegister}; {@code null} on a row from
+ *        before the unit was recorded and on a pre-V56 tenant schema
  * @param quarantineReason SUPPLY-PLAUSIBILITY: the row's quarantine marker, {@code null} on a
  *        pre-V40 tenant schema where the column does not exist (and where the plausibility check is
  *        skipped entirely anyway). It exists to <strong>select the anomaly reason text</strong> for a
@@ -32,6 +35,7 @@ public record TelemetryLatestFlowReadingRecord(
         LocalDate readingDate,
         LocalDateTime readingAt,
         Integer channel,
+        String submittedUnit,
         Integer quarantineReason,
         LocalDateTime updatedAt
 ) {

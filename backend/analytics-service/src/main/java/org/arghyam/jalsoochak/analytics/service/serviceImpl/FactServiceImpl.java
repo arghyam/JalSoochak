@@ -121,6 +121,7 @@ public class FactServiceImpl implements FactService {
                 .sourceReadingId(event.getSourceReadingId())
                 .sourceUpdatedAt(parseSourceUpdatedAt(event.getSourceUpdatedAt()))
                 .calculationParameters(event.getCalculationParameters())
+                .submittedUnit(event.getSubmittedUnit())
                 .build();
 
         // Before the first write, so a concurrent event for the same scheme cannot recalculate from a

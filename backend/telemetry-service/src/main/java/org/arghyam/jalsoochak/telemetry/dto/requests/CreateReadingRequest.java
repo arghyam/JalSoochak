@@ -63,8 +63,8 @@ public class CreateReadingRequest {
 
     /**
      * Unit of {@link #readingValue} as the submitting system sent it, not yet checked. Null means the
-     * channel's standard unit. Checked against the resolved channel, and the value converted to that
-     * channel's standard unit, when the reading is captured.
+     * channel's standard unit. Checked against the resolved channel, and the value converted to the
+     * unit it is stored in, when the reading is captured.
      */
     private String readingUnit;
 

@@ -65,10 +65,19 @@ class ReadingRepublisherTest {
                                                         LocalDate readingDate,
                                                         ReadingChannel channel,
                                                         Integer quarantineReason) {
+        return row(extracted, readingDate, channel, null, quarantineReason);
+    }
+
+    private static TelemetryLatestFlowReadingRecord row(BigDecimal extracted,
+                                                        LocalDate readingDate,
+                                                        ReadingChannel channel,
+                                                        String submittedUnit,
+                                                        Integer quarantineReason) {
         return new TelemetryLatestFlowReadingRecord(
                 READING_ID, 10L, 1L, "corr-1",
                 extracted, new BigDecimal("123"), "http://example.com/img.jpg",
-                readingDate, READING_AT, channel == null ? null : channel.getCode(), quarantineReason, UPDATED_AT);
+                readingDate, READING_AT, channel == null ? null : channel.getCode(), submittedUnit, quarantineReason,
+                UPDATED_AT);
     }
 
     /** The event handed to the executor-backed publisher. */
@@ -129,6 +138,26 @@ class ReadingRepublisherTest {
         MeterReadingEvent event = published();
         assertNull(event.getExtractedReading());
         assertEquals(new BigDecimal("123"), event.getConfirmedReading());
+    }
+
+    /** Analytics tells a kVAh reading from a kWh one by the unit alone. */
+    @Test
+    void publishesTheRowsSubmittedUnit() {
+        storedRow(row(BigDecimal.ZERO, READING_DATE, ReadingChannel.ELM, "kV.A.h", QuarantineReason.NONE));
+
+        readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
+
+        assertEquals("kV.A.h", published().getSubmittedUnit());
+    }
+
+    /** A row from before the unit was recorded, which analytics reads as the channel's standard unit. */
+    @Test
+    void publishesNoUnitForARowWithoutOne() {
+        storedRow(row(BigDecimal.ZERO, READING_DATE, ReadingChannel.ELM));
+
+        readingRepublisher.republish(SCHEMA, TENANT_ID, READING_ID);
+
+        assertNull(published().getSubmittedUnit());
     }
 
     /** Analytics reads a missing channel as BFM, so a legacy row must not be given one. */
