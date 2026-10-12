@@ -323,7 +323,7 @@ of the sum. `PUT /readings` joins its existing transaction.
 
 | Path | Endpoint (under `/api/v1/telemetry`) | Channels | Unit field |
 | --- | --- | --- | --- |
-| WhatsApp manual reading | `POST /manual-reading` | any | none: standard unit |
+| WhatsApp manual reading | `POST /manual-reading` | any | none: over the operator's row today, that row's register; else standard unit |
 | WhatsApp update previous reading | `POST /update-previous-reading` | any | none |
 | State-IT correction | `PUT /readings` | any | `reading_unit` (also `readingUnit`) |
 | State-IT reset | `POST /readings/reset-latest` | any | — |
@@ -339,8 +339,9 @@ and on every other row it is in the channel's standard unit, so a BFM row sent i
 `m3`. That covers the WhatsApp update previous reading, `PUT /readings` without `reading_unit`, and the
 reset's 0. A declared `reading_unit` wins, so a `PUT` can move a reading to the other register, except
 one read from a photo: its `extracted_reading` stays in the unit OCR read, so naming the other
-register's unit is a 400 `READING_UNIT_NOT_SUPPORTED`. A WhatsApp manual reading is always in the
-channel's standard unit, kWh on ELM.
+register's unit is a 400 `READING_UNIT_NOT_SUPPORTED`. A WhatsApp manual reading written over the
+operator's row today stays on that row's register too, so a value typed over a kVAh photo is in kVAh.
+One on a pending meter-change row, or opening a row, is in the channel's standard unit, kWh on ELM.
 
 **Every path publishes through `ReadingRepublisher`**, which:
 

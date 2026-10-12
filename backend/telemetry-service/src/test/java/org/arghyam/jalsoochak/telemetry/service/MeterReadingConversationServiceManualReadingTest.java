@@ -135,7 +135,8 @@ class MeterReadingConversationServiceManualReadingTest {
                         "bfm-1",
                         1L,
                         BigDecimal.ZERO,
-                        BigDecimal.ZERO
+                        BigDecimal.ZERO,
+                        null
                 )));
 
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
@@ -188,7 +189,8 @@ class MeterReadingConversationServiceManualReadingTest {
                         "bfm-2",
                         1L,
                         new BigDecimal("111"),
-                        BigDecimal.ZERO
+                        BigDecimal.ZERO,
+                        null
                 )));
 
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
@@ -242,7 +244,8 @@ class MeterReadingConversationServiceManualReadingTest {
                         "bfm-1",
                         1L,
                         new BigDecimal("250"),
-                        new BigDecimal("150")
+                        new BigDecimal("150"),
+                        null
                 )));
 
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
@@ -288,7 +291,8 @@ class MeterReadingConversationServiceManualReadingTest {
                         "bfm-1",
                         1L,
                         BigDecimal.ZERO,
-                        BigDecimal.ZERO
+                        BigDecimal.ZERO,
+                        null
                 )));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
@@ -363,7 +367,8 @@ class MeterReadingConversationServiceManualReadingTest {
                         "bfm-threshold",
                         1L,
                         BigDecimal.ZERO,
-                        BigDecimal.ZERO
+                        BigDecimal.ZERO,
+                        null
                 )));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
@@ -571,7 +576,8 @@ class MeterReadingConversationServiceManualReadingTest {
                         "bfm-1",
                         1L,
                         BigDecimal.ZERO,
-                        BigDecimal.ZERO
+                        BigDecimal.ZERO,
+                        null
                 )));
 
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
@@ -628,7 +634,8 @@ class MeterReadingConversationServiceManualReadingTest {
                         "bfm-55",
                         1L,
                         BigDecimal.ZERO,
-                        BigDecimal.ZERO
+                        BigDecimal.ZERO,
+                        null
                 )));
 
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
@@ -683,7 +690,8 @@ class MeterReadingConversationServiceManualReadingTest {
                         "bfm-1",
                         1L,
                         BigDecimal.ZERO,
-                        BigDecimal.ZERO
+                        BigDecimal.ZERO,
+                        null
                 )));
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
         // One reading of the clock: five separate calls could straddle an IST midnight and hand back a
@@ -778,7 +786,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
-                        99L, "bfm-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO)));
+                        99L, "bfm-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO, null)));
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt()))
                 .thenReturn(0);
         when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt()))
@@ -844,7 +852,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
-                        99L, "bfm-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO)));
+                        99L, "bfm-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO, null)));
         // The channel is the operator's stored preference, as on the photo path.
         when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.ELM);
 
@@ -987,7 +995,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
-                        99L, "pdu-1", 1L, BigDecimal.ZERO, new BigDecimal("300"))));
+                        99L, "pdu-1", 1L, BigDecimal.ZERO, new BigDecimal("300"), null)));
         when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.PDU);
         doReturn(Optional.empty()).when(pduDayLimit).writeWithinLimit(any(), any(), any(), any(), any(), any());
         when(localizationService.localizeMessage(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE, "hindi"))
@@ -1022,7 +1030,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
-                        99L, "pdu-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO)));
+                        99L, "pdu-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO, null)));
         when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.PDU);
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
@@ -1050,7 +1058,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
-                        99L, "elm-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO)));
+                        99L, "elm-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO, null)));
         when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.ELM);
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_test", 10L, ReadingChannel.ELM, MeterRegister.STANDARD, null))
@@ -1071,6 +1079,56 @@ class MeterReadingConversationServiceManualReadingTest {
                         && new BigDecimal("4800").equals(anomaly.previousReading())));
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("4821.5"), 1L,
                 RolloverResolutionService.SOURCE_MANUAL, "kW.h", ReportingChannel.WHATSAPP);
+    }
+
+    @Test
+    void manualReadingOverTodaysKvahRowStaysOnTheKvahRegister() {
+        stubAcceptedManualReading();
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        // OCR read today's photo on the kVAh register, so its extracted reading is in kVAh.
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L, "elm-1", 1L, new BigDecimal("5300"), new BigDecimal("5300"), "kV.A.h")));
+        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.ELM);
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
+                "tenant_test", 10L, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, null))
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
+                        new BigDecimal("5290"), ReadingTime.now().minusDays(1))));
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("5310.4")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        // Compared with the kVAh readings before it, not the kWh ones.
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(ArgumentMatchers.eq("tenant_test"),
+                argThat(anomaly -> anomaly != null
+                        && anomaly.type() == AnomalyConstants.TYPE_MANUAL_OVERRIDE
+                        && new BigDecimal("5290").equals(anomaly.previousReading())));
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("5310.4"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL, "kV.A.h", ReportingChannel.WHATSAPP);
+    }
+
+    @Test
+    void manualReadingOverTodaysRowOnARegisterTheChannelDoesNotHaveIsInTheStandardUnit() {
+        stubAcceptedManualReading();
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        // Today's row is on an electricity meter's kVAh register, but the operator now reports on BFM.
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L, "elm-1", 1L, new BigDecimal("5300"), new BigDecimal("5300"), "kV.A.h")));
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("123")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("123"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
     }
 
     /** Everything an accepted manual reading needs apart from the row it lands on. */

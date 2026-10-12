@@ -2047,7 +2047,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String sql = String.format("""
-                SELECT id, correlation_id, created_by, extracted_reading, confirmed_reading
+                SELECT id, correlation_id, created_by, extracted_reading, confirmed_reading, %s AS submitted_unit
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND created_by = ?
@@ -2055,14 +2055,15 @@ public class TelemetryTenantRepository {
                   AND deleted_at IS NULL
                 ORDER BY %s DESC, id DESC
                 LIMIT 1
-                """, schemaName, timeColumn);
+                """, submittedUnitColumn(schemaName), schemaName, timeColumn);
         List<TelemetryFlowReadingDetails> rows = jdbcTemplate.query(sql, (rs, n) ->
                 new TelemetryFlowReadingDetails(
                         toLong(rs.getObject("id")),
                         rs.getString("correlation_id"),
                         toLong(rs.getObject("created_by")),
                         rs.getBigDecimal("extracted_reading"),
-                        rs.getBigDecimal("confirmed_reading")
+                        rs.getBigDecimal("confirmed_reading"),
+                        rs.getString("submitted_unit")
                 ), schemeId, operatorId, readingDate);
         return rows.stream().findFirst();
     }

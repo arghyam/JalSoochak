@@ -1213,6 +1213,25 @@ public class MeterReadingConversationService {
                 .orElse(null);
     }
 
+    /**
+     * The register of the operator's row today when {@link #writeManualReading} writes the value over
+     * it; empty when the value goes on the pending meter-change row or opens a row. A register the
+     * operator's channel doesn't have, on a row another channel left, gives the standard one.
+     */
+    private Optional<MeterRegister> registerOfTodaysRowOverwritten(TelemetryOperatorWithSchema operatorWithSchema,
+                                                                 Long schemeId,
+                                                                 Optional<TelemetryPendingMeterChangeRecord> pendingOpt,
+                                                                 LocalDate today,
+                                                                 ReadingChannel channel) {
+        if (pendingOpt.isPresent()) {
+            return Optional.empty();
+        }
+        return telemetryTenantRepository.findLatestFlowReadingForDate(
+                        operatorWithSchema.schemaName(), schemeId, operatorWithSchema.operator().id(), today)
+                .map(row -> MeterRegister.of(row.submittedUnit()))
+                .map(register -> channel.storedUnit(register).isPresent() ? register : MeterRegister.STANDARD);
+    }
+
     public CreateReadingResponse manualReadingMessage(ManualReadingRequest request) {
         try {
             if (request.getContactId() == null || request.getContactId().isBlank()) {
@@ -1274,19 +1293,27 @@ public class MeterReadingConversationService {
                     operatorWithSchema.schemaName(), request.getContactId());
 
             // The same rules as any other submitted value. WhatsApp has no unit field, so the value is
-            // in the channel's standard unit.
+            // in the channel's standard unit, except over the operator's row today: there it corrects
+            // that row and, like a correction with no unit, stays on its register, so a value typed over
+            // a kVAh photo isn't stored in kWh beside OCR's kVAh reading.
+            LocalDate today = ReadingTime.today();
+            CaptureOutcome outcome = registerOfTodaysRowOverwritten(
+                            operatorWithSchema, schemeId, pendingOpt, today, resolvedChannel)
+                    .map(register -> submittedValueCapture.captureCorrection(
+                            tenantId, resolvedChannel, register, manualReadingValue, null))
+                    .orElseGet(() -> submittedValueCapture.capture(new CaptureInput(
+                            operatorWithSchema.schemaName(),
+                            tenantId,
+                            operatorWithSchema.operator().id(),
+                            schemeId,
+                            resolvedChannel,
+                            null,
+                            manualReadingValue,
+                            null,
+                            false,
+                            OcrRetryMode.NONE)));
             CapturedReading captured;
-            switch (submittedValueCapture.capture(new CaptureInput(
-                    operatorWithSchema.schemaName(),
-                    tenantId,
-                    operatorWithSchema.operator().id(),
-                    schemeId,
-                    resolvedChannel,
-                    null,
-                    manualReadingValue,
-                    null,
-                    false,
-                    OcrRetryMode.NONE))) {
+            switch (outcome) {
                 case CaptureOutcome.Captured(CapturedReading reading) -> captured = reading;
                 case CaptureOutcome.Rejected rejected -> {
                     return rejectedManualReading(rejected.message(), languageKey, correlationId, manualReadingValue);
@@ -1300,7 +1327,6 @@ public class MeterReadingConversationService {
             // - If isManualReading=false, compare against the most recent confirmed reading strictly before today.
             // - If the meter is replaced, load latest snapshot for anomaly/audit context only.
             // - A PDU reading is one run's duration rather than a running total, so it has none.
-            LocalDate today = ReadingTime.today();
             boolean compareWithLatest = request.getIsManualReading() == null || Boolean.TRUE.equals(request.getIsManualReading());
             Optional<TelemetryConfirmedReadingSnapshot> previousSnapshotOpt;
             if (resolvedChannel == ReadingChannel.PDU) {

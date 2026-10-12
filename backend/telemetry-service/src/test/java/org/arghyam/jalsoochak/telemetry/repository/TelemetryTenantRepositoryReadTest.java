@@ -699,6 +699,8 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
                     .hasValueSatisfying(r -> assertThat(r.submittedUnit()).isEqualTo("kV.A.h"));
             assertThat(repository.findLatestCompletedFlowReadingBeforeDate(SCHEMA, 10L, 1L, LocalDate.of(2026, 3, 4)))
                     .hasValueSatisfying(r -> assertThat(r.submittedUnit()).isEqualTo("kV.A.h"));
+            assertThat(repository.findLatestFlowReadingForDate(SCHEMA, 10L, 1L, LocalDate.of(2026, 3, 3)))
+                    .hasValueSatisfying(r -> assertThat(r.submittedUnit()).isEqualTo("kV.A.h"));
             assertThat(allQuerySql()).allSatisfy(sql ->
                     assertThat(sql).contains("submitted_unit AS submitted_unit"));
         }
@@ -714,7 +716,9 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
 
             assertThat(repository.findFlowReadingById(SCHEMA, 99L))
                     .hasValueSatisfying(r -> assertThat(r.submittedUnit()).isNull());
-            assertThat(allQuerySql()).anySatisfy(sql ->
+            assertThat(repository.findLatestFlowReadingForDate(SCHEMA, 10L, 1L, LocalDate.of(2026, 3, 3)))
+                    .hasValueSatisfying(r -> assertThat(r.submittedUnit()).isNull());
+            assertThat(allQuerySql()).allSatisfy(sql ->
                     assertThat(sql).contains("NULL::varchar AS submitted_unit"));
         }
 
