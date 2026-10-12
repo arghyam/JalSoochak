@@ -117,11 +117,22 @@ class BfmReadingServiceCorrectionChannelTest {
                 .thenReturn(Optional.of(row(channel, storedUnit, storedValue)));
     }
 
+    /** A row whose value OCR read off its photo, so its extracted reading is the stored value. */
+    private void correctingPhotoRead(ReadingChannel channel, String storedUnit, String storedValue) {
+        when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
+                .thenReturn(Optional.of(row(channel, storedUnit, storedValue, storedValue)));
+    }
+
     private static TelemetryLatestFlowReadingRecord row(ReadingChannel channel, String storedUnit,
                                                         String storedValue) {
-        return new TelemetryLatestFlowReadingRecord(READING_ID, 10L, OPERATOR_ID, "corr-1", BigDecimal.ZERO,
-                new BigDecimal(storedValue), "", READING_DATE, READING_DATE.atTime(9, 30),
-                channel == null ? null : channel.getCode(), storedUnit, 0, null);
+        return row(channel, storedUnit, "0", storedValue);
+    }
+
+    private static TelemetryLatestFlowReadingRecord row(ReadingChannel channel, String storedUnit,
+                                                        String extractedValue, String storedValue) {
+        return new TelemetryLatestFlowReadingRecord(READING_ID, 10L, OPERATOR_ID, "corr-1",
+                new BigDecimal(extractedValue), new BigDecimal(storedValue), "", READING_DATE,
+                READING_DATE.atTime(9, 30), channel == null ? null : channel.getCode(), storedUnit, 0, null);
     }
 
     private CreateReadingResponse correct(String value, String unit) {
@@ -173,7 +184,8 @@ class BfmReadingServiceCorrectionChannelTest {
     }
 
     @Test
-    @DisplayName("a correction's declared unit wins over the row's: a kVAh row corrected in kWh becomes kWh")
+    @DisplayName("on a reading not read from a photo, a correction's declared unit wins over the row's: "
+            + "a kVAh row corrected in kWh becomes kWh")
     void declaredUnitWinsOverTheRowsUnit() {
         correcting(ReadingChannel.ELM, "kV.A.h", "5300");
 
@@ -181,6 +193,59 @@ class BfmReadingServiceCorrectionChannelTest {
 
         verify(repo).updateConfirmedReading(SCHEMA, READING_ID, new BigDecimal("4821.5"), OPERATOR_ID,
                 RolloverResolutionService.SOURCE_MANUAL, "kW.h", ReportingChannel.API);
+    }
+
+    @Test
+    @DisplayName("a reading read from a photo of the kVAh register can't be corrected in kWh, and nothing is written")
+    void photoReadKvahRowCorrectedInKwhIsRefused() {
+        correctingPhotoRead(ReadingChannel.ELM, "kV.A.h", "5300");
+
+        CreateReadingResponse response = correct("4821.5", "kWh");
+
+        assertThat(response.isSuccess()).isFalse();
+        assertThat(response.getQualityStatus()).isEqualTo("REJECTED");
+        assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED);
+        assertThat(response.getMessage())
+                .isEqualTo("This reading was read from a meter photo in kV.A.h, so it can only be corrected in kV.A.h.");
+        assertThat(response.getCorrelationId()).isEqualTo("corr-1");
+        verifyNothingWritten();
+    }
+
+    @Test
+    @DisplayName("a reading read from a photo of the kWh register can't be corrected in kVAh, and nothing is written")
+    void photoReadKwhRowCorrectedInKvahIsRefused() {
+        correctingPhotoRead(ReadingChannel.ELM, "kW.h", "5300");
+
+        CreateReadingResponse response = correct("5400", "kVAh");
+
+        assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED);
+        assertThat(response.getMessage())
+                .isEqualTo("This reading was read from a meter photo in kW.h, so it can only be corrected in kW.h.");
+        verifyNothingWritten();
+    }
+
+    @Test
+    @DisplayName("a reading read from a photo of the kVAh register can be corrected in kVAh")
+    void photoReadKvahRowCorrectedInKvahIsStored() {
+        correctingPhotoRead(ReadingChannel.ELM, "kV.A.h", "5300");
+
+        CreateReadingResponse response = correct("5310.4", "kVAh");
+
+        assertThat(response.isSuccess()).isTrue();
+        verify(repo).updateConfirmedReading(SCHEMA, READING_ID, new BigDecimal("5310.4"), OPERATOR_ID,
+                RolloverResolutionService.SOURCE_MANUAL, "kV.A.h", ReportingChannel.API);
+    }
+
+    @Test
+    @DisplayName("a BFM reading read from a photo can be corrected in litres: L and m3 share a register")
+    void photoReadBfmRowCorrectedInLitresIsStored() {
+        correctingPhotoRead(ReadingChannel.BFM, "m3", "1.2");
+
+        CreateReadingResponse response = correct("1500", "L");
+
+        assertThat(response.isSuccess()).isTrue();
+        verify(repo).updateConfirmedReading(SCHEMA, READING_ID, new BigDecimal("1.500"), OPERATOR_ID,
+                RolloverResolutionService.SOURCE_MANUAL, "L", ReportingChannel.API);
     }
 
     @Test

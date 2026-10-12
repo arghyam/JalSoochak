@@ -337,8 +337,10 @@ PDU, a correction changes the one run it targets, not the day.
 **A correction with no unit stays on its row's register** (§3.1): on a kVAh row the value is in kVAh,
 and on every other row it is in the channel's standard unit, so a BFM row sent in `L` is corrected in
 `m3`. That covers the WhatsApp update previous reading, `PUT /readings` without `reading_unit`, and the
-reset's 0. A declared `reading_unit` wins, so a `PUT` can move a reading to the other register. A
-WhatsApp manual reading is always in the channel's standard unit, kWh on ELM.
+reset's 0. A declared `reading_unit` wins, so a `PUT` can move a reading to the other register, except
+one read from a photo: its `extracted_reading` stays in the unit OCR read, so naming the other
+register's unit is a 400 `READING_UNIT_NOT_SUPPORTED`. A WhatsApp manual reading is always in the
+channel's standard unit, kWh on ELM.
 
 **Every path publishes through `ReadingRepublisher`**, which:
 

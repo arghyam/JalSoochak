@@ -313,7 +313,8 @@ channel measured that day, or else 0.
 
 **Corrections.** A `PUT` with no `reading_unit` is in the unit the corrected reading is stored in: kVAh
 for a kVAh reading, and the channel's standard unit for every other, so a BFM reading sent in `L` is
-corrected in `m3`. A declared `reading_unit` always wins.
+corrected in `m3`. A declared `reading_unit` wins, except that a reading read from a photo can't be
+moved to the other register: its OCR value stays in the unit the photo was read in.
 
 **Photos.** A photo sent without `confirmed_reading` is stored in the unit OCR read it in: `m3` for
 BFM, and `kW.h` or `kV.A.h` for ELM, whichever the meter shows. A `reading_unit` sent with it may only
@@ -329,7 +330,8 @@ Both errors below return `400`:
 
 - `READING_UNIT_NOT_SUPPORTED` — `reading_unit` is not one of the channel's units (any value, for IOT
   and MAN), or a photo sent without `confirmed_reading` names a unit OCR doesn't read (`L` or `kL`), or
-  one other than the unit the photo shows. The last is found only after the photo is read.
+  one other than the unit the photo shows. The last is found only after the photo is read. On `PUT`, also
+  a unit on the other register from a reading read from a photo.
 - `IMAGE_NOT_SUPPORTED_FOR_CHANNEL` — `POST` only. A photo (`reading_url`) sent without
   `confirmed_reading`, on a channel that can't read photos: PDU, IOT and MAN, and ELM when no OCR
   provider is configured for the tenant's electric meters. A photo sent with `confirmed_reading` is

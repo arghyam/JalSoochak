@@ -943,15 +943,24 @@ public class BfmReadingService {
         // A correction can't store what the same channel's submission would have been refused. A
         // refused unit, PDU run or PDU day writes nothing, and no anomaly: it is the request that is
         // wrong, not the reading.
+        MeterRegister rowRegister = MeterRegister.of(reading.submittedUnit());
         CapturedReading captured;
         switch (submittedValueCapture.captureCorrection(eventTenantId, channel,
-                MeterRegister.of(reading.submittedUnit()), submittedReading, readingUnit)) {
+                rowRegister, submittedReading, readingUnit)) {
             case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
             case CaptureOutcome.Rejected(TelemetryErrorCode errorCode, String rejection) -> {
                 return rejectedCorrection(reading, errorCode, rejection);
             }
             case CaptureOutcome.Retry retry ->
                     throw new IllegalStateException("A submitted value is never retried");
+        }
+        // A correction leaves extracted_reading as OCR read it, so a reading read from a photo stays on
+        // its register: moved to the other, its extracted and confirmed values would be in different units.
+        if (isReadFromPhoto(reading) && captured.register() != rowRegister) {
+            String photoUnit = channel.storedUnit(rowRegister).map(ReadingUnit::code).orElse(reading.submittedUnit());
+            return rejectedCorrection(reading, TelemetryErrorCode.READING_UNIT_NOT_SUPPORTED,
+                    "This reading was read from a meter photo in " + photoUnit
+                            + ", so it can only be corrected in " + photoUnit + ".");
         }
         // In the unit it is stored in, so the checks below and the stored value agree.
         BigDecimal confirmedReading = captured.value();
@@ -1027,6 +1036,11 @@ public class BfmReadingService {
                 .meterReading(confirmedReading)
                 .qualityStatus("CONFIRMED")
                 .build();
+    }
+
+    /** {@code extracted_reading} is 0 on every row whose value didn't come from OCR. */
+    private static boolean isReadFromPhoto(TelemetryLatestFlowReadingRecord reading) {
+        return reading.extractedReading() != null && reading.extractedReading().signum() != 0;
     }
 
     /** A correction refused for breaking its channel's submission rules: nothing is written. */
