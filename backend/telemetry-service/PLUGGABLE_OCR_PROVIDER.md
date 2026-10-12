@@ -95,7 +95,8 @@ read). With `OCR_ELM_DEFAULT_PROVIDER` blank, startup doesn't need it.
 1. Implement `MeterReadingExtractor` (map the vendor's response onto `OcrReadingResult`); annotate `@Service`.
    Leave `readingUnit` null when the meter is read in the channel's standard unit. A provider that reads
    another register sets it to that register's unit (ELM: `KILOVOLT_AMPERE_HOUR`). The value is stored as
-   read, so it must be a unit readings are stored in, never one that needs converting (L, kL).
+   read, so it must be a unit of the provider's channel that readings are stored in, never one that needs
+   converting (L, kL). Any other unit fails the read (`FLOW_VISION_FAILED`) rather than being stored.
 2. Give it a unique `providerId()` (e.g. `"gemini-vision"`) and the `channel()` whose meters it reads.
 3. Point a tenant's provider key for that channel (`ocr_provider` or `ocr_elm_provider`) at that id (plus
    the channel's URL / API key keys as needed).

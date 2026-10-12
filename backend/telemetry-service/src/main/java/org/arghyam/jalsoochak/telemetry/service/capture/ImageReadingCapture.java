@@ -40,8 +40,9 @@ import java.util.stream.Collectors;
  *
  * <p>The reading is stored in the unit OCR read it in: the one the provider names (an ELM photo shows
  * kWh or kVAh), or else the channel's standard unit. It is stored as read, so OCR only ever reads a
- * unit {@code confirmed_reading} is stored in, and a {@code reading_unit} that isn't one (L or kL) is
- * rejected before any OCR setting is read. A declared unit must also be the one OCR read: a kWh
+ * unit {@code confirmed_reading} is stored in: a provider that names another channel's unit, or one
+ * that needs converting, fails the read. A {@code reading_unit} that isn't one (L or kL) is rejected
+ * before any OCR setting is read. A declared unit must also be the one OCR read: a kWh
  * declaration on a photo of the kVAh register is rejected rather than stored on the wrong register.
  */
 @Component
@@ -106,6 +107,9 @@ public class ImageReadingCapture implements ReadingCapture {
                     ocrResult.getQualityConfidence(),
                     sanitizeLogValue(ocrResult.getQualityStatus()));
             ReadingUnit readUnit = readUnit(ocrResult, input.channel());
+            if (!isStoredAsRead(readUnit, input.channel())) {
+                return unitNotStoredAsRead(input, readUnit);
+            }
             if (declaredUnit.isPresent() && declaredUnit.get() != readUnit) {
                 return unitNotTheOneRead(input, declaredUnit.get(), readUnit);
             }
@@ -163,6 +167,23 @@ public class ImageReadingCapture implements ReadingCapture {
     /** OCR's value is stored as it is read, so a photo is only ever read in a unit readings are stored in. */
     private static boolean isReadFromPhotos(ReadingUnit unit) {
         return unit.storedUnit() == unit;
+    }
+
+    /** Whether OCR's value can be stored as it was read: a unit of the photo's channel that needs no converting. */
+    private static boolean isStoredAsRead(ReadingUnit unit, ReadingChannel channel) {
+        return unit.channel() == channel && isReadFromPhotos(unit);
+    }
+
+    /**
+     * The provider named a unit its value can't be stored in as read: another channel's, or one that
+     * would need converting (L, kL). The provider is at fault rather than the photo, so this is handled
+     * like any other failed read, and the value is never stored in the wrong unit.
+     */
+    private CaptureOutcome unitNotStoredAsRead(CaptureInput input, ReadingUnit readUnit) {
+        log.error("readings_ocr unit_not_stored_as_read operatorId={} schemeId={} channel={} unit={}",
+                input.operatorId(), input.schemeId(), input.channel(), readUnit.code());
+        recordUnreadableImage(input, "Unreadable image. OCR read the meter in a unit its reading can't be stored in.");
+        return new CaptureOutcome.Rejected(TelemetryErrorCode.FLOW_VISION_FAILED, UNREADABLE_IMAGE_MESSAGE);
     }
 
     /** The photo shows another register than the one declared. Not an unreadable image, so no anomaly. */

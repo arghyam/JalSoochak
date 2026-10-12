@@ -232,7 +232,9 @@ fault.
 The reading is stored in the unit OCR read it in: the one the provider names in
 `OcrReadingResult.readingUnit`, or else the channel's standard unit. `FlowVisionElmOcrExtractor` names
 `kW.h` or `kV.A.h`, and rejects a reading in any other unit or none; `FlowVisionBfmOcrExtractor` names
-none, so a BFM photo is read in `m3`. OCR's value is stored as read, so a declared `reading_unit` must be a unit readings are
+none, so a BFM photo is read in `m3`. A provider that names another channel's unit, or one that needs
+converting (`L`, `kL`), fails the read like an OCR error (`FLOW_VISION_FAILED`, unreadable-image
+anomaly) instead of storing its value in the wrong unit. OCR's value is stored as read, so a declared `reading_unit` must be a unit readings are
 stored in (`unit.storedUnit() == unit`), checked before the read: `m3` for BFM, `kW.h` or `kV.A.h` for
 ELM, and never `L` or `kL`. It must also be the unit the photo shows, checked after the read: a `kW.h`
 declaration on a photo of the kVAh register is a 400 `READING_UNIT_NOT_SUPPORTED`, with no anomaly,
