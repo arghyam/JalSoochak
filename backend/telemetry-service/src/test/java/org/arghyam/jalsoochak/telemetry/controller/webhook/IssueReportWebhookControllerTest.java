@@ -63,6 +63,17 @@ class IssueReportWebhookControllerTest {
     }
 
     @Test
+    void issueReasonTypesPassesThroughAndFallsBack() {
+        when(meterWorkflowService.issueReasonTypesMessage(any())).thenReturn(okIntro);
+        assertThat(controller.issueReasonTypes(introRequest()).getBody()).isSameAs(okIntro);
+
+        when(meterWorkflowService.issueReasonTypesMessage(any())).thenThrow(BOOM);
+        var fallback = controller.issueReasonTypes(introRequest());
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().isSuccess()).isFalse();
+    }
+
+    @Test
     void issueReportSubmitPassesThroughAndFallsBack() {
         when(meterWorkflowService.issueReportSubmitMessage(any())).thenReturn(okIntro);
         assertThat(controller.issueReportSubmit(issueReportRequest()).getBody()).isSameAs(okIntro);

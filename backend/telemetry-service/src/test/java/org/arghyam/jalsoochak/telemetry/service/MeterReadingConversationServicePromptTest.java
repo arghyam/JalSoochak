@@ -325,6 +325,119 @@ class MeterReadingConversationServicePromptTest {
     }
 
     /**
+     * The nudge flow's "Select reason" menu. The flow routes on the reply number itself, so option 1
+     * must always be no reading submission and option 2 no water supply, whatever the tenant's own
+     * issue-report order.
+     */
+    @Nested
+    @DisplayName("issueReasonTypesMessage")
+    class IssueReasonTypes {
+
+        private final List<ConversationTemplateService.TemplateOption> templateReasons = List.of(
+                new ConversationTemplateService.TemplateOption("REASON_4", 1,
+                        java.util.Map.of("en", "Water not supplied", "hi", "पानी नहीं आया")),
+                new ConversationTemplateService.TemplateOption("REASON_1", 2,
+                        java.util.Map.of("en", "Meter Replaced")),
+                new ConversationTemplateService.TemplateOption("REASON_3", 3,
+                        java.util.Map.of("en", "Reading not sent", "hi", "रीडिंग नहीं भेजी")));
+
+        @BeforeEach
+        void stubConfig() {
+            when(tenantConfigRepository.findIssueReportPrompt(TENANT, "english"))
+                    .thenReturn(Optional.of("What is the issue?"));
+        }
+
+        @Test
+        void listsNoReadingSubmissionFirstAndNoWaterSupplySecondWhateverTheConfiguredOrder() {
+            when(templatesService.resolveScreenReasons(TENANT, "ISSUE_REPORT")).thenReturn(templateReasons);
+
+            var response = service.issueReasonTypesMessage(introRequest(CONTACT));
+
+            assertThat(response.isSuccess()).isTrue();
+            assertThat(response.getMessage())
+                    .isEqualTo("What is the issue?\n1. Reading not sent\n2. Water not supplied");
+        }
+
+        @Test
+        void usesTheOperatorsLanguageForTheLabels() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+            when(tenantConfigRepository.findIssueReportPrompt(TENANT, "hindi")).thenReturn(Optional.of("समस्या चुनें"));
+            when(templatesService.resolveScreenReasons(TENANT, "ISSUE_REPORT")).thenReturn(templateReasons);
+
+            assertThat(service.issueReasonTypesMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("समस्या चुनें\n1. रीडिंग नहीं भेजी\n2. पानी नहीं आया");
+        }
+
+        @Test
+        void acceptsTheLegacyNoWaterSuppliedKey() {
+            when(templatesService.resolveScreenReasons(TENANT, "ISSUE_REPORT")).thenReturn(List.of(
+                    new ConversationTemplateService.TemplateOption("noWaterSupplied", 1,
+                            java.util.Map.of("en", "Supply stopped"))));
+
+            assertThat(service.issueReasonTypesMessage(introRequest(CONTACT)).getMessage())
+                    .endsWith("\n2. Supply stopped");
+        }
+
+        @Test
+        void fallsBackToBuiltInLabelsForAReasonTheTenantDoesNotConfigure() {
+            when(templatesService.resolveScreenReasons(TENANT, "ISSUE_REPORT")).thenReturn(List.of(
+                    new ConversationTemplateService.TemplateOption("REASON_4", 1,
+                            java.util.Map.of("en", "Water not supplied"))));
+
+            assertThat(service.issueReasonTypesMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("What is the issue?\n1. No Reading Submission\n2. Water not supplied");
+        }
+
+        @Test
+        void fallsBackToBuiltInLabelsAndPromptWhenTheTenantConfiguresNothing() {
+            when(tenantConfigRepository.findIssueReportPrompt(anyInt(), anyString())).thenReturn(Optional.empty());
+
+            assertThat(service.issueReasonTypesMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("Please select your issue by typing any of the number"
+                            + "\n1. No Reading Submission\n2. No Water Supply");
+        }
+
+        @Test
+        void fallsBackToBuiltInHindiLabelsForAHindiOperator() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+            when(tenantConfigRepository.findIssueReportPrompt(anyInt(), anyString())).thenReturn(Optional.empty());
+
+            assertThat(service.issueReasonTypesMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("कृपया नंबर टाइप करके अपनी समस्या चुनें"
+                            + "\n1. रीडिंग जमा नहीं हुई\n2. पानी की आपूर्ति नहीं");
+        }
+
+        @Test
+        void prefersTheTemplatePromptLikeTheIssueReportMenu() {
+            when(templatesService.resolveScreenPrompt(TENANT, "ISSUE_REPORT", "english"))
+                    .thenReturn(Optional.of("Why no reading today?"));
+
+            assertThat(service.issueReasonTypesMessage(introRequest(CONTACT)).getMessage())
+                    .startsWith("Why no reading today?\n1. ");
+        }
+
+        @Test
+        void failsGracefullyForAMissingContactId() {
+            assertThat(service.issueReasonTypesMessage(introRequest(null)).isSuccess()).isFalse();
+        }
+
+        @Test
+        void failsGracefullyWhenTheOperatorHasNoTenant() {
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(null));
+
+            assertThat(service.issueReasonTypesMessage(introRequest(CONTACT)).isSuccess()).isFalse();
+        }
+
+        @Test
+        void failsGracefullyWhenOperatorResolutionFails() {
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT))
+                    .thenThrow(new IllegalStateException("unknown contact"));
+
+            assertThat(service.issueReasonTypesMessage(introRequest(CONTACT)).isSuccess()).isFalse();
+        }
+    }
+
+    /**
      * These two return a raw JSON body straight to the chatbot and, unlike the prompt builders, propagate
      * their failures — the controller turns them into a JSON error body.
      */

@@ -42,6 +42,7 @@ class RouteParityTest {
             "POST /api/v1/telemetry/selected/item",
             // Chatbot webhooks — issue reports
             "POST /api/v1/telemetry/issue-report",
+            "POST /api/v1/telemetry/issue-report/reason-types",
             "POST /api/v1/telemetry/issue-report/submit",
             "POST /api/v1/telemetry/issue-report/telemetry",
             "POST /api/v1/telemetry/issue-report/telemetry/submit",
