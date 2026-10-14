@@ -155,8 +155,33 @@ class StateSyncAdminControllerTest {
 
     @Test
     void reportsTheEffectiveConfiguration() {
-        assertThat(controller.config("AS")).containsEntry("enabled", true).containsEntry("mode", StateSyncProperties.Mode.DRY_RUN)
-                .containsKeys("deltaCron", "fullCron");
+        assertThat(controller.config("AS")).containsEntry("configured", true).containsEntry("enabled", true)
+                .containsEntry("mode", StateSyncProperties.Mode.DRY_RUN).containsKeys("deltaCron", "fullCron");
+    }
+
+    @Test
+    void configWithNoTenantCodeSetSaysSoInsteadOfNotFound() {
+        properties.setTenantCode(null);
+        properties.setEnabled(false);
+
+        assertThat(controller.config("AS")).containsEntry("configured", false).containsEntry("enabled", false)
+                .containsEntry("tenantCode", null).doesNotContainKeys("deltaCron", "fullCron");
+    }
+
+    @Test
+    void configForATenantTheSyncDoesNotServeDoesNotNameTheOtherTenant() {
+        authenticate("UP", "ROLE_SUPER_USER");
+
+        assertThat(controller.config("UP")).containsEntry("configured", false).containsEntry("enabled", true)
+                .containsEntry("tenantCode", null);
+    }
+
+    @Test
+    void configStillChecksTheCallersTenant() {
+        properties.setTenantCode(null);
+        authenticate("UP", "ROLE_STATE_ADMIN");
+
+        assertThatThrownBy(() -> controller.config("AS")).isInstanceOf(AccessDeniedException.class);
     }
 
     private static void authenticate(String tenant, String role) {

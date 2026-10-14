@@ -175,7 +175,7 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/scheme/state-sync/config?tenantCode={tenantCode}` | Effective flag, mode (`DRY_RUN`/`APPLY`) and crons |
+| GET | `/api/v1/scheme/state-sync/config?tenantCode={tenantCode}` | Effective flag, mode (`DRY_RUN`/`APPLY`) and crons. Always 200: `"configured": false` (and no crons) when `STATE_SYNC_TENANT_CODE` is unset or names another tenant, the case where the other state-sync endpoints answer 404 |
 | POST | `/api/v1/scheme/state-sync/runs?tenantCode={tenantCode}&kind={FULL\|DELTA}` | Start a run in the background → 202 `{runId}`; 409 while another run holds the lock |
 | POST | `/api/v1/scheme/state-sync/schemes/refresh?tenantCode={tenantCode}&ref={SCH-code\|IMIS id}` | Re-pull and reconcile one scheme now; returns the run's counts and issues |
 | GET | `/api/v1/scheme/state-sync/runs?tenantCode={tenantCode}&limit={n}` | Run history, newest first |
