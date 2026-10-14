@@ -441,12 +441,12 @@ from user-service, which mints a fresh token. Each record carries:
 - `failedAt` and `errorReason` for operational triage.
 
 The service deliberately **does not consume its own dead-letter topic** — doing so from the same
-service that produces to it would create an unbounded retry loop. Recovery is an explicit, monitored
-operations action, driven by the alerts in `backend/logger/prometheus/alerts.yml`.
+service that produces to it would create an unbounded retry loop. Recovery is an explicit operations
+action. No alert rules ship for it yet: `backend/logger/prometheus/` holds only `prometheus.yml`.
 
-Records that *are* replayable land elsewhere: a `TransientMailException` is rethrown, the container
-retries, and an exhausted record goes to `common-topic.DLT` with the original event copied whole —
-link included. Nothing reached the recipient in those cases, so a replay cannot duplicate an email.
+Every account-email failure lands on `account-email-dlt`, SMTP-level errors included; none is
+rethrown, so none reaches `common-topic.DLT`. Other event types are rethrown, retried by the
+container, and an exhausted record goes to `common-topic.DLT`.
 
 ---
 
@@ -482,7 +482,9 @@ public class NewVendorSmsService implements SmsSender {
 | **Business logic** | **0** |
 | **Existing tests** | **0** |
 
-`NotificationEventRouter` never learns the new vendor exists.
+`NotificationEventRouter` never learns the new vendor exists. The use case around the adapter
+records each send in the delivery ledger; if the vendor pushes delivery reports, add a
+`DeliveryReceiptAdapter` for it. See `docs/notification-delivery-ledger.md`.
 
 ### How this shows up in the test suite
 
@@ -492,7 +494,7 @@ The abstraction pays for itself directly in test economics:
   captured `MailRequest` — verifying template selection and variables with no vendor present anywhere
   in the test. It does not change when a provider is added.
 - **Adapter tests are vendor-specific.** `SmtpMailSenderTest` mocks `JavaMailSender`;
-  `SendGridMailSenderTest` and `SmsCountryServiceTest` run **WireMock** against the real HTTP contract.
+  `SendGridMailSenderTest` and `SmsCountrySenderTest` run **WireMock** against the real HTTP contract.
 
 The result: *N* providers means *N* adapter test classes plus **one unchanged** business-logic test
 class. Test cost scales linearly with providers, and business-logic tests stay stable across vendor

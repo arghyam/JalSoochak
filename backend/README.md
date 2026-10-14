@@ -1,6 +1,6 @@
 # Water Management Platform
 
-A production-ready multi-module Spring Boot microservices platform built with **Java 21**, **Spring Cloud 2023.x**, **Eureka Service Discovery**, **Spring Kafka**, and **PostgreSQL**.
+A production-ready multi-module Spring Boot microservices platform built with **Java 21**, **Spring Cloud 2023.x**, **Spring Kafka**, and **PostgreSQL**, with optional **Eureka** service discovery.
 
 ---
 
@@ -16,7 +16,7 @@ A production-ready multi-module Spring Boot microservices platform built with **
                     ┌──────────┴───────────┐
                     │   Service Discovery  │
                     │   (Eureka Server)    │
-                    │        :8761         │
+                    │   :8762, optional    │
                     └──────────┬───────────┘
                                │
           ┌────────────────────┼────────────────────┐
@@ -28,7 +28,7 @@ A production-ready multi-module Spring Boot microservices platform built with **
           │                    │
 ┌─────────┴────────┐ ┌────────┴─────────┐ ┌──────────────────┐
 │  Telemetry       │ │  Message Service │ │  Scheme Service  │
-│  Service  :8989  │ │     :8085        │ │     :8086        │
+│  Service  :8084  │ │     :8085        │ │     :8086        │
 └──────────────────┘ └──────────────────┘ └──────────────────┘
                                │
                     ┌──────────┴───────────┐
@@ -36,8 +36,9 @@ A production-ready multi-module Spring Boot microservices platform built with **
                     │  (DW Consumer) :8087 │
                     └──────────────────────┘
 
-All business services register with Eureka and communicate via Kafka topics.
-Analytics service consumes events from all service topics and populates the DW schema.
+Services never call each other over HTTP: they share the database and talk through Kafka.
+Eureka registration is optional (`EUREKA_ENABLED`); the gateway routes to configured service URIs.
+Analytics service consumes events from all service topics and populates `analytics_schema`.
 
 Infrastructure: PostgreSQL (shared_db) + Apache Kafka
 ```
@@ -49,14 +50,14 @@ Infrastructure: PostgreSQL (shared_db) + Apache Kafka
 | Module                       | Port   | Description                                      |
 |------------------------------|--------|--------------------------------------------------|
 | `api-gateway`                | 8080   | Spring Cloud Gateway for unified API ingress     |
-| `service-discovery`          | 8761   | Netflix Eureka Server for service registration   |
+| `service-discovery`          | 8762   | Netflix Eureka Server (optional)                 |
 | `tenant-service`             | 8081   | Manages tenant information                       |
 | `user-service`               | 8082   | Manages user information                         |
-| `anomaly-service`            | 8083   | Detects and manages anomalies (leaks, pressure)  |
-| `telemetry-service`          | 8989   | Manages sensor and meter telemetry data          |
-| `message-service`            | 8085   | Manages notifications (Email, WhatsApp, Webhook) |
+| `anomaly-service`            | 8083   | Anomaly listing; syncs user/scheme dimensions    |
+| `telemetry-service`          | 8084   | Meter readings: chatbot webhooks, OCR, partner API |
+| `message-service`            | 8085   | Notifications (WhatsApp, email, SMS), delivery ledger |
 | `scheme-service`             | 8086   | Manages water supply schemes                     |
-| `analytics-service`          | 8087   | Consumes events; populates analytics DW (`dw` schema) |
+| `analytics-service`          | 8087   | Consumes events; populates `analytics_schema`; dashboard APIs |
 
 ---
 
@@ -85,18 +86,16 @@ Infrastructure: PostgreSQL (shared_db) + Apache Kafka
 
 ## How to Start Eureka (Service Discovery)
 
+Optional: services register only with `EUREKA_ENABLED=true` (anomaly and scheme have no switch and
+always try), and their `EUREKA_URL` default points at `:8761`, so set it to the server's port.
+
 ```bash
-# From the project root
-cd water-management-platform
-
-# Build all modules
+cd backend/service-discovery
 mvn clean package -DskipTests
-
-# Start Eureka Server
-java -jar service-discovery/target/*.jar
+java -jar target/*.jar
 ```
 
-Eureka Dashboard: [http://localhost:8761](http://localhost:8761)
+Eureka Dashboard: [http://localhost:8762](http://localhost:8762)
 
 ---
 
@@ -244,68 +243,35 @@ The platform uses a **two-layer schema** strategy managed by [Flyway](https://fl
 
 ### Migration files
 
-All SQL migration scripts live in a single directory:
+`common_schema` and tenant-schema migrations live in `backend/database/` (`V1`…`V65` at the time of
+writing). `V1` creates `common_schema`; `V2` defines the `create_tenant_schema(schema_name)` PL/pgSQL
+function, which later migrations replace as the tenant tables change and which also patch every
+existing tenant schema. A `V<n>__*.sql.conf` beside a migration (e.g. `executeInTransaction=false`)
+changes how Flyway runs it.
 
-```
-backend/
-├── database/
-│   ├── V1__create_common_schema_tables.sql      # Creates common_schema and shared tables
-│   └── V2__create_tenant_schema_function.sql    # Creates the create_tenant_schema() PL/pgSQL function
-```
-
-| Script | What it does |
-|--------|-------------|
-| **V1** | Creates `common_schema` and its tables: `tenant_admin_user_master_table`, `user_type_master_table`, `tenant_master_table`, `tenant_config_master_table`, `channel_master_table`, plus indexes. |
-| **V2** | **Only defines** the `create_tenant_schema(schema_name)` PL/pgSQL function. It does **not** call it. The function is invoked at runtime by `tenant-service` when a new tenant is created. Once called, it provisions a full set of tenant-specific tables (user, scheme, location, department, readings, notifications, anomalies, etc.) inside the given schema. |
+`analytics_schema` has its own migrations in `analytics-service/src/main/resources/db/migration`,
+run by analytics-service on startup.
 
 ### How Flyway is wired into tenant-service
 
-`tenant-service` is the service responsible for running Flyway migrations on startup. The setup uses three pieces:
-
-**1. Maven resource mapping** (`tenant-service/pom.xml`):
-
-```xml
-<resources>
-    <resource>
-        <directory>src/main/resources</directory>
-    </resource>
-    <resource>
-        <directory>../database</directory>
-        <targetPath>db/migration</targetPath>
-        <includes>
-            <include>V*.sql</include>
-        </includes>
-    </resource>
-</resources>
-```
-
-This copies `V*.sql` files from `backend/database/` into `classpath:db/migration` at build time, keeping a **single source of truth** for migration scripts.
-
-**2. Flyway dependency** (`tenant-service/pom.xml`):
-
-```xml
-<dependency>
-    <groupId>org.flywaydb</groupId>
-    <artifactId>flyway-core</artifactId>
-</dependency>
-```
-
-**3. Flyway configuration** (`tenant-service/src/main/resources/application.yml`):
+`tenant-service` runs the `backend/database/` migrations on startup. Its `pom.xml` copies
+`V*.sql` and `V*.sql.conf` from `../database` into `classpath:db/migration` at build time, so the
+directory stays the single source of truth. Configuration (`application.yml`):
 
 ```yaml
 spring:
   flyway:
     enabled: true
+    baseline-version: 0
     locations: classpath:db/migration
     baseline-on-migrate: true
+    default-schema: common_schema
+    schemas: common_schema
 ```
 
-### What happens on startup
-
-1. **Flyway runs first** (before JPA/Hibernate). It creates a `flyway_schema_history` table in the `public` schema to track applied migrations.
-2. **V1** executes — creates `common_schema` and all shared tables.
-3. **V2** executes — **registers** the `create_tenant_schema()` function. No tenant schema is created at this point.
-4. **JPA** then initialises with `ddl-auto: none`, using `common_schema` as its default schema.
+The history table is `common_schema.flyway_schema_history`. CI also builds the same files into a
+standalone Flyway image, `tenant-service-db` (`backend/database/Dockerfile` + `migrate.sh`), for
+running migrations as a separate step.
 
 ### Provisioning a new tenant schema (runtime, not migration)
 
@@ -325,7 +291,7 @@ Each tenant gets its own isolated schema. The function is idempotent — calling
 
 ### Adding a new migration
 
-1. Create a new file in `backend/database/` following the Flyway naming convention: `V<version>__<description>.sql` (e.g. `V3__add_audit_log_table.sql`).
+1. Create a new file in `backend/database/` following the Flyway naming convention: `V<version>__<description>.sql`, using the next unused version. A tenant-table change must update `create_tenant_schema()` and backfill existing tenant schemas (see V56 for the pattern).
 2. Rebuild `tenant-service` (`mvn compile` or `mvn package`). The file is automatically copied to the classpath.
 3. On next startup, Flyway applies only the new, unapplied migration.
 
@@ -341,8 +307,12 @@ Each tenant gets its own isolated schema. The function is idempotent — calling
 ### Option 1: Run All from Maven
 
 ```bash
+# There is no parent POM: build each service on its own
 cd backend
-mvn clean package -DskipTests
+for s in api-gateway service-discovery tenant-service user-service anomaly-service \
+         telemetry-service message-service scheme-service analytics-service; do
+  (cd "$s" && mvn clean package -DskipTests)
+done
 
 # Start each service in a separate terminal
 java -jar api-gateway/target/*.jar
@@ -395,118 +365,15 @@ For service discovery mode, enable Eureka and set route URIs to load-balanced na
 Examples:
 
 ```bash
-# Tenant service endpoint through gateway
+# Tenant service endpoint through gateway (public list)
 curl http://localhost:8080/tenant/api/v1/tenants
 
-# User service endpoint through gateway
-curl http://localhost:8080/user/api/users
-
-# Analytics endpoint through gateway
-curl "http://localhost:8080/analytics/api/v1/analytics/tenants"
+# Analytics endpoint through gateway (public dashboard read)
+curl "http://localhost:8080/analytics/api/v1/analytics/schemes/dashboard?tenant_id=1"
 ```
 
-### Tenant Service (`:8081`)
-
-| Method | Endpoint          | Description            |
-|--------|-------------------|------------------------|
-| GET    | `/api/tenants`    | Get all tenants        |
-| POST   | `/api/publish`    | Publish Kafka message  |
-
-**Sample Response** — `GET /api/tenants`:
-```json
-[
-  { "id": 1, "name": "Tenant A" },
-  { "id": 2, "name": "Tenant B" }
-]
-```
-
-### User Service (`:8082`)
-
-| Method | Endpoint          | Description            |
-|--------|-------------------|------------------------|
-| GET    | `/api/users`      | Get all users          |
-| POST   | `/api/publish`    | Publish Kafka message  |
-
-**Sample Response** — `GET /api/users`:
-```json
-[
-  { "id": 1, "name": "John Doe" },
-  { "id": 2, "name": "Jane Doe" }
-]
-```
-
-### Anomaly Service (`:8083`)
-
-| Method | Endpoint             | Description            |
-|--------|----------------------|------------------------|
-| GET    | `/api/v1/anomalies`  | Get all anomalies      |
-| POST   | `/api/v1/publish`    | Publish Kafka message  |
-
-**Sample Response** — `GET /api/v1/anomalies`:
-```json
-[
-  { "id": 1, "type": "Leak Detection" },
-  { "id": 2, "type": "Pressure Drop" }
-]
-```
-
-### Telemetry Service (`:8989`)
-
-| Method | Endpoint             | Description              |
-|--------|----------------------|--------------------------|
-| GET    | `/api/v1/telemetry`  | Get all telemetry data   |
-| POST   | `/api/v1/publish`    | Publish Kafka message    |
-
-**Sample Response** — `GET /api/v1/telemetry`:
-```json
-[
-  { "id": 1, "meterId": "METER-001", "readingValue": 150.5 },
-  { "id": 2, "meterId": "METER-002", "readingValue": 230.8 }
-]
-```
-
-### Message Service (`:8085`)
-
-| Method | Endpoint                         | Description                        |
-|--------|----------------------------------|------------------------------------|
-| POST   | `/api/v1/message/notifications`  | Send notification via channel      |
-| POST   | `/api/v1/message/events`         | Dispatch a Kafka event             |
-
-### Scheme Service (`:8086`)
-
-| Method | Endpoint          | Description              |
-|--------|-------------------|--------------------------|
-| GET    | `/api/schemes`    | Get all schemes          |
-| POST   | `/api/publish`    | Publish Kafka message    |
-
-**Sample Response** — `GET /api/schemes`:
-```json
-[
-  { "id": 1, "schemeName": "Rural Water Supply", "schemeCode": "RWS-001" },
-  { "id": 2, "schemeName": "Urban Pipeline Network", "schemeCode": "UPN-002" }
-]
-```
-
-### Analytics Service (`:8087`)
-
-| Method | Endpoint                                  | Description                              |
-|--------|-------------------------------------------|------------------------------------------|
-| GET    | `/api/v1/analytics/tenants`               | List all tenants in the DW               |
-| GET    | `/api/v1/analytics/schemes`               | List schemes (optional `?tenantId=`)     |
-| GET    | `/api/v1/analytics/meter-readings`        | Query meter readings (filters: tenantId, schemeId, startDate, endDate) |
-| GET    | `/api/v1/analytics/water-quantity`        | Query water quantity data                |
-| GET    | `/api/v1/analytics/escalations`           | Query escalations (filters: tenantId, schemeId, resolutionStatus) |
-| GET    | `/api/v1/analytics/scheme-performance`    | Query scheme performance data            |
-
-### Kafka Publishing (All Services)
-
-```bash
-curl -X POST http://localhost:8080/tenant/api/publish \
-  -H "Content-Type: text/plain" \
-  -d "Hello from tenant-service"
-```
-
-Each service publishes to its own topic (`<service-name>-topic`) and listens on `common-topic`.
+Every endpoint, per service, is listed in [`API_ENDPOINTS.md`](API_ENDPOINTS.md); the gateway also
+serves an aggregated Swagger UI at `/swagger-ui.html`.
 
 ### Actuator Health (All Services)
 
@@ -520,96 +387,43 @@ GET http://localhost:<port>/actuator/health
 
 | Service                    | Produces To                          | Consumes From    |
 |----------------------------|--------------------------------------|------------------|
-| `tenant-service`           | `tenant-service-topic`               | `common-topic`   |
-| `user-service`             | `user-service-topic`                 | `common-topic`   |
-| `anomaly-service`          | `anomaly-service-topic`              | `common-topic`   |
-| `telemetry-service`        | `telemetry-service-topic`            | `common-topic`   |
-| `message-service`          | `message-service-topic`              | `common-topic`   |
+| `tenant-service`           | `tenant-service-topic`, `common-topic` | `common-topic` |
+| `user-service`             | `user-service-topic`, `common-topic` | — |
+| `anomaly-service`          | `anomaly-service-topic`              | `common-topic`, `telemetry-service-topic`, `user-service-topic` |
+| `telemetry-service`        | `telemetry-service-topic`            | `common-topic`, `tenant-service-topic` |
+| `message-service`          | `message-service-topic`, `account-email-dlt` | `common-topic`, `tenant-service-topic` |
 | `scheme-service`           | `scheme-service-topic`               | `common-topic`   |
-| `analytics-service`        | `analytics-service-topic`            | `tenant-service-topic`, `user-service-topic`, `scheme-service-topic`, `telemetry-service-topic`, `anomaly-service-topic`, `common-topic` |
+| `analytics-service`        | `analytics-service-topic`, `common-topic` | `tenant-service-topic`, `user-service-topic`, `scheme-service-topic`, `telemetry-service-topic`, `anomaly-service-topic`, `message-service-topic`, `common-topic` |
+
+`common-topic` carries requests for message-service (nudges, escalations, reports, OTPs, emails) and
+analytics' report KPIs. An event that fails all retries goes to `<topic>.DLT`.
 
 ---
 
 ## Future Enhancements
 
-- **Database Separation**: Currently all services point to a single `shared_db`. In production, each service should have its own dedicated database to follow the **Database-per-Service** pattern.
-- **Config Server**: Externalize configuration using Spring Cloud Config Server.
-- **Circuit Breaker**: Add Resilience4j for fault tolerance and circuit-breaking patterns.
-- **Distributed Tracing**: Integrate Micrometer Tracing with Zipkin/Jaeger.
-- **Security**: Add Spring Security with OAuth2/JWT for API protection.
-- **Docker Compose**: Create a `docker-compose.yml` for full-stack orchestration.
+See [`gitbook/future-work.md`](../gitbook/future-work.md).
 
 ---
 
 ## Project Structure
 
 ```
-water-management-platform/
-├── pom.xml                          # Parent POM with BOM management
-├── README.md
-│
-├── database/                        # Flyway SQL migrations (single source of truth)
-│   ├── V1__create_common_schema_tables.sql
-│   └── V2__create_tenant_schema_function.sql
-│
-├── api-gateway/                     # Port 8080 - unified API ingress
-│   ├── pom.xml
-│   ├── Dockerfile
-│   └── src/main/
-│       ├── java/org/arghyam/jalsoochak/apigateway/ApiGatewayApplication.java
-│       └── resources/application.yml
-│
-├── service-discovery/
-│   ├── pom.xml
-│   ├── Dockerfile
-│   └── src/main/
-│       ├── java/com/example/discovery/
-│       │   └── ServiceDiscoveryApplication.java
-│       └── resources/application.yml
-│
-├── tenant-service/                  # Port 8081 — runs Flyway migrations on startup
-│   ├── pom.xml
-│   ├── Dockerfile
-│   └── src/main/
-│       ├── java/com/example/tenant/
-│       │   ├── TenantServiceApplication.java
-│       │   ├── controller/ApiController.java
-│       │   ├── service/BusinessService.java
-│       │   ├── repository/SampleRepository.java
-│       │   ├── entity/SampleEntity.java
-│       │   ├── dto/SampleDTO.java
-│       │   ├── kafka/
-│       │   │   ├── KafkaConfig.java
-│       │   │   ├── KafkaProducer.java
-│       │   │   └── KafkaConsumer.java
-│       │   └── config/DataSourceConfig.java
-│       └── resources/application.yml
-│
-├── user-service/                    # Port 8082
-├── anomaly-service/                 # Port 8083
-├── telemetry-service/               # Port 8989
-├── message-service/                 # Port 8085
-├── scheme-service/                  # Port 8086
-│
-└── analytics-service/               # Port 8087 — DW event consumer
-    ├── pom.xml
-    ├── Dockerfile
-    └── src/main/
-        ├── java/com/example/analytics/
-        │   ├── AnalyticsServiceApplication.java
-        │   ├── controller/AnalyticsController.java
-        │   ├── service/{DimensionService,FactService,DateDimensionService}.java
-        │   ├── service/serviceImpl/
-        │   ├── entity/{DimDate,DimTenant,DimUser,...,FactMeterReading,...}.java
-        │   ├── repository/
-        │   ├── dto/event/{TenantEvent,UserEvent,SchemeEvent,...}.java
-        │   ├── kafka/
-        │   │   ├── KafkaConfig.java
-        │   │   ├── KafkaProducer.java
-        │   │   └── AnalyticsKafkaConsumer.java
-        │   ├── config/OpenApiConfig.java
-        │   └── exception/GlobalExceptionHandler.java
-        └── resources/
-            ├── application.yml
-            └── db/migration/V1__create_dw_schema.sql
+backend/
+├── README.md, API_ENDPOINTS.md, LOGGER.md
+├── database/                 # Flyway migrations for common_schema + tenant schemas, and the
+│                             # tenant-service-db image (Dockerfile, migrate.sh)
+├── logger/                   # Local Loki / Prometheus / Grafana stack (docker compose)
+├── api-gateway/              # :8080
+├── service-discovery/        # :8762 (optional)
+├── tenant-service/           # :8081, runs the backend/database migrations
+├── user-service/             # :8082
+├── anomaly-service/          # :8083
+├── telemetry-service/        # :8084
+├── message-service/          # :8085
+├── scheme-service/           # :8086
+└── analytics-service/        # :8087, runs its own analytics_schema migrations
 ```
+
+Each service is a standalone Maven project (`pom.xml`, `Dockerfile`, `src/`) whose code lives under
+`org.arghyam.jalsoochak.<service>`. CI builds images from the shared `build/maven/Dockerfile`.

@@ -6,9 +6,9 @@ meter value with no image and no AI (OCR) analysis, answering `qualityStatus: "C
 validation threshold in its rejection message.
 
 **Decision:** submitting a value instead of an image is **intended behaviour** — it is the
-server-to-server contract for state IT systems that read their own meters (see
-`docs/pluggable-ingestion-testing-guide.md`). The bypass is accepted risk and is not restricted. The
-API-key authentication gap on the chatbot webhook routes is owned by a separate change.
+server-to-server contract for state IT systems that read their own meters (see the partner
+ingestion sections of `backend/API_ENDPOINTS.md`). The bypass is accepted risk and is not restricted.
+The chatbot webhook routes have since been put behind `X-Webhook-Token` (`WebhookAuthFilter`).
 
 **What this change does:** three things only.
 

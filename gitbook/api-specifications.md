@@ -6,7 +6,7 @@
 
 All APIs are RESTful and versioned under `/api/v1/`. Clients reach services through the **API Gateway**, either on the flat path (`/api/v1/...`) or by service prefix (`/user/**`, `/tenant/**`, `/scheme/**`, `/telemetry/**`, `/message/**`, `/analytics/**`, `/anomaly/**`), which the gateway strips; the gateway validates a Keycloak-issued (`jalsoochak-realm`) **`Authorization: Bearer <JWT>`** on every path the owning service does not publish anonymously, and forwards the request. Responses are wrapped as `{ "status", "message", "data" }`. Every service except anomaly-service publishes an OpenAPI document at `/v3/api-docs`; the gateway aggregates them into one interactive **Swagger UI** at `/swagger-ui.html`.
 
-> **Two families of traffic do not go through the gateway and are not JWT-authenticated.** Ingress
+> **Three families of traffic do not go through the gateway and are not JWT-authenticated.** Ingress
 > routes them straight to telemetry-service, so the gateway's filter chain never sees them:
 >
 > * **Chatbot flow webhooks** under `/api/v1/telemetry/*` — authenticated by the `X-Webhook-Token`
@@ -15,8 +15,11 @@ All APIs are RESTful and versioned under `/api/v1/`. Clients reach services thro
 >   `/readings/formats/{format}`, `/readings/reset-latest`,
 >   `PATCH /api/v1/telemetry/schemes/{id}/yesterday-final-reading`) — authenticated by the
 >   per-tenant `X-Api-Key`, which a State Admin issues with `POST /api/v1/tenants/api-token`.
+> * **Operations routes** under `/api/v1/telemetry/internal/` (`POST /internal/readings/republish`
+>   re-sends a tenant's stored ELM/PDU readings) — authenticated by `X-Internal-Token`, plus
+>   `X-Tenant-Code`.
 >
-> Both prefixes are publicly reachable. Do not assume a path under `/api/v1/` is behind the gateway.
+> All of these are publicly reachable. Do not assume a path under `/api/v1/` is behind the gateway.
 
 ### 9.1 Authentication & User APIs
 
@@ -61,12 +64,14 @@ All APIs are RESTful and versioned under `/api/v1/`. Clients reach services thro
 * `GET /api/v1/scheme/schemes/yesterday-final-readings` — each scheme's previous-day closing reading
 * `GET /api/v1/scheme/schemes/{id}/statuses`, `PATCH /api/v1/scheme/schemes/{id}/status` — read / update a scheme's work and operating status *(update: State Admin)*
 * `POST /api/v1/scheme/schemes/upload`, `/schemes/mappings/upload` — bulk CSV upload; `GET /schemes/download`, `/schemes/mappings/download` — matching report downloads *(State Admin)*
+* `POST /api/v1/scheme/schemes/analytics-resync` — re-publish the tenant's (`X-Tenant-Code`) schemes to analytics *(State Admin)*
 * `GET /api/v1/public/schemes/{id}` — scheme detail by `tenantCode`; despite the prefix it requires a JWT for that tenant
+* `/api/v1/scheme/state-sync/config`, `/runs`, `/schemes/refresh`, `/issues` — state master-data sync settings, runs, single-scheme refresh and issues *(Super User / State Admin for that tenant)*; writes answer `409` unless `STATE_SYNC_ENABLED`
 
 ### 9.4 Field Submission APIs (Chatbot Flow Webhooks)
 
 The WhatsApp submission journey is a multi-step chatbot flow; the WhatsApp provider calls a webhook at
-each step, all under `/api/v1/telemetry`. There are **26** such endpoints, every one a `POST`.
+each step, all under `/api/v1/telemetry`. There are **27** such endpoints, every one a `POST`.
 
 **Authentication.** Each request must carry the shared secret header:
 
@@ -77,7 +82,7 @@ X-Webhook-Token: <token>
 `WebhookAuthFilter` in telemetry-service compares the SHA-256 of the supplied token against
 `telemetry.webhook.auth.token-hashes` and returns
 `401 {"success":false,"message":"Unauthorized"}` when it does not match. The match is a closed
-allowlist of exactly these 26 routes — *not* a prefix rule on `/api/v1/telemetry/**`, because that
+allowlist of exactly these 27 routes — *not* a prefix rule on `/api/v1/telemetry/**`, because that
 prefix is shared with the `X-Api-Key` ingestion endpoints, which use a different credential.
 
 Set `TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT` to log outcomes without rejecting (the kill switch), or
@@ -94,6 +99,8 @@ The endpoints:
 * `POST /api/v1/telemetry/readings/whatsapp` — async image submission, returns a job ack
 * `POST /api/v1/telemetry/manual-reading`, `/location`, `/update-previous-reading` — enter, geotag or
   correct a reading
+* `POST /api/v1/telemetry/reject-latest-reading` — the operator rejects the value just read from their
+  photo; only today's reading is reset
 * `POST /api/v1/telemetry/meter-change`, `/meter/meter-change`, `/meter/meter-change/submit` — meter
   replacement
 * `POST /api/v1/telemetry/issue-report`, `/issue-report/submit`, `/issue-report/telemetry`,
@@ -120,6 +127,7 @@ The endpoints:
 * `POST /api/v1/message/notifications` — trigger a notification *(authenticated)*
 * `POST /api/v1/message/events` — publish a raw event to `message-service-topic` *(authenticated)*
 * `POST /api/v1/message/trigger-welcome-message` — send the welcome message to a phone number; called by the chatbot flow (public)
+* `POST /api/v1/message/delivery-receipts/{providerId}` — messaging providers push delivery status here (public; each provider's adapter checks its signature or shared secret)
 
 Nudge and escalation messages are normally produced by the tenant-service schedulers and delivered by the message service via the WhatsApp provider; these endpoints support manual/administrative use.
 
@@ -130,9 +138,10 @@ Read-only BI endpoints under `/api/v1/analytics/`. The endpoints the public dash
 * `GET /api/v1/analytics/schemes/dashboard`, `/critical-schemes`, `/continuous-schemes` (public)
 * `GET /api/v1/analytics/scheme-regularity/average`, `/scheme-regularity/periodic`, `/reading-submission-rate`, `/submission-status` (public)
 * `GET /api/v1/analytics/water-quantity/region-wise`, `/water-quantity/periodic`, `/water-supply/average-per-region`, `/outage-reasons` (public)
+* `GET /api/v1/analytics/submission-activity/hourly`, `/outage-reasons/periodic`, `/schemes/dashboard/download`, `/scheme-regularity/periodic/national`, `/tenant_data`, `/tenant_boundaries` (public)
 * `GET /api/v1/analytics/operator-attendance` — day-wise operator attendance (authenticated)
 * `GET /api/v1/analytics/escalations`, `/anomalies`, `/officer/dashboard`, and the `/user` variants (`/critical-schemes/user`, `/continuous-schemes/user`, `/submission-status/user`, `/non-submission-reasons/user`, `/outage-reasons/user`) — officer-scoped reads *(Section / Sub-Divisional Officer)*
-* `GET /api/v1/analytics/national/dashboard` (public) and `/national/dashboard/district` — country-level aggregates; refused with `403` in single-tenant mode
+* `GET /api/v1/analytics/national/dashboard`, `/national/dashboard/boundary` (public) and `/national/dashboard/district` — country-level aggregates; refused with `403` in single-tenant mode
 
 Common query parameters: `tenant_id`, `start_date`, `end_date`, `lgd_id` / `department_id` (and `parent_lgd_id` / `parent_department_id`), `scale` (`day` / `week` / `month` / `quarter` / `year`), `page`, `limit`.
 

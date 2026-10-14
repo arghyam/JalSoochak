@@ -67,8 +67,9 @@ Services must start in this order:
 
 1. PostgreSQL (database)
 2. Kafka broker
-3. `service-discovery` (Eureka, port 8761) — all other services register here
-4. Remaining services (any order): `tenant-service` (8081), `user-service` (8082), `anomaly-service` (8083), `telemetry-service` (8084), `message-service` (8085), `scheme-service` (8086)
+3. All services (any order): `api-gateway` (8080), `tenant-service` (8081), `user-service` (8082), `anomaly-service` (8083), `telemetry-service` (8084), `message-service` (8085), `scheme-service` (8086), `analytics-service` (8087)
+
+`service-discovery` (Eureka, port 8762) is optional — see Service Communication.
 
 ## Architecture
 
@@ -79,7 +80,7 @@ The system uses **schema-per-tenant** multi-tenancy in PostgreSQL:
 - `common_schema` — shared tenant metadata, admin users, and LGD (Local Government Directory) location types
 - `tenant_<state_code>` — dynamically created per tenant (e.g., `tenant_mp`, `tenant_up`) via a PL/pgSQL function in `database/V2__create_tenant_schema_function.sql`
 
-Flyway migrations run automatically on service startup. Migration files live in `backend/database/`.
+`tenant-service` runs the Flyway migrations in `backend/database/` on startup (history table in `common_schema`; a `V<n>__*.sql.conf` beside a file runs it outside Flyway's transaction). CI also builds them into a `tenant-service-db` Flyway image (`backend/database/Dockerfile`). `analytics-service` runs its own migrations (`src/main/resources/db/migration`) in `analytics_schema`.
 
 ### Single Tenant Mode (`SINGLE_TENANT_MODE`)
 
@@ -97,17 +98,17 @@ flag on needs ≤1 ACTIVE tenant or `@MockBean` on the validator.
 
 ### Service Communication
 
-- **Synchronous:** HTTP/REST via Netflix Eureka service discovery
+- **Synchronous:** none between services — they share the database and Kafka. Eureka is optional: most services default `EUREKA_ENABLED` to `false` (anomaly and scheme have no switch), and the gateway routes to configured URIs, not through the registry
 - **Asynchronous:** Apache Kafka — each service produces to its own topic (`<service-name>-topic`) and consumes from `common-topic`
 
 ### Standard Package Layout (per service)
 
 ```text
-src/main/java/com/example/<service>/
+src/main/java/org/arghyam/jalsoochak/<service>/
 ├── config/        # Spring configuration beans
 ├── controller/    # REST endpoints
 ├── service/       # Business logic
-├── repository/    # Spring Data JPA repositories
+├── repository/    # repositories (JdbcTemplate in tenant-service)
 ├── entity/        # JPA entities
 ├── dto/           # Request/response DTOs
 ├── exception/     # Custom exceptions
@@ -116,10 +117,10 @@ src/main/java/com/example/<service>/
 
 ### Message Service
 
-The `message-service` (port 8085) is distinct from others: it uses **Spring WebFlux** (non-blocking) to call external notification APIs. It supports three channels configured in `application.yml`:
+The `message-service` (port 8085) is Spring MVC, calling external notification APIs with WebFlux's `WebClient`. Channels:
 
 - Webhook (generic)
-- Email via SendGrid
+- Email via SendGrid or SMTP, and SMS — provider selectable per tenant
 - WhatsApp via the `WhatsAppSender` port (adapter: `GlificWhatsAppSender`)
 
 ### Configuration
@@ -136,13 +137,16 @@ Note: Several `application.yml` files contain hardcoded credentials (development
 
 ## Notification Pipeline (nudge-escalation)
 
-Cron jobs in `tenant-service` publish Kafka events; `message-service` consumes and delivers via WhatsApp.
+`NotificationJobScheduler` in `tenant-service` ticks every minute (IST), re-reads each tenant's
+configured times, and claims each due run in `common_schema.scheduled_job_run_table` (V62), so a run
+happens once per tenant per period across pods and is never retried. The jobs publish Kafka events;
+`message-service` consumes and delivers via WhatsApp.
 
 ### Flow
 
-- 18:00 IST cron (`NudgeSchedulerService`, per-tenant `PUMP_OPERATOR_REMINDER_NUDGE_TIME`): **one** `NUDGE`
+- Nudge (`NudgeSchedulerService`, at the tenant's `PUMP_OPERATOR_REMINDER_NUDGE_TIME`): **one** `NUDGE`
   event per operator who still has a scheme with nothing recorded today by _any_ operator on it
-- 9 AM cron (`EscalationSchedulerService`): operators with missed days ≥ threshold → `ESCALATION` Kafka event
+- Escalation (`EscalationSchedulerService`, at the tenant's configured time): operators with missed days ≥ threshold → `ESCALATION` Kafka event
 - `message-service` (`NotificationEventRouter`): routes events → WhatsApp through the `WhatsAppSender` port (adapter: `GlificWhatsAppSender`, GraphQL HSM API)
 
 ### Language resolution
@@ -176,9 +180,9 @@ Message text is fetched from `common_schema.tenant_config_master_table` using th
 `GlificWhatsAppSender.sendDailyReportHsm`, behind the `WhatsAppSender` port. `storage.public-base-url`
 must be public and anonymously readable either way.
 
-- `DOCUMENT` (default) — two-step media send. Meta fetches `storage.public-base-url` itself, which
+- `DOCUMENT` (the Java fallback; `application.yml` sets `LINK`) — two-step media send. Meta fetches `storage.public-base-url` itself, which
   the India-only firewall in front of the production object store blocks.
-- `LINK` — one `sendHsmMessage` with a "View Report" button, no media step. `parameters =
+- `LINK` (the configured default) — one `sendHsmMessage` with a "View Report" button, no media step. `parameters =
 [officerName, reportDate (dd-MM-yyyy), urlSuffix]` — the URL suffix must come **last**. The
   button's prefix is frozen at Meta approval and must equal `storage.public-base-url` + `/`, so each
   environment needs its own approved template (`WHATSAPP_DAILY_REPORT_SO_LINK_TEMPLATE_ID`); set
@@ -234,7 +238,7 @@ department nodes are created/re-parented. Plan and open questions: `docs/jjm-bra
 
 ```text
 src/test/
-├── java/com/example/<service>/
+├── java/org/arghyam/jalsoochak/<service>/
 │   ├── repository/    # @SpringBootTest + Testcontainers (JdbcTemplate/SQL queries)
 │   ├── service/       # Mockito unit tests + Testcontainers where real DB needed
 │   └── channel/       # Mockito unit tests + WireMock for HTTP clients

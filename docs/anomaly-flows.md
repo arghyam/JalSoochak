@@ -57,6 +57,7 @@ The current anomaly type constants in `telemetry-service` are:
 - `9` - `NO_SUBMISSION`
 - `10` - `IMPLAUSIBLE_WATER_SUPPLY`
 - `11` - `LOCATION_MISMATCH`
+- `12` - `NO_METER_DETECTED` (the OCR provider found no meter in the photo; the submission is rejected with `NO_METER_DETECTED`)
 
 Source: `telemetry-service` `AnomalyConstants`.
 

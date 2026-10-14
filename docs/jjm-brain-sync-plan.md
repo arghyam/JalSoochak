@@ -1,6 +1,6 @@
 # JJM Brain → JalSoochak master-data sync
 
-**Sources**
+**Sources** (none of them is in this repo)
 - `JJM_Brain_Arghyam_API_Documentation_v1.pdf` — v1.0, September 2026 (12 endpoints)
 - `API_Review_Issues_and_suggesions.pdf` — the Assam team's answers to our review
 - `docs/jjm-brain-api-gap-analysis.md` — our August review of the earlier draft

@@ -43,7 +43,7 @@ Netflix Eureka registry. Services register on startup when `EUREKA_ENABLED` is s
 {% step %}
 ### Tenant Service
 
-The control plane: onboards state tenants and provisions their schemas, manages per-tenant configuration and location hierarchies, and runs the per-tenant **nudge, escalation, daily report and weekly report schedulers** (cron times configured per tenant, in IST).
+The control plane: onboards state tenants and provisions their schemas, manages per-tenant configuration and location hierarchies, and runs the per-tenant **nudge, escalation, daily report and weekly report schedulers**: a one-minute tick in IST checks each tenant's configured times, and each run is claimed in `scheduled_job_run_table` so it happens once however many pods are up.
 {% endstep %}
 
 {% step %}
@@ -61,19 +61,19 @@ Field-data ingestion. Hosts the **chatbot flow webhooks** for the WhatsApp submi
 {% step %}
 ### Scheme Service
 
-Manages water-supply schemes and their LGD / departmental location mappings, with bulk upload and filterable, paginated queries for dashboards.
+Manages water-supply schemes and their LGD / departmental location mappings, with bulk upload and filterable, paginated queries for dashboards. When `STATE_SYNC_ENABLED`, it also pulls the state's master data (schemes, officers, mappings) on a schedule and reconciles it into the tenant schema; one replica runs each sync.
 {% endstep %}
 
 {% step %}
 ### Anomaly Service
 
-Anomaly rules are evaluated where the data arrives — telemetry-service at reading time (unreadable image, reading below the previous one, duplicate image, no / low / over / implausible supply, location mismatch) and tenant-service for missed submissions during the escalation run. Each anomaly is written to the tenant's `anomaly_table` and published as an `ANOMALY_RECORDED` event for the dashboards. The anomaly service itself is currently lightweight: it syncs user and scheme dimensions from Kafka into the analytics schema.
+Anomaly rules are evaluated where the data arrives — telemetry-service at reading time (unreadable image, no meter in the photo, reading below the previous one, duplicate image, no / low / over / implausible supply, location mismatch) and tenant-service for missed submissions during the escalation run. Each anomaly is written to the tenant's `anomaly_table` and published as an `ANOMALY_RECORDED` event for the dashboards. The anomaly service itself is currently lightweight: it syncs user and scheme dimensions from Kafka into the analytics schema.
 {% endstep %}
 
 {% step %}
 ### Message Service
 
-Notification delivery across **WhatsApp, email (SendGrid or SMTP), and SMS**, with email and SMS providers selectable per tenant. WhatsApp goes through the provider-neutral `WhatsAppSender` port (adapter: `GlificWhatsAppSender`). Generates escalation and daily / weekly situation **PDF reports**, uploads them to object storage, and delivers them over WhatsApp — escalations as documents, daily reports as a document or a "View Report" link button (`NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE`, `LINK` by default), and weekly reports as a link only. Uses a non-blocking HTTP client for outbound calls.
+Notification delivery across **WhatsApp, email (SendGrid or SMTP), and SMS**, with email and SMS providers selectable per tenant. WhatsApp goes through the provider-neutral `WhatsAppSender` port (adapter: `GlificWhatsAppSender`). Generates escalation and daily / weekly situation **PDF reports**, uploads them to object storage, and delivers them over WhatsApp — escalations as documents, daily reports as a document or a "View Report" link button (`NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE`, `LINK` by default), and weekly reports as a link only. Every outbound message is recorded in a delivery ledger (`notification_table`), and its status is updated from the providers' delivery reports, both polled and pushed. Uses a non-blocking HTTP client for outbound calls.
 {% endstep %}
 
 {% step %}
@@ -97,7 +97,7 @@ Consumes events from all services into a dedicated **star-schema data warehouse*
 **Admin configuration update**
 
 1. State Admin updates configuration (e.g. water norm, escalation threshold) via the gateway
-2. Tenant Service persists the change to the tenant's configuration store and reschedules the tenant's jobs
+2. Tenant Service persists the change to the tenant's configuration store; the schedulers re-read it on their next one-minute tick, so nothing is rescheduled
 3. A `TENANT_CONFIG_UPDATED` event is published to `tenant-service-topic`
 4. Downstream consumers (e.g. analytics, telemetry, message service) sync the relevant dimension/state or evict their cached config
 
@@ -150,13 +150,13 @@ graph LR
 
 Readings and supply signals can arrive through multiple input channels:
 
-* **BFM reading** (Bulk Flow Meter photo over WhatsApp) — the primary channel
-* **Electricity consumption** (ELM)
-* **Pump runtime / duration** (PDU)
-* **IoT devices** (IOT)
-* **Manual entry** (MAN)
-* **State IT systems**, pushing readings through the telemetry reading API
+* **BFM reading** (Bulk Flow Meter) — the primary channel; meter photo or typed value
+* **Electricity consumption** (ELM) — electricity-meter photo (kWh or kVAh register) or typed value
+* **Pump runtime / duration** (PDU) — typed run time; photos are refused
+* **IoT devices** (IOT) and **Manual entry** (MAN) — codes defined, no reading yet
+
+Each of these readings can arrive over WhatsApp or from **State IT systems** through the telemetry reading API.
 
 {% hint style="info" %}
-Non-WhatsApp channels are modelled in the data layer and can be enabled per tenant (channel codes `BFM`, `ELM`, `PDU`, `IOT`, `MAN`). External systems submit through the API-key–authenticated telemetry reading API, which accepts a canonical request or a registered per-format mapping, so a new source can be onboarded without code changes elsewhere.
+Channels are enabled per tenant (codes `BFM`, `ELM`, `PDU`, `IOT`, `MAN`), and BFM, ELM and PDU each have a water-quantity calculator in analytics. Photos are read by the OCR provider configured for their channel. External systems submit through the API-key–authenticated telemetry reading API, which accepts a canonical request or a registered per-format mapping, so a new source can be onboarded without code changes elsewhere.
 {% endhint %}
