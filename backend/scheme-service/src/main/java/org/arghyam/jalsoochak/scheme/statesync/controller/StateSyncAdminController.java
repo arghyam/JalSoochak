@@ -40,11 +40,22 @@ public class StateSyncAdminController {
     private final StateSyncRunner runner;
     private final StateSyncRunRepository runRepository;
 
+    /**
+     * The sync's settings for this tenant. Answers 200 even when the sync is not set up for the tenant
+     * ({@code "configured": false}), so it can be used to find out why the other endpoints answer 404;
+     * the tenant the sync does serve is not named to another tenant's admin.
+     */
     @PreAuthorize(ADMIN)
     @GetMapping("/config")
     public Map<String, Object> config(@RequestParam String tenantCode) {
-        requireConfiguredTenant(tenantCode);
         Map<String, Object> body = new LinkedHashMap<>();
+        if (!isConfiguredTenant(tenantCode)) {
+            body.put("configured", false);
+            body.put("enabled", properties.isEnabled());
+            body.put("tenantCode", null);
+            return body;
+        }
+        body.put("configured", true);
         body.put("enabled", properties.isEnabled());
         body.put("mode", properties.getMode());
         body.put("tenantCode", properties.getTenantCode());
@@ -122,9 +133,13 @@ public class StateSyncAdminController {
     }
 
     private void requireConfiguredTenant(String tenantCode) {
-        if (properties.getTenantCode() == null || !properties.getTenantCode().equalsIgnoreCase(tenantCode.trim())) {
+        if (!isConfiguredTenant(tenantCode)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "state sync is not configured for this tenant");
         }
+    }
+
+    private boolean isConfiguredTenant(String tenantCode) {
+        return properties.getTenantCode() != null && properties.getTenantCode().equalsIgnoreCase(tenantCode.trim());
     }
 
     private static String triggeredBy(Authentication authentication) {
