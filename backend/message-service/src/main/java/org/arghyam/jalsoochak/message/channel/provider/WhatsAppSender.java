@@ -72,21 +72,27 @@ public interface WhatsAppSender {
 
     /**
      * Sends the nudge template: {@code {{1}}} = operator name, {@code {{2}}} = today's date.
+     *
+     * @return the accepted send's message id and template id, or {@link WhatsAppSendResult#suppressed}
+     *         when a dry-run flag suppressed it
      */
-    void sendNudgeHsm(Long contactId, String operatorName, String date);
+    WhatsAppSendResult sendNudgeHsm(Long contactId, String operatorName, String date);
 
     /**
      * Sends the login OTP template: {@code {{1}}} = OTP.
+     *
+     * @return as {@link #sendNudgeHsm}
      */
-    void sendLoginOtpHsm(Long contactId, String otp);
+    WhatsAppSendResult sendLoginOtpHsm(Long contactId, String otp);
 
     /**
      * Sends the escalation PDF as a document template.
      *
      * @param documentUrl publicly reachable URL of the PDF. The provider's platform downloads it
      *                    itself, so an internal address is refused before any send
+     * @return as {@link #sendNudgeHsm}
      */
-    void sendEscalationHsm(Long contactId, String documentUrl);
+    WhatsAppSendResult sendEscalationHsm(Long contactId, String documentUrl);
 
     /**
      * Sends the Daily Water Service Situation Report, in the shape the configured
@@ -122,4 +128,10 @@ public interface WhatsAppSender {
 
     /** Whether weekly reports are actually delivered rather than suppressed. */
     boolean isWeeklyReportDeliveryEnabled();
+
+    /**
+     * The provider this adapter sends through, as recorded in the delivery ledger — a short lower-case
+     * identifier that stays stable across releases.
+     */
+    String providerId();
 }

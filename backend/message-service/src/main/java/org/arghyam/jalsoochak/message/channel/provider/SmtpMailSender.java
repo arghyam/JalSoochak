@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.message.channel.provider;
 
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.message.enums.EmailProviderType;
 import org.arghyam.jalsoochak.message.config.MailProperties;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
@@ -31,6 +32,9 @@ import java.util.Map;
 @Slf4j
 public class SmtpMailSender implements EmailSender {
 
+    /** This adapter's identity in the delivery ledger. */
+    public static final String PROVIDER_ID = EmailProviderType.SMTP.getWireName();
+
     private final SmtpSettings settings;
     private final JavaMailSender javaMailSender;
 
@@ -44,7 +48,16 @@ public class SmtpMailSender implements EmailSender {
     }
 
     @Override
-    public void send(MailRequest request) {
+    public String providerId() {
+        return PROVIDER_ID;
+    }
+
+    /**
+     * Hands the message to the relay. A relay's acceptance carries nothing to follow the message up
+     * with, so the ledger records it as untracked.
+     */
+    @Override
+    public ProviderAcceptance send(MailRequest request) {
         MailProperties.SmtpTemplate tmpl = resolveTemplate(request.template());
 
         // Merge logo_image from config so template authors can use {logo_image} in body templates.
@@ -63,6 +76,7 @@ public class SmtpMailSender implements EmailSender {
         try {
             javaMailSender.send(message);
             log.info("[SmtpMailSender] sent template={}", request.template());
+            return ProviderAcceptance.untracked("accepted");
         } catch (MailException e) {
             log.error("[SmtpMailSender] failure template={}: {}", request.template(), e.getMessage(), e);
             throw new RuntimeException("SmtpMailSender failure for " + request.template(), e);

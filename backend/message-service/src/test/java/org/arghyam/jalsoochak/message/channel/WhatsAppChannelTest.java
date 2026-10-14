@@ -249,7 +249,7 @@ class WhatsAppChannelTest {
 
     /**
      * Acceptance carries the provider's message id forward. That id is the only join key between a
-     * report we sent and the delivery status Gupshup and Meta later report back to the provider —
+     * report we sent and the delivery status the BSP and Meta later report back to the provider —
      * without it the whole reconciliation is impossible, so losing it must fail a test rather than pass
      * silently.
      */

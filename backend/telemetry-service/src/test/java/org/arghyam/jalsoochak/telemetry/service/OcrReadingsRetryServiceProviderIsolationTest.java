@@ -116,7 +116,7 @@ class OcrReadingsRetryServiceProviderIsolationTest {
         when(builtIn.channel()).thenReturn(ReadingChannel.BFM);
         when(builtIn.extractReadingOrThrow(anyString(), any(OcrProviderSettings.class)))
                 .thenThrow(new ResourceAccessException("Read timed out"));
-        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(builtIn), "flowvision");
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(builtIn), "flowvision", null);
 
         CircuitBreakerRegistry cbRegistry = CircuitBreakerRegistry.ofDefaults();
         OcrReadingsRetryService service = new OcrReadingsRetryService(

@@ -5,6 +5,8 @@ import org.arghyam.jalsoochak.message.dto.EmailProviderSettings;
 import org.arghyam.jalsoochak.message.dto.TenantSecrets;
 import org.arghyam.jalsoochak.message.enums.EmailProviderType;
 import org.arghyam.jalsoochak.message.exception.ProviderNotUsableException;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -43,10 +45,23 @@ public class SendGridMailSenderFactory implements EmailSenderFactory {
 
     private final WebClient.Builder webClientBuilder;
     private final MailProperties mailProperties;
+    private final boolean statusLookupEnabled;
 
     public SendGridMailSenderFactory(WebClient.Builder webClientBuilder, MailProperties mailProperties) {
+        this(webClientBuilder, mailProperties, false);
+    }
+
+    /**
+     * @param statusLookupEnabled {@code notifications.email.status-lookup.enabled}: whether a tenant's
+     *                            sender may query SendGrid's Email Activity API for delivery status
+     */
+    @Autowired
+    public SendGridMailSenderFactory(WebClient.Builder webClientBuilder, MailProperties mailProperties,
+                                     @Value("${notifications.email.status-lookup.enabled:false}")
+                                     boolean statusLookupEnabled) {
         this.webClientBuilder = webClientBuilder;
         this.mailProperties = mailProperties;
+        this.statusLookupEnabled = statusLookupEnabled;
     }
 
     @Override
@@ -82,7 +97,7 @@ public class SendGridMailSenderFactory implements EmailSenderFactory {
                         templates.defaultInvitation(),
                         templates.superUserInvitation(),
                         templates.stateAdminInvitation()));
-        return new SendGridMailSender(resolved, webClientBuilder);
+        return new SendGridMailSender(resolved, webClientBuilder, statusLookupEnabled);
     }
 
     /**

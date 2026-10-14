@@ -43,6 +43,15 @@ class SmtpMailSenderFactoryTest {
     }
 
     @Test
+    void builtSender_recordsTheFactorysWireNameInTheLedger() {
+        EmailSender sender = factory.create(
+                settings("smtp.mp.gov.in", 587, "mp-mailer", true, "noreply@mp.gov.in", null),
+                secrets(TENANT_A_PASSWORD));
+
+        assertThat(sender.providerId()).isEqualTo(factory.providerId().getWireName());
+    }
+
+    @Test
     void secretNameConstants_matchTheOnesTheProviderTypeDeclares() {
         // The factory duplicates the name because the enum is a copy of tenant-service's, which is
         // what the secret store writes against. If the two drift, every configured tenant falls back.

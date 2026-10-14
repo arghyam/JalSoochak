@@ -85,7 +85,10 @@ class SecurityConfigTest {
             "/api/v1/telemetry/readings/formats/csv",
             // message-service
             "/api/v1/message/trigger-welcome-message",
-            "/message/api/v1/message/trigger-welcome-message"
+            "/message/api/v1/message/trigger-welcome-message",
+            // message-service: provider delivery reports (provider signature or shared token)
+            "/api/v1/message/delivery-receipts/sendgrid",
+            "/message/api/v1/message/delivery-receipts/smscountry"
     })
     void writesAuthenticatedByTheirOwnCredentialAreNotBlocked(String path) {
         assertPasses(HttpMethod.POST, path);

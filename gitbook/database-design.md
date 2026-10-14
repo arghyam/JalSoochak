@@ -77,9 +77,9 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 ### 10.5 Messaging & Nudge Configuration
 
 * Notification templates and language keys live in `tenant_config_master_table` (`nudge_message_<lang>`, `escalation_message_<lang>`, `language_<id>`); the WhatsApp conversation's screens, prompts and options live under `WHATSAPP_MESSAGE_TEMPLATES`.
-* **`channel_master_table`** (common schema) — submission/notification channel definitions. The reading channels (`channel_type` 1) are ids 1–5 (BFM, ELM, PDU, IOT, MAN), the codes `scheme_master_table.channel_id` and `flow_reading_table.channel_id` hold. The reporting channels (`channel_type` 2) are ids 6 WHATSAPP and 7 API, the codes `flow_reading_table.reported_via_id` holds.
+* **`channel_master_table`** (common schema) — submission/notification channel definitions. The reading channels (`channel_type` 1) are ids 1–5 (BFM, ELM, PDU, IOT, MAN), the codes `scheme_master_table.channel_id` and `flow_reading_table.channel_id` hold. The reporting channels (`channel_type` 2) are ids 6 WHATSAPP and 7 API, the codes `flow_reading_table.reported_via_id` holds; 8 EMAIL and 9 SMS (V63) are the notification channels the delivery ledger records.
 * **`language_master`** / **`language_alias`** (common schema) — canonical languages with locale codes, and the spellings that resolve to them; each tenant schema also carries its own `language_master_table`.
-* **`notification_table`** (tenant schema) — a per-user notification table provisioned in every tenant schema; no service writes to it yet.
+* **`notification_table`** (tenant schema, and a `common_schema` twin for sends with no tenant) — the outbound delivery ledger since V63: one row per message per recipient, with what message-service sent, through which channel and provider, the provider's answer and the delivery status it later reports. Holds no phone number, email address or message text. See `docs/notification-delivery-ledger.md`.
 
 ### 10.6 Anomalies & Status
 

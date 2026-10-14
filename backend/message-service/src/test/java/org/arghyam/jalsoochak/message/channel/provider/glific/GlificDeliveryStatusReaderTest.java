@@ -18,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,6 +27,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -102,10 +104,33 @@ class GlificDeliveryStatusReaderTest {
             assertThat(filter).containsEntry("bspStatus", "DELIVERED");
 
             Map<String, Object> opts = (Map<String, Object>) vars.getValue().get("opts");
-            assertThat(opts).containsEntry("limit", 250)
+            // 250 asked for, 50 sent: Glific caps a page at 50 whatever is asked, so asking for more only
+            // made a full page look like the last one.
+            assertThat(opts).containsEntry("limit", 50)
                     .containsEntry("offset", 0)
                     .containsEntry("order", "DESC")
                     .containsEntry("orderWith", "inserted_at");
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void aBlankDateColumnFiltersAndOrdersOnTheSendTimeColumn() {
+            when(client.execute(contains("messages"), anyMap())).thenReturn(emptyMessages());
+
+            service.fetchMessages(from, to, "DELIVERED", "", 250, 5);
+
+            ArgumentCaptor<Map<String, Object>> vars = ArgumentCaptor.forClass(Map.class);
+            verify(client).execute(anyString(), vars.capture());
+            Map<String, Object> filter = (Map<String, Object>) vars.getValue().get("filter");
+            assertThat((Map<String, Object>) filter.get("dateRange")).containsEntry("column", "inserted_at");
+            assertThat((Map<String, Object>) vars.getValue().get("opts")).containsEntry("orderWith", "inserted_at");
+        }
+
+        @Test
+        void suppliesItsOwnStatusWordsAndChangedSinceColumn() {
+            assertThat(service.statusesInProgression()).containsExactly(
+                    "ENQUEUED", "SENT", "DELIVERED", "READ", "SEEN", "PLAYED", "ERROR", "CONTACT_OPT_OUT");
+            assertThat(service.changedSinceColumn()).contains("updated_at");
         }
 
         @Test
@@ -165,6 +190,72 @@ class GlificDeliveryStatusReaderTest {
             assertThat(result).hasSize(6);
             verify(client, times(3)).execute(anyString(), anyMap());
         }
+
+        /**
+         * The production failure: Glific returns 50 rows for a requested 250, and the reader used to take
+         * that short-looking page for the last one, so every pass read only the newest 50 messages of each
+         * status. All 120 must come back, over pages of 50 at offsets 0, 50 and 100.
+         */
+        @Test
+        @SuppressWarnings("unchecked")
+        void readsPastGlificsSilentFiftyRowCap() {
+            when(client.execute(contains("messages"), anyMap()))
+                    .thenReturn(messagesResponse(fullPage(50)))
+                    .thenReturn(messagesResponse(fullPage(50)))
+                    .thenReturn(messagesResponse(fullPage(20)));
+
+            List<WhatsAppMessageStatus> result =
+                    service.fetchMessages(from, to, "DELIVERED", "inserted_at", 250, 40);
+
+            assertThat(result).hasSize(120);
+            ArgumentCaptor<Map<String, Object>> vars = ArgumentCaptor.forClass(Map.class);
+            verify(client, times(3)).execute(anyString(), vars.capture());
+            assertThat(vars.getAllValues()).extracting(v -> ((Map<String, Object>) v.get("opts")).get("offset"))
+                    .containsExactly(0, 50, 100);
+            assertThat(vars.getAllValues()).extracting(v -> ((Map<String, Object>) v.get("opts")).get("limit"))
+                    .containsOnly(50);
+        }
+
+        @Test
+        void reportsItsPageCapAndProvider() {
+            assertThat(service.maxPageSize()).isEqualTo(50);
+            assertThat(service.providerId()).isEqualTo(GlificWhatsAppSender.PROVIDER_ID);
+        }
+    }
+
+    // ───────────────────────────── single message ──────────────────────────────
+
+    @Nested
+    class SingleMessage {
+
+        @Test
+        void fetchesOneMessageById() {
+            ObjectNode data = mapper.createObjectNode();
+            data.putObject("message").set("message", message("241952232", "gs-1", "READ", 880557, true,
+                    "OUTBOUND", "6530736", null));
+            when(client.execute(contains("message(id"), anyMap())).thenReturn(data);
+
+            Optional<WhatsAppMessageStatus> status = service.fetchMessage("241952232");
+
+            assertThat(status).isPresent();
+            assertThat(status.get().messageId()).isEqualTo("241952232");
+            assertThat(status.get().outcome()).isEqualTo(WhatsAppDeliveryOutcome.READ);
+        }
+
+        @Test
+        void anUnknownIdIsEmpty() {
+            ObjectNode data = mapper.createObjectNode();
+            data.putObject("message").putNull("message");
+            when(client.execute(contains("message(id"), anyMap())).thenReturn(data);
+
+            assertThat(service.fetchMessage("nope")).isEmpty();
+        }
+
+        @Test
+        void aBlankIdAsksNothing() {
+            assertThat(service.fetchMessage(" ")).isEmpty();
+            verifyNoInteractions(client);
+        }
     }
 
     // ────────────────────────────── status mapping ─────────────────────────────
@@ -187,15 +278,15 @@ class GlificDeliveryStatusReaderTest {
                 "DELETED,         IGNORED",
         })
         void mapsEveryConfirmedEnumMember(String bspStatus, WhatsAppDeliveryOutcome expected) {
-            assertThat(WhatsAppDeliveryOutcome.fromBspStatus(bspStatus)).isEqualTo(expected);
+            assertThat(GlificDeliveryStatusReader.outcomeOf(bspStatus)).isEqualTo(expected);
         }
 
         /** Glific may add members; a pass must not die on one it has never seen. */
         @Test
         void anUnknownStatusIsNotAnError() {
-            assertThat(WhatsAppDeliveryOutcome.fromBspStatus("SOME_FUTURE_STATE"))
+            assertThat(GlificDeliveryStatusReader.outcomeOf("SOME_FUTURE_STATE"))
                     .isEqualTo(WhatsAppDeliveryOutcome.UNKNOWN_STATUS);
-            assertThat(WhatsAppDeliveryOutcome.fromBspStatus(null))
+            assertThat(GlificDeliveryStatusReader.outcomeOf(null))
                     .isEqualTo(WhatsAppDeliveryOutcome.UNKNOWN_STATUS);
         }
 
@@ -206,8 +297,8 @@ class GlificDeliveryStatusReaderTest {
          */
         @Test
         void glificSentIsPendingNotDelivered() {
-            assertThat(WhatsAppDeliveryOutcome.fromBspStatus("SENT")).isEqualTo(WhatsAppDeliveryOutcome.PENDING);
-            assertThat(WhatsAppDeliveryOutcome.fromBspStatus("SENT").isTerminal()).isFalse();
+            assertThat(GlificDeliveryStatusReader.outcomeOf("SENT")).isEqualTo(WhatsAppDeliveryOutcome.PENDING);
+            assertThat(GlificDeliveryStatusReader.outcomeOf("SENT").isTerminal()).isFalse();
         }
 
         @Test
@@ -220,9 +311,9 @@ class GlificDeliveryStatusReaderTest {
                     service.fetchMessages(from, to, "DELIVERED", "inserted_at", 10, 1).get(0);
 
             assertThat(status.messageId()).isEqualTo("241952654");
-            assertThat(status.bspMessageId()).isEqualTo("da3d8d62-fe89-4f63-ab20-730dac83a8a1");
+            assertThat(status.upstreamMessageId()).isEqualTo("da3d8d62-fe89-4f63-ab20-730dac83a8a1");
             assertThat(status.bspStatus()).isEqualTo("DELIVERED");
-            assertThat(status.templateId()).isEqualTo(880557);
+            assertThat(status.templateId()).isEqualTo("880557");
             assertThat(status.hsm()).isTrue();
             assertThat(status.flow()).isEqualTo("OUTBOUND");
             assertThat(status.receiverContactId()).isEqualTo(6530736L);

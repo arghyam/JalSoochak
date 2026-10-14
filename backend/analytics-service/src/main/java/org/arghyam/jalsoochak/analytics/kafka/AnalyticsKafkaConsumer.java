@@ -23,12 +23,14 @@ import org.arghyam.jalsoochak.analytics.dto.event.DailyReportRequestEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.DailyReportKpisEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WeeklyReportRequestEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WeeklyReportKpisEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.NotificationDeliveryEvent;
 import org.arghyam.jalsoochak.analytics.dto.DailyReportKpiDTO;
 import org.arghyam.jalsoochak.analytics.dto.WeeklyReportKpiDTO;
 import org.arghyam.jalsoochak.analytics.service.DimensionService;
 import org.arghyam.jalsoochak.analytics.service.DailySituationReportService;
 import org.arghyam.jalsoochak.analytics.service.WeeklySituationReportService;
 import org.arghyam.jalsoochak.analytics.service.FactService;
+import org.arghyam.jalsoochak.analytics.service.NotificationDeliveryIngestionService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -53,6 +55,7 @@ public class AnalyticsKafkaConsumer {
     private final DailySituationReportService dailySituationReportService;
     private final WeeklySituationReportService weeklySituationReportService;
     private final KafkaProducer kafkaProducer;
+    private final NotificationDeliveryIngestionService notificationDeliveryIngestionService;
 
     @KafkaListener(topics = "tenant-service-topic", groupId = "${spring.kafka.consumer.group-id}")
     public void consumeTenantEvents(String message) {
@@ -218,6 +221,30 @@ public class AnalyticsKafkaConsumer {
             }
         } catch (Exception e) {
             log.error("Failed to process common-topic event: {}", e.getMessage(), e);
+            throw new RuntimeException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * message-service-topic also carries ad-hoc debug messages, so anything that is not a known event
+     * type (including no eventType at all) is skipped, never failed.
+     */
+    @KafkaListener(topics = "message-service-topic", groupId = "${spring.kafka.consumer.group-id}")
+    public void consumeMessageServiceEvents(String message) {
+        // DEBUG, not INFO like the other listeners: the delivery feed carries one event per notification
+        // status change, several per message sent.
+        log.debug("[analytics] Received from message-service-topic");
+        try {
+            String eventType = extractEventType(message);
+            switch (eventType) {
+                case "NOTIFICATION_DELIVERY_UPDATED" -> {
+                    NotificationDeliveryEvent event = objectMapper.readValue(message, NotificationDeliveryEvent.class);
+                    notificationDeliveryIngestionService.ingest(event);
+                }
+                default -> log.debug("[analytics] Ignoring message-service event type: {}", eventType);
+            }
+        } catch (Exception e) {
+            log.error("Failed to process message-service event: {}", e.getMessage(), e);
             throw new RuntimeException(e.getMessage(), e);
         }
     }

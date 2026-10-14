@@ -213,18 +213,19 @@ and OCR doesn't run.
 | | BFM | ELM | PDU, IOT, MAN |
 | --- | --- | --- | --- |
 | Tenant keys | `ocr_provider`, `ocr_url`, `ocr_api_key`, `ocr_auth_header` | the same with `ocr_elm_` | none |
-| Unset fields fall back to `ocr.*` | Yes, as before | **Never** | — |
-| Default provider | `ocr.default-provider` | none yet | — |
+| Unset fields fall back to `ocr.*` | Yes, as before | **Never**; to `ocr.elm.*` instead | — |
+| Default provider | `ocr.default-provider` | `ocr.elm.default-provider` | — |
 
-- Each `MeterReadingExtractor` declares its `channel()`. `FlowVisionOcrExtractor` is BFM's, and is
+- Each `MeterReadingExtractor` declares its `channel()`. `FlowVisionBfmOcrExtractor` is BFM's, and is
   no longer `@Primary`: nothing injects a single extractor, so a photo is never read by another
-  channel's model.
+  channel's model. `FlowVisionElmOcrExtractor` is ELM's.
 - `OcrProviderRegistry.get(channel, providerId)` returns the tenant's provider if it is registered for
   that channel, else the channel's default (with a WARN if a named provider was not found), else
   empty. Empty is a 400 `IMAGE_NOT_SUPPORTED_FOR_CHANNEL`.
 - ELM never falls back to `ocr.*`, so an ELM photo can never be sent to the BFM endpoint with the BFM
-  key. No ELM extractor exists yet, so **every ELM photo is rejected** today and the `ocr_elm_*` keys
-  have no effect.
+  key. ELM's default provider is `"flowvision-elm"`. With `ocr.elm.default-provider` set blank, an ELM
+  photo is read only for a tenant whose `ocr_elm_provider` names a registered ELM provider, and every
+  other ELM photo is rejected. A default that isn't registered for ELM fails startup.
 - `OcrReadingsRetryService` runs the extractor the capture picked. Its resilience instances stay per
   provider.
 - WhatsApp photos go through the same `createReading`, with the channel from the operator's preference.
@@ -554,7 +555,8 @@ corrected after it; earlier ones need §7.
 | Setting | Service | Default | Notes |
 | --- | --- | --- | --- |
 | `TELEMETRY_INTERNAL_AUTH_TOKEN_HASH` (`telemetry.internal.auth.token-hash`) | telemetry | empty: internal routes disabled | SHA-256 hex of the token, never the token |
-| `ocr_elm_provider`, `ocr_elm_url`, `ocr_elm_api_key`, `ocr_elm_auth_header` | tenant config rows | unset | No effect until an ELM extractor exists. Raw rows; tenant-service needs no change |
+| `ocr_elm_provider`, `ocr_elm_url`, `ocr_elm_api_key`, `ocr_elm_auth_header` | tenant config rows | unset | Unset fields fall back to `ocr.elm.*`. Raw rows; tenant-service needs no change |
+| `OCR_ELM_DEFAULT_PROVIDER`, `OCR_ELM_URL`, `OCR_ELM_API_KEY`, `OCR_ELM_AUTH_HEADER`, `OCR_ELM_CONNECT_TIMEOUT_MS`, `OCR_ELM_READ_TIMEOUT_MS` (`ocr.elm.*`) | telemetry | `"flowvision-elm"`, blank, blank, `X-API-Key`, `5000`, `120000` | `OCR_ELM_URL` is required while `"flowvision-elm"` is the default provider (startup fails without it), and for a tenant that names it in `ocr_elm_provider` without its own `ocr_elm_url`. `OCR_ELM_API_KEY` must be a key the ELM service accepts. A blank default provider makes ELM OCR opt-in per tenant, and startup then doesn't need `OCR_ELM_URL` |
 | `ocr.*` | telemetry | as before | Now documented as BFM's only |
 
 ---
@@ -749,8 +751,6 @@ export JAVA_HOME=<local JDK 21>
 
 ## 16. Known limitations
 
-- **No ELM OCR model.** ELM photos are rejected. When an extractor is added, ELM also needs a default
-  provider in `OcrProviderRegistry`.
 - **ELM and PDU over WhatsApp (phase 6) are not built.** There is no PDU minutes flow, and a WhatsApp
   manual value from a PDU operator overwrites their latest row today instead of adding a run.
 - **Pump ratings and `k_factor` are entered by SQL.** Nothing validates their units at entry.
