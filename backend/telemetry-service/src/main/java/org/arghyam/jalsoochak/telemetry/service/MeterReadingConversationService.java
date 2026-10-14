@@ -98,6 +98,11 @@ public class MeterReadingConversationService {
             "Please type your issue in a few words.";
     private static final String LEGACY_ISSUE_PROMPT_HINDI =
             "कृपया अपनी समस्या संक्षेप में लिखें।";
+    /** Built-in labels of the nudge "Select reason" menu, for a tenant whose ISSUE_REPORT template lacks them. */
+    private static final String DEFAULT_NO_READING_SUBMISSION_ENGLISH = "No Reading Submission";
+    private static final String DEFAULT_NO_READING_SUBMISSION_HINDI = "रीडिंग जमा नहीं हुई";
+    private static final String DEFAULT_NO_WATER_SUPPLY_ENGLISH = "No Water Supply";
+    private static final String DEFAULT_NO_WATER_SUPPLY_HINDI = "पानी की आपूर्ति नहीं";
     private static final String TELEMETRY_ISSUE_PROMPT_ENGLISH =
             "Please select your issue.";
     private static final String TELEMETRY_ISSUE_PROMPT_HINDI =
@@ -332,19 +337,7 @@ public class MeterReadingConversationService {
 
             String languageKey = localizationService.normalizeLanguageKey(operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
 
-            String defaultPrompt = "hindi".equals(languageKey) ? DEFAULT_ISSUE_PROMPT_HINDI : DEFAULT_ISSUE_PROMPT_ENGLISH;
-
-            Optional<String> promptFromTemplate = templatesService.resolveScreenPrompt(tenantId, "ISSUE_REPORT", languageKey);
-            String prompt;
-            if (promptFromTemplate.isPresent()) {
-                prompt = promptFromTemplate.get().trim();
-            } else {
-                prompt = tenantConfigRepository.findIssueReportPrompt(tenantId, languageKey)
-                        .map(String::trim)
-                        .filter(p -> !p.equalsIgnoreCase(LEGACY_ISSUE_PROMPT_ENGLISH)
-                                && !p.equals(LEGACY_ISSUE_PROMPT_HINDI))
-                        .orElse(defaultPrompt);
-            }
+            String prompt = resolveIssueReportPrompt(tenantId, languageKey);
 
             List<ConversationTemplateService.TemplateOption> templateReasons =
                     templatesService.resolveScreenReasons(tenantId, "ISSUE_REPORT");
@@ -377,6 +370,80 @@ public class MeterReadingConversationService {
                     .message("Issue report prompt could not be prepared.")
                     .build();
         }
+    }
+
+    /**
+     * The nudge flow's "Select reason" menu: the issue-report prompt with exactly two options,
+     * always in this order — {@code 1} no reading submission, {@code 2} no water supply. The flow
+     * routes on the reply number itself (1 → the no-submission reasons, 2 → the supply-outage
+     * reasons), so the order is fixed whatever the tenant's issue-report order. Labels are the
+     * tenant's own ISSUE_REPORT labels for those reasons in the operator's language, else built-in.
+     * Records nothing: the reason is stored by whichever reason list the operator picks next.
+     */
+    public IntroResponse issueReasonTypesMessage(IntroRequest request) {
+        try {
+            if (request.getContactId() == null || request.getContactId().isBlank()) {
+                throw new IllegalStateException("contactId is required");
+            }
+
+            TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(request.getContactId());
+
+            Integer tenantId = operatorWithSchema.operator().tenantId();
+            if (tenantId == null) {
+                throw new IllegalStateException("Operator tenant could not be resolved");
+            }
+
+            String languageKey = localizationService.normalizeLanguageKey(operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
+            boolean hindi = "hindi".equals(languageKey);
+            List<ConversationTemplateService.TemplateOption> templateReasons =
+                    templatesService.resolveScreenReasons(tenantId, "ISSUE_REPORT");
+
+            String noReadingSubmission = issueReasonLabel(templateReasons, Set.of("noReadingSubmission"), languageKey)
+                    .orElse(hindi ? DEFAULT_NO_READING_SUBMISSION_HINDI : DEFAULT_NO_READING_SUBMISSION_ENGLISH);
+            String noWaterSupply = issueReasonLabel(templateReasons, Set.of("noWaterSupply", "noWaterSupplied"), languageKey)
+                    .orElse(hindi ? DEFAULT_NO_WATER_SUPPLY_HINDI : DEFAULT_NO_WATER_SUPPLY_ENGLISH);
+
+            String message = resolveIssueReportPrompt(tenantId, languageKey)
+                    + "\n1. " + noReadingSubmission
+                    + "\n2. " + noWaterSupply;
+
+            return IntroResponse.builder()
+                    .success(true)
+                    .message(message)
+                    .build();
+        } catch (Exception e) {
+            logFailure("Error preparing issue reason types", request.getContactId(), e);
+            return IntroResponse.builder()
+                    .success(false)
+                    .message("Issue reason types could not be prepared.")
+                    .build();
+        }
+    }
+
+    /** The ISSUE_REPORT label of the template reason whose key (REASON_n normalized) is one of {@code keys}. */
+    private Optional<String> issueReasonLabel(List<ConversationTemplateService.TemplateOption> templateReasons,
+                                              Set<String> keys,
+                                              String languageKey) {
+        return templateReasons.stream()
+                .filter(option -> option.key() != null
+                        && keys.contains(normalizeIssueReportSelectedKey(option.key()).trim()))
+                .map(option -> option.labelForLanguageKey(languageKey))
+                .filter(label -> label != null && !label.isBlank())
+                .map(String::trim)
+                .findFirst();
+    }
+
+    private String resolveIssueReportPrompt(Integer tenantId, String languageKey) {
+        String defaultPrompt = "hindi".equals(languageKey) ? DEFAULT_ISSUE_PROMPT_HINDI : DEFAULT_ISSUE_PROMPT_ENGLISH;
+        Optional<String> promptFromTemplate = templatesService.resolveScreenPrompt(tenantId, "ISSUE_REPORT", languageKey);
+        if (promptFromTemplate.isPresent()) {
+            return promptFromTemplate.get().trim();
+        }
+        return tenantConfigRepository.findIssueReportPrompt(tenantId, languageKey)
+                .map(String::trim)
+                .filter(p -> !p.equalsIgnoreCase(LEGACY_ISSUE_PROMPT_ENGLISH)
+                        && !p.equals(LEGACY_ISSUE_PROMPT_HINDI))
+                .orElse(defaultPrompt);
     }
 
     public String issueReportTelemetryReasons(IntroRequest request) {

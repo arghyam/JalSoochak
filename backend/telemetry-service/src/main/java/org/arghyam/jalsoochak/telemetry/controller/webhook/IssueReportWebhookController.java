@@ -50,6 +50,27 @@ public class IssueReportWebhookController {
         }
     }
 
+    /**
+     * The nudge flow's "Select reason" menu: 1 no reading submission, 2 no water supply — fixed order,
+     * since the flow routes on the number. See {@link MeterReadingConversationService#issueReasonTypesMessage}.
+     */
+    @PostMapping("/issue-report/reason-types")
+    public ResponseEntity<IntroResponse> issueReasonTypes(@RequestBody @Valid IntroRequest request) {
+        try {
+            IntroResponse response = meterWorkflowService.issueReasonTypesMessage(request);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error preparing issue reason types: {}", e.getMessage(), e);
+            log.debug("Error preparing issue reason types for contactId {}: {}", request.getContactId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    IntroResponse.builder()
+                            .success(false)
+                            .message("Issue reason types could not be prepared.")
+                            .build()
+            );
+        }
+    }
+
     @PostMapping("/issue-report/submit")
     public ResponseEntity<IntroResponse> issueReportSubmit(@RequestBody @Valid IssueReportRequest request) {
         try {
