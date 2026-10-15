@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -236,17 +237,25 @@ public class StateSyncTenantRepository {
                 + "updated_at = NOW() WHERE id = ? AND NOT is_auto_provisioned AND deleted_at IS NULL", actor, actor, schemeId);
     }
 
-    /** Schemes this sync's actor retired, by upstream code, so one the upstream lists again comes back. */
-    public List<SchemeRow> schemesRetiredBy(String schema, int actor) {
+    /** A soft-deleted real scheme, with who deleted it ({@code null} when not recorded) and when. */
+    public record DeletedScheme(SchemeRow row, Integer deletedBy, LocalDateTime deletedAt) {
+    }
+
+    /**
+     * Every soft-deleted real scheme, most recently deleted first, so one the upstream still lists can be
+     * brought back instead of duplicated. Placeholders are never included.
+     */
+    public List<DeletedScheme> deletedSchemes(String schema) {
         return jdbc.query("SELECT id, state_scheme_id, centre_scheme_id, state_scheme_code, scheme_name, "
-                + "work_status, operating_status, planned_fhtc, fhtc_count, latitude, longitude, "
-                + "is_auto_provisioned FROM " + s(schema) + ".scheme_master_table WHERE deleted_at IS NOT NULL "
-                + "AND deleted_by = ? AND state_scheme_code IS NOT NULL AND NOT is_auto_provisioned",
-                (rs, n) -> new SchemeRow(rs.getInt("id"), rs.getString("state_scheme_id"),
+                + "work_status, operating_status, planned_fhtc, fhtc_count, latitude, longitude, deleted_by, deleted_at "
+                + "FROM " + s(schema) + ".scheme_master_table WHERE deleted_at IS NOT NULL AND NOT is_auto_provisioned "
+                + "ORDER BY deleted_at DESC, id DESC",
+                (rs, n) -> new DeletedScheme(new SchemeRow(rs.getInt("id"), rs.getString("state_scheme_id"),
                         rs.getString("centre_scheme_id"), rs.getString("state_scheme_code"),
                         rs.getString("scheme_name"), rs.getInt("work_status"), rs.getInt("operating_status"),
                         rs.getInt("planned_fhtc"), rs.getInt("fhtc_count"), nullableDouble(rs, "latitude"),
-                        nullableDouble(rs, "longitude"), false), actor);
+                        nullableDouble(rs, "longitude"), false),
+                        (Integer) rs.getObject("deleted_by"), rs.getTimestamp("deleted_at").toLocalDateTime()));
     }
 
     public void reviveScheme(String schema, int schemeId, int actor) {

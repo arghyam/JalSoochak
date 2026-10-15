@@ -541,15 +541,33 @@ class SchemeReconcilerIntegrationTest extends StateSyncIntegrationTestBase {
     }
 
     @Test
-    void aSchemeAnAdminDeletedIsNotRevived() {
+    void aSchemeAnAdminDeletedIsBroughtBackAndReportedWhenJjmStillListsIt() {
         int deleted = scheme("34123", "8165607", "CHAPATOLI PWSS", "SCH-000008");
         jdbc.update("UPDATE tenant_as.scheme_master_table SET deleted_at = NOW(), deleted_by = NULL WHERE id = ?", deleted);
 
         SyncReport report = sync(chapatoli(List.of(), List.of()));
 
-        assertThat(report.counts()).doesNotContainKey("schemes.revived");
-        assertThat(jdbc.queryForObject("SELECT deleted_at IS NOT NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NULL FROM tenant_as.scheme_master_table WHERE id = ?",
                 Boolean.class, deleted)).isTrue();
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.scheme_master_table WHERE state_scheme_code = 'SCH-000008'"))
+                .isEqualTo(1);
+        assertThat(report.get("schemes.revived")).isEqualTo(1);
+        assertThat(report.issues()).filteredOn(i -> i.category().equals("SCHEME_REVIVED")).singleElement()
+                .satisfies(i -> assertThat(i.detail()).containsEntry("schemeId", deleted).containsEntry("matchedBy", "code")
+                        .containsEntry("retiredBySync", false).containsKey("deletedAt"));
+    }
+
+    @Test
+    void aSchemeDeletedBeforeItHadAJjmCodeIsBroughtBackByItsIdPair() {
+        int deleted = scheme("34123", "8165607", "Chapatoli", null);
+        jdbc.update("UPDATE tenant_as.scheme_master_table SET deleted_at = NOW(), deleted_by = ? WHERE id = ?", actor, deleted);
+
+        SyncReport report = sync(chapatoli(List.of(), List.of()));
+
+        assertThat(schemeId("SCH-000008")).isEqualTo(deleted);
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.scheme_master_table")).isEqualTo(1);
+        assertThat(report.issues()).filteredOn(i -> i.category().equals("SCHEME_REVIVED")).singleElement()
+                .satisfies(i -> assertThat(i.detail()).containsEntry("matchedBy", "id_pair").containsEntry("deletedBy", actor));
     }
 
     @Test

@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.scheme.enums.SchemeWorkStatus;
 import org.arghyam.jalsoochak.scheme.statesync.config.StateSyncProperties;
 import org.arghyam.jalsoochak.scheme.statesync.model.UpstreamPerson;
 import org.arghyam.jalsoochak.scheme.statesync.model.UpstreamScheme;
+import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantRepository.DeletedScheme;
 import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantRepository.LocationMappingRow;
 import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantRepository.LocationNode;
 import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantRepository.SchemeRow;
@@ -12,6 +13,7 @@ import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantReposito
 import org.arghyam.jalsoochak.scheme.statesync.run.SyncReport;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -80,8 +82,12 @@ public class SchemeReconciler {
     /** IMIS id → live placeholders carrying it (one per submitted id pair, so possibly several). */
     private final Map<String, List<Integer>> placeholdersByCentre = new HashMap<>();
     private final Set<Integer> claimedThisRun = new HashSet<>();
-    /** Schemes this sync retired, by upstream code: one the upstream lists again is revived, not duplicated. */
-    private final Map<String, SchemeRow> retiredByCode = new HashMap<>();
+    /**
+     * Soft-deleted schemes (by an admin or by this sync), most recent first: one the upstream still lists
+     * is brought back, not duplicated. By upstream code, and by IMIS|SMT pair for one deleted before it had a code.
+     */
+    private final Map<String, DeletedScheme> deletedByCode = new HashMap<>();
+    private final Map<String, List<DeletedScheme>> deletedByPair = new HashMap<>();
     /** IMIS id → upstream codes carrying it in the batch being reconciled; JJM does not enforce uniqueness. */
     private final Map<String, Set<String>> batchCodesByCentre = new HashMap<>();
 
@@ -114,8 +120,8 @@ public class SchemeReconciler {
             }
             index(row);
         }
-        for (SchemeRow row : repository.schemesRetiredBy(schema, actor)) {
-            retiredByCode.putIfAbsent(row.stateSchemeCode(), row);
+        for (DeletedScheme deleted : repository.deletedSchemes(schema)) {
+            rememberDeleted(deleted);
         }
 
         List<LocationNode> lgdNodes = repository.lgdNodes(schema);
@@ -167,7 +173,7 @@ public class SchemeReconciler {
             report.issue("SCHEME", null, "INVALID_UPSTREAM_ROW", Map.of("reason", "no code"));
             return Optional.empty();
         }
-        reviveIfRetired(up.code(), report);
+        reviveIfDeleted(up, report);
         Resolution resolution = match(up);
         if (resolution.issue != null) {
             report.issue("SCHEME", up.code(), resolution.issue, resolution.detail);
@@ -638,7 +644,7 @@ public class SchemeReconciler {
             SchemeRow row = schemesById.remove(schemeId);
             idByCode.remove(code);
             if (row != null) {
-                retiredByCode.put(code, row);
+                rememberDeleted(new DeletedScheme(row, actor, LocalDateTime.now()));
             }
             touchedSchemes.remove(schemeId);
             retired.add(schemeId);
@@ -648,19 +654,66 @@ public class SchemeReconciler {
         return retired;
     }
 
-    /** A scheme this sync retired comes back, same id, when the upstream lists its code again. */
-    private void reviveIfRetired(String code, SyncReport report) {
-        if (idByCode.containsKey(code)) {
+    /**
+     * The upstream is the source of truth: a soft-deleted scheme it still lists comes back with the same id
+     * (and its readings), whoever deleted it — matched by upstream code, else, for one deleted before it
+     * had a code, by its exact IMIS + SMT pair when no live scheme holds either id. Reported as
+     * {@code SCHEME_REVIVED} with who deleted it and when.
+     */
+    private void reviveIfDeleted(UpstreamScheme up, SyncReport report) {
+        if (idByCode.containsKey(up.code())) {
             return;
         }
-        SchemeRow row = retiredByCode.remove(code);
-        if (row == null) {
+        DeletedScheme found = deletedByCode.get(up.code());
+        String matchedBy = "code";
+        if (found == null && !blank(up.centreSchemeId()) && !blank(up.stateSchemeId())
+                && idsByCentre.getOrDefault(up.centreSchemeId(), Set.of()).isEmpty()
+                && idsByState.getOrDefault(up.stateSchemeId(), Set.of()).isEmpty()) {
+            found = deletedByPair.getOrDefault(pairKey(up.centreSchemeId(), up.stateSchemeId()), List.of()).stream()
+                    .filter(d -> blank(d.row().stateSchemeCode()))
+                    .findFirst().orElse(null);
+            matchedBy = "id_pair";
+        }
+        if (found == null) {
             return;
         }
-        repository.reviveScheme(schema, row.id(), actor);
-        index(row);
+        forgetDeleted(found);
+        repository.reviveScheme(schema, found.row().id(), actor);
+        index(found.row());
         report.count("schemes.revived");
-        report.issue("SCHEME", code, "SCHEME_REVIVED", Map.of("schemeId", row.id()));
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("schemeId", found.row().id());
+        detail.put("matchedBy", matchedBy);
+        detail.put("retiredBySync", Objects.equals(found.deletedBy(), actor));
+        if (found.deletedBy() != null) {
+            detail.put("deletedBy", found.deletedBy());
+        }
+        detail.put("deletedAt", found.deletedAt().toString());
+        report.issue("SCHEME", up.code(), "SCHEME_REVIVED", detail);
+    }
+
+    private void rememberDeleted(DeletedScheme deleted) {
+        SchemeRow row = deleted.row();
+        if (!blank(row.stateSchemeCode())) {
+            deletedByCode.putIfAbsent(row.stateSchemeCode(), deleted);
+        }
+        if (!blank(row.centreSchemeId()) && !blank(row.stateSchemeId())) {
+            deletedByPair.computeIfAbsent(pairKey(row.centreSchemeId(), row.stateSchemeId()), k -> new ArrayList<>()).add(deleted);
+        }
+    }
+
+    private void forgetDeleted(DeletedScheme deleted) {
+        SchemeRow row = deleted.row();
+        if (!blank(row.stateSchemeCode())) {
+            deletedByCode.remove(row.stateSchemeCode(), deleted);
+        }
+        if (!blank(row.centreSchemeId()) && !blank(row.stateSchemeId())) {
+            deletedByPair.getOrDefault(pairKey(row.centreSchemeId(), row.stateSchemeId()), new ArrayList<>()).remove(deleted);
+        }
+    }
+
+    private static String pairKey(String centreSchemeId, String stateSchemeId) {
+        return centreSchemeId.trim() + "|" + stateSchemeId.trim();
     }
 
     /** Issue details cannot hold nulls, so a missing value is left out. */
