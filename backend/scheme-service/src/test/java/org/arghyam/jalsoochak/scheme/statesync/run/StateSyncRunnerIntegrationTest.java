@@ -271,6 +271,20 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
     }
 
     @Test
+    void aRefreshReadsTheBlockedListAndLeavesABlockedOfficerOut() {
+        properties.setMode(Mode.APPLY);
+        source.blocked.add("USR-016363");
+
+        RunResult result = runner.runNow(RunKind.SCHEME_REFRESH, "SCH-000008", "ADMIN:x").orElseThrow();
+
+        assertThat(result.succeeded()).isTrue();
+        assertThat(result.counts()).containsEntry("fetched.blocked_users", 1)
+                .containsEntry("user_scheme_mappings.skipped_blocked_user", 1)
+                .containsEntry("users.inserted", 1); // the jal mitra, who is not blocked
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.user_table WHERE state_user_id = 'USR-016363'")).isZero();
+    }
+
+    @Test
     void refusesToRunWhenDisabled() {
         properties.setEnabled(false);
 
@@ -300,6 +314,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         final List<UpstreamNode> villages = new ArrayList<>();
         final List<UpstreamPerson> users = new ArrayList<>();
         final List<UpstreamScheme> schemes = new ArrayList<>();
+        final List<String> blocked = new ArrayList<>();
         boolean failVillages;
         boolean deltaReturnsNothing;
         Runnable onVillages = () -> { };
@@ -348,6 +363,6 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         }
 
         @Override public List<String> archivedSchemeCodes() { calls++; return List.of(); }
-        @Override public List<String> blockedUserCodes() { calls++; return List.of(); }
+        @Override public List<String> blockedUserCodes() { calls++; return blocked; }
     }
 }

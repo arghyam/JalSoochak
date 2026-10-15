@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantReposito
 import org.arghyam.jalsoochak.scheme.statesync.run.SyncReport;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -22,8 +23,10 @@ import java.util.Set;
  *
  * <p><b>What changes on a matched user</b>: the name; {@code state_user_id} when we hold none; and the
  * role, except that an administrative account is never re-typed and a promotion into
- * {@code EXECUTIVE_ENGINEER} is withheld for a human to approve (both raise an issue). Phone, email,
- * password and status are never touched here — status only moves through the blocked list.
+ * {@code EXECUTIVE_ENGINEER} is withheld for a human to approve (both raise an issue). Phone, email and
+ * password are never touched. Status follows the upstream, which is the source of truth: a user on its
+ * blocked list is deactivated ({@link #block}), and one it lists as a scheme's officer while not blocked
+ * is reactivated ({@link #reactivate}). Administrative accounts are left alone either way.
  *
  * <p><b>A new user</b> is inserted only for an allow-listed role with a valid Indian mobile and a name.
  */
@@ -49,6 +52,9 @@ public class UserDirectory {
     /** upstream code → outcome, so a person listed on 40 schemes is resolved (and reported) once. */
     private final Map<String, Optional<UserRow>> resolved = new HashMap<>();
     private final Map<Integer, String> typeAssignedThisRun = new HashMap<>();
+
+    /** The upstream's blocked user codes for this run; empty when the run did not fetch them. */
+    private Set<String> blockedCodes = Set.of();
 
     private final Set<Integer> created = new HashSet<>();
     private final Set<Integer> updated = new HashSet<>();
@@ -229,6 +235,41 @@ public class UserDirectory {
             updated.add(user.id());
         }
         return after;
+    }
+
+    /** The upstream's blocked list for this run, consulted by {@link #isBlocked}. */
+    public void useBlockedList(Collection<String> codes) {
+        this.blockedCodes = Set.copyOf(codes);
+    }
+
+    public boolean isBlocked(String code) {
+        return code != null && blockedCodes.contains(code);
+    }
+
+    /**
+     * Sets status 1 on a user the upstream lists as a scheme's officer and has not blocked, the way
+     * user-service's staff activation does. An administrative account is never reactivated here.
+     *
+     * @return the active user, or empty when withheld (the reason is in the report)
+     */
+    public Optional<UserRow> reactivate(UserRow user, String code, SyncReport report) {
+        UserRow current = byId.getOrDefault(user.id(), user);
+        if (current.status() == 1) {
+            return Optional.of(current);
+        }
+        if (current.userTypeName() != null && PROTECTED_TYPES.contains(current.userTypeName())) {
+            report.issue("USER", code, "REACTIVATION_ON_ADMIN_WITHHELD", Map.of("userId", current.id()));
+            return Optional.empty();
+        }
+        repository.activateUser(schema, current.id(), actor);
+        UserRow after = new UserRow(current.id(), current.uuid(), current.userTypeId(), current.userTypeName(),
+                current.titleEncrypted(), current.phoneHash(), current.stateUserId(), 1);
+        index(after);
+        if (!created.contains(current.id())) {
+            updated.add(current.id());
+        }
+        report.count("users.reactivated");
+        return Optional.of(after);
     }
 
     /** Sets status 0 on the user holding this upstream code. Administrative accounts are never blocked here. */

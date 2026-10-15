@@ -52,6 +52,10 @@ import java.util.TreeSet;
  * which case what we hold is kept. Only rows the sync owns are managed: LGD rows pointing at a village
  * (or the state placeholder), department rows pointing at a sub-division, and officer rows whose user
  * is one of {@link StateVocabulary#MANAGED_USER_TYPES}.
+ *
+ * <p>An officer the payload lists is active upstream unless the upstream's blocked list names them: an
+ * inactive one is reactivated and linked, a blocked one is never created and is left unlinked (the run
+ * applies the blocked list, deactivating them, before the schemes).
  */
 public class SchemeReconciler {
 
@@ -443,11 +447,20 @@ public class SchemeReconciler {
                 continue;
             }
             anyManaged = true;
+            if (users.isBlocked(person.code())) {
+                // Blocked upstream (the run has already deactivated them): never created, and unlinked below.
+                report.count("user_scheme_mappings.skipped_blocked_user");
+                continue;
+            }
             Optional<UserRow> user = users.resolve(person, report);
             if (user.isEmpty()) {
                 incompleteTypes.add(type.get());
-            } else if (user.get().status() == 1) {
-                desired.add(user.get().id());
+                continue;
+            }
+            // The upstream lists them as this scheme's officer and has not blocked them: they are active.
+            Optional<UserRow> active = users.reactivate(user.get(), person.code(), report);
+            if (active.isPresent()) {
+                desired.add(active.get().id());
             } else {
                 report.count("user_scheme_mappings.skipped_inactive_user");
             }
