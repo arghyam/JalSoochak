@@ -47,7 +47,8 @@ Every run:
 | `section-officer[]`, `sdo[]`, `executive-engineer[]`, `pump-operator[]` | `user_scheme_mapping_table`, `user_table.status` | Upstream is the source of truth: an officer listed on the scheme and not on `/blocked-users` is active, so an inactive user (`status = 0`) is **reactivated** (`users.reactivated`) and the pair added or revived. A listed officer who is blocked is never created, is deactivated if we hold them, and stays unlinked (`skipped_blocked_user`). Admin accounts are never reactivated (`REACTIVATION_ON_ADMIN_WITHHELD`). Rows no longer listed are retired, but only for the four managed user types. |
 | `/archived-schemes` | `user_scheme_mapping_table` | Officers are retired, so nudges and escalations stop. The scheme row, its locations and its readings stay. A scheme with a reading in the last 90 days is **spared** (`ARCHIVED_BUT_REPORTING`). |
 | `/blocked-users` | `user_table.status = 0` + mappings retired | Read on every run (one unpaginated call), before the schemes, so a blocked officer is never reactivated. Admin accounts are never blocked by the sync. JJM confirmed blocks are permanent. |
-| Schemes in neither `/schemes` nor the archive | — | Reported only (`UPSTREAM_SCHEME_MISSING`) |
+| Coded schemes in neither `/schemes` nor the archive | `scheme_master_table` | Reported every full run (`UPSTREAM_SCHEME_MISSING`). Codes are permanent and the list is complete, so one missing from **this and the previous successful full run** has become a child or test scheme upstream: with `STATE_SYNC_RETIRE_MISSING_SCHEMES=true` it is **retired** (soft-deleted, `deleted_by` = the sync's actor, officer links retired, villages / sub-divisions and readings kept) and `SCHEME_RETIRED` goes to analytics. Skipped (`RETIREMENT_SKIPPED`) when the run listed fewer schemes than `STATE_SYNC_RETIRE_MIN_LISTED_RATIO` × our coded schemes, or would retire more than `STATE_SYNC_RETIRE_MAX_PER_RUN`. Candidates are counted either way (`schemes.retire_candidates`). A retired scheme the upstream lists again is revived with the same id (`SCHEME_REVIVED`); one an admin deleted is not. |
+| Our schemes no upstream scheme matched (no code) | — | Reported every full run (`LOCAL_SCHEME_NOT_IN_JJM`) with name, IMIS and SMT ids and last reading date, never changed. `GET /api/v1/scheme/state-sync/unmatched-schemes?tenantCode=&format=csv` downloads both lists from the last successful full run (dry runs included) to review with the JJM team. |
 
 Safety rules:
 - An **empty** village, sub-division or officer list keeps what we hold and raises an issue
@@ -66,6 +67,7 @@ Safety rules:
 | Event (`scheme-service-topic`) | Analytics does |
 | --- | --- |
 | `SCHEME_MAPPINGS_REPLACED` (dev's event, reused) | The scheme's details plus its full village and sub-division lists. Analytics keeps one `dim_scheme_table` row per village × sub-division pair, deletes the rows of pairs that are gone and writes the details to every row. The sync sends it for every scheme it inserted or changed, through `SchemeService.publishSchemeMappingsReplaced`, keyed `tenantId:schemeId`. |
+| `SCHEME_RETIRED {schemeId}` (new; keyed `tenantId:schemeId`) | Drops the scheme's dim rows and daily aggregates so it leaves the dashboards, then re-aggregates the days it had readings. Its facts stay; a revived scheme gets its dim rows back from its next `SCHEME_MAPPINGS_REPLACED`. A send Kafka refuses is recorded as `RETIREMENT_EVENT_FAILED`. |
 | `SCHEME_READINGS_REASSIGNED {from, to}` (new; keyed like the real scheme, so it follows that scheme's own message) | In one transaction holding both schemes' ingestion locks: moves the meter-reading facts (including pre-V56 rows with no `source_reading_id`, which a republish would have duplicated), plus attendance, anomaly and escalation facts. It then works out water quantity again for each affected day (removed from the placeholder, recalculated on the real scheme) and drops the placeholder's daily aggregates and dim rows. After commit it re-aggregates the affected dates in the background, in 31-day `backfillWindow` chunks. |
 
 The mapping CSV upload sends the same event; the scheme upload and status PATCH send `SCHEME_UPDATED`
@@ -92,7 +94,9 @@ reported.
 | `STATE_SYNC_DELTA_OVERLAP` | `PT30M` | How far before the watermark each delta re-reads |
 | `STATE_SYNC_STALE_RUN_AFTER` | `PT2H` | Lock takeover after a crash. Must exceed the longest full run. |
 | `STATE_SYNC_ARCHIVE_SPARE_READING_DAYS` | `90` | |
-| `STATE_SYNC_RETIRE_ON_EMPTY_LIST` | `false` | Flip once Assam confirms that empty means "none" |
+| `STATE_SYNC_RETIRE_ON_EMPTY_LIST` | `false` | Keep `false`: JJM confirmed an empty list means "not linked yet" |
+| `STATE_SYNC_RETIRE_MISSING_SCHEMES` | `false` | Retire coded schemes missing from two consecutive full runs (§2) |
+| `STATE_SYNC_RETIRE_MIN_LISTED_RATIO` / `STATE_SYNC_RETIRE_MAX_PER_RUN` | `0.95` / `200` | Guards on that retirement |
 | `STATE_SYNC_PLACEHOLDER_LOOKUPS_PER_RUN` / `_RETRY_AFTER` | `25` / `PT24H` | Placeholder lookups per delta, and the cool-down for ids upstream does not know |
 | `STATE_SYNC_MOVE_PLACEHOLDER_READINGS` | `true` | Move a superseded placeholder's readings to the real scheme (§2a) |
 | `JJM_BRAIN_BASE_URL` / `JJM_BRAIN_API_KEY` | `https://jjmbrain.in/api/v1` / — | |

@@ -66,6 +66,18 @@ class AnalyticsKafkaConsumerTest {
     private AnalyticsKafkaConsumer consumer;
 
     @Test
+    void consumeSchemeEvents_schemeRetired_routesToTheReassignmentService() {
+        consumer.consumeSchemeEvents("""
+                {"eventType":"SCHEME_RETIRED","tenantId":1,"schemeId":21}
+                """);
+
+        ArgumentCaptor<org.arghyam.jalsoochak.analytics.dto.event.SchemeRetiredEvent> captor =
+                ArgumentCaptor.forClass(org.arghyam.jalsoochak.analytics.dto.event.SchemeRetiredEvent.class);
+        verify(schemeReassignmentService).retire(captor.capture());
+        assertThat(captor.getValue().getSchemeId()).isEqualTo(21);
+    }
+
+    @Test
     void consumeSchemeEvents_readingsReassigned_routesToTheReassignmentService() {
         consumer.consumeSchemeEvents("""
                 {"eventType":"SCHEME_READINGS_REASSIGNED","tenantId":1,"fromSchemeId":99,"toSchemeId":10}

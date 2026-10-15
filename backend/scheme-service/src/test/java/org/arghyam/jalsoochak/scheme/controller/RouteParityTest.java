@@ -57,7 +57,8 @@ class RouteParityTest {
             "POST /api/v1/scheme/state-sync/runs",
             "GET /api/v1/scheme/state-sync/runs",
             "POST /api/v1/scheme/state-sync/schemes/refresh",
-            "GET /api/v1/scheme/state-sync/issues"
+            "GET /api/v1/scheme/state-sync/issues",
+            "GET /api/v1/scheme/state-sync/unmatched-schemes"
     );
 
     @Test

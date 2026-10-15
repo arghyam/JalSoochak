@@ -496,6 +496,63 @@ class SchemeReconcilerIntegrationTest extends StateSyncIntegrationTestBase {
     }
 
     @Test
+    void reportsOurSchemesJjmNeverMatchedForReview() {
+        int local = scheme("60001", "9000002", "Local only PWSS", null);
+        reading(local, LocalDateTime.of(2026, 9, 3, 8, 0));
+        int placeholder = placeholder("", "9000003");
+
+        SchemeReconciler reconciler = reconciler();
+        SyncReport report = new SyncReport();
+        reconciler.reconcile(List.of(chapatoli(List.of(), List.of())), report);
+        reconciler.reportNotInUpstream(report);
+
+        assertThat(report.issues()).filteredOn(i -> i.category().equals("LOCAL_SCHEME_NOT_IN_JJM")).singleElement()
+                .satisfies(i -> assertThat(i.detail()).containsEntry("schemeId", local)
+                        .containsEntry("schemeName", "Local only PWSS").containsEntry("centreSchemeId", "9000002")
+                        .containsEntry("stateSchemeId", "60001").containsEntry("lastReadingDate", "2026-09-03"));
+        assertThat(report.get("schemes.local_not_in_jjm")).isEqualTo(1);
+        assertThat(report.issues()).noneMatch(i -> placeholder == (Integer) i.detail().getOrDefault("schemeId", -1));
+    }
+
+    @Test
+    void aRetiredSchemeLosesItsOfficersAndComesBackWhenJjmListsItAgain() {
+        sync(chapatoli(List.of("VIL-008633"), List.of(so, po)));
+        int id = schemeId("SCH-000008");
+
+        SchemeReconciler reconciler = reconciler();
+        SyncReport retire = new SyncReport();
+        assertThat(reconciler.retireMissing(Set.of("SCH-000008"), retire)).containsExactly(id);
+
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NOT NULL AND deleted_by = ? FROM tenant_as.scheme_master_table "
+                + "WHERE id = ?", Boolean.class, actor, id)).isTrue();
+        assertThat(liveOfficers(id)).isZero();
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.scheme_lgd_mapping_table WHERE scheme_id = ? AND deleted_at IS NULL",
+                id)).isEqualTo(1);
+        assertThat(retire.issues()).extracting(SyncIssue::category).contains("SCHEME_RETIRED");
+
+        SyncReport back = sync(chapatoli(List.of("VIL-008633"), List.of(so, po)));
+
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, id)).isTrue();
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.scheme_master_table WHERE state_scheme_code = 'SCH-000008'"))
+                .isEqualTo(1);
+        assertThat(liveOfficers(id)).isEqualTo(2);
+        assertThat(back.get("schemes.revived")).isEqualTo(1);
+    }
+
+    @Test
+    void aSchemeAnAdminDeletedIsNotRevived() {
+        int deleted = scheme("34123", "8165607", "CHAPATOLI PWSS", "SCH-000008");
+        jdbc.update("UPDATE tenant_as.scheme_master_table SET deleted_at = NOW(), deleted_by = NULL WHERE id = ?", deleted);
+
+        SyncReport report = sync(chapatoli(List.of(), List.of()));
+
+        assertThat(report.counts()).doesNotContainKey("schemes.revived");
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NOT NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, deleted)).isTrue();
+    }
+
+    @Test
     void anExistingRealSchemeAlsoAbsorbsAPlaceholderWithItsImisId() {
         int real = scheme("34123", "8165607", "Chapatoli", "SCH-000008");
         int first = placeholder("34123", "8165607");

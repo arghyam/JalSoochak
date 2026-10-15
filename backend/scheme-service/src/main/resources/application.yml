@@ -93,6 +93,9 @@ state-sync:
   stale-run-after: ${STATE_SYNC_STALE_RUN_AFTER:PT2H}
   archive-spare-reading-days: ${STATE_SYNC_ARCHIVE_SPARE_READING_DAYS:90}
   retire-on-empty-list: ${STATE_SYNC_RETIRE_ON_EMPTY_LIST:false}
+  retire-missing-schemes: ${STATE_SYNC_RETIRE_MISSING_SCHEMES:false}
+  retire-min-listed-ratio: ${STATE_SYNC_RETIRE_MIN_LISTED_RATIO:0.95}
+  retire-max-per-run: ${STATE_SYNC_RETIRE_MAX_PER_RUN:200}
   placeholder-lookups-per-run: ${STATE_SYNC_PLACEHOLDER_LOOKUPS_PER_RUN:25}
   placeholder-retry-after: ${STATE_SYNC_PLACEHOLDER_RETRY_AFTER:PT24H}
   move-placeholder-readings: ${STATE_SYNC_MOVE_PLACEHOLDER_READINGS:true}

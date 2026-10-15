@@ -184,6 +184,47 @@ class StateSyncAdminControllerTest {
         assertThatThrownBy(() -> controller.config("AS")).isInstanceOf(AccessDeniedException.class);
     }
 
+    private static StateSyncRunRepository.ReviewList reviewList() {
+        return new StateSyncRunRepository.ReviewList(9L, java.time.LocalDateTime.of(2026, 10, 15, 2, 0), List.of(
+                new StateSyncRunRepository.ReviewRow("NOT_IN_JJM", 31, "Borah, \"New\" PWSS", null, "9000002", "60001",
+                        "2026-09-03"),
+                new StateSyncRunRepository.ReviewRow("NO_LONGER_LISTED", 32, "=SUM(A1)", "SCH-777777", "9000001", "50001",
+                        null)));
+    }
+
+    @Test
+    void listsTheUnmatchedSchemesOfTheLastFullRun() {
+        when(runRepository.findTenant("AS")).thenReturn(Optional.of(new StateSyncRunRepository.Tenant(1, "AS", "tenant_as")));
+        when(runRepository.unmatchedSchemes(1)).thenReturn(reviewList());
+
+        var response = controller.unmatchedSchemes("AS", "json");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(((StateSyncRunRepository.ReviewList) response.getBody()).schemes()).hasSize(2);
+    }
+
+    @Test
+    void downloadsTheUnmatchedSchemesAsCsvWithSafeCells() {
+        when(runRepository.findTenant("AS")).thenReturn(Optional.of(new StateSyncRunRepository.Tenant(1, "AS", "tenant_as")));
+        when(runRepository.unmatchedSchemes(1)).thenReturn(reviewList());
+
+        var response = controller.unmatchedSchemes("AS", "csv");
+
+        assertThat(response.getHeaders().getContentType().toString()).startsWith("text/csv");
+        assertThat(response.getHeaders().getFirst("Content-Disposition")).contains("unmatched-schemes-as.csv");
+        assertThat((String) response.getBody()).isEqualTo(
+                "reason,scheme_id,scheme_name,jjm_code,imis_id,smt_id,last_reading_date\n"
+                        + "NOT_IN_JJM,31,\"Borah, \"\"New\"\" PWSS\",,9000002,60001,2026-09-03\n"
+                        + "NO_LONGER_LISTED,32,'=SUM(A1),SCH-777777,9000001,50001,\n");
+    }
+
+    @Test
+    void theReviewListNeedsTheTenantsAdmin() {
+        authenticate("UP", "ROLE_STATE_ADMIN");
+
+        assertThatThrownBy(() -> controller.unmatchedSchemes("AS", "json")).isInstanceOf(AccessDeniedException.class);
+    }
+
     private static void authenticate(String tenant, String role) {
         Jwt jwt = new Jwt("t", Instant.now(), Instant.now().plusSeconds(60), Map.of("alg", "none"),
                 Map.of("sub", "user-uuid", "tenant_state_code", tenant));

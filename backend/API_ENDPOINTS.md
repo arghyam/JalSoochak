@@ -180,6 +180,7 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 | POST | `/api/v1/scheme/state-sync/schemes/refresh?tenantCode={tenantCode}&ref={SCH-code\|IMIS id}` | Re-pull and reconcile one scheme now; returns the run's counts and issues |
 | GET | `/api/v1/scheme/state-sync/runs?tenantCode={tenantCode}&limit={n}` | Run history, newest first |
 | GET | `/api/v1/scheme/state-sync/issues?tenantCode={tenantCode}&runId={id?}&category={c?}&limit={n}&offset={n}` | What a run declined to write (conflicts, unmatched villages, spared archives …) |
+| GET | `/api/v1/scheme/state-sync/unmatched-schemes?tenantCode={tenantCode}&format={json\|csv}` | Our schemes the last successful full run did not find upstream: `NOT_IN_JJM` (never matched) and `NO_LONGER_LISTED` (code missing from the full list), with name, JJM code, IMIS / SMT ids and last reading date. `csv` downloads a file to review with the JJM team |
 
 ### Scheme Status Integer Mapping
 

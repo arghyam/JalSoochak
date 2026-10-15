@@ -198,6 +198,9 @@ public class StateSyncRunner {
                     report.issue("SCHEME", null, "REASSIGNMENT_EVENT_FAILED",
                             Map.of("fromSchemeId", move.fromSchemeId(), "toSchemeId", move.toSchemeId()));
                 }
+                for (Integer schemeId : published.failedRetirements()) {
+                    report.issue("SCHEME", null, "RETIREMENT_EVENT_FAILED", Map.of("schemeId", schemeId));
+                }
             }
         } catch (RuntimeException e) {
             error = e.getClass().getSimpleName() + ": " + e.getMessage();
@@ -376,14 +379,46 @@ public class StateSyncRunner {
         SchemeReconciler schemes = new SchemeReconciler(tenantRepository, properties, schema, ctx.actor(), users, mappings);
         schemes.reconcile(fetched.schemes(), report);
 
+        List<Integer> retired = List.of();
         if (kind == RunKind.FULL) {
             schemes.applyArchived(fetched.archived(), report);
             Set<String> listed = new HashSet<>();
             fetched.schemes().forEach(s -> listed.add(s.code()));
-            schemes.reportAbsent(listed, new HashSet<>(fetched.archived()), report);
+            Set<String> missing = schemes.reportAbsent(listed, new HashSet<>(fetched.archived()), report);
+            schemes.reportNotInUpstream(report);
+            retired = retireMissing(ctx, schemes, listed.size(), missing, report);
         }
         return new PendingEvents(List.copyOf(schemes.touchedSchemes()), userEvents(tenantId, users, mappings),
-                departmentEvents, schemes.reassignments());
+                departmentEvents, schemes.reassignments(), retired);
+    }
+
+    /**
+     * Retires the coded schemes the upstream left out of this full run and the previous successful one.
+     * Candidates are always counted; they are retired only with {@code retire-missing-schemes} on, and
+     * never by a run whose list came back short or that would retire more than the cap.
+     */
+    private List<Integer> retireMissing(Context ctx, SchemeReconciler schemes, int listed, Set<String> missing,
+                                        SyncReport report) {
+        Set<String> candidates = new HashSet<>(missing);
+        candidates.retainAll(runRepository.lastSucceededFullRun(ctx.tenant().id())
+                .map(id -> runRepository.issueCodes(id, "UPSTREAM_SCHEME_MISSING"))
+                .orElse(Set.of()));
+        report.add("schemes.retire_candidates", candidates.size());
+        if (candidates.isEmpty() || !properties.isRetireMissingSchemes()) {
+            return List.of();
+        }
+        int ours = schemes.codedSchemeCount();
+        if (listed < properties.getRetireMinListedRatio() * ours) {
+            report.issue("SCHEME", null, "RETIREMENT_SKIPPED", Map.of("reason", "upstream list came back short",
+                    "listed", listed, "ourCodedSchemes", ours, "minListedRatio", properties.getRetireMinListedRatio()));
+            return List.of();
+        }
+        if (candidates.size() > properties.getRetireMaxPerRun()) {
+            report.issue("SCHEME", null, "RETIREMENT_SKIPPED", Map.of("reason", "more candidates than the cap",
+                    "candidates", candidates.size(), "maxPerRun", properties.getRetireMaxPerRun()));
+            return List.of();
+        }
+        return schemes.retireMissing(candidates, report);
     }
 
     private static List<Map<String, Object>> userEvents(int tenantId, UserDirectory users, UserSchemeMappings mappings) {

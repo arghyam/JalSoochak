@@ -285,6 +285,60 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
     }
 
     @Test
+    void aSchemeMissingFromTwoFullRunsIsRetiredWhenSwitchedOn() {
+        properties.setMode(Mode.APPLY);
+        properties.setRetireMissingSchemes(true);
+        properties.setRetireMinListedRatio(0);
+        int gone = scheme("50001", "9000001", "Now a child scheme", "SCH-777777");
+
+        RunResult first = runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+        // No earlier full run: nothing has been missing twice yet (a zero count is not recorded).
+        assertThat(first.counts()).doesNotContainKeys("schemes.retire_candidates", "schemes.retired");
+        assertThat(first.issues()).extracting(SyncIssue::category).contains("UPSTREAM_SCHEME_MISSING");
+
+        RunResult second = runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+
+        assertThat(second.counts()).containsEntry("schemes.retired", 1);
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NOT NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, gone)).isTrue();
+        verify(kafka).publishJson(eq("scheme-service-topic"), eq(TENANT_ID + ":" + gone),
+                org.mockito.ArgumentMatchers.argThat(e -> "SCHEME_RETIRED".equals(((Map<?, ?>) e).get("eventType"))));
+    }
+
+    @Test
+    void retirementIsSkippedWhenTheListComesBackShort() {
+        properties.setMode(Mode.APPLY);
+        properties.setRetireMissingSchemes(true); // default ratio 0.95: 1 listed of our 2 coded schemes
+        int gone = scheme("50001", "9000001", "Now a child scheme", "SCH-777777");
+        runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+
+        RunResult second = runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+
+        assertThat(second.issues()).extracting(SyncIssue::category).contains("RETIREMENT_SKIPPED");
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, gone)).isTrue();
+    }
+
+    @Test
+    void withRetirementOffCandidatesAreOnlyCountedAndListedForReview() {
+        properties.setMode(Mode.APPLY);
+        int gone = scheme("50001", "9000001", "Now a child scheme", "SCH-777777");
+        int local = scheme("60001", "9000002", "Local only", null);
+        runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+
+        RunResult second = runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+
+        assertThat(second.counts()).containsEntry("schemes.retire_candidates", 1).doesNotContainKey("schemes.retired");
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, gone)).isTrue();
+        StateSyncRunRepository.ReviewList review = runRepository.unmatchedSchemes(TENANT_ID);
+        assertThat(review.runId()).isEqualTo(second.runId());
+        assertThat(review.schemes()).extracting(StateSyncRunRepository.ReviewRow::reason, StateSyncRunRepository.ReviewRow::schemeId)
+                .containsExactlyInAnyOrder(org.assertj.core.groups.Tuple.tuple("NO_LONGER_LISTED", gone),
+                        org.assertj.core.groups.Tuple.tuple("NOT_IN_JJM", local));
+    }
+
+    @Test
     void refusesToRunWhenDisabled() {
         properties.setEnabled(false);
 

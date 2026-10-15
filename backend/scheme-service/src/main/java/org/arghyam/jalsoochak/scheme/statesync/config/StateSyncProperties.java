@@ -58,9 +58,26 @@ public class StateSyncProperties {
 
     /**
      * Whether an empty officer / village / sub-division list on a scheme retires the mappings we hold.
-     * Off until the state confirms an empty list means "none" rather than "not captured".
+     * Keep it off: the JJM team confirmed an empty list means the field official has not linked them yet.
      */
     private boolean retireOnEmptyList = false;
+
+    /**
+     * Whether the nightly full run retires (soft-deletes) a scheme carrying an upstream code that the
+     * upstream's complete scheme list has not listed, nor archived, in this run and the previous full run.
+     * Codes are permanent and the list holds every parent scheme, so such a scheme has become a child or
+     * test scheme upstream. Off by default; review {@code GET …/state-sync/unmatched-schemes} first.
+     */
+    private boolean retireMissingSchemes = false;
+
+    /**
+     * Retirement is skipped for a run that listed fewer schemes than this share of the coded schemes we
+     * hold — a crawl that came back short must not retire real schemes.
+     */
+    private double retireMinListedRatio = 0.95;
+
+    /** Retirement is skipped for a run that would retire more schemes than this. */
+    private int retireMaxPerRun = 200;
 
     /**
      * Each delta also looks up this many lenient-ingestion placeholder schemes (newest first) by their

@@ -21,7 +21,8 @@ import java.util.Map;
  *
  * <p>{@code SCHEME_READINGS_REASSIGNED} follows, one per placeholder whose readings moved. It is keyed
  * like the real scheme's own message ({@code tenantId:schemeId}), so it lands on the same partition
- * after it and analytics never holds facts for a scheme with no dim row. Department events on
+ * after it and analytics never holds facts for a scheme with no dim row. {@code SCHEME_RETIRED}, one
+ * per scheme the full run retired, tells analytics to drop it from the dashboards. Department events on
  * {@code scheme-service-topic}, user events on {@code user-service-topic}, as elsewhere.
  */
 @Component
@@ -33,10 +34,16 @@ public class StateSyncEventPublisher {
 
     /** Everything a run wants announced, gathered while it reconciles. */
     public record PendingEvents(List<Integer> schemeIds, List<Map<String, Object>> userEvents,
-                                List<Map<String, Object>> departmentEvents, List<Reassignment> reassignments) {
+                                List<Map<String, Object>> departmentEvents, List<Reassignment> reassignments,
+                                List<Integer> retiredSchemeIds) {
+
+        public PendingEvents(List<Integer> schemeIds, List<Map<String, Object>> userEvents,
+                             List<Map<String, Object>> departmentEvents, List<Reassignment> reassignments) {
+            this(schemeIds, userEvents, departmentEvents, reassignments, List.of());
+        }
 
         public static PendingEvents empty() {
-            return new PendingEvents(List.of(), List.of(), List.of(), List.of());
+            return new PendingEvents(List.of(), List.of(), List.of(), List.of(), List.of());
         }
     }
 
@@ -53,9 +60,10 @@ public class StateSyncEventPublisher {
      * {@code POST /api/v1/scheme/schemes/analytics-resync}. A failed department or user event is
      * only counted; it goes out again when that node or user next changes. A failed
      * {@code SCHEME_READINGS_REASSIGNED} cannot come back on its own (the placeholder is already
-     * retired), so it is returned by itself for the run to record with both scheme ids.
+     * retired), so it is returned by itself for the run to record with both scheme ids. A failed
+     * {@code SCHEME_RETIRED} is returned too: the resync skips deleted schemes, so it would not repair it.
      */
-    public record Outcome(int failures, List<Reassignment> failedReassignments) {
+    public record Outcome(int failures, List<Reassignment> failedReassignments, List<Integer> failedRetirements) {
     }
 
     /** Sends everything in order; never throws for a single failed send. */
@@ -84,10 +92,22 @@ public class StateSyncEventPublisher {
                 failedReassignments.add(move);
             }
         }
+        List<Integer> failedRetirements = new ArrayList<>();
+        for (Integer schemeId : events.retiredSchemeIds()) {
+            Map<String, Object> event = new LinkedHashMap<>();
+            event.put("eventType", "SCHEME_RETIRED");
+            event.put("tenantId", tenantId);
+            event.put("schemeId", schemeId);
+            int failed = send(SCHEME_TOPIC, tenantId + ":" + schemeId, event);
+            failures += failed;
+            if (failed > 0) {
+                failedRetirements.add(schemeId);
+            }
+        }
         if (failures > 0) {
             log.warn("[state-sync] {} analytics event(s) failed to publish for tenant {}", failures, tenantId);
         }
-        return new Outcome(failures, List.copyOf(failedReassignments));
+        return new Outcome(failures, List.copyOf(failedReassignments), List.copyOf(failedRetirements));
     }
 
     private int send(String topic, String key, Map<String, Object> event) {

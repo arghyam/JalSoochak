@@ -11,8 +11,10 @@ import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantReposito
 import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantRepository.UserRow;
 import org.arghyam.jalsoochak.scheme.statesync.run.SyncReport;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -22,6 +24,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 /**
@@ -77,6 +80,8 @@ public class SchemeReconciler {
     /** IMIS id → live placeholders carrying it (one per submitted id pair, so possibly several). */
     private final Map<String, List<Integer>> placeholdersByCentre = new HashMap<>();
     private final Set<Integer> claimedThisRun = new HashSet<>();
+    /** Schemes this sync retired, by upstream code: one the upstream lists again is revived, not duplicated. */
+    private final Map<String, SchemeRow> retiredByCode = new HashMap<>();
     /** IMIS id → upstream codes carrying it in the batch being reconciled; JJM does not enforce uniqueness. */
     private final Map<String, Set<String>> batchCodesByCentre = new HashMap<>();
 
@@ -108,6 +113,9 @@ public class SchemeReconciler {
                 continue;
             }
             index(row);
+        }
+        for (SchemeRow row : repository.schemesRetiredBy(schema, actor)) {
+            retiredByCode.putIfAbsent(row.stateSchemeCode(), row);
         }
 
         List<LocationNode> lgdNodes = repository.lgdNodes(schema);
@@ -159,6 +167,7 @@ public class SchemeReconciler {
             report.issue("SCHEME", null, "INVALID_UPSTREAM_ROW", Map.of("reason", "no code"));
             return Optional.empty();
         }
+        reviveIfRetired(up.code(), report);
         Resolution resolution = match(up);
         if (resolution.issue != null) {
             report.issue("SCHEME", up.code(), resolution.issue, resolution.detail);
@@ -573,11 +582,104 @@ public class SchemeReconciler {
     }
 
     /** After a full crawl: coded schemes the upstream neither listed nor archived. Reported only. */
-    public void reportAbsent(Set<String> listedCodes, Set<String> archivedCodes, SyncReport report) {
+    public Set<String> reportAbsent(Set<String> listedCodes, Set<String> archivedCodes, SyncReport report) {
+        Map<String, Integer> missing = new TreeMap<>();
         for (Map.Entry<String, Integer> entry : idByCode.entrySet()) {
             if (!listedCodes.contains(entry.getKey()) && !archivedCodes.contains(entry.getKey())) {
-                report.issue("SCHEME", entry.getKey(), "UPSTREAM_SCHEME_MISSING", Map.of("schemeId", entry.getValue()));
+                missing.put(entry.getKey(), entry.getValue());
             }
+        }
+        Map<Integer, LocalDate> lastReadings = repository.lastReadingDates(schema, missing.values());
+        missing.forEach((code, id) -> report.issue("SCHEME", code, "UPSTREAM_SCHEME_MISSING",
+                reviewDetail(schemesById.get(id), lastReadings.get(id))));
+        return missing.keySet();
+    }
+
+    /**
+     * After a full run: live schemes of ours that no upstream scheme matched and that carry no upstream
+     * code, so the upstream has never known them by code. Reported for review with the JJM team
+     * ({@code LOCAL_SCHEME_NOT_IN_JJM}); nothing is changed.
+     */
+    public void reportNotInUpstream(SyncReport report) {
+        List<SchemeRow> local = schemesById.values().stream()
+                .filter(row -> blank(row.stateSchemeCode()) && !claimedThisRun.contains(row.id()))
+                .sorted(Comparator.comparingInt(SchemeRow::id))
+                .toList();
+        Map<Integer, LocalDate> lastReadings = repository.lastReadingDates(schema,
+                local.stream().map(SchemeRow::id).toList());
+        for (SchemeRow row : local) {
+            report.issue("SCHEME", null, "LOCAL_SCHEME_NOT_IN_JJM", reviewDetail(row, lastReadings.get(row.id())));
+        }
+        report.add("schemes.local_not_in_jjm", local.size());
+    }
+
+    public int codedSchemeCount() {
+        return idByCode.size();
+    }
+
+    /**
+     * Soft-deletes our schemes carrying these upstream codes and retires their officers, so nudges and
+     * escalations stop. Villages, sub-divisions and readings stay for history; the run announces each
+     * retired scheme so analytics drops it from the dashboards.
+     *
+     * @return the retired scheme ids
+     */
+    public List<Integer> retireMissing(Set<String> codes, SyncReport report) {
+        List<Integer> retired = new ArrayList<>();
+        for (String code : new TreeSet<>(codes)) {
+            Integer schemeId = idByCode.get(code);
+            if (schemeId == null) {
+                continue;
+            }
+            repository.retireScheme(schema, schemeId, actor);
+            for (Integer userId : userMappings.liveUsers(schemeId)) {
+                userMappings.retire(userId, schemeId, report);
+            }
+            SchemeRow row = schemesById.remove(schemeId);
+            idByCode.remove(code);
+            if (row != null) {
+                retiredByCode.put(code, row);
+            }
+            touchedSchemes.remove(schemeId);
+            retired.add(schemeId);
+            report.count("schemes.retired");
+            report.issue("SCHEME", code, "SCHEME_RETIRED", Map.of("schemeId", schemeId));
+        }
+        return retired;
+    }
+
+    /** A scheme this sync retired comes back, same id, when the upstream lists its code again. */
+    private void reviveIfRetired(String code, SyncReport report) {
+        if (idByCode.containsKey(code)) {
+            return;
+        }
+        SchemeRow row = retiredByCode.remove(code);
+        if (row == null) {
+            return;
+        }
+        repository.reviveScheme(schema, row.id(), actor);
+        index(row);
+        report.count("schemes.revived");
+        report.issue("SCHEME", code, "SCHEME_REVIVED", Map.of("schemeId", row.id()));
+    }
+
+    /** Issue details cannot hold nulls, so a missing value is left out. */
+    private static Map<String, Object> reviewDetail(SchemeRow row, LocalDate lastReading) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        if (row != null) {
+            detail.put("schemeId", row.id());
+            putIfPresent(detail, "schemeName", row.name());
+            putIfPresent(detail, "stateSchemeCode", row.stateSchemeCode());
+            putIfPresent(detail, "centreSchemeId", row.centreSchemeId());
+            putIfPresent(detail, "stateSchemeId", row.stateSchemeId());
+        }
+        putIfPresent(detail, "lastReadingDate", lastReading == null ? null : lastReading.toString());
+        return detail;
+    }
+
+    private static void putIfPresent(Map<String, Object> detail, String key, String value) {
+        if (!blank(value)) {
+            detail.put(key, value);
         }
     }
 

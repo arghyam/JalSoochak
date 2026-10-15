@@ -211,7 +211,9 @@ and only records counts + issues. Crons (`STATE_SYNC_DELTA_CRON` hourly, `STATE_
 IST) fire on every replica; the RUNNING row in `common_schema.state_sync_run_table` (partial unique
 index, V64) is the cross-pod lock, so exactly one runs. Upstream sits behind the `StateMasterDataSource`
 port (adapter `JjmBrainClient`). LGD nodes are matched, never created (no national `lgd_code` upstream);
-department nodes are created/re-parented. Plan and open questions: `docs/jjm-brain-sync-plan.md`.
+department nodes are created/re-parented. Nothing is hard-deleted: links JJM drops are retired, and a coded
+scheme missing from two full runs is retired only with `STATE_SYNC_RETIRE_MISSING_SCHEMES=true`. Plan, JJM's
+answers and what is still open: `docs/jjm-brain-sync-plan.md`.
 
 ## Testing Approach
 
