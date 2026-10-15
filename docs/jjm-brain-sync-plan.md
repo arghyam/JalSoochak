@@ -17,9 +17,9 @@ outstanding, the code takes the conservative choice and records an issue instead
 
 | Trigger | What it pulls | When | Why |
 | --- | --- | --- | --- |
-| **Delta** | `/schemes?updated_since=<last APPLY watermark − 30 min>` + up to 25 lenient-ingestion placeholders by IMIS id | `STATE_SYNC_DELTA_CRON`, default hourly at :15 | `updated_at` moves on SO, SDO, Jal Mitra and village changes (confirmed). The overlap absorbs the undocumented timezone. The placeholder lookup turns a reading for an unknown scheme into a real scheme within an hour. |
+| **Delta** | `/schemes?updated_since=<last APPLY watermark − 30 min>` + up to 25 lenient-ingestion placeholders by IMIS id + `/blocked-users` | `STATE_SYNC_DELTA_CRON`, default hourly at :15 | `updated_at` moves on SO, SDO, Jal Mitra and village changes (confirmed). The overlap absorbs the undocumented timezone. The placeholder lookup turns a reading for an unknown scheme into a real scheme within an hour. |
 | **Full** | All 8 masters, `/user-master`, every scheme, `/archived-schemes`, `/blocked-users` | `STATE_SYNC_FULL_CRON`, default 02:00 IST | Masters and users have no `updated_since`. EE and SDO reassignments do not move a scheme's `updated_at`. Archives and blocks only show up when the whole list is read. |
-| **Scheme refresh** | `/schemes?code=` or `?centre_scheme_id=` | `POST /api/v1/scheme/state-sync/schemes/refresh` | Support tickets |
+| **Scheme refresh** | `/schemes?code=` or `?centre_scheme_id=`, + `/blocked-users` | `POST /api/v1/scheme/state-sync/schemes/refresh` | Support tickets |
 | **Manual run** | FULL or DELTA | `POST /api/v1/scheme/state-sync/runs` | Onboarding, cut-over |
 
 Every run:
@@ -44,9 +44,9 @@ Every run:
 | User master + officers embedded in schemes | `user_table` | Allow-list: jal-mitra, section-officer, sdo, executive-engineer. Matched by `state_user_id`, else by phone hash (`91XXXXXXXXXX`). On a match: name updated, code stamped, role updated, except that admin accounts are never re-typed and a promotion to EE is withheld. New users are created encrypted, with a NULL email. |
 | Scheme | `scheme_master_table` | Matched by `state_scheme_code`, else by the IMIS+SMT id pair, else by one id when the other is unused (and adopted). Conflicting or ambiguous ids raise an issue and nothing is written. Upstream owns the name, ids, code, statuses, FHTC counts and coordinates. A blank or unrecognised upstream value never overwrites ours. |
 | `village[]`, `subdivisions[]` | `scheme_lgd_mapping_table`, `scheme_department_mapping_table` | Missing rows are added and rows no longer listed are retired. The sync only manages rows pointing at villages, sub-divisions or the state placeholder. |
-| `section-officer[]`, `sdo[]`, `executive-engineer[]`, `pump-operator[]` | `user_scheme_mapping_table` | Missing rows are added and retired pairs revived. Rows no longer listed are retired, but only for the four managed user types. |
+| `section-officer[]`, `sdo[]`, `executive-engineer[]`, `pump-operator[]` | `user_scheme_mapping_table`, `user_table.status` | Upstream is the source of truth: an officer listed on the scheme and not on `/blocked-users` is active, so an inactive user (`status = 0`) is **reactivated** (`users.reactivated`) and the pair added or revived. A listed officer who is blocked is never created, is deactivated if we hold them, and stays unlinked (`skipped_blocked_user`). Admin accounts are never reactivated (`REACTIVATION_ON_ADMIN_WITHHELD`). Rows no longer listed are retired, but only for the four managed user types. |
 | `/archived-schemes` | `user_scheme_mapping_table` | Officers are retired, so nudges and escalations stop. The scheme row, its locations and its readings stay. A scheme with a reading in the last 90 days is **spared** (`ARCHIVED_BUT_REPORTING`). |
-| `/blocked-users` | `user_table.status = 0` + mappings retired | Admin accounts are never blocked by the sync. |
+| `/blocked-users` | `user_table.status = 0` + mappings retired | Read on every run (one unpaginated call), before the schemes, so a blocked officer is never reactivated. Admin accounts are never blocked by the sync. A user who leaves the list is reactivated the next time a scheme lists them. |
 | Schemes in neither `/schemes` nor the archive | — | Reported only (`UPSTREAM_SCHEME_MISSING`) |
 
 Safety rules:
@@ -113,7 +113,7 @@ fails rather than store plaintext.
 | Re-aggregation surviving a pod restart | The background re-aggregation after a reassignment is in memory. If the pod dies mid-queue, the WARN names the range, and `ANALYTICS_AGG_BACKFILL_*` re-runs it. Only matters with `ANALYTICS_READ_FROM_AGGREGATES` on. |
 | `fact_submission_activity_hourly_table` | Not keyed by scheme, so a reassignment does not change it |
 | Creating LGD nodes | Needs the national `lgd_code` from upstream (question 11). |
-| Reviving archived schemes or unblocked users | Needs question 3 answered. |
+| Reviving archived schemes | Needs question 3 answered. (Unblocked users are reactivated when a scheme lists them.) |
 | Language / email for users | Not in the API (question 13). |
 
 ## 6. Questions for the Assam team

@@ -150,6 +150,12 @@ public class StateSyncTenantRepository {
                 titleEncrypted, titleHash, userTypeId, stateUserId, actor, id);
     }
 
+    /** Mirrors user-service's staff activation: status only, a deleted user is never revived. */
+    public void activateUser(String schema, int id, int actor) {
+        jdbc.update("UPDATE " + s(schema) + ".user_table SET status = 1, updated_by = ?, updated_at = NOW() "
+                + "WHERE id = ? AND status <> 1 AND deleted_at IS NULL", actor, id);
+    }
+
     public void deactivateUser(String schema, int id, int actor) {
         jdbc.update("UPDATE " + s(schema) + ".user_table SET status = 0, updated_by = ?, updated_at = NOW() "
                 + "WHERE id = ? AND status <> 0", actor, id);
