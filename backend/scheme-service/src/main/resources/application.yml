@@ -99,5 +99,5 @@ state-sync:
   jjm:
     base-url: ${JJM_BRAIN_BASE_URL:https://jjmbrain.in/api/v1}
     api-key: ${JJM_BRAIN_API_KEY:}
-    min-request-interval: ${JJM_BRAIN_MIN_REQUEST_INTERVAL:PT0.5S}
+    min-request-interval: ${JJM_BRAIN_MIN_REQUEST_INTERVAL:PT1.1S}
     max-attempts: ${JJM_BRAIN_MAX_ATTEMPTS:4}

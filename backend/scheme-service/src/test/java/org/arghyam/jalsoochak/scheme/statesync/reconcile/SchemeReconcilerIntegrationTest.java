@@ -50,6 +50,20 @@ class SchemeReconcilerIntegrationTest extends StateSyncIntegrationTestBase {
         return report;
     }
 
+    private SyncReport syncAllowingDowngrade(boolean allow, UpstreamScheme... schemes) {
+        SyncReport report = new SyncReport();
+        UserDirectory users = new UserDirectory(repository, pii, SCHEMA, TENANT_ID, actor);
+        users.allowRoleDowngrades(allow);
+        UserSchemeMappings mappings = new UserSchemeMappings(repository, SCHEMA, actor);
+        new SchemeReconciler(repository, properties, SCHEMA, actor, users, mappings).reconcile(List.of(schemes), report);
+        return report;
+    }
+
+    private String roleOf(String code) {
+        return jdbc.queryForObject("SELECT ut.c_name FROM tenant_as.user_table u JOIN common_schema.user_type_master_table ut "
+                + "ON ut.id = u.user_type WHERE u.state_user_id = ?", String.class, code);
+    }
+
     private SchemeReconciler reconciler() {
         UserDirectory users = new UserDirectory(repository, pii, SCHEMA, TENANT_ID, actor);
         UserSchemeMappings mappings = new UserSchemeMappings(repository, SCHEMA, actor);
@@ -306,6 +320,86 @@ class SchemeReconcilerIntegrationTest extends StateSyncIntegrationTestBase {
             assertThat(i.category()).isEqualTo("PLACEHOLDER_SUPERSEDED");
             assertThat(i.detail()).containsEntry("placeholderSchemeId", placeholder).containsEntry("moved", true);
         });
+    }
+
+    @Test
+    void aPlaceholderStaysPutWhenTwoUpstreamSchemesShareItsImisId() {
+        int placeholder = placeholder("", "8165607");
+        reading(placeholder, LocalDateTime.of(2026, 7, 10, 8, 0));
+        UpstreamScheme twin = upstream("SCH-000009", "8165607", "99999", "CHAPATOLI TWIN", List.of("SDV-035"),
+                List.of(), List.of());
+
+        SchemeReconciler reconciler = reconciler();
+        SyncReport report = new SyncReport();
+        reconciler.reconcile(List.of(chapatoli(List.of(), List.of()), twin), report);
+
+        assertThat(rowsOf("flow_reading_table", placeholder)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, placeholder)).isTrue();
+        assertThat(reconciler.reassignments()).isEmpty();
+        assertThat(report.issues()).filteredOn(i -> i.category().equals("PLACEHOLDER_IMIS_NOT_UNIQUE")).singleElement()
+                .satisfies(i -> assertThat(i.detail()).containsEntry("placeholderSchemeIds", List.of(placeholder)));
+    }
+
+    @Test
+    void aPlaceholderStaysPutWhenTwoOfOurSchemesCarryItsImisId() {
+        scheme("34123", "8165607", "Chapatoli", null);
+        scheme("77777", "8165607", "Chapatoli duplicate", null);
+        int placeholder = placeholder("", "8165607");
+        reading(placeholder, LocalDateTime.of(2026, 7, 10, 8, 0));
+
+        SyncReport report = sync(chapatoli(List.of(), List.of()));
+
+        assertThat(rowsOf("flow_reading_table", placeholder)).isEqualTo(1);
+        assertThat(report.issues()).extracting(SyncIssue::category).contains("PLACEHOLDER_IMIS_NOT_UNIQUE")
+                .doesNotContain("PLACEHOLDER_SUPERSEDED");
+    }
+
+    @Test
+    void aPersonListedWithTwoRolesKeepsTheHigherInEitherOrder() {
+        UpstreamPerson asSo = person("USR-047218", "Nibir Paban Borah", "9100000005", "section-officer");
+        UpstreamPerson asSdo = person("USR-047218", "Nibir Paban Borah", "9100000005", "sdo");
+        UpstreamScheme first = upstream("SCH-000010", "8100010", "40010", "FIRST", List.of(), List.of(), List.of(asSdo));
+        UpstreamScheme second = upstream("SCH-000011", "8100011", "40011", "SECOND", List.of(), List.of(), List.of(asSo));
+
+        SyncReport report = sync(first, second);
+
+        assertThat(roleOf("USR-047218")).isEqualTo("SUB_DIVISIONAL_OFFICER");
+        assertThat(report.get("users.role_kept_higher")).isEqualTo(1);
+        assertThat(report.issues()).extracting(SyncIssue::category).doesNotContain("ROLE_CONFLICT_IN_UPSTREAM");
+
+        sync(second, first);
+        assertThat(roleOf("USR-047218")).isEqualTo("SUB_DIVISIONAL_OFFICER");
+        assertThat(liveOfficers(schemeId("SCH-000010"))).isEqualTo(1);
+        assertThat(liveOfficers(schemeId("SCH-000011"))).isEqualTo(1);
+    }
+
+    @Test
+    void anHourlyOrRefreshRunNeverLowersARoleButTheNightlyRunDoes() {
+        UpstreamPerson asSdo = person("USR-047387", "Nibir Paban Borah", "9100000006", "sdo");
+        UpstreamPerson asSo = person("USR-047387", "Nibir Paban Borah", "9100000006", "section-officer");
+        sync(upstream("SCH-000012", "8100012", "40012", "ONE", List.of(), List.of(), List.of(asSdo)));
+
+        SyncReport partial = syncAllowingDowngrade(false,
+                upstream("SCH-000012", "8100012", "40012", "ONE", List.of(), List.of(), List.of(asSo)));
+        assertThat(roleOf("USR-047387")).isEqualTo("SUB_DIVISIONAL_OFFICER");
+        assertThat(partial.get("users.role_downgrade_deferred")).isEqualTo(1);
+
+        syncAllowingDowngrade(true, upstream("SCH-000012", "8100012", "40012", "ONE", List.of(), List.of(), List.of(asSo)));
+        assertThat(roleOf("USR-047387")).isEqualTo("SECTION_OFFICER");
+    }
+
+    @Test
+    void aRoleOutsideTheUpstreamsValueSetIsReportedOnce() {
+        UpstreamPerson odd = person("USR-090001", "Someone", "9100000007", "plumber");
+        UpstreamPerson odd2 = person("USR-090002", "Someone Else", "9100000008", "plumber");
+        UpstreamPerson khalasi = person("USR-090003", "A Khalasi", "9100000009", "khalasi");
+
+        SyncReport report = sync(chapatoli(List.of(), List.of(so, odd, odd2, khalasi)));
+
+        assertThat(report.issues()).filteredOn(i -> i.category().equals("UNKNOWN_ROLE")).singleElement()
+                .satisfies(i -> assertThat(i.detail()).containsEntry("role", "plumber"));
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.user_table WHERE state_user_id IN ('USR-090001', 'USR-090003')")).isZero();
     }
 
     @Test

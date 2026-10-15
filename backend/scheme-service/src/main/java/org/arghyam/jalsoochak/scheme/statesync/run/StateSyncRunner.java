@@ -256,13 +256,15 @@ public class StateSyncRunner {
                     throw new IllegalArgumentException("a scheme code or IMIS id is required");
                 }
                 String ref = schemeRef.trim();
-                Optional<UpstreamScheme> scheme = ref.chars().allMatch(Character::isDigit)
-                        ? src.schemeByCentreSchemeId(ref)
-                        : src.schemeByCode(ref);
-                if (scheme.isEmpty()) {
+                // An IMIS id can name several upstream schemes; all are reconciled, and the reconciler then
+                // refuses to move a placeholder's readings onto either.
+                List<UpstreamScheme> found = ref.chars().allMatch(Character::isDigit)
+                        ? src.schemesByCentreSchemeId(ref)
+                        : src.schemeByCode(ref).map(List::of).orElse(List.of());
+                if (found.isEmpty()) {
                     report.issue("SCHEME", ref, "NOT_FOUND_UPSTREAM", Map.of());
                 }
-                yield new Fetched(null, null, List.of(), scheme.map(List::of).orElse(List.of()), List.of(), List.of());
+                yield new Fetched(null, null, List.of(), found, List.of(), List.of());
             }
         };
     }
@@ -293,9 +295,9 @@ public class StateSyncRunner {
             }
             budget--;
             report.count("placeholders.looked_up");
-            Optional<UpstreamScheme> scheme = ctx.source().schemeByCentreSchemeId(centreId);
-            if (scheme.isPresent()) {
-                found.add(scheme.get());
+            List<UpstreamScheme> schemes = ctx.source().schemesByCentreSchemeId(centreId);
+            if (!schemes.isEmpty()) {
+                found.addAll(schemes);
                 report.count("placeholders.found_upstream");
             } else {
                 placeholderCooldown.put(centreId, now.plus(properties.getPlaceholderRetryAfter()));
@@ -357,6 +359,8 @@ public class StateSyncRunner {
         }
 
         UserDirectory users = new UserDirectory(tenantRepository, pii, schema, tenantId, ctx.actor());
+        // Only the full run reads every listing of a person, so only it may lower a role.
+        users.allowRoleDowngrades(kind == RunKind.FULL);
         UserSchemeMappings mappings = new UserSchemeMappings(tenantRepository, schema, ctx.actor());
         for (UpstreamPerson person : fetched.users()) {
             users.resolve(person, report);

@@ -91,8 +91,8 @@ public class StateSyncProperties {
          * header; only a local stub server (tests) turns it on.
          */
         private boolean allowInsecureBaseUrl = false;
-        /** Minimum gap between two requests — a polite ceiling until the state publishes a rate limit. */
-        private Duration minRequestInterval = Duration.ofMillis(500);
+        /** Minimum gap between two requests. The upstream allows 60 requests a minute per IP; 1.1 s leaves headroom. */
+        private Duration minRequestInterval = Duration.ofMillis(1100);
         private Duration connectTimeout = Duration.ofSeconds(10);
         private Duration readTimeout = Duration.ofSeconds(60);
         private int maxAttempts = 4;

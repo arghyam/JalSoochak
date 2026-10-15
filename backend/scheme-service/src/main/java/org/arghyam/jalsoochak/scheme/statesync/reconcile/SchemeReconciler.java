@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Reconciles upstream schemes into {@code scheme_master_table} and the three tables that hang off it.
@@ -72,6 +73,8 @@ public class SchemeReconciler {
     /** IMIS id → live placeholders carrying it (one per submitted id pair, so possibly several). */
     private final Map<String, List<Integer>> placeholdersByCentre = new HashMap<>();
     private final Set<Integer> claimedThisRun = new HashSet<>();
+    /** IMIS id → upstream codes carrying it in the batch being reconciled; JJM does not enforce uniqueness. */
+    private final Map<String, Set<String>> batchCodesByCentre = new HashMap<>();
 
     private final Map<String, Integer> lgdIdsByCode;
     private final Map<String, Integer> deptIdsByCode;
@@ -135,6 +138,11 @@ public class SchemeReconciler {
 
     /** Reconciles each scheme in turn; one bad row never stops the rest. */
     public void reconcile(Collection<UpstreamScheme> schemes, SyncReport report) {
+        for (UpstreamScheme scheme : schemes) {
+            if (!blank(scheme.centreSchemeId()) && scheme.code() != null) {
+                batchCodesByCentre.computeIfAbsent(scheme.centreSchemeId().trim(), k -> new TreeSet<>()).add(scheme.code());
+            }
+        }
         for (UpstreamScheme scheme : schemes) {
             report.seenSourceUpdatedAt(scheme.updatedAt());
             reconcileOne(scheme, report);
@@ -431,6 +439,7 @@ public class SchemeReconciler {
         for (UpstreamPerson person : up.officers()) {
             Optional<String> type = StateVocabulary.userType(person.role());
             if (type.isEmpty()) {
+                users.noteRoleNotIngested(person.role(), report);
                 continue;
             }
             anyManaged = true;
@@ -486,6 +495,16 @@ public class SchemeReconciler {
     private void supersedePlaceholder(int schemeId, UpstreamScheme up, SyncReport report) {
         List<Integer> placeholders = blank(up.centreSchemeId()) ? null : placeholdersByCentre.remove(up.centreSchemeId());
         if (placeholders == null) {
+            return;
+        }
+        // JJM does not enforce unique IMIS ids (legacy data has duplicates): with two schemes on one id we
+        // cannot tell whose readings these are, so they stay on the placeholder until the ids are fixed.
+        Set<String> upstreamCodes = batchCodesByCentre.getOrDefault(up.centreSchemeId().trim(), Set.of());
+        Set<Integer> ourSchemes = idsByCentre.getOrDefault(up.centreSchemeId(), Set.of());
+        if (upstreamCodes.size() > 1 || ourSchemes.size() > 1) {
+            report.issue("SCHEME", up.code(), "PLACEHOLDER_IMIS_NOT_UNIQUE", Map.of("centreSchemeId", up.centreSchemeId(),
+                    "placeholderSchemeIds", List.copyOf(placeholders), "upstreamCodes", List.copyOf(upstreamCodes),
+                    "ourSchemeIds", List.copyOf(new TreeSet<>(ourSchemes))));
             return;
         }
         for (Integer placeholder : placeholders) {

@@ -184,10 +184,10 @@ public class JjmBrainClient implements StateMasterDataSource {
     }
 
     @Override
-    public Optional<UpstreamScheme> schemeByCentreSchemeId(String centreSchemeId) {
+    public List<UpstreamScheme> schemesByCentreSchemeId(String centreSchemeId) {
         return pagedDistinct("schemes", Map.of("centre_scheme_id", centreSchemeId), JjmBrainClient::scheme,
                 UpstreamScheme::code)
-                .stream().filter(s -> centreSchemeId.equals(s.centreSchemeId())).findFirst();
+                .stream().filter(s -> centreSchemeId.equals(s.centreSchemeId())).toList();
     }
 
     @Override

@@ -40,7 +40,8 @@ public interface StateMasterDataSource {
 
     Optional<UpstreamScheme> schemeByCode(String code);
 
-    Optional<UpstreamScheme> schemeByCentreSchemeId(String centreSchemeId);
+    /** Every scheme carrying this IMIS id: the upstream does not enforce uniqueness, so there can be several. */
+    List<UpstreamScheme> schemesByCentreSchemeId(String centreSchemeId);
 
     List<String> archivedSchemeCodes();
 

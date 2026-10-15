@@ -341,10 +341,10 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         }
 
         @Override
-        public Optional<UpstreamScheme> schemeByCentreSchemeId(String centreSchemeId) {
+        public List<UpstreamScheme> schemesByCentreSchemeId(String centreSchemeId) {
             calls++;
             lastCentreLookup = centreSchemeId;
-            return schemes.stream().filter(s -> s.centreSchemeId().equals(centreSchemeId)).findFirst();
+            return schemes.stream().filter(s -> s.centreSchemeId().equals(centreSchemeId)).toList();
         }
 
         @Override public List<String> archivedSchemeCodes() { calls++; return List.of(); }

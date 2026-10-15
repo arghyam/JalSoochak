@@ -43,6 +43,9 @@ public class UserDirectory {
     private final Map<String, Integer> idByStateCode = new HashMap<>();
     private final Map<String, List<Integer>> idsByPhoneHash = new HashMap<>();
     private final Set<String> reportedMissingTypes = new HashSet<>();
+    private final Set<String> reportedUnknownRoles = new HashSet<>();
+    /** Off for runs that see only part of a person's listings (hourly, refresh): a lower role waits for the nightly run. */
+    private boolean allowRoleDowngrades = true;
     /** upstream code → outcome, so a person listed on 40 schemes is resolved (and reported) once. */
     private final Map<String, Optional<UserRow>> resolved = new HashMap<>();
     private final Map<Integer, String> typeAssignedThisRun = new HashMap<>();
@@ -72,13 +75,45 @@ public class UserDirectory {
             report.issue("USER", null, "INVALID_UPSTREAM_ROW", Map.of("reason", "no code"));
             return Optional.empty();
         }
-        return resolved.computeIfAbsent(person.code(), code -> doResolve(person, report));
+        Optional<UserRow> earlier = resolved.get(person.code());
+        if (earlier == null) {
+            Optional<UserRow> result = doResolve(person, report);
+            resolved.put(person.code(), result);
+            return result;
+        }
+        if (earlier.isEmpty()) {
+            return earlier;
+        }
+        // Listed again (another scheme, perhaps another role): only the role can differ.
+        UserRow current = byId.getOrDefault(earlier.get().id(), earlier.get());
+        Optional<String> type = StateVocabulary.userType(person.role());
+        Integer typeId = type.map(userTypeIds::get).orElse(null);
+        if (typeId == null || type.get().equals(current.userTypeName())) {
+            return Optional.of(current);
+        }
+        return Optional.of(applyDiff(current, person, type.get(), typeId, report));
+    }
+
+    /**
+     * Whether a role may move down. Only a run that reads every listing (the nightly full run) knows a
+     * person's highest role, so the others only ever raise one.
+     */
+    public void allowRoleDowngrades(boolean allow) {
+        this.allowRoleDowngrades = allow;
+    }
+
+    /** Counts a role we do not onboard, and reports once per run a value outside the upstream's role set. */
+    public void noteRoleNotIngested(String role, SyncReport report) {
+        if (!StateVocabulary.isKnownRole(role) && role != null && !role.isBlank() && reportedUnknownRoles.add(role)) {
+            report.issue("USER", null, "UNKNOWN_ROLE", Map.of("role", role));
+        }
+        report.count("users.role_not_ingested");
     }
 
     private Optional<UserRow> doResolve(UpstreamPerson person, SyncReport report) {
         Optional<String> type = StateVocabulary.userType(person.role());
         if (type.isEmpty()) {
-            report.count("users.role_not_ingested");
+            noteRoleNotIngested(person.role(), report);
             return Optional.empty();
         }
         Integer typeId = userTypeIds.get(type.get());
@@ -126,11 +161,11 @@ public class UserDirectory {
             report.count("users.inserted");
             return Optional.of(inserted);
         }
+        report.count("users.matched");
         return Optional.of(applyDiff(match, person, type.get(), typeId, report));
     }
 
     private UserRow applyDiff(UserRow user, UpstreamPerson person, String type, int typeId, SyncReport report) {
-        report.count("users.matched");
         String titleEncrypted = user.titleEncrypted();
         String titleHash = null;
         boolean changed = false;
@@ -158,14 +193,17 @@ public class UserDirectory {
         int newTypeId = user.userTypeId();
         String newType = user.userTypeName();
         if (!type.equals(user.userTypeName())) {
+            // One person can hold several upstream roles (an in-charge officer); they keep the highest.
+            boolean lower = StateVocabulary.roleRank(type) <= StateVocabulary.roleRank(user.userTypeName());
             String earlier = typeAssignedThisRun.get(user.id());
-            if (earlier != null) {
-                report.issue("USER", person.code(), "ROLE_CONFLICT_IN_UPSTREAM",
-                        Map.of("userId", user.id(), "kept", earlier, "alsoListedAs", type));
-            } else if (user.userTypeName() != null && PROTECTED_TYPES.contains(user.userTypeName())) {
+            if (user.userTypeName() != null && PROTECTED_TYPES.contains(user.userTypeName())) {
                 report.issue("USER", person.code(), "ROLE_CHANGE_ON_ADMIN_WITHHELD",
                         Map.of("userId", user.id(), "current", user.userTypeName(), "upstream", type));
-            } else if (GATED_PROMOTION_TYPE.equals(type)) {
+            } else if (lower && earlier != null) {
+                report.count("users.role_kept_higher");
+            } else if (lower && !allowRoleDowngrades) {
+                report.count("users.role_downgrade_deferred");
+            } else if (GATED_PROMOTION_TYPE.equals(type) && !created.contains(user.id())) {
                 report.issue("USER", person.code(), "PROMOTION_WITHHELD",
                         Map.of("userId", user.id(), "current", String.valueOf(user.userTypeName()), "upstream", type));
             } else {
@@ -175,7 +213,7 @@ public class UserDirectory {
                 report.count("users.role_updated");
             }
         }
-        typeAssignedThisRun.putIfAbsent(user.id(), newType);
+        typeAssignedThisRun.put(user.id(), newType);
 
         if (!changed) {
             return user;
