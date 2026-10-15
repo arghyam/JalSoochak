@@ -2043,6 +2043,40 @@ public class TelemetryTenantRepository {
         return jdbcTemplate.query(sql.toString(), (rs, n) -> toLong(rs.getObject("id")), params.toArray());
     }
 
+    /**
+     * SUPPLY-PLAUSIBILITY: the quarantined BFM readings dated between two dates, both inclusive, oldest
+     * first — the order a release assesses them in, since a released reading becomes the baseline of
+     * its scheme's next one. Only BFM readings are ever quarantined. Empty on a pre-V40 schema, which
+     * cannot mark a row.
+     *
+     * @param schemeId narrows the result to one scheme; {@code null} returns every scheme's rows
+     */
+    public List<TelemetryLatestFlowReadingRecord> findQuarantinedReadings(String schemaName,
+                                                                         LocalDate fromDate,
+                                                                         LocalDate toDate,
+                                                                         Long schemeId) {
+        validateSchemaName(schemaName);
+        if (!columnExists(schemaName, "flow_reading_table", "quarantine_reason")) {
+            return List.of();
+        }
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        StringBuilder sql = new StringBuilder(String.format("""
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS submitted_unit, %s AS reading_time, quarantine_reason, updated_at
+                FROM %s.flow_reading_table
+                WHERE reading_date BETWEEN ? AND ?
+                  AND quarantine_reason <> 0
+                  AND COALESCE(channel_id, 1) = ?
+                  AND deleted_at IS NULL
+                """, submittedUnitColumn(schemaName), timeColumn, schemaName));
+        List<Object> params = new ArrayList<>(List.of(fromDate, toDate, ReadingChannel.BFM.getCode()));
+        if (schemeId != null) {
+            sql.append(" AND scheme_id = ?");
+            params.add(schemeId);
+        }
+        sql.append(String.format(" ORDER BY reading_date, %s, id", timeColumn));
+        return jdbcTemplate.query(sql.toString(), (rs, n) -> mapLatestFlowReadingRecord(rs), params.toArray());
+    }
+
     public Optional<TelemetryFlowReadingDetails> findLatestFlowReadingForDate(String schemaName,
                                                                               Long schemeId,
                                                                               Long operatorId,

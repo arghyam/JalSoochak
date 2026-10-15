@@ -57,7 +57,13 @@ public class SupplyPlausibilityGuard {
         /** {@code POST /readings} — a new submission. */
         SUBMISSION("submission"),
         /** {@code PUT /readings} — a correction to a stored reading. */
-        CORRECTION("correction");
+        CORRECTION("correction"),
+        /**
+         * {@code POST /internal/readings/quarantine/release} — a stored quarantined reading assessed
+         * again. Acts on its verdict whatever the mode: the release exists to replay the check, so a
+         * reading it finds implausible stays quarantined.
+         */
+        RELEASE("release");
 
         private final String tag;
 
@@ -226,7 +232,7 @@ public class SupplyPlausibilityGuard {
                         accepted.litres(), accepted.ceiling(), accepted.population(), daysElapsed);
             }
             case Verdict.Quarantined quarantined -> {
-                boolean enforcing = isEnforcing();
+                boolean enforcing = path == Path.RELEASE || isEnforcing();
                 count(enforcing ? METRIC_QUARANTINED : METRIC_WOULD_QUARANTINE, path);
                 log.warn("{} mode={} path={} tenantId={} schemeId={} operatorId={} readingDate={} "
                                 + "submitted={} baseline={} litres={} ceiling={} population={} days={}",
