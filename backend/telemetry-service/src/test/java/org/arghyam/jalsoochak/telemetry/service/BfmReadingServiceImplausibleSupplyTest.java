@@ -104,7 +104,7 @@ class BfmReadingServiceImplausibleSupplyTest {
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findLatestConfirmedReadingSnapshot(
                 SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT, BASELINE_AT)));
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
         // createReading reads two tenant configs on every submission for a block that is commented
         // out; answer them all as absent so the household size falls back to the configured default.
@@ -144,13 +144,18 @@ class BfmReadingServiceImplausibleSupplyTest {
                 null);
     }
 
-    /** The scheme is migrated, has 100 connections, and has a reading to be measured against. */
+    /** The scheme is migrated, has 100 connections, and has a reading from the day before to be measured against. */
     private void checkableScheme() {
+        checkableScheme(BASELINE_AT);
+    }
+
+    /** @param baselineReadAt when the reading measured against was taken */
+    private void checkableScheme(LocalDateTime baselineReadAt) {
         when(repo.supportsQuarantine(SCHEMA)).thenReturn(true);
         when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
                 eq(SCHEMA), eq(SCHEME_ID), eq(ReadingChannel.BFM), eq(MeterRegister.STANDARD),
                 any(LocalDate.class), isNull()))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT, baselineReadAt)));
         when(repo.findSchemeSupplyCounts(SCHEMA, SCHEME_ID))
                 .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(100, 0, 0)));
     }
@@ -301,6 +306,26 @@ class BfmReadingServiceImplausibleSupplyTest {
             assertThat(response.isSuccess()).isTrue();
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), eq(new BigDecimal("950")), anyString(),
+                    any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull(), any(), any(), any());
+            verify(repo, never()).createTenantAnomalyRecord(anyString(), any());
+        }
+
+        /**
+         * A quarantined reading is never a baseline, so the next one is measured from the last reading
+         * accepted before it. Judged as one day's water, that growing delta kept the scheme quarantined
+         * for good.
+         */
+        @Test
+        @DisplayName("a delta supplied since a reading days earlier is judged against those days")
+        void multiDayDeltaIsJudgedOverItsDays() {
+            checkableScheme(READING_AT.minusDays(3));
+
+            CreateReadingResponse response = submit(SupplyPlausibilityProperties.Mode.ENFORCE, "1100", true);
+
+            // 200,000 L over three days, within the 225,000 L they allow.
+            assertThat(response.isSuccess()).isTrue();
+            verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
+                    any(LocalDateTime.class), any(BigDecimal.class), eq(new BigDecimal("1100")), anyString(),
                     any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull(), any(), any(), any());
             verify(repo, never()).createTenantAnomalyRecord(anyString(), any());
         }

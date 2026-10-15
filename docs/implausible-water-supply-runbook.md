@@ -43,18 +43,25 @@ the explanation: the reading is there, it is simply not counted.
 ```
 litres     = (confirmed_reading − baseline) × 1000        -- m³ index to litres
 population = connections × AVERAGE_MEMBERS_PER_HOUSEHOLD
-ceiling    = population × limit-per-person-litres          -- default 150 L/person/day
+days       = reading's day − baseline's day                -- at least 1
+ceiling    = population × limit-per-person-litres × days   -- default 150 L/person/day
 quarantine iff litres > ceiling
 ```
 
-`baseline` is the latest **non-quarantined** confirmed reading strictly before this one.
-`connections` falls back `fhtc_count` → `planned_fhtc` → `house_hold_count`, first non-zero wins.
+`baseline` is the latest **non-quarantined** confirmed reading strictly before this one's day, and
+`days` counts from the day it was read on, not the day its row was written. `connections` falls back
+`fhtc_count` → `planned_fhtc` → `house_hold_count`, first non-zero wins.
 
-Two things follow that are worth holding onto:
+Three things follow that are worth holding onto:
 
 - The ceiling scales with the scheme. A hamlet and a town do not share an allowance.
 - Quarantined rows are excluded from the baseline, so one bad day cannot poison the next day's
   comparison.
+- The ceiling scales with the gap. A delta is the water supplied over every day since the baseline,
+  so a scheme that skipped a day of reporting, or whose last reading was quarantined, is judged on
+  its average supply. Until the gap was counted, the ceiling was always one day's: one quarantine
+  made the next reading's delta longer than a day, so it was quarantined too, and the scheme dropped
+  off the dashboards until someone intervened.
 
 ### When it does not run at all
 
@@ -205,7 +212,7 @@ Metrics on `/actuator/prometheus`, all tagged `path` (`submission` | `correction
 Log lines, all prefixed `implausible_supply_`:
 
 - `implausible_supply_rejected` / `implausible_supply_would_reject` (WARN) — carries submitted value,
-  baseline, litres, ceiling and population
+  baseline, litres, ceiling, population and the days the ceiling covers
 - `implausible_supply_skipped reason=no_population` (WARN) — the fixable master-data gap
 - other skips and acceptances at DEBUG
 

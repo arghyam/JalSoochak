@@ -140,14 +140,19 @@ class BfmReadingServiceCorrectionOutcomeTest {
                 READING_DATE, READING_AT, ReadingChannel.BFM.getCode(), null, quarantineReason, null);
     }
 
-    /** The scheme is migrated, has 100 connections, and has an earlier reading to measure against. */
+    /** The scheme is migrated, has 100 connections, and has a reading from the day before to measure against. */
     private void checkableScheme(int quarantineReason) {
+        checkableScheme(quarantineReason, BASELINE_AT);
+    }
+
+    /** @param baselineReadAt when the reading measured against was taken */
+    private void checkableScheme(int quarantineReason, LocalDateTime baselineReadAt) {
         when(repo.supportsQuarantine(SCHEMA)).thenReturn(true);
         when(repo.findSchemeSupplyCounts(SCHEMA, SCHEME_ID))
                 .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(100, 0, 0)));
         when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
                 SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, READING_DATE, READING_ID))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT, baselineReadAt)));
         when(repo.findLatestFlowReadingByOperator(SCHEMA, OPERATOR_ID))
                 .thenReturn(Optional.of(target(quarantineReason)));
         when(operatorContextService.resolveOperatorWithSchema(CONTACT, TENANT_ID))
@@ -200,6 +205,25 @@ class BfmReadingServiceCorrectionOutcomeTest {
             verify(readingRepublisher).republish(SCHEMA, TENANT_ID, READING_ID);
             assertThat(response.isSuccess()).isTrue();
             assertThat(response.getQualityStatus()).isEqualTo("CONFIRMED");
+        }
+
+        /**
+         * A quarantined reading is never a baseline, so an honest correction of the reading after one
+         * is measured from days back. Judged as one day's water, it was refused, and the reading could
+         * only leave quarantine with a value made up to fit.
+         */
+        @Test
+        @DisplayName("releases a quarantined target whose delta was supplied over several days")
+        void releasesAMultiDayDelta() {
+            checkableScheme(QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY, READING_AT.minusDays(3));
+
+            // 200,000 L over three days, within the 225,000 L they allow.
+            CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.ENFORCE, IMPLAUSIBLE);
+
+            verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(IMPLAUSIBLE), eq(OPERATOR_ID), any(), eq("m3"), any());
+            verify(repo).applyQuarantineReason(SCHEMA, READING_ID, QuarantineReason.NONE);
+            verify(readingRepublisher).republish(SCHEMA, TENANT_ID, READING_ID);
+            assertThat(response.isSuccess()).isTrue();
         }
 
         /** Regression guard on the path that existed before this feature. */
@@ -491,7 +515,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
                     .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(100, 0, 0)));
             when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
                     SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, READING_DATE, READING_ID))
-                    .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
+                    .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT, BASELINE_AT)));
 
             CreateReadingResponse response = service(SupplyPlausibilityProperties.Mode.ENFORCE)
                     .updateConfirmedReading(CORRELATION_ID, null, IMPLAUSIBLE, TENANT_ID);

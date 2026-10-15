@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSupplyCounts;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
@@ -57,10 +58,20 @@ class SupplyPlausibilityGuardTest {
                 .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(100, 0, 0)));
     }
 
+    /** A submission measured against a baseline read the day before. */
     private Verdict assess(SupplyPlausibilityGuard guard, String confirmed, String baseline) {
+        return assess(guard, confirmed, baseline, READING_DATE.minusDays(1), SupplyPlausibilityGuard.Path.SUBMISSION);
+    }
+
+    /** @param baselineDate the day the baseline was read on; {@code null} for a baseline with no reading time */
+    private Verdict assess(SupplyPlausibilityGuard guard, String confirmed, String baseline,
+                           LocalDate baselineDate, SupplyPlausibilityGuard.Path path) {
+        TelemetryConfirmedReadingSnapshot snapshot = baseline == null
+                ? null
+                : new TelemetryConfirmedReadingSnapshot(new BigDecimal(baseline), null,
+                        baselineDate == null ? null : baselineDate.atTime(9, 0));
         return guard.assess(SCHEMA, TENANT_ID, OPERATOR_ID, SCHEME_ID, READING_DATE,
-                new BigDecimal(confirmed), baseline == null ? null : new BigDecimal(baseline),
-                SupplyPlausibilityGuard.Path.SUBMISSION);
+                new BigDecimal(confirmed), snapshot, path);
     }
 
     private double counter(String name, String... tags) {
@@ -134,6 +145,36 @@ class SupplyPlausibilityGuardTest {
             // No stub for findSchemeSupplyCounts: strict stubs would fail if it were consulted.
             assertThat(assess(guard(SupplyPlausibilityProperties.Mode.ENFORCE), "950", null))
                     .isEqualTo(new Verdict.Skipped(Verdict.SkipReason.NO_BASELINE));
+        }
+    }
+
+    @Nested
+    @DisplayName("days since the baseline")
+    class DaysSinceBaseline {
+
+        @Test
+        @DisplayName("allows the ceiling for every day since the baseline's reading")
+        void scalesByTheBaselinesDay() {
+            schemeWith100Connections();
+
+            // 200 m3 since a reading three days earlier: 225,000 L allowed, not 75,000.
+            Verdict verdict = assess(guard(SupplyPlausibilityProperties.Mode.ENFORCE), "1100", "900",
+                    READING_DATE.minusDays(3), SupplyPlausibilityGuard.Path.SUBMISSION);
+
+            assertThat(verdict).isInstanceOf(Verdict.Accepted.class);
+            assertThat(((Verdict.Accepted) verdict).ceiling()).isEqualByComparingTo("225000");
+        }
+
+        @Test
+        @DisplayName("counts a baseline with no reading time as one day")
+        void unknownReadingTimeIsOneDay() {
+            schemeWith100Connections();
+
+            Verdict verdict = assess(guard(SupplyPlausibilityProperties.Mode.ENFORCE), "1100", "900",
+                    null, SupplyPlausibilityGuard.Path.SUBMISSION);
+
+            assertThat(verdict).isInstanceOf(Verdict.Quarantined.class);
+            assertThat(((Verdict.Quarantined) verdict).ceiling()).isEqualByComparingTo("75000");
         }
     }
 

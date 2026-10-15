@@ -274,7 +274,7 @@ class BfmReadingServiceRolloverTest {
         when(defaultOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(ocr);
         when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, 10L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("140"),
-                        ReadingTime.now().minusDays(1))));
+                        ReadingTime.now().minusDays(1), null)));
         when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(10L), eq(1L), any(LocalDate.class)))
                 .thenReturn(Optional.empty());
         // Tenant schema migrated with confirmed_reading_source (V35) so the resolver is allowed to run.

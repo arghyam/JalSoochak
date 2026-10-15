@@ -1505,13 +1505,13 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         StringBuilder sql = new StringBuilder(String.format("""
-                SELECT confirmed_reading, created_at
+                SELECT confirmed_reading, created_at, %s AS reading_time
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND COALESCE(channel_id, 1) = ?
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL%s
-                """, schemaName, quarantineFilter(schemaName)));
+                """, timeColumn, schemaName, quarantineFilter(schemaName)));
         List<Object> params = new ArrayList<>();
         params.add(schemeId);
         params.add(channel.getCode());
@@ -1525,7 +1525,8 @@ public class TelemetryTenantRepository {
                 sql.toString(),
                 (rs, n) -> new TelemetryConfirmedReadingSnapshot(
                         rs.getBigDecimal("confirmed_reading"),
-                        rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toLocalDateTime() : null
+                        rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toLocalDateTime() : null,
+                        rs.getObject("reading_time", LocalDateTime.class)
                 ),
                 params.toArray()
         );
@@ -1747,14 +1748,14 @@ public class TelemetryTenantRepository {
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         LocalDateTime cutoffTimeExclusive = cutoffDateExclusive.atStartOfDay();
         StringBuilder sql = new StringBuilder(String.format("""
-                SELECT confirmed_reading, created_at
+                SELECT confirmed_reading, created_at, %s AS reading_time
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND COALESCE(channel_id, 1) = ?
                   AND confirmed_reading > 0
                   AND %s < ?
                   AND deleted_at IS NULL%s
-                """, schemaName, timeColumn, quarantineFilter(schemaName)));
+                """, timeColumn, schemaName, timeColumn, quarantineFilter(schemaName)));
         List<Object> params = new ArrayList<>();
         params.add(schemeId);
         params.add(channel.getCode());
@@ -1769,7 +1770,8 @@ public class TelemetryTenantRepository {
                 sql.toString(),
                 (rs, n) -> new TelemetryConfirmedReadingSnapshot(
                         rs.getBigDecimal("confirmed_reading"),
-                        rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toLocalDateTime() : null
+                        rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toLocalDateTime() : null,
+                        rs.getObject("reading_time", LocalDateTime.class)
                 ),
                 params.toArray()
         );
@@ -1793,14 +1795,14 @@ public class TelemetryTenantRepository {
         LocalDateTime startInclusive = readingDate.atStartOfDay();
         LocalDateTime endExclusive = readingDate.plusDays(1).atStartOfDay();
         StringBuilder sql = new StringBuilder(String.format("""
-                SELECT confirmed_reading, created_at
+                SELECT confirmed_reading, created_at, %s AS reading_time
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND confirmed_reading > 0
                   AND %s >= ?
                   AND %s < ?
                   AND deleted_at IS NULL
-                """, schemaName, timeColumn, timeColumn));
+                """, timeColumn, schemaName, timeColumn, timeColumn));
         List<Object> params = new ArrayList<>();
         params.add(schemeId);
         params.add(startInclusive);
@@ -1814,7 +1816,8 @@ public class TelemetryTenantRepository {
                 sql.toString(),
                 (rs, n) -> new TelemetryConfirmedReadingSnapshot(
                         rs.getBigDecimal("confirmed_reading"),
-                        rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toLocalDateTime() : null
+                        rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toLocalDateTime() : null,
+                        rs.getObject("reading_time", LocalDateTime.class)
                 ),
                 params.toArray()
         );

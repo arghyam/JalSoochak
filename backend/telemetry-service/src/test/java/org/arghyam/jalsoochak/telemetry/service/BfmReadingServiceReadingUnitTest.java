@@ -125,7 +125,7 @@ class BfmReadingServiceReadingUnitTest {
         lenient().when(repo.findLatestConfirmedReadingSnapshot(
                 SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
-                        new BigDecimal("0.5"), ReadingTime.now().minusDays(1))));
+                        new BigDecimal("0.5"), ReadingTime.now().minusDays(1), null)));
         lenient().when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(SCHEME_ID), eq(OPERATOR_ID),
                 any(LocalDate.class))).thenReturn(Optional.empty());
         lenient().when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
@@ -249,7 +249,7 @@ class BfmReadingServiceReadingUnitTest {
         when(repo.findLatestConfirmedReadingSnapshot(
                 SCHEMA, SCHEME_ID, ReadingChannel.ELM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
-                        new BigDecimal("4800"), ReadingTime.now().minusDays(1))));
+                        new BigDecimal("4800"), ReadingTime.now().minusDays(1), null)));
 
         CreateReadingResponse response = service.createReading(
                 assertedValue(ReadingChannel.ELM, "4821.5", null), SCHEMA, operator, CONTACT, false);
@@ -277,11 +277,11 @@ class BfmReadingServiceReadingUnitTest {
         when(repo.findLatestConfirmedReadingSnapshot(
                 SCHEMA, SCHEME_ID, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
-                        new BigDecimal("5300"), ReadingTime.now().minusDays(1))));
+                        new BigDecimal("5300"), ReadingTime.now().minusDays(1), null)));
         lenient().when(repo.findLatestConfirmedReadingSnapshot(
                 SCHEMA, SCHEME_ID, ReadingChannel.ELM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
-                        new BigDecimal("4800"), ReadingTime.now().minusDays(1))));
+                        new BigDecimal("4800"), ReadingTime.now().minusDays(1), null)));
 
         CreateReadingResponse kvah = service.createReading(
                 assertedValue(ReadingChannel.ELM, "5310.4", "kVAh"), SCHEMA, operator, CONTACT, false);
