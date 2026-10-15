@@ -41,7 +41,8 @@ import java.util.Optional;
  *
  * <p>Each event waits for Kafka's acknowledgement on the calling thread, as {@link ReadingBackfillService}
  * does. A reading whose event is not acknowledged is quarantined again — the event may never arrive,
- * and a reading that is not quarantined is never picked up by a later release — and the run stops.
+ * and a reading that is not quarantined is never picked up by a later release — and the run stops. A
+ * publish that throws does the same, and the exception propagates.
  * Releasing the same range again carries on from there; should the event arrive after all, analytics
  * keeps the version the rerun sends.
  */
@@ -134,7 +135,19 @@ public class QuarantinedReadingReleaseService {
                 released++;
                 continue;
             }
-            ReadingRepublisher.Result result = readingRepublisher.republishAndAwait(schemaName, tenantId, reading.id());
+            ReadingRepublisher.Result result;
+            try {
+                result = readingRepublisher.republishAndAwait(schemaName, tenantId, reading.id());
+            } catch (RuntimeException e) {
+                // The cleared marker is already committed: put it back, or the unsent reading would
+                // never be picked up again.
+                try {
+                    telemetryTenantRepository.applyQuarantineReason(schemaName, reading.id(), reading.quarantineReason());
+                } catch (RuntimeException restoreFailure) {
+                    e.addSuppressed(restoreFailure);
+                }
+                throw e;
+            }
             if (result == ReadingRepublisher.Result.NOT_ACKNOWLEDGED) {
                 telemetryTenantRepository.applyQuarantineReason(schemaName, reading.id(), reading.quarantineReason());
                 break;

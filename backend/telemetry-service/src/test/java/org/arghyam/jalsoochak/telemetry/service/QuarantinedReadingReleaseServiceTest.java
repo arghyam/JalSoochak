@@ -28,13 +28,16 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -202,6 +205,44 @@ class QuarantinedReadingReleaseServiceTest {
         verify(supplyPlausibilityGuard, never()).assess(any(), any(), any(), any(), eq(third.readingDate()),
                 any(), any(), any());
         verify(readingRepublisher, never()).republishAndAwait(SCHEMA, TENANT_ID, 7L);
+    }
+
+    /** As when Kafka does not acknowledge: the marker is already committed, so an unsent reading goes back. */
+    @Test
+    void quarantinesAgainAndRethrowsWhenThePublishFails() {
+        tenantSchema();
+        TelemetryLatestFlowReadingRecord reading = quarantined(5L, LocalDate.of(2026, 9, 7), "1100");
+        quarantinedReadings(reading);
+        assessedAs(reading, ACCEPTED);
+        IllegalStateException failure = new IllegalStateException("Flow reading 5 not found in " + SCHEMA);
+        when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 5L)).thenThrow(failure);
+
+        assertSame(failure, assertThrows(IllegalStateException.class, () -> release(false)));
+
+        InOrder order = inOrder(telemetryTenantRepository);
+        order.verify(telemetryTenantRepository).applyQuarantineReason(SCHEMA, 5L, QuarantineReason.NONE);
+        order.verify(telemetryTenantRepository)
+                .applyQuarantineReason(SCHEMA, 5L, QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY);
+    }
+
+    @Test
+    void keepsThePublishFailureWhenQuarantiningAgainFailsToo() {
+        tenantSchema();
+        TelemetryLatestFlowReadingRecord reading = quarantined(5L, LocalDate.of(2026, 9, 7), "1100");
+        quarantinedReadings(reading);
+        assessedAs(reading, ACCEPTED);
+        IllegalStateException failure = new IllegalStateException("publish failed");
+        IllegalStateException restoreFailure = new IllegalStateException("restore failed");
+        when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 5L)).thenThrow(failure);
+        // The clear succeeds; putting the marker back fails.
+        doNothing().doThrow(restoreFailure).when(telemetryTenantRepository)
+                .applyQuarantineReason(eq(SCHEMA), eq(5L), anyInt());
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class, () -> release(false));
+
+        assertSame(failure, thrown);
+        assertArrayEquals(new Throwable[]{restoreFailure}, thrown.getSuppressed());
+        verify(telemetryTenantRepository).applyQuarantineReason(SCHEMA, 5L, QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY);
     }
 
     @Test
