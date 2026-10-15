@@ -1505,13 +1505,13 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         StringBuilder sql = new StringBuilder(String.format("""
-                SELECT confirmed_reading, created_at
+                SELECT confirmed_reading, created_at, %s AS reading_time
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND COALESCE(channel_id, 1) = ?
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL%s
-                """, schemaName, quarantineFilter(schemaName)));
+                """, timeColumn, schemaName, quarantineFilter(schemaName)));
         List<Object> params = new ArrayList<>();
         params.add(schemeId);
         params.add(channel.getCode());
@@ -1525,7 +1525,8 @@ public class TelemetryTenantRepository {
                 sql.toString(),
                 (rs, n) -> new TelemetryConfirmedReadingSnapshot(
                         rs.getBigDecimal("confirmed_reading"),
-                        rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toLocalDateTime() : null
+                        rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toLocalDateTime() : null,
+                        rs.getObject("reading_time", LocalDateTime.class)
                 ),
                 params.toArray()
         );
@@ -1747,14 +1748,14 @@ public class TelemetryTenantRepository {
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         LocalDateTime cutoffTimeExclusive = cutoffDateExclusive.atStartOfDay();
         StringBuilder sql = new StringBuilder(String.format("""
-                SELECT confirmed_reading, created_at
+                SELECT confirmed_reading, created_at, %s AS reading_time
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND COALESCE(channel_id, 1) = ?
                   AND confirmed_reading > 0
                   AND %s < ?
                   AND deleted_at IS NULL%s
-                """, schemaName, timeColumn, quarantineFilter(schemaName)));
+                """, timeColumn, schemaName, timeColumn, quarantineFilter(schemaName)));
         List<Object> params = new ArrayList<>();
         params.add(schemeId);
         params.add(channel.getCode());
@@ -1769,7 +1770,8 @@ public class TelemetryTenantRepository {
                 sql.toString(),
                 (rs, n) -> new TelemetryConfirmedReadingSnapshot(
                         rs.getBigDecimal("confirmed_reading"),
-                        rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toLocalDateTime() : null
+                        rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toLocalDateTime() : null,
+                        rs.getObject("reading_time", LocalDateTime.class)
                 ),
                 params.toArray()
         );
@@ -1793,14 +1795,14 @@ public class TelemetryTenantRepository {
         LocalDateTime startInclusive = readingDate.atStartOfDay();
         LocalDateTime endExclusive = readingDate.plusDays(1).atStartOfDay();
         StringBuilder sql = new StringBuilder(String.format("""
-                SELECT confirmed_reading, created_at
+                SELECT confirmed_reading, created_at, %s AS reading_time
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND confirmed_reading > 0
                   AND %s >= ?
                   AND %s < ?
                   AND deleted_at IS NULL
-                """, schemaName, timeColumn, timeColumn));
+                """, timeColumn, schemaName, timeColumn, timeColumn));
         List<Object> params = new ArrayList<>();
         params.add(schemeId);
         params.add(startInclusive);
@@ -1814,7 +1816,8 @@ public class TelemetryTenantRepository {
                 sql.toString(),
                 (rs, n) -> new TelemetryConfirmedReadingSnapshot(
                         rs.getBigDecimal("confirmed_reading"),
-                        rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toLocalDateTime() : null
+                        rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toLocalDateTime() : null,
+                        rs.getObject("reading_time", LocalDateTime.class)
                 ),
                 params.toArray()
         );
@@ -2038,6 +2041,40 @@ public class TelemetryTenantRepository {
         }
         sql.append(String.format(" ORDER BY reading_date, %s, id", resolveFlowReadingTimeColumn(schemaName)));
         return jdbcTemplate.query(sql.toString(), (rs, n) -> toLong(rs.getObject("id")), params.toArray());
+    }
+
+    /**
+     * SUPPLY-PLAUSIBILITY: the quarantined BFM readings dated between two dates, both inclusive, oldest
+     * first — the order a release assesses them in, since a released reading becomes the baseline of
+     * its scheme's next one. Only BFM readings are ever quarantined. Empty on a pre-V40 schema, which
+     * cannot mark a row.
+     *
+     * @param schemeId narrows the result to one scheme; {@code null} returns every scheme's rows
+     */
+    public List<TelemetryLatestFlowReadingRecord> findQuarantinedReadings(String schemaName,
+                                                                         LocalDate fromDate,
+                                                                         LocalDate toDate,
+                                                                         Long schemeId) {
+        validateSchemaName(schemaName);
+        if (!columnExists(schemaName, "flow_reading_table", "quarantine_reason")) {
+            return List.of();
+        }
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        StringBuilder sql = new StringBuilder(String.format("""
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel_id, %s AS submitted_unit, %s AS reading_time, quarantine_reason, updated_at
+                FROM %s.flow_reading_table
+                WHERE reading_date BETWEEN ? AND ?
+                  AND quarantine_reason <> 0
+                  AND COALESCE(channel_id, 1) = ?
+                  AND deleted_at IS NULL
+                """, submittedUnitColumn(schemaName), timeColumn, schemaName));
+        List<Object> params = new ArrayList<>(List.of(fromDate, toDate, ReadingChannel.BFM.getCode()));
+        if (schemeId != null) {
+            sql.append(" AND scheme_id = ?");
+            params.add(schemeId);
+        }
+        sql.append(String.format(" ORDER BY reading_date, %s, id", timeColumn));
+        return jdbcTemplate.query(sql.toString(), (rs, n) -> mapLatestFlowReadingRecord(rs), params.toArray());
     }
 
     public Optional<TelemetryFlowReadingDetails> findLatestFlowReadingForDate(String schemaName,

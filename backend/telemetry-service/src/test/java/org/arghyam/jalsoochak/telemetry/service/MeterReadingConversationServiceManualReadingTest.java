@@ -284,7 +284,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_test", 10L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1), null)));
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L,
@@ -626,7 +626,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_test", 10L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1), null)));
 
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
@@ -1063,7 +1063,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_test", 10L, ReadingChannel.ELM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
-                        new BigDecimal("4800"), ReadingTime.now().minusDays(1))));
+                        new BigDecimal("4800"), ReadingTime.now().minusDays(1), null)));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")
@@ -1094,7 +1094,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_test", 10L, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
-                        new BigDecimal("5290"), ReadingTime.now().minusDays(1))));
+                        new BigDecimal("5290"), ReadingTime.now().minusDays(1), null)));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")

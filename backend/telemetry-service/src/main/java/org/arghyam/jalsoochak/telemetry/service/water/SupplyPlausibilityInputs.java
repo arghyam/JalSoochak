@@ -18,6 +18,9 @@ import java.math.BigDecimal;
  *                               not the model's raw pick
  * @param baselineReading        latest non-quarantined confirmed reading strictly before this one;
  *                               {@code null} when the scheme has no earlier reading
+ * @param daysElapsed            days from the baseline's day to this reading's day — the days the
+ *                               delta was supplied over. At least 1, since the baseline is from an
+ *                               earlier day; a smaller value is read as 1
  * @param fhtcCount              functional household tap connections achieved
  * @param plannedFhtc            tap connections the scheme was designed for
  * @param houseHoldCount         households in the service area
@@ -29,6 +32,7 @@ import java.math.BigDecimal;
 public record SupplyPlausibilityInputs(
         BigDecimal confirmedReading,
         BigDecimal baselineReading,
+        long daysElapsed,
         int fhtcCount,
         int plannedFhtc,
         int houseHoldCount,

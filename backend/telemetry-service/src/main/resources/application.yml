@@ -109,13 +109,16 @@ telemetry:
       # 64-character hex disables them the same way, with a warning at startup.
       token-hash: ${TELEMETRY_INTERNAL_AUTH_TOKEN_HASH:}
   supply-plausibility:
-    # SUPPLY-PLAUSIBILITY: rejects a meter reading whose implied daily volume exceeds what the
-    # scheme's connected population could physically consume:
+    # SUPPLY-PLAUSIBILITY: rejects a meter reading whose implied volume exceeds what the scheme's
+    # connected population could physically consume since its previous accepted reading:
     #   litres  = (confirmed_reading - previous confirmed reading) * 1000
     #   ceiling = connections * AVERAGE_MEMBERS_PER_HOUSEHOLD * limit-per-person-litres
+    #             * days since the previous reading (at least 1)
     # A failing POST is stored with flow_reading_table.quarantine_reason = 1, withheld from the
     # warehouse and answered with 400 ABNORMAL_READING; a failing PUT correction leaves the stored
-    # value untouched. The release path is a corrected PUT that passes.
+    # value untouched. The release paths are a corrected PUT that passes, and
+    # POST /api/v1/telemetry/internal/readings/quarantine/release, which assesses stored quarantined
+    # readings again and releases the ones that pass.
     #
     # Scope: this mode governs the quarantine gate above and nothing else. The OVER_WATER_SUPPLY
     # check on the WhatsApp path is untouched by it, and still adds a per-capita litre figure to a

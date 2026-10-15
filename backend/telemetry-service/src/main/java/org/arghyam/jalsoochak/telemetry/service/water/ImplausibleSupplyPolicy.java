@@ -12,9 +12,16 @@ import java.util.Optional;
  * <pre>
  * litres     = max(0, confirmedReading − baseline) × 1000
  * population = firstNonZero(fhtcCount, plannedFhtc, houseHoldCount) × avgMembersPerHousehold
- * ceiling    = population × limitPerPersonLitres
+ * ceiling    = population × limitPerPersonLitres × max(1, daysElapsed)
  * quarantine iff litres &gt; ceiling
  * </pre>
+ *
+ * <p>The ceiling covers every day since the baseline, because a cumulative index's delta is the
+ * water supplied over all of them. Held to a single day, a scheme that missed a day of reporting was
+ * judged on two days' water. Worse, a quarantined reading is never a baseline, so after one
+ * quarantine each later reading was measured over a growing gap against the same one-day ceiling, and
+ * the scheme stayed quarantined for good. Scaling by the gap keeps a scheme whose average supply is
+ * plausible passing, however long ago its last accepted reading was.
  *
  * <p>Pure arithmetic over {@link SupplyPlausibilityInputs}: no Spring, no repository, no clock. The
  * decision is therefore reproducible from the numbers alone, which is what lets an operator argue
@@ -80,7 +87,10 @@ public final class ImplausibleSupplyPolicy {
 
         BigDecimal population = populationOpt.get();
         BigDecimal litres = deltaLitres(confirmedReading, baseline);
-        BigDecimal ceiling = population.multiply(limitPerPerson);
+        // Floored at one day: the baseline is from an earlier day, so a smaller value is a caller bug,
+        // and a ceiling of zero would quarantine every reading rather than none.
+        BigDecimal days = BigDecimal.valueOf(Math.max(1L, inputs.daysElapsed()));
+        BigDecimal ceiling = population.multiply(limitPerPerson).multiply(days);
 
         // Strictly greater: a reading landing exactly on the ceiling is plausible, not implausible.
         return litres.compareTo(ceiling) > 0

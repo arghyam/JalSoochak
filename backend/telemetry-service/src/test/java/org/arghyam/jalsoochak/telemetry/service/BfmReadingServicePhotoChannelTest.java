@@ -166,7 +166,7 @@ class BfmReadingServicePhotoChannelTest {
         lenient().when(repo.findLatestConfirmedReadingSnapshot(
                 SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
-                        new BigDecimal("30"), ReadingTime.now().minusDays(1))));
+                        new BigDecimal("30"), ReadingTime.now().minusDays(1), null)));
         lenient().when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(SCHEME_ID), eq(OPERATOR_ID),
                 any(LocalDate.class))).thenReturn(Optional.empty());
         when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
