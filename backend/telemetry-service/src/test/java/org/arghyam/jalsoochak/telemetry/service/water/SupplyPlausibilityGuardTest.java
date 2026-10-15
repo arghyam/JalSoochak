@@ -179,6 +179,25 @@ class SupplyPlausibilityGuardTest {
     }
 
     @Nested
+    @DisplayName("release path")
+    class ReleasePath {
+
+        @Test
+        @DisplayName("counts an implausible reading as quarantined whatever the mode")
+        void actsOnTheVerdictUnderAudit() {
+            schemeWith100Connections();
+
+            Verdict verdict = assess(guard(SupplyPlausibilityProperties.Mode.AUDIT), "1100", "900",
+                    READING_DATE.minusDays(1), SupplyPlausibilityGuard.Path.RELEASE);
+
+            assertThat(verdict).isInstanceOf(Verdict.Quarantined.class);
+            assertThat(counter("implausible_supply.quarantined", "path", "release", "mode", "AUDIT"))
+                    .isEqualTo(1.0);
+            assertThat(counter("implausible_supply.would_quarantine")).isZero();
+        }
+    }
+
+    @Nested
     @DisplayName("household size")
     class HouseholdSize {
 

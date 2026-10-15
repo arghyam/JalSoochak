@@ -170,6 +170,24 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
     }
 
     @Test
+    void findsTheQuarantinedReadingsInARange() {
+        List<TelemetryLatestFlowReadingRecord> readings =
+                repository().findQuarantinedReadings(MIGRATED_SCHEMA, DAY_1, DAY_3, null);
+
+        assertEquals(List.of(3L), readings.stream().map(TelemetryLatestFlowReadingRecord::id).toList());
+        assertEquals(DAY_3, readings.get(0).readingDate());
+        assertEquals(DAY_3.atTime(6, 0), readings.get(0).readingAt());
+        assertEquals(1, readings.get(0).quarantineReason());
+        assertTrue(repository().findQuarantinedReadings(MIGRATED_SCHEMA, DAY_1, DAY_2, null).isEmpty());
+        assertTrue(repository().findQuarantinedReadings(MIGRATED_SCHEMA, DAY_1, DAY_3, 4242L).isEmpty());
+    }
+
+    @Test
+    void findsNoQuarantinedReadingsOnAPreMigrationSchema() {
+        assertTrue(repository().findQuarantinedReadings(PRE_MIGRATION_SCHEMA, DAY_1, DAY_3, null).isEmpty());
+    }
+
+    @Test
     void quarantinedRowIsNotInTheConsumptionBand() {
         // The band drives rollover resolution: a quarantined value must not shape which candidate the
         // resolver picks. The window is relative to today, so seed dates are reached with a wide span.

@@ -15,8 +15,9 @@ All APIs are RESTful and versioned under `/api/v1/`. Clients reach services thro
 >   `/readings/formats/{format}`, `/readings/reset-latest`) — authenticated by the per-tenant
 >   `X-Api-Key`, which a State Admin issues with `POST /api/v1/tenants/api-token`.
 > * **Operations routes** under `/api/v1/telemetry/internal/` (`POST /internal/readings/republish`
->   re-sends a tenant's stored ELM/PDU readings) — authenticated by `X-Internal-Token`, plus
->   `X-Tenant-Code`.
+>   re-sends a tenant's stored ELM/PDU readings; `POST /internal/readings/quarantine/release`
+>   releases the quarantined readings the implausible-supply check now accepts) — authenticated by
+>   `X-Internal-Token`, plus `X-Tenant-Code`.
 >
 > All of these are publicly reachable. Do not assume a path under `/api/v1/` is behind the gateway.
 > The one telemetry route that takes a JWT, the SO/SDO Fix-readings save (§9.3), is reachable the
