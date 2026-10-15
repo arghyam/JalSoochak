@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSupplyCounts;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 
 /**
@@ -97,8 +99,8 @@ public class SupplyPlausibilityGuard {
      * channel being BFM, the meter not having been replaced — are the caller's to apply before
      * calling. Only conditions derivable from the scheme's own data are resolved here.
      *
-     * @param baselineReading the latest non-quarantined confirmed reading strictly before this one,
-     *                        or {@code null} when the scheme has none
+     * @param baseline the latest non-quarantined confirmed reading strictly before this one's day, or
+     *                 {@code null} when the scheme has none
      * @return the verdict; its numbers have already been logged and counted
      */
     public Verdict assess(String schemaName,
@@ -107,15 +109,18 @@ public class SupplyPlausibilityGuard {
                           Long schemeId,
                           LocalDate readingDate,
                           BigDecimal confirmedReading,
-                          BigDecimal baselineReading,
+                          TelemetryConfirmedReadingSnapshot baseline,
                           Path path) {
         TelemetrySchemeSupplyCounts counts = telemetryTenantRepository
                 .findSchemeSupplyCounts(schemaName, schemeId)
                 .orElse(new TelemetrySchemeSupplyCounts(0, 0, 0));
 
+        BigDecimal baselineReading = baseline != null ? baseline.confirmedReading() : null;
+        long daysElapsed = daysElapsed(baseline, readingDate);
         SupplyPlausibilityInputs inputs = new SupplyPlausibilityInputs(
                 confirmedReading,
                 baselineReading,
+                daysElapsed,
                 counts.fhtcCount(),
                 counts.plannedFhtc(),
                 counts.houseHoldCount(),
@@ -124,8 +129,21 @@ public class SupplyPlausibilityGuard {
 
         Verdict verdict = ImplausibleSupplyPolicy.evaluate(inputs);
         report(verdict, tenantId, operatorId, schemeId, readingDate, confirmedReading,
-                baselineReading, path);
+                baselineReading, daysElapsed, path);
         return verdict;
+    }
+
+    /**
+     * Days from the baseline's day to the reading's day, which the policy's ceiling covers. A baseline
+     * with no reading time counts as one day, which is how the check judged every reading before it
+     * counted days; {@code findLatestConfirmedReadingSnapshotBeforeDate}, where every caller takes its
+     * baseline from, filters on that time, so it never returns one.
+     */
+    static long daysElapsed(TelemetryConfirmedReadingSnapshot baseline, LocalDate readingDate) {
+        if (baseline == null || baseline.readingAt() == null || readingDate == null) {
+            return 1L;
+        }
+        return Math.max(1L, ChronoUnit.DAYS.between(baseline.readingAt().toLocalDate(), readingDate));
     }
 
     /**
@@ -184,6 +202,7 @@ public class SupplyPlausibilityGuard {
                         LocalDate readingDate,
                         BigDecimal confirmedReading,
                         BigDecimal baselineReading,
+                        long daysElapsed,
                         Path path) {
         switch (verdict) {
             case Verdict.Skipped skipped -> {
@@ -202,19 +221,19 @@ public class SupplyPlausibilityGuard {
             case Verdict.Accepted accepted -> {
                 count(METRIC_ACCEPTED, path);
                 log.debug("implausible_supply_accepted tenantId={} schemeId={} readingDate={} path={} "
-                                + "litres={} ceiling={} population={}",
+                                + "litres={} ceiling={} population={} days={}",
                         tenantId, schemeId, readingDate, path.tag(),
-                        accepted.litres(), accepted.ceiling(), accepted.population());
+                        accepted.litres(), accepted.ceiling(), accepted.population(), daysElapsed);
             }
             case Verdict.Quarantined quarantined -> {
                 boolean enforcing = isEnforcing();
                 count(enforcing ? METRIC_QUARANTINED : METRIC_WOULD_QUARANTINE, path);
                 log.warn("{} mode={} path={} tenantId={} schemeId={} operatorId={} readingDate={} "
-                                + "submitted={} baseline={} litres={} ceiling={} population={}",
+                                + "submitted={} baseline={} litres={} ceiling={} population={} days={}",
                         enforcing ? "implausible_supply_rejected" : "implausible_supply_would_reject",
                         properties.getResolvedMode(), path.tag(), tenantId, schemeId, operatorId,
                         readingDate, confirmedReading, baselineReading,
-                        quarantined.litres(), quarantined.ceiling(), quarantined.population());
+                        quarantined.litres(), quarantined.ceiling(), quarantined.population(), daysElapsed);
             }
         }
     }

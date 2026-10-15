@@ -153,6 +153,22 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
         assertEquals(0, snapshot.get().confirmedReading().compareTo(new BigDecimal("220")));
     }
 
+    /**
+     * The plausibility ceiling covers the days since the baseline, so it needs the day the baseline
+     * was read on — not the day its row was written, which is later for a reading submitted late.
+     */
+    @Test
+    void baselineCarriesWhenItWasReadAsWellAsWhenItWasWritten() {
+        TelemetryConfirmedReadingSnapshot snapshot = repository()
+                .findLatestConfirmedReadingSnapshotBeforeDate(
+                        MIGRATED_SCHEMA, SCHEME, ReadingChannel.BFM, MeterRegister.STANDARD, DAY_3, null)
+                .orElseThrow();
+
+        assertEquals(DAY_2.atTime(6, 0), snapshot.readingAt());
+        assertTrue(snapshot.createdAt() != null && !snapshot.createdAt().equals(snapshot.readingAt()),
+                "created_at defaults to the insert time, unrelated to the reading's own time");
+    }
+
     @Test
     void quarantinedRowIsNotInTheConsumptionBand() {
         // The band drives rollover resolution: a quarantined value must not shape which candidate the

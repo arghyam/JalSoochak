@@ -287,7 +287,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_test", 10L, ReadingChannel.BFM, MeterRegister.STANDARD, 99L))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1), null)));
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L,
@@ -473,7 +473,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_test", 10L, ReadingChannel.BFM, MeterRegister.STANDARD, 99L))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
-                        new BigDecimal("12000"), ReadingTime.now().minusDays(1))));
+                        new BigDecimal("12000"), ReadingTime.now().minusDays(1), null)));
         // Maximum = baseline + 55 * 120% = 12066 from yesterday's 12000, but 1266 from the photo's 1200.
         when(tenantConfigRepository.findConfigValue(1, "TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD"))
                 .thenReturn(Optional.of("{\"undersupplyThresholdPercent\":0.0,\"oversupplyThresholdPercent\":20.0}"));
@@ -685,7 +685,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_test", 10L, ReadingChannel.BFM, MeterRegister.STANDARD, 55L))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1), null)));
 
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
@@ -1122,7 +1122,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_test", 10L, ReadingChannel.ELM, MeterRegister.STANDARD, 99L))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
-                        new BigDecimal("4800"), ReadingTime.now().minusDays(1))));
+                        new BigDecimal("4800"), ReadingTime.now().minusDays(1), null)));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")
@@ -1153,7 +1153,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_test", 10L, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, 99L))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
-                        new BigDecimal("5290"), ReadingTime.now().minusDays(1))));
+                        new BigDecimal("5290"), ReadingTime.now().minusDays(1), null)));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")

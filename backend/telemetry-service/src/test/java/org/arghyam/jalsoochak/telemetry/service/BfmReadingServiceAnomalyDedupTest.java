@@ -171,7 +171,7 @@ class BfmReadingServiceAnomalyDedupTest {
         );
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_up", 100L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("123"), ReadingTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("123"), ReadingTime.now().minusDays(1), null)));
         when(tenantConfigRepository.findConfigValue(anyInt(), anyString())).thenReturn(Optional.empty());
 
         CreateReadingRequest request = CreateReadingRequest.builder()
