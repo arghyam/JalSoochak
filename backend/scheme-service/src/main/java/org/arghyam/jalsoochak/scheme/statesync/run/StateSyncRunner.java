@@ -249,7 +249,8 @@ public class StateSyncRunner {
                 report.add("delta.full_scheme_crawl", since == null ? 1 : 0);
                 List<UpstreamScheme> schemes = new ArrayList<>(step(runId, "schemes", () -> src.schemes(since), report));
                 schemes.addAll(lookUpPlaceholders(ctx, schemes, report));
-                yield new Fetched(null, null, List.of(), schemes, List.of(), List.of());
+                List<String> blocked = step(runId, "blocked_users", src::blockedUserCodes, report);
+                yield new Fetched(null, null, List.of(), schemes, List.of(), blocked);
             }
             case SCHEME_REFRESH -> {
                 if (schemeRef == null || schemeRef.isBlank()) {
@@ -262,7 +263,8 @@ public class StateSyncRunner {
                 if (scheme.isEmpty()) {
                     report.issue("SCHEME", ref, "NOT_FOUND_UPSTREAM", Map.of());
                 }
-                yield new Fetched(null, null, List.of(), scheme.map(List::of).orElse(List.of()), List.of(), List.of());
+                List<String> blocked = step(runId, "blocked_users", src::blockedUserCodes, report);
+                yield new Fetched(null, null, List.of(), scheme.map(List::of).orElse(List.of()), List.of(), blocked);
             }
         };
     }
@@ -361,15 +363,17 @@ public class StateSyncRunner {
         for (UpstreamPerson person : fetched.users()) {
             users.resolve(person, report);
         }
+        // Before the schemes, so an officer the upstream blocked is neither reactivated nor linked.
+        users.useBlockedList(fetched.blocked());
+        for (String code : fetched.blocked()) {
+            users.block(code, report).ifPresent(u -> mappings.retireAllForUser(u.id(), report));
+        }
 
         SchemeReconciler schemes = new SchemeReconciler(tenantRepository, properties, schema, ctx.actor(), users, mappings);
         schemes.reconcile(fetched.schemes(), report);
 
         if (kind == RunKind.FULL) {
             schemes.applyArchived(fetched.archived(), report);
-            for (String code : fetched.blocked()) {
-                users.block(code, report).ifPresent(u -> mappings.retireAllForUser(u.id(), report));
-            }
             Set<String> listed = new HashSet<>();
             fetched.schemes().forEach(s -> listed.add(s.code()));
             schemes.reportAbsent(listed, new HashSet<>(fetched.archived()), report);
