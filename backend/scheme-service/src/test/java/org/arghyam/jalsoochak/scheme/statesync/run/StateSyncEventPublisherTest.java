@@ -102,6 +102,20 @@ class StateSyncEventPublisherTest {
     }
 
     @Test
+    void announcesEachRetiredSchemeAndReturnsTheOnesKafkaRefused() {
+        when(kafka.publishJson(eq("scheme-service-topic"), eq(TENANT_ID + ":21"), any())).thenReturn(false);
+
+        StateSyncEventPublisher.Outcome outcome = publisher.publish(SCHEMA, TENANT_ID,
+                new PendingEvents(List.of(), List.of(), List.of(), List.of(), List.of(20, 21)));
+
+        verify(kafka).publishJson(eq("scheme-service-topic"), eq(TENANT_ID + ":20"),
+                argThat(e -> "SCHEME_RETIRED".equals(((Map<?, ?>) e).get("eventType"))
+                        && Integer.valueOf(20).equals(((Map<?, ?>) e).get("schemeId"))));
+        assertThat(outcome.failedRetirements()).containsExactly(21);
+        assertThat(outcome.failures()).isEqualTo(1);
+    }
+
+    @Test
     void keysUserAndDepartmentEventsByTheirOwnIds() {
         publisher.publish(SCHEMA, TENANT_ID, new PendingEvents(List.of(),
                 List.of(Map.of("eventType", "USER_UPDATED", "userId", 5)),

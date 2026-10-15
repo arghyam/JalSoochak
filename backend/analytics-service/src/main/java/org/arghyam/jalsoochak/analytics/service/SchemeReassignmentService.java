@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.analytics.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeReadingsReassignedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeRetiredEvent;
 import org.arghyam.jalsoochak.analytics.repository.FactIngestionRepository;
 import org.arghyam.jalsoochak.analytics.repository.SchemeReassignmentRepository;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityRecalculationService;
@@ -11,6 +12,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -20,6 +22,10 @@ import java.util.Set;
  * affected day's water quantity is worked out again for the real scheme and removed from the
  * placeholder; the placeholder's daily aggregates and dim rows go. After commit the pre-aggregation
  * is rebuilt for the affected dates in the background.
+ *
+ * <p>Also applies {@code SCHEME_RETIRED}: the scheme's dim rows and daily aggregates go, so it leaves the
+ * dashboards, and the pre-aggregation is rebuilt over the days it had readings. Its facts stay, for
+ * history: a scheme the sync revives gets its dim rows back from the next {@code SCHEME_MAPPINGS_REPLACED}.
  */
 @Service
 @Slf4j
@@ -73,5 +79,25 @@ public class SchemeReassignmentService {
                     "scheme " + from + " -> " + to + " tenant " + tenantId);
         }
         return outcome;
+    }
+
+    public void retire(SchemeRetiredEvent event) {
+        Integer tenantId = event.getTenantId();
+        Integer schemeId = event.getSchemeId();
+        if (tenantId == null || schemeId == null) {
+            log.warn("Ignoring SCHEME_RETIRED with tenantId={} schemeId={}", tenantId, schemeId);
+            return;
+        }
+        Optional<SchemeReassignmentRepository.DateRange> range = transaction.execute(status -> {
+            factIngestionRepository.lockSchemes(tenantId, Set.of(schemeId));
+            Optional<SchemeReassignmentRepository.DateRange> days = repository.readingDateRange(tenantId, schemeId);
+            repository.dropScheme(tenantId, schemeId);
+            return days;
+        });
+        log.info("Retired scheme {} (tenantId={}) from the dashboards", schemeId, tenantId);
+        if (range != null && range.isPresent()) {
+            aggregationRefreshQueue.refresh(range.get().from(), range.get().to(),
+                    "scheme " + schemeId + " retired, tenant " + tenantId);
+        }
     }
 }

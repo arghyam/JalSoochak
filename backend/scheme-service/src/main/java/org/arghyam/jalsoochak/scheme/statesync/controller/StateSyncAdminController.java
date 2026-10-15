@@ -6,7 +6,9 @@ import org.arghyam.jalsoochak.scheme.statesync.run.RunKind;
 import org.arghyam.jalsoochak.scheme.statesync.run.StateSyncRunRepository;
 import org.arghyam.jalsoochak.scheme.statesync.run.StateSyncRunner;
 import org.arghyam.jalsoochak.scheme.statesync.run.StateSyncRunner.RunResult;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -18,8 +20,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -114,6 +118,47 @@ public class StateSyncAdminController {
                                                         @RequestParam(defaultValue = "0") int offset) {
         return runRepository.listIssues(tenant(tenantCode).id(), runId, category, clamp(limit, 1, 1000),
                 Math.max(0, offset));
+    }
+
+    /**
+     * Our schemes the last successful full run did not find upstream, for review with the JJM team:
+     * {@code NOT_IN_JJM} (never matched any upstream scheme) and {@code NO_LONGER_LISTED} (carries an
+     * upstream code the full list no longer has). {@code format=csv} downloads it as a spreadsheet.
+     */
+    @PreAuthorize(ADMIN)
+    @GetMapping("/unmatched-schemes")
+    public ResponseEntity<?> unmatchedSchemes(@RequestParam String tenantCode,
+                                              @RequestParam(defaultValue = "json") String format) {
+        StateSyncRunRepository.ReviewList list = runRepository.unmatchedSchemes(tenant(tenantCode).id());
+        if (!"csv".equalsIgnoreCase(format)) {
+            return ResponseEntity.ok(list);
+        }
+        StringBuilder csv = new StringBuilder("reason,scheme_id,scheme_name,jjm_code,imis_id,smt_id,last_reading_date\n");
+        for (StateSyncRunRepository.ReviewRow row : list.schemes()) {
+            csv.append(String.join(",", cell(row.reason()), cell(row.schemeId()), cell(row.schemeName()),
+                    cell(row.stateSchemeCode()), cell(row.centreSchemeId()), cell(row.stateSchemeId()),
+                    cell(row.lastReadingDate()))).append('\n');
+        }
+        return ResponseEntity.ok()
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"unmatched-schemes-"
+                        + tenantCode.trim().toLowerCase(Locale.ROOT) + ".csv\"")
+                .body(csv.toString());
+    }
+
+    /** One CSV cell; quoted when needed, and a leading formula character neutralised for spreadsheets. */
+    private static String cell(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String text = value.toString();
+        if (!text.isEmpty() && "=+-@".indexOf(text.charAt(0)) >= 0) {
+            text = "'" + text;
+        }
+        if (text.contains(",") || text.contains("\"") || text.contains("\n") || text.contains("\r")) {
+            text = "\"" + text.replace("\"", "\"\"") + "\"";
+        }
+        return text;
     }
 
     @ExceptionHandler(StateSyncRunner.SyncDisabledException.class)

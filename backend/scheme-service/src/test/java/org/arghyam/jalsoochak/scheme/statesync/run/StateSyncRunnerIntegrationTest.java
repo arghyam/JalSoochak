@@ -271,6 +271,74 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
     }
 
     @Test
+    void aRefreshReadsTheBlockedListAndLeavesABlockedOfficerOut() {
+        properties.setMode(Mode.APPLY);
+        source.blocked.add("USR-016363");
+
+        RunResult result = runner.runNow(RunKind.SCHEME_REFRESH, "SCH-000008", "ADMIN:x").orElseThrow();
+
+        assertThat(result.succeeded()).isTrue();
+        assertThat(result.counts()).containsEntry("fetched.blocked_users", 1)
+                .containsEntry("user_scheme_mappings.skipped_blocked_user", 1)
+                .containsEntry("users.inserted", 1); // the jal mitra, who is not blocked
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.user_table WHERE state_user_id = 'USR-016363'")).isZero();
+    }
+
+    @Test
+    void aSchemeMissingFromTwoFullRunsIsRetiredWhenSwitchedOn() {
+        properties.setMode(Mode.APPLY);
+        properties.setRetireMissingSchemes(true);
+        properties.setRetireMinListedRatio(0);
+        int gone = scheme("50001", "9000001", "Now a child scheme", "SCH-777777");
+
+        RunResult first = runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+        // No earlier full run: nothing has been missing twice yet (a zero count is not recorded).
+        assertThat(first.counts()).doesNotContainKeys("schemes.retire_candidates", "schemes.retired");
+        assertThat(first.issues()).extracting(SyncIssue::category).contains("UPSTREAM_SCHEME_MISSING");
+
+        RunResult second = runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+
+        assertThat(second.counts()).containsEntry("schemes.retired", 1);
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NOT NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, gone)).isTrue();
+        verify(kafka).publishJson(eq("scheme-service-topic"), eq(TENANT_ID + ":" + gone),
+                org.mockito.ArgumentMatchers.argThat(e -> "SCHEME_RETIRED".equals(((Map<?, ?>) e).get("eventType"))));
+    }
+
+    @Test
+    void retirementIsSkippedWhenTheListComesBackShort() {
+        properties.setMode(Mode.APPLY);
+        properties.setRetireMissingSchemes(true); // default ratio 0.95: 1 listed of our 2 coded schemes
+        int gone = scheme("50001", "9000001", "Now a child scheme", "SCH-777777");
+        runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+
+        RunResult second = runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+
+        assertThat(second.issues()).extracting(SyncIssue::category).contains("RETIREMENT_SKIPPED");
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, gone)).isTrue();
+    }
+
+    @Test
+    void withRetirementOffCandidatesAreOnlyCountedAndListedForReview() {
+        properties.setMode(Mode.APPLY);
+        int gone = scheme("50001", "9000001", "Now a child scheme", "SCH-777777");
+        int local = scheme("60001", "9000002", "Local only", null);
+        runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+
+        RunResult second = runner.runNow(RunKind.FULL, null, "SCHEDULER").orElseThrow();
+
+        assertThat(second.counts()).containsEntry("schemes.retire_candidates", 1).doesNotContainKey("schemes.retired");
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, gone)).isTrue();
+        StateSyncRunRepository.ReviewList review = runRepository.unmatchedSchemes(TENANT_ID);
+        assertThat(review.runId()).isEqualTo(second.runId());
+        assertThat(review.schemes()).extracting(StateSyncRunRepository.ReviewRow::reason, StateSyncRunRepository.ReviewRow::schemeId)
+                .containsExactlyInAnyOrder(org.assertj.core.groups.Tuple.tuple("NO_LONGER_LISTED", gone),
+                        org.assertj.core.groups.Tuple.tuple("NOT_IN_JJM", local));
+    }
+
+    @Test
     void refusesToRunWhenDisabled() {
         properties.setEnabled(false);
 
@@ -300,6 +368,7 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         final List<UpstreamNode> villages = new ArrayList<>();
         final List<UpstreamPerson> users = new ArrayList<>();
         final List<UpstreamScheme> schemes = new ArrayList<>();
+        final List<String> blocked = new ArrayList<>();
         boolean failVillages;
         boolean deltaReturnsNothing;
         Runnable onVillages = () -> { };
@@ -341,13 +410,13 @@ class StateSyncRunnerIntegrationTest extends StateSyncIntegrationTestBase {
         }
 
         @Override
-        public Optional<UpstreamScheme> schemeByCentreSchemeId(String centreSchemeId) {
+        public List<UpstreamScheme> schemesByCentreSchemeId(String centreSchemeId) {
             calls++;
             lastCentreLookup = centreSchemeId;
-            return schemes.stream().filter(s -> s.centreSchemeId().equals(centreSchemeId)).findFirst();
+            return schemes.stream().filter(s -> s.centreSchemeId().equals(centreSchemeId)).toList();
         }
 
         @Override public List<String> archivedSchemeCodes() { calls++; return List.of(); }
-        @Override public List<String> blockedUserCodes() { calls++; return List.of(); }
+        @Override public List<String> blockedUserCodes() { calls++; return blocked; }
     }
 }

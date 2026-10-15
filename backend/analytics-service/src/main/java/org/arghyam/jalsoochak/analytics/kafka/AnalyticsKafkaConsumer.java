@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeReadingsReassignedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SchemeRetiredEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SubmissionRejectedEvent;
@@ -143,6 +144,10 @@ public class AnalyticsKafkaConsumer {
                 case "SCHEME_READINGS_REASSIGNED" -> {
                     SchemeReadingsReassignedEvent event = objectMapper.readValue(message, SchemeReadingsReassignedEvent.class);
                     schemeReassignmentService.reassign(event);
+                }
+                case "SCHEME_RETIRED" -> {
+                    SchemeRetiredEvent event = objectMapper.readValue(message, SchemeRetiredEvent.class);
+                    schemeReassignmentService.retire(event);
                 }
                 case "LGD_LOCATION_CREATED", "LGD_LOCATION_UPDATED" -> {
                     LgdLocationEvent event = objectMapper.readValue(message, LgdLocationEvent.class);

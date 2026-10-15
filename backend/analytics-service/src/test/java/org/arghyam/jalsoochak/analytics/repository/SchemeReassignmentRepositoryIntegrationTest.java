@@ -118,6 +118,16 @@ class SchemeReassignmentRepositoryIntegrationTest {
     }
 
     @Test
+    void reportsTheFirstAndLastReadingDayOfAScheme() {
+        reading(SCHEME, D2, 2L);
+        reading(SCHEME, D1, 1L);
+
+        assertThat(reassignmentRepository.readingDateRange(TENANT, SCHEME))
+                .contains(new SchemeReassignmentRepository.DateRange(D1, D2));
+        assertThat(reassignmentRepository.readingDateRange(TENANT, PLACEHOLDER)).isEmpty();
+    }
+
+    @Test
     void dropsThePlaceholdersDimAndDailyRows() {
         jdbc.update("INSERT INTO analytics_schema.dim_scheme_table (scheme_id, tenant_id, scheme_name, state_scheme_id, "
                 + "centre_scheme_id, parent_lgd_location_id, operating_status) VALUES (?, 1, 'Auto', 0, 0, 1, 0)", PLACEHOLDER);

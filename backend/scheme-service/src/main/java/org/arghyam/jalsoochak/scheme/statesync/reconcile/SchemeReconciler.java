@@ -5,14 +5,18 @@ import org.arghyam.jalsoochak.scheme.enums.SchemeWorkStatus;
 import org.arghyam.jalsoochak.scheme.statesync.config.StateSyncProperties;
 import org.arghyam.jalsoochak.scheme.statesync.model.UpstreamPerson;
 import org.arghyam.jalsoochak.scheme.statesync.model.UpstreamScheme;
+import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantRepository.DeletedScheme;
 import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantRepository.LocationMappingRow;
 import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantRepository.LocationNode;
 import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantRepository.SchemeRow;
 import org.arghyam.jalsoochak.scheme.statesync.reconcile.StateSyncTenantRepository.UserRow;
 import org.arghyam.jalsoochak.scheme.statesync.run.SyncReport;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -22,6 +26,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 /**
  * Reconciles upstream schemes into {@code scheme_master_table} and the three tables that hang off it.
@@ -51,6 +57,10 @@ import java.util.Set;
  * which case what we hold is kept. Only rows the sync owns are managed: LGD rows pointing at a village
  * (or the state placeholder), department rows pointing at a sub-division, and officer rows whose user
  * is one of {@link StateVocabulary#MANAGED_USER_TYPES}.
+ *
+ * <p>An officer the payload lists is active upstream unless the upstream's blocked list names them: an
+ * inactive one is reactivated and linked, a blocked one is never created and is left unlinked (the run
+ * applies the blocked list, deactivating them, before the schemes).
  */
 public class SchemeReconciler {
 
@@ -72,6 +82,14 @@ public class SchemeReconciler {
     /** IMIS id → live placeholders carrying it (one per submitted id pair, so possibly several). */
     private final Map<String, List<Integer>> placeholdersByCentre = new HashMap<>();
     private final Set<Integer> claimedThisRun = new HashSet<>();
+    /**
+     * Soft-deleted schemes (by an admin or by this sync), most recent first: one the upstream still lists
+     * is brought back, not duplicated. By upstream code, and by IMIS|SMT pair for one deleted before it had a code.
+     */
+    private final Map<String, DeletedScheme> deletedByCode = new HashMap<>();
+    private final Map<String, List<DeletedScheme>> deletedByPair = new HashMap<>();
+    /** IMIS id → upstream codes carrying it in the batch being reconciled; JJM does not enforce uniqueness. */
+    private final Map<String, Set<String>> batchCodesByCentre = new HashMap<>();
 
     private final Map<String, Integer> lgdIdsByCode;
     private final Map<String, Integer> deptIdsByCode;
@@ -101,6 +119,9 @@ public class SchemeReconciler {
                 continue;
             }
             index(row);
+        }
+        for (DeletedScheme deleted : repository.deletedSchemes(schema)) {
+            rememberDeleted(deleted);
         }
 
         List<LocationNode> lgdNodes = repository.lgdNodes(schema);
@@ -136,6 +157,11 @@ public class SchemeReconciler {
     /** Reconciles each scheme in turn; one bad row never stops the rest. */
     public void reconcile(Collection<UpstreamScheme> schemes, SyncReport report) {
         for (UpstreamScheme scheme : schemes) {
+            if (!blank(scheme.centreSchemeId()) && scheme.code() != null) {
+                batchCodesByCentre.computeIfAbsent(scheme.centreSchemeId().trim(), k -> new TreeSet<>()).add(scheme.code());
+            }
+        }
+        for (UpstreamScheme scheme : schemes) {
             report.seenSourceUpdatedAt(scheme.updatedAt());
             reconcileOne(scheme, report);
         }
@@ -147,6 +173,7 @@ public class SchemeReconciler {
             report.issue("SCHEME", null, "INVALID_UPSTREAM_ROW", Map.of("reason", "no code"));
             return Optional.empty();
         }
+        reviveIfDeleted(up, report);
         Resolution resolution = match(up);
         if (resolution.issue != null) {
             report.issue("SCHEME", up.code(), resolution.issue, resolution.detail);
@@ -431,14 +458,24 @@ public class SchemeReconciler {
         for (UpstreamPerson person : up.officers()) {
             Optional<String> type = StateVocabulary.userType(person.role());
             if (type.isEmpty()) {
+                users.noteRoleNotIngested(person.role(), report);
                 continue;
             }
             anyManaged = true;
+            if (users.isBlocked(person.code())) {
+                // Blocked upstream (the run has already deactivated them): never created, and unlinked below.
+                report.count("user_scheme_mappings.skipped_blocked_user");
+                continue;
+            }
             Optional<UserRow> user = users.resolve(person, report);
             if (user.isEmpty()) {
                 incompleteTypes.add(type.get());
-            } else if (user.get().status() == 1) {
-                desired.add(user.get().id());
+                continue;
+            }
+            // The upstream lists them as this scheme's officer and has not blocked them: they are active.
+            Optional<UserRow> active = users.reactivate(user.get(), person.code(), report);
+            if (active.isPresent()) {
+                desired.add(active.get().id());
             } else {
                 report.count("user_scheme_mappings.skipped_inactive_user");
             }
@@ -486,6 +523,16 @@ public class SchemeReconciler {
     private void supersedePlaceholder(int schemeId, UpstreamScheme up, SyncReport report) {
         List<Integer> placeholders = blank(up.centreSchemeId()) ? null : placeholdersByCentre.remove(up.centreSchemeId());
         if (placeholders == null) {
+            return;
+        }
+        // JJM does not enforce unique IMIS ids (legacy data has duplicates): with two schemes on one id we
+        // cannot tell whose readings these are, so they stay on the placeholder until the ids are fixed.
+        Set<String> upstreamCodes = batchCodesByCentre.getOrDefault(up.centreSchemeId().trim(), Set.of());
+        Set<Integer> ourSchemes = idsByCentre.getOrDefault(up.centreSchemeId(), Set.of());
+        if (upstreamCodes.size() > 1 || ourSchemes.size() > 1) {
+            report.issue("SCHEME", up.code(), "PLACEHOLDER_IMIS_NOT_UNIQUE", Map.of("centreSchemeId", up.centreSchemeId(),
+                    "placeholderSchemeIds", List.copyOf(placeholders), "upstreamCodes", List.copyOf(upstreamCodes),
+                    "ourSchemeIds", List.copyOf(new TreeSet<>(ourSchemes))));
             return;
         }
         for (Integer placeholder : placeholders) {
@@ -541,11 +588,151 @@ public class SchemeReconciler {
     }
 
     /** After a full crawl: coded schemes the upstream neither listed nor archived. Reported only. */
-    public void reportAbsent(Set<String> listedCodes, Set<String> archivedCodes, SyncReport report) {
+    public Set<String> reportAbsent(Set<String> listedCodes, Set<String> archivedCodes, SyncReport report) {
+        Map<String, Integer> missing = new TreeMap<>();
         for (Map.Entry<String, Integer> entry : idByCode.entrySet()) {
             if (!listedCodes.contains(entry.getKey()) && !archivedCodes.contains(entry.getKey())) {
-                report.issue("SCHEME", entry.getKey(), "UPSTREAM_SCHEME_MISSING", Map.of("schemeId", entry.getValue()));
+                missing.put(entry.getKey(), entry.getValue());
             }
+        }
+        Map<Integer, LocalDate> lastReadings = repository.lastReadingDates(schema, missing.values());
+        missing.forEach((code, id) -> report.issue("SCHEME", code, "UPSTREAM_SCHEME_MISSING",
+                reviewDetail(schemesById.get(id), lastReadings.get(id))));
+        return missing.keySet();
+    }
+
+    /**
+     * After a full run: live schemes of ours that no upstream scheme matched and that carry no upstream
+     * code, so the upstream has never known them by code. Reported for review with the JJM team
+     * ({@code LOCAL_SCHEME_NOT_IN_JJM}); nothing is changed.
+     */
+    public void reportNotInUpstream(SyncReport report) {
+        List<SchemeRow> local = schemesById.values().stream()
+                .filter(row -> blank(row.stateSchemeCode()) && !claimedThisRun.contains(row.id()))
+                .sorted(Comparator.comparingInt(SchemeRow::id))
+                .toList();
+        Map<Integer, LocalDate> lastReadings = repository.lastReadingDates(schema,
+                local.stream().map(SchemeRow::id).toList());
+        for (SchemeRow row : local) {
+            report.issue("SCHEME", null, "LOCAL_SCHEME_NOT_IN_JJM", reviewDetail(row, lastReadings.get(row.id())));
+        }
+        report.add("schemes.local_not_in_jjm", local.size());
+    }
+
+    public int codedSchemeCount() {
+        return idByCode.size();
+    }
+
+    /**
+     * Soft-deletes our schemes carrying these upstream codes and retires their officers, so nudges and
+     * escalations stop. Villages, sub-divisions and readings stay for history; the run announces each
+     * retired scheme so analytics drops it from the dashboards.
+     *
+     * @return the retired scheme ids
+     */
+    public List<Integer> retireMissing(Set<String> codes, SyncReport report) {
+        List<Integer> retired = new ArrayList<>();
+        for (String code : new TreeSet<>(codes)) {
+            Integer schemeId = idByCode.get(code);
+            if (schemeId == null) {
+                continue;
+            }
+            repository.retireScheme(schema, schemeId, actor);
+            for (Integer userId : userMappings.liveUsers(schemeId)) {
+                userMappings.retire(userId, schemeId, report);
+            }
+            SchemeRow row = schemesById.remove(schemeId);
+            idByCode.remove(code);
+            if (row != null) {
+                rememberDeleted(new DeletedScheme(row, actor, LocalDateTime.now()));
+            }
+            touchedSchemes.remove(schemeId);
+            retired.add(schemeId);
+            report.count("schemes.retired");
+            report.issue("SCHEME", code, "SCHEME_RETIRED", Map.of("schemeId", schemeId));
+        }
+        return retired;
+    }
+
+    /**
+     * The upstream is the source of truth: a soft-deleted scheme it still lists comes back with the same id
+     * (and its readings), whoever deleted it — matched by upstream code, else, for one deleted before it
+     * had a code, by its exact IMIS + SMT pair when no live scheme holds either id. Reported as
+     * {@code SCHEME_REVIVED} with who deleted it and when.
+     */
+    private void reviveIfDeleted(UpstreamScheme up, SyncReport report) {
+        if (idByCode.containsKey(up.code())) {
+            return;
+        }
+        DeletedScheme found = deletedByCode.get(up.code());
+        String matchedBy = "code";
+        if (found == null && !blank(up.centreSchemeId()) && !blank(up.stateSchemeId())
+                && idsByCentre.getOrDefault(up.centreSchemeId(), Set.of()).isEmpty()
+                && idsByState.getOrDefault(up.stateSchemeId(), Set.of()).isEmpty()) {
+            found = deletedByPair.getOrDefault(pairKey(up.centreSchemeId(), up.stateSchemeId()), List.of()).stream()
+                    .filter(d -> blank(d.row().stateSchemeCode()))
+                    .findFirst().orElse(null);
+            matchedBy = "id_pair";
+        }
+        if (found == null) {
+            return;
+        }
+        forgetDeleted(found);
+        repository.reviveScheme(schema, found.row().id(), actor);
+        index(found.row());
+        report.count("schemes.revived");
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("schemeId", found.row().id());
+        detail.put("matchedBy", matchedBy);
+        detail.put("retiredBySync", Objects.equals(found.deletedBy(), actor));
+        if (found.deletedBy() != null) {
+            detail.put("deletedBy", found.deletedBy());
+        }
+        detail.put("deletedAt", found.deletedAt().toString());
+        report.issue("SCHEME", up.code(), "SCHEME_REVIVED", detail);
+    }
+
+    private void rememberDeleted(DeletedScheme deleted) {
+        SchemeRow row = deleted.row();
+        if (!blank(row.stateSchemeCode())) {
+            deletedByCode.putIfAbsent(row.stateSchemeCode(), deleted);
+        }
+        if (!blank(row.centreSchemeId()) && !blank(row.stateSchemeId())) {
+            deletedByPair.computeIfAbsent(pairKey(row.centreSchemeId(), row.stateSchemeId()), k -> new ArrayList<>()).add(deleted);
+        }
+    }
+
+    private void forgetDeleted(DeletedScheme deleted) {
+        SchemeRow row = deleted.row();
+        if (!blank(row.stateSchemeCode())) {
+            deletedByCode.remove(row.stateSchemeCode(), deleted);
+        }
+        if (!blank(row.centreSchemeId()) && !blank(row.stateSchemeId())) {
+            deletedByPair.getOrDefault(pairKey(row.centreSchemeId(), row.stateSchemeId()), new ArrayList<>()).remove(deleted);
+        }
+    }
+
+    private static String pairKey(String centreSchemeId, String stateSchemeId) {
+        return centreSchemeId.trim() + "|" + stateSchemeId.trim();
+    }
+
+    /** Issue details cannot hold nulls, so a missing value is left out. */
+    private static Map<String, Object> reviewDetail(SchemeRow row, LocalDate lastReading) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        if (row != null) {
+            detail.put("schemeId", row.id());
+            putIfPresent(detail, "schemeName", row.name());
+            putIfPresent(detail, "stateSchemeCode", row.stateSchemeCode());
+            putIfPresent(detail, "centreSchemeId", row.centreSchemeId());
+            putIfPresent(detail, "stateSchemeId", row.stateSchemeId());
+        }
+        putIfPresent(detail, "lastReadingDate", lastReading == null ? null : lastReading.toString());
+        return detail;
+    }
+
+    private static void putIfPresent(Map<String, Object> detail, String key, String value) {
+        if (!blank(value)) {
+            detail.put(key, value);
         }
     }
 
