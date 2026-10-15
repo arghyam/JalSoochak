@@ -273,12 +273,38 @@ class FlowVisionElmOcrExtractorTest {
     }
 
     @Test
-    void rejectsAReadingThatNeedsReviewWithoutShowingTheStaffReasons() {
-        Map<String, Object> body = envelope("NEEDS_REVIEW", "REVIEW", "0019712.7");
-        data(body).put("reasons", List.of(Map.of(
-                "code", "DIGIT_COUNT_MISMATCH",
-                "message", "Read 7 digits but meter type hpl_ppsm01 has 8")));
-        restTemplate.enqueue(ok(body));
+    @DisplayName("a reading that needs review is accepted as read, and reported as SUCCESS")
+    void acceptsAReadingThatNeedsReviewAsRead() {
+        restTemplate.enqueue(ok(needsReview("0019712.7", "kWh")));
+
+        OcrReadingResult result = extractor.extractReadingOrThrow(IMAGE_URL, null);
+
+        assertThat(result.getAdjustedReading()).isEqualByComparingTo("19712.7");
+        assertThat(result.getReadingUnit()).isEqualTo(ReadingUnit.KILOWATT_HOUR);
+        assertThat(result.getRawMeterReading()).isEqualTo("0019712.7");
+        assertThat(result.getQualityStatus()).isEqualTo("SUCCESS");
+        assertThat(result.getCorrelationId()).isEqualTo("5f0c2a8e-1b7d-4c1e-9d3a-2f7e0b6a9c41");
+        assertThat(result.getRejectionReason()).isNull();
+        assertThat(result.isNoMeter()).isFalse();
+    }
+
+    @Test
+    void rejectsAReadingThatNeedsReviewInAnyOtherUnit() {
+        restTemplate.enqueue(ok(needsReview("0019712.7", "kW")));
+
+        OcrReadingResult result = extractor.extractReadingOrThrow(IMAGE_URL, null);
+
+        assertThat(result.getAdjustedReading()).isNull();
+        assertThat(result.getQualityStatus()).isEqualTo("REJECTED");
+        assertThat(result.getRejectionReason())
+                .isEqualTo("Please send a photo of the meter showing its kWh or kVAh reading.");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"00197?2.7", "Reading needs manual review"})
+    @DisplayName("a reading that needs review but is not a number is rejected, without the staff reasons")
+    void rejectsAReadingThatNeedsReviewButIsNotANumber(String meterReading) {
+        restTemplate.enqueue(ok(needsReview(meterReading, "kWh")));
 
         OcrReadingResult result = extractor.extractReadingOrThrow(IMAGE_URL, null);
 
@@ -379,6 +405,16 @@ class FlowVisionElmOcrExtractorTest {
     private static Map<String, Object> accepted(String meterReading, String unit) {
         Map<String, Object> body = envelope("SUCCESS", "ACCEPT", meterReading);
         data(body).put("unit", unit);
+        return body;
+    }
+
+    /** The service's REVIEW response: a reading that failed a consistency check, with reasons written for staff. */
+    private static Map<String, Object> needsReview(String meterReading, String unit) {
+        Map<String, Object> body = envelope("NEEDS_REVIEW", "REVIEW", meterReading);
+        data(body).put("unit", unit);
+        data(body).put("reasons", List.of(Map.of(
+                "code", "DIGIT_COUNT_MISMATCH",
+                "message", "Read 7 digits but meter type hpl_ppsm01 has 8")));
         return body;
     }
 

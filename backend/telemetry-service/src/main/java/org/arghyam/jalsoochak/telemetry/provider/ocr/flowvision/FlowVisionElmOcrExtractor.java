@@ -49,8 +49,10 @@ import java.util.UUID;
  * fails startup without {@code ocr.elm.url}. Otherwise an unconfigured deployment would reject every
  * such ELM photo.
  *
- * <p>Only an {@code ACCEPT} in kWh or kVAh becomes a reading. {@code NOMETER} is a photo without a
- * meter; every other verdict, a reading in any other unit included, is a rejection.
+ * <p>An {@code ACCEPT} in kWh or kVAh becomes a reading, and so does a {@code NEEDS_REVIEW} one: a reading
+ * that failed one of the service's consistency checks is still taken as read, and reported as
+ * {@code SUCCESS}. {@code NOMETER} is a photo without a meter; every other verdict, a reading in any
+ * other unit included, is a rejection.
  */
 @Component
 @Slf4j
@@ -68,7 +70,10 @@ public class FlowVisionElmOcrExtractor implements MeterReadingExtractor {
     private static final String RESPONSE_CODE_ERROR = "ERROR";
     private static final String UNSUPPORTED_UNIT_MESSAGE =
             "Please send a photo of the meter showing its kWh or kVAh reading.";
-    /** {@code reasons[]} on a NEEDS_REVIEW result are written for staff, so the submitter gets this instead. */
+    /**
+     * For a NEEDS_REVIEW result with no number to take. Its {@code reasons[]} are written for staff, so the
+     * submitter gets this instead.
+     */
     private static final String NEEDS_REVIEW_MESSAGE =
             "The reading could not be confirmed. Please send another clear photo of the meter.";
 
@@ -181,7 +186,8 @@ public class FlowVisionElmOcrExtractor implements MeterReadingExtractor {
         String normalizedStatus = status == null ? "" : status.toUpperCase(Locale.ROOT);
 
         return switch (normalizedStatus) {
-            case STATUS_SUCCESS -> accepted(data, imageUrl, responseRequestId, correlationId);
+            case STATUS_SUCCESS, STATUS_NEEDS_REVIEW ->
+                    accepted(normalizedStatus, data, imageUrl, responseRequestId, correlationId);
             case STATUS_NO_METER -> {
                 log.warn("ELM OCR found no meter imageUrlHash={} correlationId={}", imageUrlHash(imageUrl), correlationId);
                 yield OcrReadingResult.builder()
@@ -193,12 +199,13 @@ public class FlowVisionElmOcrExtractor implements MeterReadingExtractor {
                         .build();
             }
             case STATUS_UNCLEAR -> rejected(text(data.get("retakeHint")), status, data, imageUrl, responseRequestId, correlationId);
-            case STATUS_NEEDS_REVIEW -> rejected(NEEDS_REVIEW_MESSAGE, status, data, imageUrl, responseRequestId, correlationId);
             default -> rejected(null, status, data, imageUrl, responseRequestId, correlationId);
         };
     }
 
-    private OcrReadingResult accepted(Map<String, Object> data, String imageUrl, String requestId, String correlationId) {
+    /** {@code status} is the service's SUCCESS or NEEDS_REVIEW; either way a reading is reported as SUCCESS. */
+    private OcrReadingResult accepted(String status, Map<String, Object> data, String imageUrl, String requestId,
+                                      String correlationId) {
         String meterReading = text(data.get("meterReading"));
         if (meterReading == null) {
             log.error("ELM OCR accepted a reading without meterReading imageUrlHash={}", imageUrlHash(imageUrl));
@@ -207,13 +214,17 @@ public class FlowVisionElmOcrExtractor implements MeterReadingExtractor {
         String unitText = text(data.get("unit"));
         Optional<ReadingUnit> unit = ReadingUnit.parseFor(ReadingChannel.ELM, unitText);
         if (unit.isEmpty()) {
-            return rejected(UNSUPPORTED_UNIT_MESSAGE, STATUS_SUCCESS + "/" + unitText, data, imageUrl, requestId,
+            return rejected(UNSUPPORTED_UNIT_MESSAGE, status + "/" + unitText, data, imageUrl, requestId,
                     correlationId);
         }
         BigDecimal reading;
         try {
             reading = new BigDecimal(meterReading);
         } catch (NumberFormatException ex) {
+            if (STATUS_NEEDS_REVIEW.equals(status)) {
+                // A digit the model could not even guess ("?"), or no reading at all, only the service's note.
+                return rejected(NEEDS_REVIEW_MESSAGE, status, data, imageUrl, requestId, correlationId);
+            }
             log.error("ELM OCR accepted a reading that is not a number imageUrlHash={} correlationId={}",
                     imageUrlHash(imageUrl), correlationId);
             return null;
@@ -227,8 +238,9 @@ public class FlowVisionElmOcrExtractor implements MeterReadingExtractor {
                 .requestId(requestId)
                 .correlationId(correlationId)
                 .build();
-        log.info("ELM OCR accepted imageUrlHash={} correlationId={} reading={} unit={} confidence={}",
-                imageUrlHash(imageUrl), correlationId, reading, unit.get().code(), result.getQualityConfidence());
+        log.info("ELM OCR accepted imageUrlHash={} status={} reasonCodes={} correlationId={} reading={} unit={} confidence={}",
+                imageUrlHash(imageUrl), status, reasonCodes(data), correlationId, reading, unit.get().code(),
+                result.getQualityConfidence());
         return result;
     }
 
