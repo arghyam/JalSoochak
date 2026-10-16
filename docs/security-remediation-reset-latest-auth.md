@@ -5,7 +5,8 @@ returning `200` with or without a key. Any caller who knew an operator's phone n
 permanently zero that operator's latest confirmed meter reading.
 
 **Status:** fixed in `telemetry-service`. Callers that do not yet send a key are listed in §5 — the
-WhatsApp chatbot flow is one of them, and is owned by a separate change.
+WhatsApp chatbot flow is one of them, and is owned by a separate change. `PATCH …/yesterday-final-reading`
+has since moved off the API key to the officer's own JWT (§5).
 
 ---
 
@@ -52,6 +53,9 @@ A fail-closed servlet filter, deny-by-default over the server-to-server prefixes
   chatbot webhook routes that fall inside those prefixes. They are exempt from the API key only: both
   are registered webhook routes, authenticated by `WebhookAuthFilter`'s `X-Webhook-Token` check
   (see §4). They are listed where a reviewer can see them, instead of being exempt by omission.
+
+*Since the Fix-readings save moved to the officer's JWT (§5), the `/schemes/` prefix and its
+`POST /schemes` exemption are gone; the filter covers `/readings` only.*
 
 Consequences worth stating plainly: a new `/readings/**` endpoint is authenticated the moment it is
 mapped, and making one public takes a deliberate edit to a named allowlist. The filter normalises the
@@ -136,6 +140,14 @@ State-IT integration already sends. `X-Tenant-Code` is no longer consulted on th
 
 Callers already sending a valid key on the `/readings` routes need no change. The two rows in bold
 are the behavioural break.
+
+**SO/SDO Fix-readings save — moved to the officer's token.** Its caller is the officer web UI, which
+holds the officer's Keycloak token, not a tenant API key. The route is now
+`PATCH /api/v1/telemetry/staff/schemes/{id}/yesterday-final-reading`, behind a Spring Security chain
+scoped to `/api/v1/telemetry/staff/**`: section and sub-divisional officers only, the tenant from the
+token's `tenant_state_code`, the officer from its `sub`, who must be mapped to the scheme. The API-key
+route and its `phoneNumber` body field are deleted. Details: `backend/API_ENDPOINTS.md`,
+*Telemetry service — SO/SDO Fix-readings save*.
 
 **WhatsApp chatbot flow — resolved separately.** The bot called `reset-latest` with no key, so it
 received 401 after this change. Since `24946b40` it calls the webhook

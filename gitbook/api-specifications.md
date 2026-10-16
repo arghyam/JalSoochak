@@ -12,14 +12,15 @@ All APIs are RESTful and versioned under `/api/v1/`. Clients reach services thro
 > * **Chatbot flow webhooks** under `/api/v1/telemetry/*` — authenticated by the `X-Webhook-Token`
 >   shared secret (§9.4).
 > * **Partner meter-reading ingestion** (`POST`/`PUT /api/v1/telemetry/readings`,
->   `/readings/formats/{format}`, `/readings/reset-latest`,
->   `PATCH /api/v1/telemetry/schemes/{id}/yesterday-final-reading`) — authenticated by the
->   per-tenant `X-Api-Key`, which a State Admin issues with `POST /api/v1/tenants/api-token`.
+>   `/readings/formats/{format}`, `/readings/reset-latest`) — authenticated by the per-tenant
+>   `X-Api-Key`, which a State Admin issues with `POST /api/v1/tenants/api-token`.
 > * **Operations routes** under `/api/v1/telemetry/internal/` (`POST /internal/readings/republish`
 >   re-sends a tenant's stored ELM/PDU readings) — authenticated by `X-Internal-Token`, plus
 >   `X-Tenant-Code`.
 >
 > All of these are publicly reachable. Do not assume a path under `/api/v1/` is behind the gateway.
+> The one telemetry route that takes a JWT, the SO/SDO Fix-readings save (§9.3), is reachable the
+> same way, so telemetry-service checks the officer's token itself.
 
 ### 9.1 Authentication & User APIs
 
@@ -62,6 +63,7 @@ All APIs are RESTful and versioned under `/api/v1/`. Clients reach services thro
 * `GET /api/v1/scheme/schemes/mappings` — paginated scheme-to-location mappings (village LGD code, sub-division)
 * `GET /api/v1/scheme/schemes/counts/by-status` — aggregate counts
 * `GET /api/v1/scheme/schemes/yesterday-final-readings` — each scheme's previous-day closing reading
+* `PATCH /api/v1/telemetry/staff/schemes/{id}/yesterday-final-reading` — correct a scheme's latest BFM reading, recorded as reported via `WEB` *(Section Officer / Sub-Divisional Officer mapped to the scheme)*
 * `GET /api/v1/scheme/schemes/{id}/statuses`, `PATCH /api/v1/scheme/schemes/{id}/status` — read / update a scheme's work and operating status *(update: State Admin)*
 * `POST /api/v1/scheme/schemes/upload`, `/schemes/mappings/upload` — bulk CSV upload; `GET /schemes/download`, `/schemes/mappings/download` — matching report downloads *(State Admin)*
 * `POST /api/v1/scheme/schemes/analytics-resync` — re-publish the tenant's (`X-Tenant-Code`) schemes to analytics *(State Admin)*

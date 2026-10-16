@@ -18,8 +18,9 @@ import org.springframework.security.web.SecurityFilterChain;
  * untouched apart from its {@code StrictHttpFirewall}, so this chain adds nothing to those paths.
  * There is deliberately no catch-all chain.
  *
- * <p><b>Enforced here, not at the api-gateway.</b> Ingress also exposes this service directly, so a
- * gateway-only check could be bypassed.
+ * <p><b>Enforced here, whatever the api-gateway does.</b> The gateway also refuses a missing or
+ * invalid token on this path, but ingress exposes this service directly too, so a gateway-only check
+ * could be bypassed.
  *
  * <p>The chain admits section and sub-divisional officers. Which tenant, user and scheme they may
  * write is decided by the service from the token's {@code tenant_state_code} and {@code sub} claims,
