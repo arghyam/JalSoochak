@@ -3025,18 +3025,26 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst().orElse(null);
     }
 
-    public Optional<Long> findUserIdByPhone(String schemaName, String phoneNumber) {
+    /**
+     * The live, active user whose {@code uuid} is {@code uuid}. user-service overwrites {@code uuid}
+     * with the Keycloak user id at provisioning, so this resolves the holder of a staff token from its
+     * subject. An officer deactivated since the token was issued resolves to nothing.
+     */
+    public Optional<Long> findUserIdByUuid(String schemaName, String uuid) {
         validateSchemaName(schemaName);
-        Optional<TelemetryOperator> operatorOpt = findOperatorByPhone(schemaName, phoneNumber);
-        return operatorOpt.map(TelemetryOperator::id);
-    }
-
-    private Optional<TelemetryOperator> findOperatorByPhone(String schemaName, String phoneNumber) {
-        String normalized = normalizePhone(phoneNumber);
-        if (normalized == null || normalized.isBlank()) {
+        if (uuid == null || uuid.isBlank()) {
             return Optional.empty();
         }
-        return findOperatorByPhone(schemaName, phoneNumber, normalized);
+        String sql = String.format("""
+                SELECT id
+                FROM %s.user_table
+                WHERE uuid = ?
+                  AND status = 1
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """, schemaName);
+        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), uuid.trim());
+        return rows.stream().findFirst();
     }
 
     private Long toLong(Object value) {

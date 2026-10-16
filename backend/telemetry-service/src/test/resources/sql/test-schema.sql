@@ -18,6 +18,7 @@ CREATE SCHEMA IF NOT EXISTS tenant_as;
 
 CREATE TABLE tenant_as.user_table (
     id           SERIAL    PRIMARY KEY,
+    uuid         VARCHAR(36) NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
     tenant_id    INTEGER   NOT NULL,
     title        TEXT      NOT NULL,
     email        VARCHAR(255),

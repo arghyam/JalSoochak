@@ -139,7 +139,6 @@ public class SchemeServiceImpl implements SchemeService {
     private final KafkaProducer kafkaProducer;
     private final ObjectStorageService objectStorageService;
     private final StorageProperties storageProperties;
-    private final PiiEncryptionService piiEncryptionService;
 
     @Override
     public PageResponseDTO<SchemeDTO> listSchemes(
@@ -225,19 +224,12 @@ public class SchemeServiceImpl implements SchemeService {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
 
         int userId = resolveCurrentUserId(schemaName);
-        String encrypted = schemeDbRepository.findUserPhoneNumberById(schemaName, userId);
-        String resolvedPhoneNumber = piiEncryptionService != null ? piiEncryptionService.safeDecrypt(encrypted) : null;
         int size = clampLimit(limit);
         int p = Math.max(0, page);
         int offset = p * size;
 
         List<SchemeYesterdayFinalReadingDTO> rows =
                 schemeDbRepository.listSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName, offset, size);
-        if (resolvedPhoneNumber != null && !resolvedPhoneNumber.isBlank()) {
-            for (SchemeYesterdayFinalReadingDTO row : rows) {
-                row.setPhoneNumber(resolvedPhoneNumber);
-            }
-        }
         long total = schemeDbRepository.countSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName);
         return PageResponseDTO.of(rows, total, p, size);
     }

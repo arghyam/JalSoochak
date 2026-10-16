@@ -38,6 +38,8 @@ class WebhookRouteCoverageTest {
 
     private static final String INTERNAL_CONTROLLER_PACKAGE =
             "org.arghyam.jalsoochak.telemetry.controller.internal";
+    private static final String STAFF_CONTROLLER_PACKAGE =
+            "org.arghyam.jalsoochak.telemetry.controller.staff";
 
     @Test
     @DisplayName("every @PostMapping on a webhook controller is in the protected set, and vice versa")
@@ -115,8 +117,8 @@ class WebhookRouteCoverageTest {
 
     /**
      * The two gates must hand off cleanly. {@link TelemetryApiKeyAuthFilter} denies by default under
-     * {@code /readings**} and {@code /schemes/*}; a chatbot route landing inside one of those prefixes
-     * without being on its exemption list would be rejected for lacking an {@code X-Api-Key} it is
+     * {@code /readings**}; a chatbot route landing inside that prefix without being on its exemption
+     * list would be rejected for lacking an {@code X-Api-Key} it is
      * never going to have, breaking the flow in the field. Nothing else in either class would catch it.
      */
     @Test
@@ -157,10 +159,11 @@ class WebhookRouteCoverageTest {
     /**
      * Closes the gap the allowlist cannot see: a controller that should have carried
      * {@link WebhookRoute} but does not. Its routes would be in no allowlist and, outside the
-     * {@code /readings} and {@code /schemes/*} prefixes, behind no gate at all. Every route the
-     * service maps must therefore be authenticated by exactly one of the three gates: the webhook
+     * {@code /readings} prefix, behind no gate at all. Every route the
+     * service maps must therefore be authenticated by exactly one of the four gates: the webhook
      * token for {@code @WebhookRoute} controllers, the operations token for the controllers in
-     * {@code controller.internal}, and the API key for the rest.
+     * {@code controller.internal}, the officer's JWT ({@link SecurityConfig}) for the controllers in
+     * {@code controller.staff}, and the API key for the rest.
      */
     @Test
     @DisplayName("every route the service maps is behind exactly one credential gate")
@@ -172,15 +175,20 @@ class WebhookRouteCoverageTest {
                     boolean webhookGate = WebhookRoutes.isProtected(route.method(), route.path());
                     boolean apiKeyGate = TelemetryApiKeyAuthFilter.requiresApiKey(route.path());
                     boolean internalGate = InternalAuthFilter.isInternal(route.path());
+                    boolean staffGate = route.path().startsWith(SecurityConfig.STAFF_BASE_PATH + "/");
                     boolean familyGate;
                     if (route.controller().isAnnotationPresent(WebhookRoute.class)) {
                         familyGate = webhookGate;
                     } else if (route.controller().getPackageName().equals(INTERNAL_CONTROLLER_PACKAGE)) {
                         familyGate = internalGate;
+                    } else if (route.controller().getPackageName().equals(STAFF_CONTROLLER_PACKAGE)) {
+                        familyGate = staffGate;
                     } else {
                         familyGate = apiKeyGate;
                     }
-                    long gates = Stream.of(webhookGate, apiKeyGate, internalGate).filter(gate -> gate).count();
+                    long gates = Stream.of(webhookGate, apiKeyGate, internalGate, staffGate)
+                            .filter(gate -> gate)
+                            .count();
                     return !familyGate || gates != 1;
                 })
                 .map(route -> route.controller().getSimpleName() + ": " + route.key())
@@ -189,8 +197,9 @@ class WebhookRouteCoverageTest {
         assertThat(misgated)
                 .as("Routes not behind exactly the gate of their family. A webhook controller needs "
                         + "@WebhookRoute and an allowlist entry; a controller in controller.internal must "
-                        + "sit under " + InternalAuthFilter.INTERNAL_PREFIX + "; anything else must sit "
-                        + "under the API-key prefixes.")
+                        + "sit under " + InternalAuthFilter.INTERNAL_PREFIX + "; one in controller.staff "
+                        + "under " + SecurityConfig.STAFF_BASE_PATH + "; anything else must sit under the "
+                        + "API-key prefix.")
                 .isEmpty();
     }
 
