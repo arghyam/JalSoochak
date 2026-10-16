@@ -53,6 +53,9 @@ class MeterReadingConversationServiceIssueReportTest {
     @Spy
     private com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
+    @Mock
+    private ConversationSchemeResolver conversationSchemeResolver;
+
     @InjectMocks
     private MeterReadingConversationService service;
 
@@ -69,7 +72,7 @@ class MeterReadingConversationServiceIssueReportTest {
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
 
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
         IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
                 .issueReason("2")
@@ -134,7 +137,7 @@ class MeterReadingConversationServiceIssueReportTest {
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
 
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
@@ -175,7 +178,7 @@ class MeterReadingConversationServiceIssueReportTest {
         when(templatesService.resolveScreenConfirmationTemplate(1, "ISSUE_REPORT", "english")).thenReturn(Optional.empty());
         when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
 
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
@@ -231,7 +234,7 @@ class MeterReadingConversationServiceIssueReportTest {
         );
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(templateReasons);
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
@@ -297,7 +300,7 @@ class MeterReadingConversationServiceIssueReportTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
@@ -307,7 +310,7 @@ class MeterReadingConversationServiceIssueReportTest {
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("meterReplaced", resp.getSelected());
-        verify(telemetryTenantRepository).findFirstSchemeForUser("tenant_test", 1L);
+        verify(conversationSchemeResolver).require(operatorWithSchema);
     }
 
     @Test
@@ -324,7 +327,7 @@ class MeterReadingConversationServiceIssueReportTest {
         when(templatesService.resolveScreenConfirmationTemplate(1, "ISSUE_REPORT", "english")).thenReturn(Optional.empty());
         when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
 
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = service.othersSubmittedMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
@@ -373,7 +376,7 @@ class MeterReadingConversationServiceIssueReportTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
 
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
         when(telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme("tenant_test", 10L)).thenReturn(List.of(99L));
         when(telemetryTenantRepository.upsertPendingIssueReportRecord(
                 eq("tenant_test"),
@@ -470,8 +473,9 @@ class MeterReadingConversationServiceIssueReportTest {
         assertEquals(false, resp.isSuccess());
         assertEquals("Issue reason can only contain letters, numbers, and spaces.", resp.getMessage());
 
-        // The guard runs before findFirstSchemeForUser, so the tenant repository is never touched
+        // The guard runs before the scheme is resolved, so the tenant repository is never touched
         // at all — no row written, and no wasted lookup either.
+        org.mockito.Mockito.verifyNoInteractions(conversationSchemeResolver);
         org.mockito.Mockito.verifyNoInteractions(telemetryTenantRepository);
         org.mockito.Mockito.verifyNoInteractions(telemetryEventPublisher);
     }
@@ -493,10 +497,10 @@ class MeterReadingConversationServiceIssueReportTest {
 
     @Test
     void issueReportSubmitAcceptsDevanagariFreeTextAndStoresItIntact() {
-        stubOperator();
+        TelemetryOperatorWithSchema operatorWithSchema = stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = submitFreeText("पानी की आपूर्ति नहीं");
 
@@ -569,10 +573,10 @@ class MeterReadingConversationServiceIssueReportTest {
         // The other half of the per-token rule, and the one that matters: real Hindi is
         // Lo Mc Lo Mc … so tightening the pattern must not have re-broken it. "पानी" is
         // प + ा + न + ी — three of those four characters sit after a base.
-        stubOperator();
+        TelemetryOperatorWithSchema operatorWithSchema = stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = submitFreeText("मीटर में पानी नहीं");
 
@@ -627,11 +631,11 @@ class MeterReadingConversationServiceIssueReportTest {
     @Test
     void issueReportSubmitAcceptsATenantLabelExactlyAtTheLengthCap() {
         // The boundary, so the guard cannot drift to >= and start rejecting a label that stores.
-        stubOperator();
+        TelemetryOperatorWithSchema operatorWithSchema = stubOperator();
         String atCap = "a".repeat(IssueReportRequest.MAX_ISSUE_REASON_LENGTH);
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of(atCap));
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = submitFreeText("1");
 
@@ -684,11 +688,11 @@ class MeterReadingConversationServiceIssueReportTest {
         // labels come from the database and may contain punctuation the allowlist forbids;
         // simplifying the guard to reasons.contains(...) or dropping the flag would start
         // rejecting valid menu picks.
-        stubOperator();
+        TelemetryOperatorWithSchema operatorWithSchema = stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english"))
                 .thenReturn(List.of("Motor burnt out, needs repair", "Pipe leak - urgent"));
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = submitFreeText("1");
 
@@ -707,11 +711,11 @@ class MeterReadingConversationServiceIssueReportTest {
     void issueReportSubmitAcceptsAPunctuatedTenantLabelSelectedByItsExactText() {
         // Same discriminator, reached through the label-equality branch of resolveSelection
         // rather than the numeric-index branch.
-        stubOperator();
+        TelemetryOperatorWithSchema operatorWithSchema = stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english"))
                 .thenReturn(List.of("Motor burnt out, needs repair", "Pipe leak - urgent"));
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = submitFreeText("Pipe leak - urgent");
 
@@ -733,12 +737,12 @@ class MeterReadingConversationServiceIssueReportTest {
         // Behaviour change on an endpoint outside the reported finding, and the reason \p{M} was
         // added: this path already enforced ISSUE_REASON_ALLOWED, so before the fix a Hindi
         // "other issue" was rejected outright. Guards against a regression to letters-only.
-        stubOperator();
+        TelemetryOperatorWithSchema operatorWithSchema = stubOperator();
         when(templatesService.resolveScreenConfirmationTemplate(1, "ISSUE_REPORT", "english"))
                 .thenReturn(Optional.empty());
         when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english"))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = service.othersSubmittedMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
