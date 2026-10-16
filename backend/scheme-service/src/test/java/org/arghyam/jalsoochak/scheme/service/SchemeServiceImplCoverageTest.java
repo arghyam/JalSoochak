@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeYesterdayFinalReadingDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.scheme.exception.FileValidationException;
 import org.arghyam.jalsoochak.scheme.exception.UnsupportedFileTypeException;
@@ -30,6 +31,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Collections;
@@ -409,6 +411,33 @@ class SchemeServiceImplCoverageTest {
         assertThat(page.getTotalElements()).isEqualTo(1);
         assertThat(page.getNumber()).isEqualTo(0);
         assertThat(page.getSize()).isEqualTo(100);
+    }
+
+    @Test
+    void listSchemesWithYesterdayFinalReading_pagesTheCallersOwnSchemes() {
+        setJwt(Jwt.withTokenValue("token")
+                .header("alg", "RS256")
+                .subject("officer-uuid")
+                .claim("tenant_state_code", "ka")
+                .build(), false);
+        when(schemeDbRepository.findUserIdByUuid("tenant_ka", "officer-uuid")).thenReturn(10);
+        SchemeYesterdayFinalReadingDTO row = SchemeYesterdayFinalReadingDTO.builder()
+                .schemeId(7)
+                .schemeName("Scheme One")
+                .yesterdayFinalReading(new BigDecimal("1234.5"))
+                .build();
+        when(schemeDbRepository.listSchemesWithYesterdayFinalReadingForUser("tenant_ka", 10, "Scheme", 20, 20))
+                .thenReturn(List.of(row));
+        when(schemeDbRepository.countSchemesWithYesterdayFinalReadingForUser("tenant_ka", 10, "Scheme"))
+                .thenReturn(21L);
+
+        PageResponseDTO<SchemeYesterdayFinalReadingDTO> page =
+                schemeService.listSchemesWithYesterdayFinalReading("ka", 1, 20, "Scheme");
+
+        assertThat(page.getContent()).containsExactly(row);
+        assertThat(page.getTotalElements()).isEqualTo(21);
+        assertThat(page.getNumber()).isEqualTo(1);
+        assertThat(page.getSize()).isEqualTo(20);
     }
 
     @Test

@@ -12,7 +12,6 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
-import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
@@ -20,7 +19,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.List;
@@ -42,6 +40,7 @@ public class MeterImageWorkflowService {
     private final TenantConfigRepository tenantConfigRepository;
     private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final ObjectMapper objectMapper;
+    private final ConversationSchemeResolver conversationSchemeResolver;
 
     // LENIENT-INGEST: master off-switch for recording submissions with a missing scheme/operator.
     // Set telemetry.lenient-ingestion.enabled=false to restore the original reject behaviour.
@@ -55,7 +54,8 @@ public class MeterImageWorkflowService {
                                      ConversationLocalizationService localizationService,
                                      TenantConfigRepository tenantConfigRepository,
                                      UserChannelPreferenceRepository userChannelPreferenceRepository,
-                                     ObjectMapper objectMapper) {
+                                     ObjectMapper objectMapper,
+                                     ConversationSchemeResolver conversationSchemeResolver) {
         this.inboundMediaService = inboundMediaService;
         this.bfmReadingService = bfmReadingService;
         this.telemetryTenantRepository = telemetryTenantRepository;
@@ -64,6 +64,7 @@ public class MeterImageWorkflowService {
         this.tenantConfigRepository = tenantConfigRepository;
         this.userChannelPreferenceRepository = userChannelPreferenceRepository;
         this.objectMapper = objectMapper;
+        this.conversationSchemeResolver = conversationSchemeResolver;
     }
 
     public CreateReadingResponse processImage(MeterImageWebhookRequest meterImageWebhookRequest) {
@@ -80,18 +81,7 @@ public class MeterImageWorkflowService {
             );
 //            ensureSelectedChannelExists(tenantId, operatorWithSchema.schemaName(), contactId);
 
-            Long schemeId = telemetryTenantRepository
-                    .findLatestPendingSchemeSelectionForDate(
-                            operatorWithSchema.schemaName(),
-                            operatorWithSchema.operator().id(),
-                            LocalDate.now(ReadingTime.ZONE)
-                    )
-                    .map(TelemetrySchemeSelectionRecord::schemeId)
-                    .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
-                            operatorWithSchema.schemaName(),
-                            operatorWithSchema.operator().id()
-                    ))
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = conversationSchemeResolver.require(operatorWithSchema);
 
             // Fetched and stored only once the submission is known to belong to a mapped operator.
             // Doing either earlier meant every rejected submission still made this service dial a

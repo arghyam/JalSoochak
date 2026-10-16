@@ -9,15 +9,12 @@ import org.arghyam.jalsoochak.telemetry.config.TelemetryApiKeyAuthFilter;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ResetLatestReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
-import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateYesterdayFinalReadingBySchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
-import org.arghyam.jalsoochak.telemetry.dto.response.UpdateYesterdayFinalReadingBySchemeResponse;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
 import org.arghyam.jalsoochak.telemetry.service.MeterImageWorkflowService;
-import org.arghyam.jalsoochak.telemetry.service.TelemetrySchemeReadingService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.slf4j.Logger;
@@ -25,17 +22,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
@@ -55,114 +48,23 @@ public class ReadingIngestController {
     private final MeterImageWorkflowService imageWorkflowService;
     private final TelemetryApiKeyService telemetryApiKeyService;
     private final BfmReadingService bfmReadingService;
-    private final TelemetrySchemeReadingService telemetrySchemeReadingService;
     private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
 
     public ReadingIngestController(MeterImageWorkflowService imageWorkflowService,
                                    TelemetryApiKeyService telemetryApiKeyService,
                                    BfmReadingService bfmReadingService) {
-        this(imageWorkflowService, telemetryApiKeyService, bfmReadingService, null, null);
+        this(imageWorkflowService, telemetryApiKeyService, bfmReadingService, null);
     }
 
     @Autowired
     public ReadingIngestController(MeterImageWorkflowService imageWorkflowService,
                                    TelemetryApiKeyService telemetryApiKeyService,
                                    BfmReadingService bfmReadingService,
-                                   TelemetrySchemeReadingService telemetrySchemeReadingService,
                                    TelemetrySubmissionAuditService telemetrySubmissionAuditService) {
         this.imageWorkflowService = imageWorkflowService;
         this.telemetryApiKeyService = telemetryApiKeyService;
         this.bfmReadingService = bfmReadingService;
-        this.telemetrySchemeReadingService = telemetrySchemeReadingService;
         this.telemetrySubmissionAuditService = telemetrySubmissionAuditService;
-    }
-
-    /**
-     * External correction of a prior day's final reading.
-     *
-     * <p>Documented as an API-key route but shipped without any key check, and it picked its tenant
-     * from the unauthenticated {@code X-Tenant-Code} header — so an anonymous caller could name any
-     * tenant and overwrite a submitted reading. Same defect class as {@code /readings/reset-latest};
-     * fixed the same way: the key is required, and the tenant comes from the key rather than from a
-     * header the caller controls.
-     */
-    @PatchMapping(
-            value = "/schemes/{schemeId}/yesterday-final-reading",
-            consumes = "application/json",
-            produces = "application/json"
-    )
-    public ResponseEntity<UpdateYesterdayFinalReadingBySchemeResponse> updateYesterdayFinalReadingByScheme(
-            @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
-            @RequestAttribute(name = TelemetryApiKeyAuthFilter.TENANT_ID_ATTRIBUTE, required = false)
-            Integer authenticatedTenantId,
-            @PathVariable Long schemeId,
-            @RequestParam(value = "date", required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
-            @RequestBody @Valid UpdateYesterdayFinalReadingBySchemeRequest request
-    ) {
-        String masked = request != null ? request.getPhoneNumber() : null;
-        if (masked != null) {
-            masked = masked.replaceAll("\\D", "");
-            if (masked.length() > 4) {
-                masked = "****" + masked.substring(masked.length() - 4);
-            } else {
-                masked = "****";
-            }
-        }
-        log.info("PATCH /api/v1/telemetry/schemes/{}/yesterday-final-reading phone={}", schemeId, masked);
-        try {
-            // Authenticated before anything else. The tenant comes from the API key — via the filter
-            // attribute, or resolved here as defence in depth — never from the X-Tenant-Code header
-            // the caller controls.
-            Integer tenantId = requireAuthenticatedTenant(apiKey, authenticatedTenantId);
-            UpdateYesterdayFinalReadingBySchemeResponse response = telemetrySchemeReadingService.updateYesterdayFinalReadingBySchemeId(
-                    schemeId,
-                    request.getPhoneNumber(),
-                    request.getReading(),
-                    date,
-                    tenantId
-            );
-            logReadingSubmission(
-                    "/api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading",
-                    request != null ? request.getPhoneNumber() : null,
-                    schemeId,
-                    response != null && response.isSuccess() ? "SUCCESS" : "FAILED",
-                    response != null ? response.getMessage() : "Yesterday final reading processed."
-            );
-            return ResponseEntity.ok(response);
-        } catch (ResponseStatusException e) {
-            logReadingSubmission(
-                    "/api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading",
-                    request != null ? request.getPhoneNumber() : null,
-                    schemeId,
-                    "FAILED",
-                    e.getReason()
-            );
-            return ResponseEntity.status(e.getStatusCode()).body(
-                    UpdateYesterdayFinalReadingBySchemeResponse.builder()
-                            .success(false)
-                            .schemeId(schemeId)
-                            .finalReading(request != null ? request.getReading() : null)
-                            .message(e.getReason())
-                            .build()
-            );
-        } catch (Exception e) {
-            logReadingSubmission(
-                    "/api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading",
-                    request != null ? request.getPhoneNumber() : null,
-                    schemeId,
-                    "FAILED",
-                    e.getMessage()
-            );
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
-                    UpdateYesterdayFinalReadingBySchemeResponse.builder()
-                            .success(false)
-                            .schemeId(schemeId)
-                            .finalReading(request != null ? request.getReading() : null)
-                            .message("Internal error")
-                            .build()
-            );
-        }
     }
 
     @PostMapping(
@@ -632,26 +534,6 @@ public class ReadingIngestController {
             return TelemetryErrorCode.REQUEST_FAILED;
         }
         return TelemetryErrorCode.BAD_REQUEST;
-    }
-
-    private void logReadingSubmission(String api, String phoneNumber, Long schemeId, String status, String message) {
-        TelemetrySubmissionAuditService.SubmissionAuditSnapshot audit =
-                telemetrySubmissionAuditService != null
-                        ? telemetrySubmissionAuditService.captureForPhoneAndScheme(phoneNumber, schemeId)
-                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", schemeId, 0, LocalDate.now(ReadingTime.ZONE));
-
-        log.info(
-                "reading_submission api={} status={} phone={} submittedPhone={} schemeId={} dailyUniqueUserCount={} date={} message=\"{}\"",
-                api,
-                status,
-                audit.maskedPhone(),
-                maskPhone(phoneNumber),
-                audit.schemeId(),
-                audit.dailyUniqueUserCount(),
-                audit.date(),
-                sanitizeLogMessage(message)
-        );
-        logRawSubmissionPhoneAtDebug(api, status, phoneNumber, audit);
     }
 
     private void logReadingSubmission(String api, CanonicalReadingRequest request, Integer tenantId, String status, String message) {

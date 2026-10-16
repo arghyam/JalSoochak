@@ -1142,7 +1142,7 @@ class ReadingIngestControllerUnitTest {
         }
 
         private StubImageWorkflowService(boolean rejected) {
-            super(null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null);
             this.rejected = rejected;
         }
 
@@ -1170,7 +1170,7 @@ class ReadingIngestControllerUnitTest {
         private final ResponseStatusException failure;
 
         private ThrowingImageWorkflowService(ResponseStatusException failure) {
-            super(null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null);
             this.failure = failure;
         }
 
@@ -1182,7 +1182,7 @@ class ReadingIngestControllerUnitTest {
 
     private static final class RetryImageWorkflowService extends MeterImageWorkflowService {
         private RetryImageWorkflowService() {
-            super(null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null);
         }
 
         @Override

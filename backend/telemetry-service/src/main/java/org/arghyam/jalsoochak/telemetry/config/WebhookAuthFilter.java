@@ -22,21 +22,16 @@ import java.util.Deque;
 /**
  * Authenticates the chatbot webhook endpoints with a shared secret header.
  *
- * <p><b>Why a plain filter rather than Spring Security.</b> telemetry-service has no security starter
- * on the classpath. Adding {@code spring-boot-starter-security} would insert
- * {@code springSecurityFilterChain} in front of <i>every</i> request — the load-balancer health probe,
- * the anonymous Prometheus scrape, the {@code X-Api-Key} ingestion routes — so any path not explicitly
- * permitted would start returning 401 the moment the JAR shipped, all at once.
- * {@code oauth2-resource-server} would additionally make the service fetch Keycloak's discovery
- * document at startup, coupling meter-reading ingestion to Keycloak availability for the sake of a
- * caller that will never present a JWT. What is needed here is a comparison of one header against one
- * secret. {@link TelemetryApiKeyAuthFilter} is the sibling precedent in this package: same shape, a
- * different credential for a different family of callers.
+ * <p><b>Why a plain filter rather than Spring Security.</b> Spring Security is on the classpath for
+ * the SO/SDO staff routes only: {@link SecurityConfig} declares one chain, scoped to
+ * {@link SecurityConfig#STAFF_BASE_PATH}, and no other path matches it. The chatbot will never present
+ * a JWT, so routing it through Spring Security would buy nothing; what is needed here is a comparison
+ * of one header against one secret. {@link TelemetryApiKeyAuthFilter} is the sibling precedent in this
+ * package: same shape, a different credential for a different family of callers.
  *
  * <p><b>Relationship to {@link TelemetryApiKeyAuthFilter}.</b> That filter guards the partner
- * ingestion routes under {@code /readings**} and {@code /schemes/*} with a per-tenant key, and exempts
- * {@code /readings/whatsapp} and {@code /schemes} because those two are chatbot webhooks. This filter
- * is what authenticates them. {@code WebhookRouteCoverageTest} asserts that handoff in both
+ * ingestion routes under {@code /readings**} with a per-tenant key, and exempts
+ * {@code /readings/whatsapp} because it is a chatbot webhook. This filter is what authenticates it. {@code WebhookRouteCoverageTest} asserts that handoff in both
  * directions, so neither gate can be narrowed without the other noticing.
  *
  * <p><b>Why a filter rather than a {@code HandlerInterceptor}.</b> An interceptor runs after handler
@@ -54,9 +49,9 @@ public class WebhookAuthFilter extends OncePerRequestFilter {
      * Runs after {@link RequestCorrelationFilter} (10) so rejections carry the request id,
      * {@link DisallowedHttpMethodFilter} (15) and {@link TelemetryApiKeyAuthFilter} (20) — the last
      * purely to keep the chain in a stable, documented order. The two credential gates never contend:
-     * this filter's allowlist and that filter's protected prefixes are disjoint, apart from
-     * {@code /readings/whatsapp} and {@code /schemes}, which the API-key filter exempts precisely so
-     * the webhook token can authenticate them here.
+     * this filter's allowlist and that filter's protected prefix are disjoint, apart from
+     * {@code /readings/whatsapp}, which the API-key filter exempts precisely so the webhook token can
+     * authenticate it here.
      */
     public static final int ORDER = 30;
 

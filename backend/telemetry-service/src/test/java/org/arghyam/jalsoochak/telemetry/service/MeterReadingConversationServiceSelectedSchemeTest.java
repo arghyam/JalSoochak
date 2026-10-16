@@ -7,7 +7,6 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingReque
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
-import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,8 +34,9 @@ import static org.mockito.Mockito.when;
  * operator picked in this conversation, not their first mapped scheme.
  *
  * <p>The v6 flow asks a multi-scheme operator which scheme before each of these paths, and
- * {@code /scheme/selected} stores the answer as today's scheme-selection row. Every test here has
- * a selection of {@link #SELECTED} while the first mapped scheme is {@link #FIRST}.</p>
+ * {@link ConversationSchemeResolver} answers with the scheme picked on {@code /scheme/selected}
+ * (see {@code ConversationSchemeResolverTest} for how). Every test here has it answer
+ * {@link #SELECTED}, which is not the operator's first mapped scheme.</p>
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -45,7 +45,6 @@ class MeterReadingConversationServiceSelectedSchemeTest {
     private static final String SCHEMA = "tenant_test";
     private static final String CONTACT = "919999999999";
     private static final long OPERATOR = 1L;
-    private static final long FIRST = 10L;
     private static final long SELECTED = 20L;
 
     @Mock private OperatorContextService operatorContextService;
@@ -55,6 +54,7 @@ class MeterReadingConversationServiceSelectedSchemeTest {
     @Mock private TelemetryTenantRepository telemetryTenantRepository;
     @Mock private TelemetryEventPublisher telemetryEventPublisher;
     @Spy private com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    @Mock private ConversationSchemeResolver conversationSchemeResolver;
 
     @InjectMocks
     private MeterReadingConversationService service;
@@ -66,9 +66,7 @@ class MeterReadingConversationServiceSelectedSchemeTest {
         when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator);
         when(operatorContextService.resolveOperatorLanguage(operator, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(telemetryTenantRepository.findFirstSchemeForUser(SCHEMA, OPERATOR)).thenReturn(Optional.of(FIRST));
-        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(eq(SCHEMA), eq(OPERATOR), any()))
-                .thenReturn(Optional.of(new TelemetrySchemeSelectionRecord(5L, SELECTED, "scheme-selection-x")));
+        when(conversationSchemeResolver.require(operator)).thenReturn(SELECTED);
     }
 
     @Test

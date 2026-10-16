@@ -63,8 +63,9 @@ class RouteParityTest {
             "PUT /api/v1/telemetry/readings",
             "PUT /api/v1/telemetry/readings/",
             "POST /api/v1/telemetry/readings/reset-latest",
-            "PATCH /api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading",
             "POST /api/v1/telemetry/readings/formats/{format}",
+            // SO/SDO web UI
+            "PATCH /api/v1/telemetry/staff/schemes/{schemeId}/yesterday-final-reading",
             // Operations
             "POST /api/v1/telemetry/internal/readings/republish"
     );

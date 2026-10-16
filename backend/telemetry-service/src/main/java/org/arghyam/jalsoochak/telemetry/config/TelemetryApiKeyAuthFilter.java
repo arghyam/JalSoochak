@@ -27,7 +27,7 @@ import java.util.Set;
  * block copied into each controller method. {@code POST /readings/reset-latest} shipped without that
  * block, so a destructive route sat unauthenticated on the public internet (CWE-287). Repeating a
  * check in every handler makes forgetting it the default failure mode, so the check lives here
- * instead: <b>every</b> path under the protected prefixes needs a valid key unless it is on the
+ * instead: <b>every</b> path under the protected prefix needs a valid key unless it is on the
  * explicit {@link #UNAUTHENTICATED_WEBHOOK_PATHS} allowlist. A new {@code /readings/**} endpoint is
  * therefore authenticated the moment it is mapped, and exposing one publicly takes a deliberate,
  * reviewable edit to that allowlist.
@@ -60,18 +60,14 @@ public class TelemetryApiKeyAuthFilter extends OncePerRequestFilter {
 
     private static final String TELEMETRY_BASE = "/api/v1/telemetry";
     private static final String READINGS_PREFIX = TELEMETRY_BASE + "/readings";
-    private static final String SCHEMES_PREFIX = TELEMETRY_BASE + "/schemes";
 
     /**
-     * Chatbot (WhatsApp) webhook routes that fall inside the protected prefixes. They are
-     * unauthenticated at the application layer today — {@code telemetry-service} runs without Spring
-     * Security and their only protection is network placement — and that is tracked as its own
-     * finding. They are listed explicitly so the exemption is visible in review rather than implied
-     * by a missing check.
+     * Chatbot (WhatsApp) webhook routes that fall inside the protected prefix. {@link WebhookAuthFilter}
+     * authenticates them with the chatbot's shared token instead. They are listed explicitly so the
+     * exemption is visible in review rather than implied by a missing check.
      */
     private static final Set<String> UNAUTHENTICATED_WEBHOOK_PATHS = Set.of(
-            READINGS_PREFIX + "/whatsapp",
-            SCHEMES_PREFIX
+            READINGS_PREFIX + "/whatsapp"
     );
 
     private static final String UNAUTHORIZED_BODY = """
@@ -110,11 +106,7 @@ public class TelemetryApiKeyAuthFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    /**
-     * Deny by default inside the protected prefixes. {@code /readings} and everything beneath it is
-     * server-to-server ingestion; under {@code /schemes} only the sub-paths are (bare
-     * {@code POST /schemes} is a chatbot selection webhook).
-     */
+    /** Deny by default inside the protected prefix: {@code /readings} and everything beneath it. */
     static boolean requiresApiKey(String path) {
         if (path == null || path.isBlank()) {
             return false;
@@ -122,10 +114,7 @@ public class TelemetryApiKeyAuthFilter extends OncePerRequestFilter {
         if (UNAUTHENTICATED_WEBHOOK_PATHS.contains(path)) {
             return false;
         }
-        if (path.equals(READINGS_PREFIX) || path.startsWith(READINGS_PREFIX + "/")) {
-            return true;
-        }
-        return path.startsWith(SCHEMES_PREFIX + "/");
+        return path.equals(READINGS_PREFIX) || path.startsWith(READINGS_PREFIX + "/");
     }
 
     /** The exemptions, so a guard test can assert the webhook gate authenticates each one instead. */

@@ -6,7 +6,6 @@ import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
-import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.UpdateYesterdayFinalReadingBySchemeResponse;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -18,67 +17,54 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class TelemetrySchemeReadingService {
 
+    private static final String SCHEMA_PREFIX = "tenant_";
+    /** A state code that can name a tenant schema; anything else is refused before it reaches SQL. */
+    private static final Pattern TENANT_STATE_CODE = Pattern.compile("^[a-z0-9_]+$");
+
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final ReadingRepublisher readingRepublisher;
     private final SubmittedValueCapture submittedValueCapture;
 
     /**
-     * Falls back to the schema in {@link TenantContext}, i.e. the unauthenticated
-     * {@code X-Tenant-Code} header.
+     * An SO/SDO's correction of a scheme's latest submitted BFM reading, or of the one on {@code date}.
      *
-     * <p>Production callers must use
-     * {@link #updateYesterdayFinalReadingBySchemeId(Long, String, BigDecimal, LocalDate, Integer)}
-     * and pass the id of the tenant behind an authenticated {@code X-Api-Key}. This overload exists
-     * for tests that set {@code TenantContext} directly.
+     * <p>The tenant and the user both come from the officer's verified token: the tenant from
+     * {@code tenant_state_code}, the user from the subject. The scheme must then be mapped to that
+     * user. Nothing in the request's headers or body selects any of the three.
      */
     public UpdateYesterdayFinalReadingBySchemeResponse updateYesterdayFinalReadingBySchemeId(Long schemeId,
-                                                                                            String phoneNumber,
-                                                                                            BigDecimal finalReading,
-                                                                                            LocalDate date) {
-        return updateYesterdayFinalReadingBySchemeId(schemeId, phoneNumber, finalReading, date, null);
-    }
-
-    /**
-     * {@code authenticatedTenantId} is the tenant the caller proved with its API key, and it decides
-     * which schema the correction is applied to. The {@code X-Tenant-Code} header behind
-     * {@link TenantContext} remains the fallback for in-process callers with no authenticated tenant,
-     * but it must never win over the key: it is unauthenticated, so letting it decide would let a
-     * caller holding one tenant's key — or none at all — correct another tenant's readings. Same
-     * precedence as {@code BfmReadingService.resolveSchemaForCorrelationUpdate}.
-     */
-    public UpdateYesterdayFinalReadingBySchemeResponse updateYesterdayFinalReadingBySchemeId(Long schemeId,
-                                                                                            String phoneNumber,
                                                                                             BigDecimal finalReading,
                                                                                             LocalDate date,
-                                                                                            Integer authenticatedTenantId) {
-        String maskedPhone = maskPhone(phoneNumber);
+                                                                                            StaffCaller caller) {
         try {
             if (schemeId == null || schemeId < 1) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "schemeId must be a positive integer");
             }
-            if (phoneNumber == null || phoneNumber.isBlank()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "phoneNumber is required");
-            }
             if (finalReading == null || finalReading.compareTo(BigDecimal.ZERO) <= 0) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "reading must be greater than zero");
             }
+            if (caller == null) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+            }
 
-            String schemaName = requireTenantSchema(authenticatedTenantId);
-            log.info("[update-yesterday-final-reading] start schemeId={} tenantSchema={} phone={}", schemeId, schemaName, maskedPhone);
-
-            Long updaterUserId = telemetryTenantRepository.findUserIdByPhone(schemaName, phoneNumber)
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found for phoneNumber"));
+            String schemaName = requireCallerSchema(caller.tenantStateCode());
             Integer tenantId = telemetryTenantRepository.findTenantIdBySchemaName(schemaName);
             if (tenantId == null) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found for schema");
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not authorized for this tenant");
             }
+            Long updaterUserId = telemetryTenantRepository.findUserIdByUuid(schemaName, caller.userUuid())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "User not found for token"));
+            log.info("[update-yesterday-final-reading] start schemeId={} tenantSchema={} userId={}",
+                    schemeId, schemaName, updaterUserId);
 
             boolean mapped = telemetryTenantRepository.isUserMappedToScheme(schemaName, updaterUserId, schemeId);
             log.info("[update-yesterday-final-reading] resolved userId={} mappedToScheme={}", updaterUserId, mapped);
@@ -123,7 +109,7 @@ public class TelemetrySchemeReadingService {
             // The target is always a BFM row and the request has no unit field, so the value is in m3.
             telemetryTenantRepository.updateConfirmedReading(schemaName, targetDayRecord.id(), finalReading, updaterUserId,
                     RolloverResolutionService.manualConfirmSource(finalReading, targetDayRecord.confirmedReading()),
-                    ReadingUnit.CUBIC_METRE.code(), ReportingChannel.API);
+                    ReadingUnit.CUBIC_METRE.code(), ReportingChannel.WEB);
             log.info("[update-yesterday-final-reading] updated readingId={} newFinalReading={}",
                     targetDayRecord.id(), finalReading);
 
@@ -141,51 +127,24 @@ public class TelemetrySchemeReadingService {
                     .message("Final reading updated successfully.")
                     .build();
         } catch (ResponseStatusException e) {
-            log.info("[update-yesterday-final-reading] rejected schemeId={} phone={} status={} reason={}",
-                    schemeId, maskedPhone, e.getStatusCode(), e.getReason());
+            log.info("[update-yesterday-final-reading] rejected schemeId={} status={} reason={}",
+                    schemeId, e.getStatusCode(), e.getReason());
             throw e;
         } catch (Exception e) {
-            log.error("[update-yesterday-final-reading] failed schemeId={} phone={} err={}",
-                    schemeId, maskedPhone, e.getMessage(), e);
+            log.error("[update-yesterday-final-reading] failed schemeId={} err={}", schemeId, e.getMessage(), e);
             throw e;
         }
     }
 
     /**
-     * The schema behind an authenticated API key wins over {@link TenantContext}. That context is
-     * populated from {@code X-Tenant-Code}, which carries no credential — letting it take precedence
-     * would let a caller holding one tenant's key write into another tenant's schema.
+     * The schema the token's {@code tenant_state_code} names. A token with no usable tenant is refused
+     * as unauthorised for any tenant, rather than reaching the schema-name guard as a server error.
      */
-    private String requireTenantSchema(Integer authenticatedTenantId) {
-        if (authenticatedTenantId != null) {
-            return telemetryTenantRepository.findSchemaNameByTenantId(authenticatedTenantId)
-                    .filter(schema -> !schema.isBlank())
-                    .orElseThrow(() -> new ResponseStatusException(
-                            HttpStatus.NOT_FOUND, "Tenant not found for API key"));
+    private static String requireCallerSchema(String tenantStateCode) {
+        String code = tenantStateCode == null ? "" : tenantStateCode.trim().toLowerCase(Locale.ROOT);
+        if (!TENANT_STATE_CODE.matcher(code).matches()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not authorized for this tenant");
         }
-        String schemaName = TenantContext.getSchema();
-        if (schemaName == null || schemaName.isBlank()) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "Tenant could not be resolved. Ensure X-Tenant-Code header is set."
-            );
-        }
-        return schemaName;
+        return SCHEMA_PREFIX + code;
     }
-
-    private static String maskPhone(String phoneNumber) {
-        if (phoneNumber == null) {
-            return "null";
-        }
-        String digits = phoneNumber.replaceAll("\\D", "");
-        if (digits.length() <= 4) {
-            return "****";
-        }
-        return "****" + digits.substring(digits.length() - 4);
-    }
-
-    // No JWT here: the caller is authenticated by the per-tenant X-Api-Key at the controller, which
-    // also fixes the tenant schema. The phone lookup and scheme-mapping check below then constrain
-    // the write within that tenant — they are authorization, not authentication, and were never
-    // sufficient on their own.
 }

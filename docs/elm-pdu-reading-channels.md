@@ -328,7 +328,7 @@ of the sum. `PUT /readings` joins its existing transaction.
 | WhatsApp update previous reading | `POST /update-previous-reading` | any | none |
 | State-IT correction | `PUT /readings` | any | `reading_unit` (also `readingUnit`) |
 | State-IT reset | `POST /readings/reset-latest` | any | — |
-| SO/SDO Fix-readings save | `PATCH /schemes/{schemeId}/yesterday-final-reading` | **BFM only** (§9) | none: `m3` |
+| SO/SDO Fix-readings save | `PATCH /staff/schemes/{schemeId}/yesterday-final-reading` | **BFM only** (§9) | none: `m3` |
 
 A correction follows its row's channel's submission rules: the unit, the PDU limits, and
 `submitted_unit` written. The BFM-only checks stay BFM-only: the supply-plausibility guard and the
@@ -559,8 +559,8 @@ tenant's `X-Api-Key` is also held by its integrator. `InternalAuthFilter` guards
 `/api/v1/telemetry/internal`, so a new internal route is protected the moment it is mapped. It
 compares digests in constant time and never logs the token. An unset or malformed hash **disables**
 the routes (every call gets 401) rather than failing startup, since the route is run by hand and a
-deploy that leaves it out must not take ingestion down. The api-gateway routes
-`/api/v1/telemetry/**` publicly, so this token is the only thing in front of it.
+deploy that leaves it out must not take ingestion down. The api-gateway passes
+`/api/v1/telemetry/internal` through without a JWT, so this token is the only thing in front of it.
 
 **Why BFM is refused.** Its water quantity doesn't depend on configuration, and BFM fact rows from
 before analytics V56 have no `source_reading_id`, so republishing would add a second row.

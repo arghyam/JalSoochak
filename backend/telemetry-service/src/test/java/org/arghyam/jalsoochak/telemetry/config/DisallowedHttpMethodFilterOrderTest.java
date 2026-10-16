@@ -3,10 +3,12 @@ package org.arghyam.jalsoochak.telemetry.config;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.config.BeanDefinition;
+import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.core.type.filter.AssignableTypeFilter;
 import org.springframework.core.type.filter.TypeFilter;
@@ -16,6 +18,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.lang.reflect.Method;
 import java.util.Objects;
+import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -41,7 +44,10 @@ class DisallowedHttpMethodFilterOrderTest {
     void runsBeforeEveryCredentialGate() {
         // So a disallowed method never triggers an API-key lookup against the database and never
         // reaches TenantInterceptor, which would otherwise apply an unauthenticated X-Tenant-Code.
+        // Spring Security's own default order (-100) would put its chain first, so OPTIONS on a
+        // staff route would get its 401 instead of this filter's 405; application.yml moves it.
         assertThat(DisallowedHttpMethodFilter.ORDER)
+                .isLessThan(configuredSecurityFilterOrder())
                 .isLessThan(TelemetryApiKeyAuthFilter.ORDER)
                 .isLessThan(WebhookAuthFilter.ORDER)
                 .isLessThan(InternalAuthFilter.ORDER);
@@ -86,6 +92,17 @@ class DisallowedHttpMethodFilterOrderTest {
         assertThat(configurersMappingCors)
                 .as("addCorsMappings is the other way a CORS policy can arrive")
                 .isEmpty();
+    }
+
+    private static int configuredSecurityFilterOrder() {
+        YamlPropertiesFactoryBean yaml = new YamlPropertiesFactoryBean();
+        yaml.setResources(new ClassPathResource("application.yml"));
+        Properties properties = yaml.getObject();
+        String order = properties == null ? null : properties.getProperty("spring.security.filter.order");
+        assertThat(order)
+                .as("spring.security.filter.order must be set in application.yml")
+                .isNotBlank();
+        return Integer.parseInt(order);
     }
 
     /**

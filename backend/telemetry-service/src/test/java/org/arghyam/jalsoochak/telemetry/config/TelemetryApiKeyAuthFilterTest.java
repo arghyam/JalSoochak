@@ -9,6 +9,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -87,16 +88,17 @@ class TelemetryApiKeyAuthFilterTest {
     }
 
     @Test
-    void yesterdayFinalReadingCorrectionIsProtected() throws Exception {
+    void staffCorrectionNeedsNoApiKey() throws Exception {
+        // Authenticated by the officer's JWT in SecurityConfig, not by a tenant key.
         MockFilterChain chain = new MockFilterChain();
         MockHttpServletResponse response = new MockHttpServletResponse();
-        MockHttpServletRequest request =
-                new MockHttpServletRequest("PATCH", "/api/v1/telemetry/schemes/42/yesterday-final-reading");
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "PATCH", "/api/v1/telemetry/staff/schemes/42/yesterday-final-reading");
 
         filter().doFilter(request, response, chain);
 
-        assertEquals(401, response.getStatus());
-        assertNull(chain.getRequest());
+        assertEquals(200, response.getStatus());
+        assertNotNull(chain.getRequest());
     }
 
     @Test
