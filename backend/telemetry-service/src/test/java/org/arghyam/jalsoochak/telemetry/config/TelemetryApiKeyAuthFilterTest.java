@@ -88,20 +88,6 @@ class TelemetryApiKeyAuthFilterTest {
     }
 
     @Test
-    void schemesSubPathsStayClosedWithNoRouteBeneathThem() throws Exception {
-        // The SO/SDO correction moved to /staff; the prefix stays fail-closed for anything added here.
-        MockFilterChain chain = new MockFilterChain();
-        MockHttpServletResponse response = new MockHttpServletResponse();
-        MockHttpServletRequest request =
-                new MockHttpServletRequest("PATCH", "/api/v1/telemetry/schemes/42/yesterday-final-reading");
-
-        filter().doFilter(request, response, chain);
-
-        assertEquals(401, response.getStatus());
-        assertNull(chain.getRequest());
-    }
-
-    @Test
     void staffCorrectionNeedsNoApiKey() throws Exception {
         // Authenticated by the officer's JWT in SecurityConfig, not by a tenant key.
         MockFilterChain chain = new MockFilterChain();

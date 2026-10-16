@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateYesterdayFinalReading
 import org.arghyam.jalsoochak.telemetry.dto.response.UpdateYesterdayFinalReadingBySchemeResponse;
 import org.arghyam.jalsoochak.telemetry.service.StaffCaller;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySchemeReadingService;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -40,6 +41,10 @@ import java.util.stream.Collectors;
  * tenant and the officer are read from that token and handed to the service as a {@link StaffCaller};
  * {@code X-Tenant-Code} plays no part. Every failure past the security chain is answered in the
  * {@link UpdateYesterdayFinalReadingBySchemeResponse} envelope.
+ *
+ * <p>Each attempt the handler sees is audited as a {@code reading_submission} line, like the other
+ * reading routes, marked {@code channel=WEB} and naming the officer by token subject. It is kept out
+ * of {@code TelemetrySubmissionAuditService}, whose daily count is of operators who submitted.
  */
 @RestController
 @RequestMapping(SecurityConfig.STAFF_BASE_PATH)
@@ -68,13 +73,17 @@ public class StaffReadingCorrectionController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
             @RequestBody @Valid UpdateYesterdayFinalReadingBySchemeRequest request
     ) {
-        // The service logs every outcome, so nothing is logged here.
+        StaffCaller caller = callerOf(jwt);
         try {
-            return ResponseEntity.ok(telemetrySchemeReadingService.updateYesterdayFinalReadingBySchemeId(
-                    schemeId, request.getReading(), date, callerOf(jwt)));
+            UpdateYesterdayFinalReadingBySchemeResponse response = telemetrySchemeReadingService
+                    .updateYesterdayFinalReadingBySchemeId(schemeId, request.getReading(), date, caller);
+            logReadingSubmission(caller, schemeId, response.isSuccess() ? "SUCCESS" : "FAILED", response.getMessage());
+            return ResponseEntity.ok(response);
         } catch (ResponseStatusException e) {
+            logReadingSubmission(caller, schemeId, "FAILED", e.getReason());
             return reject(e.getStatusCode(), schemeId, request.getReading(), e.getReason());
         } catch (Exception e) {
+            logReadingSubmission(caller, schemeId, "FAILED", e.getMessage());
             return reject(HttpStatus.INTERNAL_SERVER_ERROR, schemeId, request.getReading(), "Internal error");
         }
     }
@@ -86,7 +95,7 @@ public class StaffReadingCorrectionController {
                 .filter(value -> value != null && !value.isBlank())
                 .sorted()
                 .collect(Collectors.joining("; "));
-        log.info("{} rejected reason=\"validation\" message=\"{}\"", API, message);
+        log.info("{} rejected reason=\"validation\" message=\"{}\"", API, sanitize(message));
         return reject(HttpStatus.BAD_REQUEST, null, null, message.isBlank() ? "Validation failed" : message);
     }
 
@@ -94,6 +103,17 @@ public class StaffReadingCorrectionController {
     public ResponseEntity<UpdateYesterdayFinalReadingBySchemeResponse> handleUnreadableJson(HttpMessageNotReadableException ex) {
         log.info("{} rejected reason=\"malformed body\"", API);
         return reject(HttpStatus.BAD_REQUEST, null, null, "Malformed request body");
+    }
+
+    private static void logReadingSubmission(StaffCaller caller, Long schemeId, String status, String message) {
+        log.info("reading_submission api={} channel=WEB status={} tenant={} userUuid={} schemeId={} date={} message=\"{}\"",
+                API,
+                status,
+                caller != null ? sanitize(caller.tenantStateCode()) : "n/a",
+                caller != null ? sanitize(caller.userUuid()) : "n/a",
+                schemeId,
+                ReadingTime.today(),
+                sanitize(message));
     }
 
     /** {@code null} without a token, which the service refuses as unauthenticated. */
@@ -111,5 +131,12 @@ public class StaffReadingCorrectionController {
                 .finalReading(reading)
                 .message(message)
                 .build());
+    }
+
+    private static String sanitize(String value) {
+        if (value == null || value.isBlank()) {
+            return "n/a";
+        }
+        return value.replace('\n', ' ').replace('\r', ' ').trim();
     }
 }

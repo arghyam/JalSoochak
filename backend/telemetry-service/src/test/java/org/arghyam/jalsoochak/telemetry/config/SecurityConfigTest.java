@@ -1,5 +1,8 @@
 package org.arghyam.jalsoochak.telemetry.config;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.arghyam.jalsoochak.telemetry.controller.staff.StaffReadingCorrectionController;
 import org.arghyam.jalsoochak.telemetry.dto.response.UpdateYesterdayFinalReadingBySchemeResponse;
 import org.arghyam.jalsoochak.telemetry.service.StaffCaller;
@@ -9,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Bean;
@@ -184,6 +188,49 @@ class SecurityConfigTest {
 
         verify(service).updateYesterdayFinalReadingBySchemeId(
                 7L, new BigDecimal("600"), LocalDate.of(2026, 3, 1), OFFICER);
+    }
+
+    /** The {@code reading_submission} lines the controller logs while {@code request} runs. */
+    private List<String> readingSubmissionLines(MockHttpServletRequestBuilder request) throws Exception {
+        Logger logger = (Logger) LoggerFactory.getLogger(StaffReadingCorrectionController.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            mockMvc.perform(request);
+        } finally {
+            logger.detachAppender(appender);
+        }
+        return appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(line -> line.startsWith("reading_submission "))
+                .toList();
+    }
+
+    @Test
+    @DisplayName("a correction is audited as a WEB reading_submission naming the staff route and officer")
+    void auditsACorrection() throws Exception {
+        assertThat(readingSubmissionLines(correction("so")))
+                .singleElement()
+                .satisfies(line -> assertThat(line).contains(
+                        "api=/api/v1/telemetry/staff/schemes/{schemeId}/yesterday-final-reading",
+                        "channel=WEB",
+                        "status=SUCCESS",
+                        "tenant=AS",
+                        "userUuid=" + OFFICER_UUID,
+                        "schemeId=7"));
+    }
+
+    @Test
+    @DisplayName("a refused correction is audited as FAILED with its reason")
+    void auditsARefusedCorrection() throws Exception {
+        when(service.updateYesterdayFinalReadingBySchemeId(any(), any(), any(), any()))
+                .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "Not authorized for this scheme"));
+
+        assertThat(readingSubmissionLines(correction("so")))
+                .singleElement()
+                .satisfies(line -> assertThat(line)
+                        .contains("channel=WEB", "status=FAILED", "message=\"Not authorized for this scheme\""));
     }
 
     @Test

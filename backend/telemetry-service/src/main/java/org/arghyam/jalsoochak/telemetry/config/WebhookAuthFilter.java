@@ -30,9 +30,8 @@ import java.util.Deque;
  * package: same shape, a different credential for a different family of callers.
  *
  * <p><b>Relationship to {@link TelemetryApiKeyAuthFilter}.</b> That filter guards the partner
- * ingestion routes under {@code /readings**} and {@code /schemes/*} with a per-tenant key, and exempts
- * {@code /readings/whatsapp} and {@code /schemes} because those two are chatbot webhooks. This filter
- * is what authenticates them. {@code WebhookRouteCoverageTest} asserts that handoff in both
+ * ingestion routes under {@code /readings**} with a per-tenant key, and exempts
+ * {@code /readings/whatsapp} because it is a chatbot webhook. This filter is what authenticates it. {@code WebhookRouteCoverageTest} asserts that handoff in both
  * directions, so neither gate can be narrowed without the other noticing.
  *
  * <p><b>Why a filter rather than a {@code HandlerInterceptor}.</b> An interceptor runs after handler
@@ -50,9 +49,9 @@ public class WebhookAuthFilter extends OncePerRequestFilter {
      * Runs after {@link RequestCorrelationFilter} (10) so rejections carry the request id,
      * {@link DisallowedHttpMethodFilter} (15) and {@link TelemetryApiKeyAuthFilter} (20) — the last
      * purely to keep the chain in a stable, documented order. The two credential gates never contend:
-     * this filter's allowlist and that filter's protected prefixes are disjoint, apart from
-     * {@code /readings/whatsapp} and {@code /schemes}, which the API-key filter exempts precisely so
-     * the webhook token can authenticate them here.
+     * this filter's allowlist and that filter's protected prefix are disjoint, apart from
+     * {@code /readings/whatsapp}, which the API-key filter exempts precisely so the webhook token can
+     * authenticate it here.
      */
     public static final int ORDER = 30;
 

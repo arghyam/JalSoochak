@@ -117,8 +117,8 @@ class WebhookRouteCoverageTest {
 
     /**
      * The two gates must hand off cleanly. {@link TelemetryApiKeyAuthFilter} denies by default under
-     * {@code /readings**} and {@code /schemes/*}; a chatbot route landing inside one of those prefixes
-     * without being on its exemption list would be rejected for lacking an {@code X-Api-Key} it is
+     * {@code /readings**}; a chatbot route landing inside that prefix without being on its exemption
+     * list would be rejected for lacking an {@code X-Api-Key} it is
      * never going to have, breaking the flow in the field. Nothing else in either class would catch it.
      */
     @Test
@@ -159,7 +159,7 @@ class WebhookRouteCoverageTest {
     /**
      * Closes the gap the allowlist cannot see: a controller that should have carried
      * {@link WebhookRoute} but does not. Its routes would be in no allowlist and, outside the
-     * {@code /readings} and {@code /schemes/*} prefixes, behind no gate at all. Every route the
+     * {@code /readings} prefix, behind no gate at all. Every route the
      * service maps must therefore be authenticated by exactly one of the four gates: the webhook
      * token for {@code @WebhookRoute} controllers, the operations token for the controllers in
      * {@code controller.internal}, the officer's JWT ({@link SecurityConfig}) for the controllers in
@@ -199,7 +199,7 @@ class WebhookRouteCoverageTest {
                         + "@WebhookRoute and an allowlist entry; a controller in controller.internal must "
                         + "sit under " + InternalAuthFilter.INTERNAL_PREFIX + "; one in controller.staff "
                         + "under " + SecurityConfig.STAFF_BASE_PATH + "; anything else must sit under the "
-                        + "API-key prefixes.")
+                        + "API-key prefix.")
                 .isEmpty();
     }
 
