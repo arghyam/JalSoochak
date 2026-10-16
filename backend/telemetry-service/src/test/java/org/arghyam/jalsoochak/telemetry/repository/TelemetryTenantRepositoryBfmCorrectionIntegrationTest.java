@@ -70,10 +70,14 @@ class TelemetryTenantRepositoryBfmCorrectionIntegrationTest {
     }
 
     private long insertOfficer(String uuid, LocalDateTime deletedAt) {
+        return insertOfficer(uuid, 1, deletedAt);
+    }
+
+    private long insertOfficer(String uuid, int status, LocalDateTime deletedAt) {
         return jdbcTemplate.queryForObject("INSERT INTO " + SCHEMA + ".user_table "
                         + "(uuid, tenant_id, title, user_type, phone_number, status, deleted_at) "
-                        + "VALUES (?, 1, 'Officer', 2, '91XXXXXXXXXX', 1, ?) RETURNING id",
-                Long.class, uuid, deletedAt);
+                        + "VALUES (?, 1, 'Officer', 2, '91XXXXXXXXXX', ?, ?) RETURNING id",
+                Long.class, uuid, status, deletedAt);
     }
 
     @Test
@@ -87,6 +91,13 @@ class TelemetryTenantRepositoryBfmCorrectionIntegrationTest {
     @Test
     void findsNoOfficerForASoftDeletedUser() {
         insertOfficer(OFFICER_UUID, DAY.atStartOfDay());
+
+        assertThat(repository.findUserIdByUuid(SCHEMA, OFFICER_UUID)).isEmpty();
+    }
+
+    @Test
+    void findsNoOfficerForAnInactiveUser() {
+        insertOfficer(OFFICER_UUID, 0, null);
 
         assertThat(repository.findUserIdByUuid(SCHEMA, OFFICER_UUID)).isEmpty();
     }

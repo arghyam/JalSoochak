@@ -3026,8 +3026,9 @@ public class TelemetryTenantRepository {
     }
 
     /**
-     * The live user whose {@code uuid} is {@code uuid}. user-service overwrites {@code uuid} with the
-     * Keycloak user id at provisioning, so this resolves the holder of a staff token from its subject.
+     * The live, active user whose {@code uuid} is {@code uuid}. user-service overwrites {@code uuid}
+     * with the Keycloak user id at provisioning, so this resolves the holder of a staff token from its
+     * subject. An officer deactivated since the token was issued resolves to nothing.
      */
     public Optional<Long> findUserIdByUuid(String schemaName, String uuid) {
         validateSchemaName(schemaName);
@@ -3038,6 +3039,7 @@ public class TelemetryTenantRepository {
                 SELECT id
                 FROM %s.user_table
                 WHERE uuid = ?
+                  AND status = 1
                   AND deleted_at IS NULL
                 LIMIT 1
                 """, schemaName);

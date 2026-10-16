@@ -541,8 +541,8 @@ the WhatsApp flows share one correlation id across several readings (analytics V
 
 The new route takes `Authorization: Bearer <token>` from a section or sub-divisional officer
 (`USER_TYPE_SECTION_OFFICER`, `USER_TYPE_SUB_DIVISIONAL_OFFICER`). The tenant comes from the token's
-`tenant_state_code` and the officer from its `sub`, which must be a live `user_table.uuid` mapped to
-the scheme. The body is `{ "reading": <m3, greater than 0> }`; an optional `?date=YYYY-MM-DD` targets
+`tenant_state_code` and the officer from its `sub`, which must be the `user_table.uuid` of an active,
+undeleted user mapped to the scheme. The body is `{ "reading": <m3, greater than 0> }`; an optional `?date=YYYY-MM-DD` targets
 that day's latest BFM reading instead of the scheme's latest. The corrected row is recorded as
 reported via `WEB` (`channel_master_table` id 10, V66).
 
@@ -552,7 +552,7 @@ reported via `WEB` (`channel_master_table` id 10, V66).
 | `400` | Invalid or malformed body, or a value the BFM capture rules refuse | The same envelope, `success: false` |
 | `401` | No token, or an invalid one | None; `WWW-Authenticate: Bearer` |
 | `403` | Not a section or sub-divisional officer | None |
-| `403` | Unknown tenant claim, no live user for `sub`, or not mapped to the scheme | The envelope |
+| `403` | Unknown tenant claim, no active user for `sub`, or not mapped to the scheme | The envelope |
 | `404` | No submitted BFM reading to correct | The envelope |
 
 **Deploying**, in this order:
