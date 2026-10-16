@@ -65,11 +65,17 @@ public class SecurityConfig {
     };
 
     /**
-     * telemetry-service runs without Spring Security: every route under this prefix authenticates
-     * with its own credential instead — X-Webhook-Token on the 26 chatbot webhooks
-     * (WebhookRoutes), X-Api-Key on the vendor ingestion routes (TelemetryApiKeyAuthFilter).
-     * Neither credential is a JWT, so a bearer-token gate here would reject all of it and protect
-     * nothing that is not already protected upstream.
+     * telemetry-service's SO/SDO reading corrections, authenticated by the officer's own JWT. The
+     * service checks the role and the scheme mapping; the gateway only refuses a missing or invalid
+     * token. Registered ahead of {@link #TELEMETRY_SERVICE_PUBLIC}, which also matches it.
+     */
+    private static final String[] TELEMETRY_SERVICE_STAFF = {"/api/v1/telemetry/staff/**"};
+
+    /**
+     * Every other telemetry-service route authenticates with its own credential instead —
+     * X-Webhook-Token on the 26 chatbot webhooks (WebhookRoutes), X-Api-Key on the vendor ingestion
+     * routes (TelemetryApiKeyAuthFilter). Neither credential is a JWT, so a bearer-token gate here
+     * would reject all of it and protect nothing that is not already protected upstream.
      */
     private static final String[] TELEMETRY_SERVICE_PUBLIC = {"/api/v1/telemetry/**"};
 
@@ -116,6 +122,7 @@ public class SecurityConfig {
                 .authorizeExchange(auth -> auth
                         .pathMatchers(bothForms("/user", USER_SERVICE_PUBLIC)).permitAll()
                         .pathMatchers(HttpMethod.GET, bothForms("/user", USER_SERVICE_PUBLIC_READS)).permitAll()
+                        .pathMatchers(bothForms("/telemetry", TELEMETRY_SERVICE_STAFF)).authenticated()
                         .pathMatchers(bothForms("/telemetry", TELEMETRY_SERVICE_PUBLIC)).permitAll()
                         .pathMatchers(bothForms("/scheme", SCHEME_SERVICE_PUBLIC)).permitAll()
                         .pathMatchers(bothForms("/message", MESSAGE_SERVICE_PUBLIC)).permitAll()

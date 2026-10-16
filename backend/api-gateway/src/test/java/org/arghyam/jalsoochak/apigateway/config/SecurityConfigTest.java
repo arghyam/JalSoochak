@@ -96,8 +96,16 @@ class SecurityConfigTest {
 
     @Test
     void vendorReadingCorrectionsKeyedByApiKeyAreNotBlocked() {
-        assertPasses(HttpMethod.PATCH, "/api/v1/telemetry/schemes/7/yesterday-final-reading");
         assertPasses(HttpMethod.PUT, "/api/v1/telemetry/readings");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/api/v1/telemetry/staff/schemes/7/yesterday-final-reading",
+            "/telemetry/api/v1/telemetry/staff/schemes/7/yesterday-final-reading"
+    })
+    void officerReadingCorrectionsRequireAJwtDespiteTheTelemetryPrefixBeingPublic(String path) {
+        assertRequiresJwt(HttpMethod.PATCH, path);
     }
 
     @Test
