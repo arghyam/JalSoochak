@@ -63,11 +63,9 @@ public class TelemetryApiKeyAuthFilter extends OncePerRequestFilter {
     private static final String SCHEMES_PREFIX = TELEMETRY_BASE + "/schemes";
 
     /**
-     * Chatbot (WhatsApp) webhook routes that fall inside the protected prefixes. They are
-     * unauthenticated at the application layer today — {@code telemetry-service} runs without Spring
-     * Security and their only protection is network placement — and that is tracked as its own
-     * finding. They are listed explicitly so the exemption is visible in review rather than implied
-     * by a missing check.
+     * Chatbot (WhatsApp) webhook routes that fall inside the protected prefixes. {@link WebhookAuthFilter}
+     * authenticates them with the chatbot's shared token instead. They are listed explicitly so the
+     * exemption is visible in review rather than implied by a missing check.
      */
     private static final Set<String> UNAUTHENTICATED_WEBHOOK_PATHS = Set.of(
             READINGS_PREFIX + "/whatsapp",
@@ -112,8 +110,9 @@ public class TelemetryApiKeyAuthFilter extends OncePerRequestFilter {
 
     /**
      * Deny by default inside the protected prefixes. {@code /readings} and everything beneath it is
-     * server-to-server ingestion; under {@code /schemes} only the sub-paths are (bare
-     * {@code POST /schemes} is a chatbot selection webhook).
+     * server-to-server ingestion. Nothing beneath {@code /schemes} is mapped now that the SO/SDO
+     * correction has moved under {@link SecurityConfig#STAFF_BASE_PATH}, but the prefix stays closed so
+     * a route added there needs a key. Bare {@code POST /schemes} is a chatbot selection webhook.
      */
     static boolean requiresApiKey(String path) {
         if (path == null || path.isBlank()) {

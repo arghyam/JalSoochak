@@ -20,8 +20,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The lookups behind the SO/SDO correction (PATCH {@code yesterday-final-reading}) against a real
- * PostgreSQL instance: the officer screens show BFM readings only, so the correction targets BFM rows
- * only.
+ * PostgreSQL instance: the officer is found by their token's subject, and the officer screens show BFM
+ * readings only, so the correction targets BFM rows only.
  */
 @Testcontainers
 class TelemetryTenantRepositoryBfmCorrectionIntegrationTest {
@@ -30,6 +30,7 @@ class TelemetryTenantRepositoryBfmCorrectionIntegrationTest {
     private static final long SCHEME = 1L;
     private static final long OPERATOR = 9L;
     private static final LocalDate DAY = LocalDate.of(2026, 3, 1);
+    private static final String OFFICER_UUID = "5b0f8f7e-2a4c-4d8e-9a51-0c6f3c1d2e7a";
 
     @Container
     static final PostgreSQLContainer<?> postgres =
@@ -51,6 +52,7 @@ class TelemetryTenantRepositoryBfmCorrectionIntegrationTest {
     @BeforeEach
     void clean() {
         jdbcTemplate.execute("DELETE FROM " + SCHEMA + ".flow_reading_table");
+        jdbcTemplate.execute("DELETE FROM " + SCHEMA + ".user_table");
         String key = Base64.getEncoder().encodeToString(new byte[32]);
         repository = new TelemetryTenantRepository(jdbcTemplate, new PiiEncryptionService(key, key));
         repository.invalidateMetadataCaches();
@@ -65,6 +67,37 @@ class TelemetryTenantRepositoryBfmCorrectionIntegrationTest {
                 SCHEME, readingAt, readingAt.toLocalDate(),
                 new BigDecimal(reading), new BigDecimal(reading),
                 channel == null ? null : channel.getCode(), OPERATOR);
+    }
+
+    private long insertOfficer(String uuid, LocalDateTime deletedAt) {
+        return jdbcTemplate.queryForObject("INSERT INTO " + SCHEMA + ".user_table "
+                        + "(uuid, tenant_id, title, user_type, phone_number, status, deleted_at) "
+                        + "VALUES (?, 1, 'Officer', 2, '91XXXXXXXXXX', 1, ?) RETURNING id",
+                Long.class, uuid, deletedAt);
+    }
+
+    @Test
+    void findsTheOfficerWhoseUuidIsTheTokenSubject() {
+        long officer = insertOfficer(OFFICER_UUID, null);
+        insertOfficer("0d6c2b1a-7e3f-4a9b-8c5d-1f2e3a4b5c6d", null);
+
+        assertThat(repository.findUserIdByUuid(SCHEMA, OFFICER_UUID)).contains(officer);
+    }
+
+    @Test
+    void findsNoOfficerForASoftDeletedUser() {
+        insertOfficer(OFFICER_UUID, DAY.atStartOfDay());
+
+        assertThat(repository.findUserIdByUuid(SCHEMA, OFFICER_UUID)).isEmpty();
+    }
+
+    @Test
+    void findsNoOfficerForAnUnknownOrBlankSubject() {
+        insertOfficer(OFFICER_UUID, null);
+
+        assertThat(repository.findUserIdByUuid(SCHEMA, "0d6c2b1a-7e3f-4a9b-8c5d-1f2e3a4b5c6d")).isEmpty();
+        assertThat(repository.findUserIdByUuid(SCHEMA, " ")).isEmpty();
+        assertThat(repository.findUserIdByUuid(SCHEMA, null)).isEmpty();
     }
 
     @Test

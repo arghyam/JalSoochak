@@ -30,6 +30,19 @@ spring:
         max.block.ms: 1000
         request.timeout.ms: 1000
 
+  security:
+    filter:
+      # Spring Security's default (-100) would put it ahead of RequestCorrelationFilter (10) and
+      # DisallowedHttpMethodFilter (15). After them, its rejections carry the request id and a
+      # disallowed method still gets 405. Only the /staff routes have a chain (config/SecurityConfig).
+      order: 18
+    oauth2:
+      resourceserver:
+        jwt:
+          # Must name the realm that issues the frontend's tokens in each environment. The discovery
+          # document is fetched on the first staff request, not at startup.
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:https://jalsoochak.beehyv.com/keycloak/realms/jalsoochak-realm}
+
 storage:
   enabled: ${STORAGE_ENABLED:true}
   endpoint: ${STORAGE_ENDPOINT:} # required; URL of the S3-compatible store

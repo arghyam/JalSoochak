@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.telemetry.controller.ingest.MultiFormatReadingCont
 import org.arghyam.jalsoochak.telemetry.controller.ingest.ReadingIngestController;
 import org.arghyam.jalsoochak.telemetry.controller.ingest.TelemetryValidationExceptionHandler;
 import org.arghyam.jalsoochak.telemetry.controller.internal.ReadingBackfillController;
+import org.arghyam.jalsoochak.telemetry.controller.staff.StaffReadingCorrectionController;
 import org.arghyam.jalsoochak.telemetry.controller.webhook.ConversationWebhookController;
 import org.arghyam.jalsoochak.telemetry.controller.webhook.IssueReportWebhookController;
 import org.arghyam.jalsoochak.telemetry.controller.webhook.MeterChangeWebhookController;
@@ -77,8 +78,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       {@code submissionRejected} on a validation reject, so analytics undercounts reported
  *       schemes.</li>
  * </ul>
- * {@code MultiFormatReadingController} and {@code ReadingBackfillController} are deliberately covered
- * by neither.
+ * {@code MultiFormatReadingController}, {@code ReadingBackfillController} and
+ * {@code StaffReadingCorrectionController} are deliberately covered by neither.
  *
  * <p>The binding checks use Spring's own {@link ControllerAdviceBean} applicability test over every
  * controller in the service, so they cover a controller no HTTP case can reach (most webhook request
@@ -211,6 +212,13 @@ class ControllerAdviceBindingTest {
     void theBackfillControllerIsAnsweredByNeitherAdvice() {
         // It handles its own validation failures and malformed bodies, in its own envelope.
         assertThat(advicesFor(ReadingBackfillController.class)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("StaffReadingCorrectionController is answered by neither advice")
+    void theStaffControllerIsAnsweredByNeitherAdvice() {
+        // It handles its own validation failures and malformed bodies, in its own envelope.
+        assertThat(advicesFor(StaffReadingCorrectionController.class)).isEmpty();
     }
 
     // ---- Webhook envelope, end to end ----
