@@ -5,13 +5,15 @@ package org.arghyam.jalsoochak.telemetry.channel;
  * {@link ReadingChannel} its reading came from. Stored in {@code flow_reading_table.reported_via_id}.
  *
  * <p>The numeric {@link #getCode() code} is the row's id in {@code common_schema.channel_master_table},
- * where these channels have {@code channel_type} 2, seeded by V61.
+ * where these channels have {@code channel_type} 2, seeded by V61 and V66.
  */
 public enum ReportingChannel {
     /** The WhatsApp conversation, through the chatbot webhook routes. */
     WHATSAPP(6),
     /** A state IT system, through the routes authenticated by a tenant API key. */
-    API(7);
+    API(7),
+    /** The staff web console, through the routes authenticated by an SO's or SDO's own token. */
+    WEB(10);
 
     private final int code;
 
