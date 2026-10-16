@@ -9,7 +9,6 @@ import org.arghyam.jalsoochak.telemetry.repository.FlowReadingVersion;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryFlowReadingDetails;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
-import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.location.LocationAffinityService;
@@ -77,6 +76,8 @@ class MeterReadingConversationServiceLocationTest {
     private TelemetryEventPublisher telemetryEventPublisher;
     @Mock
     private LocationAffinityService locationAffinityService;
+    @Mock
+    private ConversationSchemeResolver conversationSchemeResolver;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -95,8 +96,7 @@ class MeterReadingConversationServiceLocationTest {
         when(localizationService.normalizeLanguageKey(anyString())).thenReturn("english");
         when(localizationService.localizeMessage(anyString(), anyString()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        when(telemetryTenantRepository.findFirstSchemeForUser(SCHEMA, OPERATOR))
-                .thenReturn(Optional.of(SCHEME));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(SCHEME);
         when(telemetryTenantRepository.findLatestFlowReadingForDate(anyString(), anyLong(), anyLong(), any()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.createFlowReading(
@@ -259,8 +259,7 @@ class MeterReadingConversationServiceLocationTest {
     void usesTheSelectedScheme() {
         long selectedScheme = 9L;
         long pendingRow = 5151L;
-        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(eq(SCHEMA), eq(OPERATOR), any()))
-                .thenReturn(Optional.of(new TelemetrySchemeSelectionRecord(pendingRow, selectedScheme, "scheme-selection-x")));
+        when(conversationSchemeResolver.require(any())).thenReturn(selectedScheme);
         TelemetryFlowReadingDetails pending = new TelemetryFlowReadingDetails(
                 pendingRow, "scheme-selection-x", OPERATOR, BigDecimal.ZERO, BigDecimal.ZERO, null);
         when(telemetryTenantRepository.findLatestFlowReadingForDate(eq(SCHEMA), eq(selectedScheme), eq(OPERATOR), any()))
@@ -290,18 +289,5 @@ class MeterReadingConversationServiceLocationTest {
                 eq(BigDecimal.ZERO), eq(BigDecimal.ZERO), startsWith("location-"), isNull(), eq(""), isNull(),
                 isNull(), isNull(), eq(ReportingChannel.WHATSAPP));
         verify(telemetryTenantRepository).updateReadingLocation(SCHEMA, READING, LAT, LNG, OPERATOR);
-    }
-
-    @Test
-    @DisplayName("falls back to the first mapped scheme when nothing was selected today")
-    void fallsBackToTheFirstScheme() {
-        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(eq(SCHEMA), eq(OPERATOR), any()))
-                .thenReturn(Optional.empty());
-        verdict(new LocationVerdict.Within(10.0d, 500.0d));
-
-        post();
-
-        verify(locationAffinityService).assess(eq(SCHEMA), eq(TENANT), eq(SCHEME), eq(LAT), eq(LNG),
-                eq(LocationAffinityService.Path.LOCATION_WEBHOOK));
     }
 }

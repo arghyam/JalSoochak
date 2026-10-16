@@ -16,7 +16,6 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
-import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -73,6 +72,9 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
+    @Mock
+    private ConversationSchemeResolver conversationSchemeResolver;
+
     @InjectMocks
     private MeterImageWorkflowService service;
 
@@ -94,9 +96,7 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, ReadingTime.today()))
-                .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(101L);
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
@@ -137,9 +137,7 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, ReadingTime.today()))
-                .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(101L);
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder().success(true).message("ok").qualityStatus("CONFIRMED").build());
         when(localizationService.localizeMessage("ok", "english")).thenReturn("ok");
@@ -170,9 +168,7 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, ReadingTime.today()))
-                .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(101L);
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(OcrRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)

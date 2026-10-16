@@ -65,6 +65,8 @@ class MeterReadingConversationServicePromptTest {
     private TelemetryEventPublisher telemetryEventPublisher;
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
+    @Mock
+    private ConversationSchemeResolver conversationSchemeResolver;
 
     @InjectMocks
     private MeterReadingConversationService service;
@@ -167,7 +169,7 @@ class MeterReadingConversationServicePromptTest {
         void stubConfig() {
             when(tenantConfigRepository.findMeterChangeReasons(TENANT, "english"))
                     .thenReturn(List.of("Meter replaced", "Meter not working"));
-            when(telemetryTenantRepository.findFirstSchemeForUser(SCHEMA, 11L)).thenReturn(Optional.of(7L));
+            when(conversationSchemeResolver.require(operator(TENANT))).thenReturn(7L);
             when(telemetryTenantRepository.upsertPendingMeterChangeRecord(
                     anyString(), anyLong(), anyLong(), any(LocalDateTime.class), anyString(), any()))
                     .thenReturn("meter-change-abc");
@@ -229,7 +231,8 @@ class MeterReadingConversationServicePromptTest {
 
         @Test
         void failsGracefullyWhenTheOperatorIsMappedToNoScheme() {
-            when(telemetryTenantRepository.findFirstSchemeForUser(SCHEMA, 11L)).thenReturn(Optional.empty());
+            when(conversationSchemeResolver.require(operator(TENANT)))
+                    .thenThrow(new IllegalStateException(ConversationSchemeResolver.NOT_MAPPED_MESSAGE));
 
             assertThat(service.takeMeterReadingMessage(request(CONTACT, "1")).isSuccess()).isFalse();
         }

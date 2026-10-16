@@ -20,8 +20,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
-import java.time.LocalDate;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -62,6 +60,8 @@ class MeterImageWorkflowServiceStorageOrderTest {
     private TenantConfigRepository tenantConfigRepository;
     @Mock
     private UserChannelPreferenceRepository userChannelPreferenceRepository;
+    @Mock
+    private ConversationSchemeResolver conversationSchemeResolver;
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
@@ -107,9 +107,8 @@ class MeterImageWorkflowServiceStorageOrderTest {
         when(operatorContextService.resolveOperatorWithSchema(CONTACT_ID)).thenReturn(mappedOperator());
         when(operatorContextService.resolveOperatorLanguage(any(), any())).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(anyString(), any(), any(LocalDate.class)))
-                .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findFirstSchemeForUser(anyString(), any())).thenReturn(Optional.empty());
+        when(conversationSchemeResolver.require(mappedOperator()))
+                .thenThrow(new IllegalStateException(ConversationSchemeResolver.NOT_MAPPED_MESSAGE));
 
         CreateReadingResponse response = service.processImage(submission());
 
@@ -124,9 +123,7 @@ class MeterImageWorkflowServiceStorageOrderTest {
         when(operatorContextService.resolveOperatorWithSchema(CONTACT_ID)).thenReturn(mappedOperator());
         when(operatorContextService.resolveOperatorLanguage(any(), any())).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(anyString(), any(), any(LocalDate.class)))
-                .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findFirstSchemeForUser(anyString(), any())).thenReturn(Optional.of(101L));
+        when(conversationSchemeResolver.require(mappedOperator())).thenReturn(101L);
         when(inboundMediaService.uploadImage(CONTACT_ID, IMAGE)).thenReturn("https://storage.example.org/bfm/x.jpg");
         when(bfmReadingService.createReading(any(), anyString(), any(), anyString(), anyBoolean(), any()))
                 .thenReturn(CreateReadingResponse.builder().success(true).message("ok").build());
