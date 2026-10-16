@@ -10,10 +10,12 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * {@code common_schema.state_sync_run_table} / {@code state_sync_issue_table} (V64).
@@ -186,6 +188,79 @@ public class StateSyncRunRepository {
                         rs.getString("upstream_code"), rs.getString("category"), rs.getString("detail"),
                         toLocal(rs.getTimestamp("created_at"))),
                 args.toArray());
+    }
+
+    /** One scheme to review with the upstream team: {@code NOT_IN_JJM} or {@code NO_LONGER_LISTED}. */
+    public record ReviewRow(String reason, Integer schemeId, String schemeName, String stateSchemeCode,
+                            String centreSchemeId, String stateSchemeId, String lastReadingDate) {
+    }
+
+    /** The review list of one full run; {@code runId} is null when no full run has succeeded yet. */
+    public record ReviewList(Long runId, LocalDateTime runStartedAt, List<ReviewRow> schemes) {
+    }
+
+    /**
+     * Our schemes the last successful full run could not find upstream: never matched
+     * ({@code LOCAL_SCHEME_NOT_IN_JJM}) or carrying a code the upstream no longer lists
+     * ({@code UPSTREAM_SCHEME_MISSING}). Read from that run's issues, so a DRY_RUN run gives the list too.
+     */
+    public ReviewList unmatchedSchemes(int tenantId) {
+        Optional<Long> runId = lastSucceededFullRun(tenantId);
+        if (runId.isEmpty()) {
+            return new ReviewList(null, null, List.of());
+        }
+        LocalDateTime startedAt = jdbcTemplate.queryForObject(
+                "SELECT started_at FROM common_schema.state_sync_run_table WHERE id = ?", LocalDateTime.class, runId.get());
+        List<ReviewRow> rows = new ArrayList<>();
+        for (IssueRow issue : runIssues(runId.get(), List.of("LOCAL_SCHEME_NOT_IN_JJM", "UPSTREAM_SCHEME_MISSING"))) {
+            Map<String, Object> d = parse(issue.detail());
+            rows.add(new ReviewRow(issue.category().equals("LOCAL_SCHEME_NOT_IN_JJM") ? "NOT_IN_JJM" : "NO_LONGER_LISTED",
+                    d.get("schemeId") instanceof Number n ? n.intValue() : null, text(d.get("schemeName")),
+                    issue.upstreamCode() != null ? issue.upstreamCode() : text(d.get("stateSchemeCode")),
+                    text(d.get("centreSchemeId")), text(d.get("stateSchemeId")), text(d.get("lastReadingDate"))));
+        }
+        return new ReviewList(runId.get(), startedAt, rows);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parse(String detail) {
+        try {
+            return detail == null ? Map.of() : objectMapper.readValue(detail, Map.class);
+        } catch (JsonProcessingException e) {
+            return Map.of();
+        }
+    }
+
+    private static String text(Object value) {
+        return value == null ? null : value.toString();
+    }
+
+    /** The last successful full run of the tenant, if any (a running one is never SUCCEEDED). */
+    public Optional<Long> lastSucceededFullRun(int tenantId) {
+        return Optional.ofNullable(jdbcTemplate.queryForObject("""
+                SELECT MAX(id) FROM common_schema.state_sync_run_table
+                WHERE tenant_id = ? AND run_kind = 'FULL' AND status = 'SUCCEEDED'
+                """, Long.class, tenantId));
+    }
+
+    /** Upstream codes a run recorded under one issue category. */
+    public Set<String> issueCodes(long runId, String category) {
+        return new HashSet<>(jdbcTemplate.queryForList("""
+                SELECT upstream_code FROM common_schema.state_sync_issue_table
+                WHERE run_id = ? AND category = ? AND upstream_code IS NOT NULL
+                """, String.class, runId, category));
+    }
+
+    /** Every issue of one run in these categories, oldest first. */
+    public List<IssueRow> runIssues(long runId, List<String> categories) {
+        return jdbcTemplate.query("""
+                        SELECT id, run_id, entity, upstream_code, category, detail::text AS detail, created_at
+                        FROM common_schema.state_sync_issue_table WHERE run_id = ? AND category = ANY (?) ORDER BY id
+                        """,
+                (rs, n) -> new IssueRow(rs.getLong("id"), rs.getLong("run_id"), rs.getString("entity"),
+                        rs.getString("upstream_code"), rs.getString("category"), rs.getString("detail"),
+                        toLocal(rs.getTimestamp("created_at"))),
+                runId, categories.toArray(new String[0]));
     }
 
     private String json(Map<String, ?> value) {

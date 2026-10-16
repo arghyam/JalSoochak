@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -44,6 +45,14 @@ public final class StateVocabulary {
             "sdo", "SUB_DIVISIONAL_OFFICER",
             "executive-engineer", "EXECUTIVE_ENGINEER");
 
+    /** The upstream's complete role set (confirmed by the JJM team); a role outside it is reported. */
+    private static final Set<String> KNOWN_ROLES = Set.of("executive-engineer", "section-officer", "sdo", "jal-mitra",
+            "jalmitra", "pump-operator", "khalasi", "jal-sahayak", "other");
+
+    /** Seniority of the managed user types: one person can hold several upstream roles, and keeps the highest. */
+    private static final Map<String, Integer> ROLE_RANK = Map.of(
+            "PUMP_OPERATOR", 1, "SECTION_OFFICER", 2, "SUB_DIVISIONAL_OFFICER", 3, "EXECUTIVE_ENGINEER", 4);
+
     /** The user types this sync owns. Mappings of any other user type are never touched. */
     public static final List<String> MANAGED_USER_TYPES =
             List.of("PUMP_OPERATOR", "SECTION_OFFICER", "SUB_DIVISIONAL_OFFICER", "EXECUTIVE_ENGINEER");
@@ -71,6 +80,16 @@ public final class StateVocabulary {
     public static Optional<String> userType(String role) {
         String key = slug(role);
         return key == null ? Optional.empty() : Optional.ofNullable(ROLES.get(key));
+    }
+
+    public static boolean isKnownRole(String role) {
+        String key = slug(role);
+        return key != null && KNOWN_ROLES.contains(key);
+    }
+
+    /** 0 for a user type outside {@link #MANAGED_USER_TYPES}. */
+    public static int roleRank(String userType) {
+        return userType == null ? 0 : ROLE_RANK.getOrDefault(userType, 0);
     }
 
     /**

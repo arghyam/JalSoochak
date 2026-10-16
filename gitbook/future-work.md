@@ -12,8 +12,8 @@ Planned enhancements and known gaps beyond the current production scope.
 ### Platform Capabilities
 
 * **Native mobile application** as an alternative to the WhatsApp flow.
-* **Additional reading channels** — the electricity-meter (ELM), pump-duration (PDU), and IoT channel codes are already defined and selectable per tenant, but only the bulk-flow-meter (BFM) channel has a water-quantity calculator; ELM/PDU calculators and a real-time IoT sensor integration are still to come.
-* **Live State-IT integration** — State IT systems can already push meter readings through the readings API; master data (users, schemes, mappings) still arrives as bulk CSV/spreadsheet uploads rather than system-to-system sync.
+* **IoT reading channel** — the IoT channel code is defined and selectable per tenant, but a real-time sensor integration and its water-quantity calculator are still to come (BFM, ELM, and PDU calculators have shipped).
+* **Live State-IT integration** — State IT systems push meter readings through the readings API, and a scheduled master-data sync (users, schemes, mappings) exists behind `STATE_SYNC_ENABLED`; it is off by default, and a few upstream questions are still open. Without it, master data arrives by bulk upload.
 
 ### Notifications & Localisation
 

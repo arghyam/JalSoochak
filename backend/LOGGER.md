@@ -9,7 +9,7 @@ This setup centralizes logs and metrics for all backend microservices using:
 
 ## Services covered
 
-- `service-discovery` (`8761`)
+- `service-discovery` (`8762`)
 - `tenant-service` (`8081`)
 - `user-service` (`8082`)
 - `anomaly-service` (`8083`)

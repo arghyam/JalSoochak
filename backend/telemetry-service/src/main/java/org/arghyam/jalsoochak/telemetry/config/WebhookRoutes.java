@@ -44,6 +44,7 @@ public final class WebhookRoutes {
             "/selected/item",
             "/meter-change",
             "/issue-report",
+            "/issue-report/reason-types",
             "/issue-report/submit",
             "/issue-report/telemetry",
             "/issue-report/telemetry/submit",

@@ -1,6 +1,6 @@
 # Entity-Relationship Diagrams
 
-These diagrams show the PostgreSQL schema as left by the Flyway migrations in `backend/database/` (common and tenant schemas, up to V61) and `backend/analytics-service/src/main/resources/db/migration/` (analytics warehouse, up to V55). Table and column descriptions are in [Database Design](database-design.md).
+These diagrams show the PostgreSQL schema as left by the Flyway migrations in `backend/database/` (common and tenant schemas, up to V65) and `backend/analytics-service/src/main/resources/db/migration/` (analytics warehouse, up to V60). Table and column descriptions are in [Database Design](database-design.md).
 
 **Reading the diagrams**
 
@@ -111,7 +111,7 @@ erDiagram
     language_master ||--o{ language_alias : "spelled as"
 ```
 
-Two common tables are not drawn. `channel_master_table` (submission and notification channels) is referenced only from the tenant schemas, by `scheme_master_table.channel_id`, `flow_reading_table.channel_id` and `flow_reading_table.reported_via_id`. `common_schema.language_master_table` (a language list with labels and locale codes, which the services do not read) has no relationships. Each tenant schema has its own `language_master_table`, which is the one the services use; see the tenant schema section below.
+Several common tables are not drawn. `channel_master_table` (submission and notification channels) is referenced only from the tenant schemas, by `scheme_master_table.channel_id`, `flow_reading_table.channel_id`, `flow_reading_table.reported_via_id` and `notification_table.channel`. `notification_table` is the tenant table below, for sends with no tenant, and `notification_status_sync_state` holds each delivery-status pull's cursor. `scheduled_job_run_table` (notification job runs) and `state_sync_run_table` / `state_sync_issue_table` (master-data sync runs and their issues) reference tenants by `tenant_id` only. `common_schema.language_master_table` (a language list with labels and locale codes, which the services do not read) has no relationships. Each tenant schema has its own `language_master_table`, which is the one the services use; see the tenant schema section below.
 
 ## Tenant schema (`tenant_<stateCode>`)
 
@@ -189,6 +189,7 @@ erDiagram
         double pump_head
         double pump_discharge_capacity
         double motor_power
+        float power_factor "(0, 1], kVAh to kWh"
         int status
     }
 
@@ -238,6 +239,7 @@ erDiagram
         numeric extracted_reading "OCR value"
         numeric confirmed_reading
         smallint confirmed_reading_source
+        varchar submitted_unit
         numeric quantity
         text image_url
         smallint ingestion_source "lenient-ingestion bitmask"
@@ -256,10 +258,21 @@ erDiagram
     }
     notification_table {
         int id PK
-        int user_id FK
-        text message
-        int channel
-        boolean seen_status
+        varchar uuid
+        int user_id FK "nullable"
+        bigint admin_user_id "common_schema.tenant_admin_user_master_table"
+        int channel "common_schema.channel_master_table"
+        varchar recipient_hash "HMAC of the address"
+        varchar message_type
+        varchar provider
+        varchar dedupe_key
+        varchar dispatch_status
+        varchar delivery_status
+        varchar provider_message_id
+        jsonb message_blob "send metadata only"
+        timestamp dispatched_at
+        timestamp delivered_at
+        int status_version
     }
     reports_table {
         uuid id PK
@@ -406,10 +419,13 @@ erDiagram
         int user_id
         numeric extracted_reading
         numeric confirmed_reading
+        varchar submitted_unit
         date reading_date
         timestamp reading_at
         int submission_status
         text correlation_id
+        bigint source_reading_id "tenant flow_reading_table.id"
+        jsonb calculation_parameters
     }
     fact_water_quantity_table {
         bigint id PK
@@ -549,3 +565,5 @@ erDiagram
     dim_lgd_location_table ||..o{ fact_submission_activity_hourly_table : ""
     dim_department_location_table ||..o{ fact_submission_activity_hourly_table : ""
 ```
+
+Not drawn: `fact_notification_delivery_table` (one row per message in the delivery ledger) and its daily rollups `agg_notification_delivery_daily_table` and `agg_notification_failure_daily_table`. They carry `tenant_id` with no foreign key; it is NULL for a notification with no tenant.

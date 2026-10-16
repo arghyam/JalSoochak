@@ -66,7 +66,7 @@ graph TD
 Each input channel ([5.5](technical-architecture.md#5.5-channels)) has its own deployment path and, where a live provider is not yet available, a **mock adapter**:
 
 * **BFM / WhatsApp** — Glific flow webhooks served by telemetry-service, behind the ingress
-* **Electricity consumption / pump runtime** — ingestion from state utilities through the telemetry reading API (`X-Api-Key`)
+* **Electricity consumption / pump runtime** — the same Glific flow (ELM photos read by the FlowVision ELM OCR service at `OCR_ELM_URL`, required at startup while it is the default provider; PDU typed in), or ingestion from state utilities through the telemetry reading API (`X-Api-Key`)
 * **State IT systems** — push readings through the same telemetry reading API
 * **IoT devices** — gateway/ingest adapters
 
@@ -79,6 +79,7 @@ Each service has its own GitHub Actions workflow (`.github/workflows/Image-*.yam
 * **SonarQube** scan with JaCoCo coverage on every pull request and push
 * On `dev` and `main`, a Docker image built from the shared `build/maven/Dockerfile` (Java 21) and pushed to the container registry, tagged with the commit SHA
 * **Trivy** vulnerability scan of the pushed image
+* tenant-service's workflow, which also runs on changes under `backend/database/`, additionally pushes a `tenant-service-db` image (`backend/database/Dockerfile` + `migrate.sh`): Flyway with the `backend/database` migrations, for running them as a separate step
 * Deployment through the separate DevOps repository's deploy workflow — `dev` branch → **dev**, `main` branch → **staging**
 
 A repository-wide **vendor-neutrality guard** (`.github/workflows/vendor-neutrality-guard.yaml`) fails any change that introduces a vendor or state name outside the places its rules allow.

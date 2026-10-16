@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -48,6 +49,35 @@ class SchemeReconcilerIntegrationTest extends StateSyncIntegrationTestBase {
         SyncReport report = new SyncReport();
         reconciler().reconcile(List.of(schemes), report);
         return report;
+    }
+
+    private SyncReport syncAllowingDowngrade(boolean allow, UpstreamScheme... schemes) {
+        SyncReport report = new SyncReport();
+        UserDirectory users = new UserDirectory(repository, pii, SCHEMA, TENANT_ID, actor);
+        users.allowRoleDowngrades(allow);
+        UserSchemeMappings mappings = new UserSchemeMappings(repository, SCHEMA, actor);
+        new SchemeReconciler(repository, properties, SCHEMA, actor, users, mappings).reconcile(List.of(schemes), report);
+        return report;
+    }
+
+    private SyncReport syncWithBlocked(Set<String> blocked, UpstreamScheme... schemes) {
+        SyncReport report = new SyncReport();
+        UserDirectory users = new UserDirectory(repository, pii, SCHEMA, TENANT_ID, actor);
+        UserSchemeMappings mappings = new UserSchemeMappings(repository, SCHEMA, actor);
+        // As the runner does, before the schemes.
+        users.useBlockedList(blocked);
+        blocked.forEach(code -> users.block(code, report).ifPresent(u -> mappings.retireAllForUser(u.id(), report)));
+        new SchemeReconciler(repository, properties, SCHEMA, actor, users, mappings).reconcile(List.of(schemes), report);
+        return report;
+    }
+
+    private String roleOf(String code) {
+        return jdbc.queryForObject("SELECT ut.c_name FROM tenant_as.user_table u JOIN common_schema.user_type_master_table ut "
+                + "ON ut.id = u.user_type WHERE u.state_user_id = ?", String.class, code);
+    }
+
+    private int userStatus(String code) {
+        return jdbc.queryForObject("SELECT status FROM tenant_as.user_table WHERE state_user_id = ?", Integer.class, code);
     }
 
     private SchemeReconciler reconciler() {
@@ -253,6 +283,83 @@ class SchemeReconcilerIntegrationTest extends StateSyncIntegrationTestBase {
     }
 
     @Test
+    void anInactiveOfficerTheSchemeListsIsReactivatedAndRelinked() {
+        sync(chapatoli(List.of("VIL-008633"), List.of(so, po)));
+        int id = schemeId("SCH-000008");
+        // Deactivated here earlier (by an admin, or a block JJM has since lifted), link retired with it.
+        jdbc.update("UPDATE tenant_as.user_table SET status = 0 WHERE state_user_id = 'USR-021920'");
+        jdbc.update("UPDATE tenant_as.user_scheme_mapping_table m SET status = 0, deleted_at = NOW() FROM tenant_as.user_table u "
+                + "WHERE u.id = m.user_id AND u.state_user_id = 'USR-021920'");
+
+        SyncReport report = sync(chapatoli(List.of("VIL-008633"), List.of(so, po)));
+
+        assertThat(userStatus("USR-021920")).isEqualTo(1);
+        assertThat(liveOfficers(id)).isEqualTo(2);
+        assertThat(report.get("users.reactivated")).isEqualTo(1);
+        assertThat(report.get("user_scheme_mappings.revived")).isEqualTo(1);
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.user_scheme_mapping_table WHERE scheme_id = ?", id)).isEqualTo(2);
+    }
+
+    @Test
+    void anOfficerListedOnTwoSchemesIsReactivatedOnce() {
+        sync(chapatoli(List.of("VIL-008633"), List.of(so, po)));
+        jdbc.update("UPDATE tenant_as.user_table SET status = 0 WHERE state_user_id = 'USR-021920'");
+        UpstreamScheme other = upstream("SCH-000009", "8165608", "34124", "OTHER PWSS", List.of("SDV-035"),
+                List.of("VIL-008635"), List.of(po));
+
+        SyncReport report = sync(chapatoli(List.of("VIL-008633"), List.of(so, po)), other);
+
+        assertThat(report.get("users.reactivated")).isEqualTo(1);
+        assertThat(liveOfficers(schemeId("SCH-000009"))).isEqualTo(1);
+    }
+
+    @Test
+    void aBlockedOfficerStaysInactiveAndIsNotLinked() {
+        sync(chapatoli(List.of("VIL-008633"), List.of(so, po)));
+        int id = schemeId("SCH-000008");
+        jdbc.update("UPDATE tenant_as.user_table SET status = 0 WHERE state_user_id = 'USR-021920'");
+        jdbc.update("UPDATE tenant_as.user_scheme_mapping_table m SET status = 0, deleted_at = NOW() FROM tenant_as.user_table u "
+                + "WHERE u.id = m.user_id AND u.state_user_id = 'USR-021920'");
+
+        SyncReport report = syncWithBlocked(Set.of("USR-021920"), chapatoli(List.of("VIL-008633"), List.of(so, po)));
+
+        assertThat(userStatus("USR-021920")).isZero();
+        assertThat(liveOfficers(id)).isEqualTo(1);
+        assertThat(report.get("user_scheme_mappings.skipped_blocked_user")).isEqualTo(1);
+        assertThat(report.counts()).doesNotContainKey("users.reactivated");
+    }
+
+    @Test
+    void anActiveOfficerJjmHasBlockedIsDeactivatedAndUnlinked() {
+        sync(chapatoli(List.of("VIL-008633"), List.of(so, po)));
+        int id = schemeId("SCH-000008");
+
+        SyncReport report = syncWithBlocked(Set.of("USR-021920"), chapatoli(List.of("VIL-008633"), List.of(so, po)));
+
+        assertThat(userStatus("USR-021920")).isZero();
+        assertThat(liveOfficers(id)).isEqualTo(1);
+        assertThat(report.get("users.blocked")).isEqualTo(1);
+        assertThat(report.get("user_scheme_mappings.retired")).isEqualTo(1);
+    }
+
+    @Test
+    void anInactiveAdminAccountIsNeverReactivated() {
+        int adminType = jdbc.queryForObject("SELECT id FROM common_schema.user_type_master_table WHERE c_name = 'STATE_ADMIN'",
+                Integer.class);
+        jdbc.update("INSERT INTO tenant_as.user_table (tenant_id, title, email, user_type, phone_number, phone_number_hash, "
+                        + "state_user_id, password, status, created_by, updated_by) VALUES (?, ?, 'admin@example.org', ?, ?, ?, "
+                        + "'USR-016363', 'x', 0, ?, ?)",
+                TENANT_ID, pii.encrypt("Thagen Saikia"), adminType, pii.encrypt("91" + SO_PHONE), pii.hmac("91" + SO_PHONE),
+                actor, actor);
+
+        SyncReport report = sync(chapatoli(List.of("VIL-008633"), List.of(so)));
+
+        assertThat(userStatus("USR-016363")).isZero();
+        assertThat(liveOfficers(schemeId("SCH-000008"))).isZero();
+        assertThat(report.issues()).extracting(SyncIssue::category).contains("REACTIVATION_ON_ADMIN_WITHHELD");
+    }
+
+    @Test
     void aBlockedUserIsDeactivatedAndUnmapped() {
         sync(chapatoli(List.of(), List.of(so, po)));
         UserDirectory users = new UserDirectory(repository, pii, SCHEMA, TENANT_ID, actor);
@@ -306,6 +413,161 @@ class SchemeReconcilerIntegrationTest extends StateSyncIntegrationTestBase {
             assertThat(i.category()).isEqualTo("PLACEHOLDER_SUPERSEDED");
             assertThat(i.detail()).containsEntry("placeholderSchemeId", placeholder).containsEntry("moved", true);
         });
+    }
+
+    @Test
+    void aPlaceholderStaysPutWhenTwoUpstreamSchemesShareItsImisId() {
+        int placeholder = placeholder("", "8165607");
+        reading(placeholder, LocalDateTime.of(2026, 7, 10, 8, 0));
+        UpstreamScheme twin = upstream("SCH-000009", "8165607", "99999", "CHAPATOLI TWIN", List.of("SDV-035"),
+                List.of(), List.of());
+
+        SchemeReconciler reconciler = reconciler();
+        SyncReport report = new SyncReport();
+        reconciler.reconcile(List.of(chapatoli(List.of(), List.of()), twin), report);
+
+        assertThat(rowsOf("flow_reading_table", placeholder)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, placeholder)).isTrue();
+        assertThat(reconciler.reassignments()).isEmpty();
+        assertThat(report.issues()).filteredOn(i -> i.category().equals("PLACEHOLDER_IMIS_NOT_UNIQUE")).singleElement()
+                .satisfies(i -> assertThat(i.detail()).containsEntry("placeholderSchemeIds", List.of(placeholder)));
+    }
+
+    @Test
+    void aPlaceholderStaysPutWhenTwoOfOurSchemesCarryItsImisId() {
+        scheme("34123", "8165607", "Chapatoli", null);
+        scheme("77777", "8165607", "Chapatoli duplicate", null);
+        int placeholder = placeholder("", "8165607");
+        reading(placeholder, LocalDateTime.of(2026, 7, 10, 8, 0));
+
+        SyncReport report = sync(chapatoli(List.of(), List.of()));
+
+        assertThat(rowsOf("flow_reading_table", placeholder)).isEqualTo(1);
+        assertThat(report.issues()).extracting(SyncIssue::category).contains("PLACEHOLDER_IMIS_NOT_UNIQUE")
+                .doesNotContain("PLACEHOLDER_SUPERSEDED");
+    }
+
+    @Test
+    void aPersonListedWithTwoRolesKeepsTheHigherInEitherOrder() {
+        UpstreamPerson asSo = person("USR-047218", "Nibir Paban Borah", "9100000005", "section-officer");
+        UpstreamPerson asSdo = person("USR-047218", "Nibir Paban Borah", "9100000005", "sdo");
+        UpstreamScheme first = upstream("SCH-000010", "8100010", "40010", "FIRST", List.of(), List.of(), List.of(asSdo));
+        UpstreamScheme second = upstream("SCH-000011", "8100011", "40011", "SECOND", List.of(), List.of(), List.of(asSo));
+
+        SyncReport report = sync(first, second);
+
+        assertThat(roleOf("USR-047218")).isEqualTo("SUB_DIVISIONAL_OFFICER");
+        assertThat(report.get("users.role_kept_higher")).isEqualTo(1);
+        assertThat(report.issues()).extracting(SyncIssue::category).doesNotContain("ROLE_CONFLICT_IN_UPSTREAM");
+
+        sync(second, first);
+        assertThat(roleOf("USR-047218")).isEqualTo("SUB_DIVISIONAL_OFFICER");
+        assertThat(liveOfficers(schemeId("SCH-000010"))).isEqualTo(1);
+        assertThat(liveOfficers(schemeId("SCH-000011"))).isEqualTo(1);
+    }
+
+    @Test
+    void anHourlyOrRefreshRunNeverLowersARoleButTheNightlyRunDoes() {
+        UpstreamPerson asSdo = person("USR-047387", "Nibir Paban Borah", "9100000006", "sdo");
+        UpstreamPerson asSo = person("USR-047387", "Nibir Paban Borah", "9100000006", "section-officer");
+        sync(upstream("SCH-000012", "8100012", "40012", "ONE", List.of(), List.of(), List.of(asSdo)));
+
+        SyncReport partial = syncAllowingDowngrade(false,
+                upstream("SCH-000012", "8100012", "40012", "ONE", List.of(), List.of(), List.of(asSo)));
+        assertThat(roleOf("USR-047387")).isEqualTo("SUB_DIVISIONAL_OFFICER");
+        assertThat(partial.get("users.role_downgrade_deferred")).isEqualTo(1);
+
+        syncAllowingDowngrade(true, upstream("SCH-000012", "8100012", "40012", "ONE", List.of(), List.of(), List.of(asSo)));
+        assertThat(roleOf("USR-047387")).isEqualTo("SECTION_OFFICER");
+    }
+
+    @Test
+    void aRoleOutsideTheUpstreamsValueSetIsReportedOnce() {
+        UpstreamPerson odd = person("USR-090001", "Someone", "9100000007", "plumber");
+        UpstreamPerson odd2 = person("USR-090002", "Someone Else", "9100000008", "plumber");
+        UpstreamPerson khalasi = person("USR-090003", "A Khalasi", "9100000009", "khalasi");
+
+        SyncReport report = sync(chapatoli(List.of(), List.of(so, odd, odd2, khalasi)));
+
+        assertThat(report.issues()).filteredOn(i -> i.category().equals("UNKNOWN_ROLE")).singleElement()
+                .satisfies(i -> assertThat(i.detail()).containsEntry("role", "plumber"));
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.user_table WHERE state_user_id IN ('USR-090001', 'USR-090003')")).isZero();
+    }
+
+    @Test
+    void reportsOurSchemesJjmNeverMatchedForReview() {
+        int local = scheme("60001", "9000002", "Local only PWSS", null);
+        reading(local, LocalDateTime.of(2026, 9, 3, 8, 0));
+        int placeholder = placeholder("", "9000003");
+
+        SchemeReconciler reconciler = reconciler();
+        SyncReport report = new SyncReport();
+        reconciler.reconcile(List.of(chapatoli(List.of(), List.of())), report);
+        reconciler.reportNotInUpstream(report);
+
+        assertThat(report.issues()).filteredOn(i -> i.category().equals("LOCAL_SCHEME_NOT_IN_JJM")).singleElement()
+                .satisfies(i -> assertThat(i.detail()).containsEntry("schemeId", local)
+                        .containsEntry("schemeName", "Local only PWSS").containsEntry("centreSchemeId", "9000002")
+                        .containsEntry("stateSchemeId", "60001").containsEntry("lastReadingDate", "2026-09-03"));
+        assertThat(report.get("schemes.local_not_in_jjm")).isEqualTo(1);
+        assertThat(report.issues()).noneMatch(i -> placeholder == (Integer) i.detail().getOrDefault("schemeId", -1));
+    }
+
+    @Test
+    void aRetiredSchemeLosesItsOfficersAndComesBackWhenJjmListsItAgain() {
+        sync(chapatoli(List.of("VIL-008633"), List.of(so, po)));
+        int id = schemeId("SCH-000008");
+
+        SchemeReconciler reconciler = reconciler();
+        SyncReport retire = new SyncReport();
+        assertThat(reconciler.retireMissing(Set.of("SCH-000008"), retire)).containsExactly(id);
+
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NOT NULL AND deleted_by = ? FROM tenant_as.scheme_master_table "
+                + "WHERE id = ?", Boolean.class, actor, id)).isTrue();
+        assertThat(liveOfficers(id)).isZero();
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.scheme_lgd_mapping_table WHERE scheme_id = ? AND deleted_at IS NULL",
+                id)).isEqualTo(1);
+        assertThat(retire.issues()).extracting(SyncIssue::category).contains("SCHEME_RETIRED");
+
+        SyncReport back = sync(chapatoli(List.of("VIL-008633"), List.of(so, po)));
+
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, id)).isTrue();
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.scheme_master_table WHERE state_scheme_code = 'SCH-000008'"))
+                .isEqualTo(1);
+        assertThat(liveOfficers(id)).isEqualTo(2);
+        assertThat(back.get("schemes.revived")).isEqualTo(1);
+    }
+
+    @Test
+    void aSchemeAnAdminDeletedIsBroughtBackAndReportedWhenJjmStillListsIt() {
+        int deleted = scheme("34123", "8165607", "CHAPATOLI PWSS", "SCH-000008");
+        jdbc.update("UPDATE tenant_as.scheme_master_table SET deleted_at = NOW(), deleted_by = NULL WHERE id = ?", deleted);
+
+        SyncReport report = sync(chapatoli(List.of(), List.of()));
+
+        assertThat(jdbc.queryForObject("SELECT deleted_at IS NULL FROM tenant_as.scheme_master_table WHERE id = ?",
+                Boolean.class, deleted)).isTrue();
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.scheme_master_table WHERE state_scheme_code = 'SCH-000008'"))
+                .isEqualTo(1);
+        assertThat(report.get("schemes.revived")).isEqualTo(1);
+        assertThat(report.issues()).filteredOn(i -> i.category().equals("SCHEME_REVIVED")).singleElement()
+                .satisfies(i -> assertThat(i.detail()).containsEntry("schemeId", deleted).containsEntry("matchedBy", "code")
+                        .containsEntry("retiredBySync", false).containsKey("deletedAt"));
+    }
+
+    @Test
+    void aSchemeDeletedBeforeItHadAJjmCodeIsBroughtBackByItsIdPair() {
+        int deleted = scheme("34123", "8165607", "Chapatoli", null);
+        jdbc.update("UPDATE tenant_as.scheme_master_table SET deleted_at = NOW(), deleted_by = ? WHERE id = ?", actor, deleted);
+
+        SyncReport report = sync(chapatoli(List.of(), List.of()));
+
+        assertThat(schemeId("SCH-000008")).isEqualTo(deleted);
+        assertThat(count("SELECT COUNT(*) FROM tenant_as.scheme_master_table")).isEqualTo(1);
+        assertThat(report.issues()).filteredOn(i -> i.category().equals("SCHEME_REVIVED")).singleElement()
+                .satisfies(i -> assertThat(i.detail()).containsEntry("matchedBy", "id_pair").containsEntry("deletedBy", actor));
     }
 
     @Test

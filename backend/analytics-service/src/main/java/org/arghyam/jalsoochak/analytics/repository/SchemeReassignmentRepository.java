@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Moves a tenant's facts from one scheme to another — the placeholder lenient ingestion made, to the
@@ -59,6 +60,22 @@ public class SchemeReassignmentRepository {
                         + "WHERE tenant_id = ? AND scheme_id = ?", to, tenantId, from)
                 + jdbcTemplate.update("UPDATE analytics_schema.fact_escalation_table SET scheme_id = ?, updated_at = NOW() "
                         + "WHERE tenant_id = ? AND scheme_id = ?", to, tenantId, from);
+    }
+
+    /** First and last day the scheme has meter-reading facts for. */
+    public record DateRange(LocalDate from, LocalDate to) {
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<DateRange> readingDateRange(int tenantId, int schemeId) {
+        return jdbcTemplate.query("SELECT MIN(reading_date) AS first, MAX(reading_date) AS last "
+                        + "FROM analytics_schema.fact_meter_reading_table WHERE tenant_id = ? AND scheme_id = ?",
+                rs -> {
+                    if (!rs.next() || rs.getDate("first") == null) {
+                        return Optional.<DateRange>empty();
+                    }
+                    return Optional.of(new DateRange(rs.getDate("first").toLocalDate(), rs.getDate("last").toLocalDate()));
+                }, tenantId, schemeId);
     }
 
     /**

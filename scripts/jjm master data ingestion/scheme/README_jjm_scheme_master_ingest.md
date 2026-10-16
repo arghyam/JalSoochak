@@ -189,7 +189,7 @@ ids we already hold:
 | `state_scheme_id` | SMT id, state system |
 | `state_scheme_code` | the state system's **public code** |
 
-Stored by `backend/database/V38__add_state_scheme_code_to_scheme_master_table.sql`,
+Stored by `backend/database/V42__add_state_scheme_code_to_scheme_master_table.sql`,
 which also puts a partial `UNIQUE` index on it (live rows only). The script
 therefore refuses to write a code another live scheme owns, or one the source
 itself repeats: that row keeps everything else and only loses that column, with

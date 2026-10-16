@@ -2,7 +2,7 @@
 
 ## 10. Database Design
 
-Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared `common_schema` holds cross-tenant metadata, and each state has its own `tenant_<stateCode>` schema, provisioned by the `common_schema.create_tenant_schema()` PL/pgSQL function when the tenant is created. The common-schema tables and this function are defined by the Flyway migrations in `backend/database/`, which tenant-service packages and runs on startup. The **analytics star-schema warehouse** lives in `analytics_schema`, on analytics-service's own datasource. The tables below are grouped by functional domain (column format: `name (type, notes)`). For how the tables relate to each other, see the [Entity-Relationship Diagrams](database-er-diagram.md).
+Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared `common_schema` holds cross-tenant metadata, and each state has its own `tenant_<stateCode>` schema, provisioned by the `common_schema.create_tenant_schema()` PL/pgSQL function when the tenant is created. The common-schema tables and this function are defined by the Flyway migrations in `backend/database/`, which tenant-service packages and runs on startup (CI also builds them into a standalone `tenant-service-db` Flyway image, `backend/database/Dockerfile`). The **analytics star-schema warehouse** lives in `analytics_schema`, on analytics-service's own datasource. The tables below are grouped by functional domain (column format: `name (type, notes)`). For how the tables relate to each other, see the [Entity-Relationship Diagrams](database-er-diagram.md).
 
 ### 10.1 Tenancy & Users
 
@@ -57,7 +57,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 
 * **`scheme_lgd_mapping_table` / `scheme_department_mapping_table`** — scheme ↔ location links
 * **`user_scheme_mapping_table`** — operator ↔ scheme assignments
-* **`asset_pump_registry_table`** — pumps installed on a scheme (pump model, efficiency, head, discharge capacity, motor ratings)
+* **`asset_pump_registry_table`** — pumps installed on a scheme (pump model, efficiency, head, discharge capacity, motor ratings, and `power_factor` in (0, 1], which turns kVAh readings into kWh)
 
 ### 10.4 Readings & Submissions
 
@@ -67,6 +67,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 * `observation_time (timestamp)`, `reading_date (date, daily de-duplication)`
 * `extracted_reading (numeric, OCR-extracted value)`, `confirmed_reading (numeric, operator value)`, `confirmed_reading_source (smallint, as extracted / rollover-resolved)`
 * `ai_confidence_percentage (numeric)`, `quantity (numeric, delta vs previous reading)`
+* `submitted_unit (varchar, the UCUM unit the value was sent in; confirmed_reading is stored in the channel's unit: m3 for BFM, kWh or kVAh for ELM, min for PDU; NULL before V56)`
 * `channel_id (int, FK to common_schema.channel_master_table: 1 BFM, 2 ELM, 3 PDU, 4 IOT, 5 MAN; NULL on rows with no reading and on BFM readings from before the channel was recorded)`
 * `reported_via_id (int, FK to common_schema.channel_master_table: 6 WHATSAPP, 7 API; how the row was reported, replaced by each later write of the reading; NULL on rows written before V61)`
 * `image_url (text)`, `latitude / longitude (double, submission location)`, `correlation_id / ocr_correlation_id (varchar)`
@@ -80,15 +81,17 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 * **`channel_master_table`** (common schema) — submission/notification channel definitions. The reading channels (`channel_type` 1) are ids 1–5 (BFM, ELM, PDU, IOT, MAN), the codes `scheme_master_table.channel_id` and `flow_reading_table.channel_id` hold. The reporting channels (`channel_type` 2) are ids 6 WHATSAPP and 7 API, the codes `flow_reading_table.reported_via_id` holds; 8 EMAIL and 9 SMS (V63) are the notification channels the delivery ledger records.
 * **`language_master`** / **`language_alias`** (common schema) — canonical languages with locale codes, and the spellings that resolve to them; each tenant schema also carries its own `language_master_table`.
 * **`notification_table`** (tenant schema, and a `common_schema` twin for sends with no tenant) — the outbound delivery ledger since V63: one row per message per recipient, with what message-service sent, through which channel and provider, the provider's answer and the delivery status it later reports. Holds no phone number, email address or message text. See `docs/notification-delivery-ledger.md`.
+* **`scheduled_job_run_table`** (common schema) — one row per nudge, escalation, daily-report and weekly-report run per tenant and period; its unique key makes each run happen once however many tenant-service pods are up.
 
 ### 10.6 Anomalies & Status
 
-* **`anomaly_table`** — detected anomalies (unreadable image, manual override, consecutive overrides, duplicate image, reading below previous, no / low / over water supply, no submission, implausible water supply, location mismatch) with type, status, reason, and the related scheme/operator and `flow_reading_id`, feeding dashboards.
+* **`anomaly_table`** — detected anomalies (unreadable image, manual override, consecutive overrides, duplicate image, reading below previous, no / low / over water supply, no submission, implausible water supply, location mismatch, no meter detected in the photo) with type, status, reason, and the related scheme/operator and `flow_reading_id`, feeding dashboards.
 
 ### 10.7 Sync Tracking
 
 * Onboarding and ongoing **integration sync** from State IT systems relies on de-duplication keys (`state_scheme_id`, `state_scheme_code`, `state_user_id`, `state_dept_id`) so bulk re-uploads update rather than duplicate.
 * Submissions that do not match master data are tracked on the rows themselves: `flow_reading_table.ingestion_source` and the submitted ids, and `scheme_master_table.submitted_*_mismatch` / `id_mismatch_last_seen_at` for scheme ids that disagree with the stored ones.
+* **`state_sync_run_table`** / **`state_sync_issue_table`** (common schema) — one row per state master-data sync run, which also serves as the cross-pod lock, and everything a run declined to write, for a person to resolve. See `docs/jjm-brain-sync-plan.md`.
 * **`data_versions_table`** / **`reports_table`** (tenant schema) — a version counter per resource type, and generated report files cached against it in object storage.
 
 ### 10.8 Analytics Warehouse (`analytics_schema`)
@@ -96,8 +99,8 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 A star schema fed asynchronously via Kafka, with its own Flyway migrations in analytics-service (`src/main/resources/db/migration`). Every table name carries a `_table` suffix (e.g. `dim_date_table`):
 
 * **Dimensions:** `dim_date_table`, `dim_tenant_table` (with `dim_tenant_water_norm_table` and `dim_tenant_work_status_filter_table` keeping their history by effective date), `dim_user_table`, `dim_scheme_table` (carrying the scheme's `work_status` and `operating_status` as ingested from the tenant schema), `dim_lgd_location_table`, `dim_department_location_table`, `dim_user_scheme_mapping_table`
-* **Facts:** `fact_meter_reading_table`, `fact_water_quantity_table` (daily quantity per scheme, the basis for LPCD and norm achievement), `fact_escalation_table`, `fact_scheme_performance_table` (performance score, last supply date), `fact_operator_attendance_table`, `fact_anomaly_table` (anomalies received from telemetry-service)
-* **Pre-aggregations:** `fact_scheme_daily_table`, `fact_region_metrics_table`, `fact_submission_activity_hourly_table`, rebuilt from the facts above
+* **Facts:** `fact_meter_reading_table` (keyed to its source reading by `source_reading_id`, with the `submitted_unit` and the `calculation_parameters` its quantity was worked out with), `fact_water_quantity_table` (daily quantity per scheme, the basis for LPCD and norm achievement), `fact_escalation_table`, `fact_scheme_performance_table` (performance score, last supply date), `fact_operator_attendance_table`, `fact_anomaly_table` (anomalies received from telemetry-service), `fact_notification_delivery_table` (one row per message in message-service's delivery ledger)
+* **Pre-aggregations:** `fact_scheme_daily_table`, `fact_region_metrics_table`, `fact_submission_activity_hourly_table`, `agg_notification_delivery_daily_table`, `agg_notification_failure_daily_table`, rebuilt from the facts above
 * **Other:** `submission_attempt_table` (submissions rejected before any reading was stored)
 
 {% hint style="danger" %}

@@ -236,7 +236,7 @@ class JjmBrainClientTest {
                 .withQueryParam("centre_scheme_id", equalTo("8165607")).willReturn(okJson(SCHEME_SAMPLE)));
 
         assertThat(client.schemeByCode("SCH-000008")).map(UpstreamScheme::code).contains("SCH-000008");
-        assertThat(client.schemeByCentreSchemeId("8165607")).map(UpstreamScheme::code).contains("SCH-000008");
+        assertThat(client.schemesByCentreSchemeId("8165607")).extracting(UpstreamScheme::code).containsExactly("SCH-000008");
     }
 
     @Test

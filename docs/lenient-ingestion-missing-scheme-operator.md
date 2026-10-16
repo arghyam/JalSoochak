@@ -209,6 +209,14 @@ submitted). Raw phone numbers only ever appear at DEBUG, per the project privacy
 
 ## 7. Reconciliation (once the real scheme/operator is added)
 
+**Unknown schemes are reconciled automatically** where the state master-data sync runs in `APPLY` mode
+with `STATE_SYNC_MOVE_PLACEHOLDER_READINGS` on (the default). When the sync writes or matches a real
+scheme carrying the placeholder's IMIS id, it re-points the placeholder's readings and anomalies,
+soft-deletes the placeholder, and publishes `SCHEME_READINGS_REASSIGNED` so analytics moves its facts
+too. The readings keep their `ingestion_source` bits. See
+[jjm-brain-sync-plan.md §2a](jjm-brain-sync-plan.md#2a-analytics). The manual steps below remain for
+unknown operators and for tenants without the sync.
+
 1. Create the real scheme/operator through the normal admin flow (this also propagates to analytics
    via the usual `SCHEME_CREATED` / `USER_CREATED` events).
 2. Re-point the recorded rows and clear the tag, e.g. for an unknown scheme:

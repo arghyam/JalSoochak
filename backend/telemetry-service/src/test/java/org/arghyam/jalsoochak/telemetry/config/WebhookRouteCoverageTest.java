@@ -105,12 +105,12 @@ class WebhookRouteCoverageTest {
     }
 
     @Test
-    @DisplayName("the audit reported 12 endpoints; the webhook surface now has 27 (26 audited + reject-latest-reading)")
+    @DisplayName("the audit reported 12 endpoints; the webhook surface now has 28 (26 audited + reject-latest-reading + issue-report/reason-types)")
     void protectsEveryEndpointNotJustTheReportedOnes() {
         // The security audit listed 12 paths. Pinning the real count keeps that discrepancy visible:
         // if this number changes, the chatbot flow webhook nodes need updating too.
-        assertThat(WebhookRoutes.relativePaths()).hasSize(27);
-        assertThat(WebhookRoutes.absolutePaths()).hasSize(27);
+        assertThat(WebhookRoutes.relativePaths()).hasSize(28);
+        assertThat(WebhookRoutes.absolutePaths()).hasSize(28);
     }
 
     /**

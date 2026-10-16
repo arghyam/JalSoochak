@@ -27,11 +27,13 @@ clamped page rather than `400`.
 
 ## Required Environment Variables
 
-Set the following environment variables before running the Telemetry services:
+Set the following environment variables before running message-service (the full list, with
+defaults, is in its `application.yml`):
 
 - `WHATSAPP_API_URL`
 - `WHATSAPP_USERNAME`
 - `WHATSAPP_PASSWORD`
+- `WHATSAPP_NUDGE_FLOW_ID`
 - `WHATSAPP_NUDGE_TEMPLATE_ID`
 - `WHATSAPP_ESCALATION_TEMPLATE_ID`
 - `STORAGE_ENDPOINT`
@@ -81,6 +83,9 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/tenant/user/staff` | List tenant staff |
 | PUT | `/api/v1/tenant/user/staff/{id}/role` | Update staff role |
 | GET | `/api/v1/tenant/user/staff/counts/by-role` | Staff counts grouped by role |
+| POST | `/api/v1/tenant/user/staff/{id}/deactivate` | Deactivate a staff member |
+| POST | `/api/v1/tenant/user/staff/{id}/activate` | Reactivate a staff member |
+| POST | `/api/v1/tenant/user/staff/reports` | Staff export (same filters as `GET /staff`), cached per data version |
 | POST | `/api/v1/tenant/user/welcome` | Send welcome message to staff |
 
 ### Pump Operators
@@ -93,6 +98,13 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/pumpoperator/pump-operators/reading-compliance` | Reading compliance for all operators |
 | GET | `/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance?schemeId={schemeId}&pumpOperatorId={pumpOperatorId}&startDate={yyyy-MM-dd}&endDate={yyyy-MM-dd}` | Compliance for a pump operator within a scheme, optionally filtered by date range |
 | GET | `/api/v1/pumpoperator/pump-operators/by-scheme` | Operators grouped by scheme |
+| GET | `/api/v1/pumpoperator/pump-operators/by-uuid/{uuid}` | Operator detail by UUID — the anonymous village dashboard's route |
+| GET | `/api/v1/pumpoperator/pump-operators/{pumpOperatorId}/readings` | One operator's readings |
+| GET | `/api/v1/pumpoperator/person/{personId}/schemes` | Schemes assigned to an officer |
+| GET | `/api/v1/pumpoperator/person/{personId}/schemes/count` | Count of schemes assigned to an officer |
+| GET | `/api/v1/pumpoperator/person/{personId}/pump-operators` | Operators on an officer's schemes |
+| GET | `/api/v1/pumpoperator/schemes/{schemeId}/details` | Scheme details, scoped to the caller |
+| GET | `/api/v1/pumpoperator/schemes/{schemeId}/reading-submissions` | A scheme's reading submissions, scoped to the caller |
 | POST | `/api/v1/state-admin/pump-operators/upload` | Bulk upload pump operators (CSV) |
 | POST | `/api/v1/state-admin/user-scheme-mappings/upload` | Bulk upload user-scheme mappings (CSV/XLSX) |
 
@@ -119,6 +131,13 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/tenants/{tenantId}/location-hierarchy/{hierarchyType}/edit-constraints` | Location hierarchy edit constraints |
 | PUT | `/api/v1/tenants/{tenantId}/location-hierarchy/{hierarchyType}` | Update location hierarchy |
 | GET | `/api/v1/tenants/{tenantId}/locations/{hierarchyType}` | Get child locations |
+| POST | `/api/v1/tenants/api-token` | Issue the tenant's partner-ingestion `X-Api-Key` (STATE_ADMIN) |
+| PUT | `/api/v1/tenants/{tenantId}/messaging-providers` | Set email / SMS provider settings |
+| GET | `/api/v1/tenants/{tenantId}/messaging-providers` | Provider settings and secret status |
+| DELETE | `/api/v1/tenants/{tenantId}/messaging-providers/{channel}` | Delete a channel's provider settings |
+| PUT | `/api/v1/tenants/{tenantId}/messaging-providers/{channel}/secrets` | Set a channel's provider secrets |
+| GET | `/api/v1/tenants/{tenantId}/messaging-providers/{channel}/secrets` | A channel's secret status (never the values) |
+| DELETE | `/api/v1/tenants/{tenantId}/messaging-providers/{channel}/secrets` | Delete a channel's provider secrets |
 
 ### System Config
 
@@ -127,6 +146,8 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/system/config` | Get system config |
 | GET | `/api/v1/system/channels` | Get available channels |
 | PUT | `/api/v1/system/config` | Update system config |
+| POST | `/api/v1/system/messaging-secrets/rewrap` | Re-wrap every tenant's data key under the current master key (SUPER_USER) |
+| POST | `/api/v1/system/messaging-secrets/tenants/{tenantId}/rotate` | Rotate one tenant's data key (SUPER_USER) |
 
 ---
 
@@ -138,22 +159,28 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/scheme/schemes` | List all schemes; `workStatus` / `operatingStatus` accept repeated or comma-separated values |
 | GET | `/api/v1/scheme/schemes/mappings` | List scheme mappings; same multi-valued status filters |
 | GET | `/api/v1/scheme/schemes/counts/by-status` | Total schemes plus the work-status and operating-status breakdowns |
+| GET | `/api/v1/scheme/schemes/yesterday-final-readings` | Each scheme's previous-day closing reading |
+| GET | `/api/v1/scheme/schemes/{schemeId}/statuses` | A scheme's work and operating status |
 | PATCH | `/api/v1/scheme/schemes/{schemeId}/status?tenantCode={tenantCode}` | Update scheme work/operating status (one or both) |
 | POST | `/api/v1/scheme/schemes/upload` | Bulk upload schemes (CSV) |
 | POST | `/api/v1/scheme/schemes/mappings/upload` | Bulk upload scheme mappings (CSV) |
+| GET | `/api/v1/scheme/schemes/download` | Download schemes (STATE_ADMIN) |
+| GET | `/api/v1/scheme/schemes/mappings/download` | Download scheme mappings (STATE_ADMIN) |
+| POST | `/api/v1/scheme/schemes/analytics-resync` | Re-publish the `X-Tenant-Code` tenant's schemes to analytics (STATE_ADMIN / SUPER_STATE_ADMIN) |
 
 ### State master-data sync (`scheme-service`)
 
-SUPER_USER / STATE_ADMIN of the configured tenant only. Off unless `STATE_SYNC_ENABLED=true` — the two
+SUPER_USER / STATE_ADMIN / SUPER_STATE_ADMIN with access to that tenant. Off unless `STATE_SYNC_ENABLED=true` — the two
 POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/scheme/state-sync/config?tenantCode={tenantCode}` | Effective flag, mode (`DRY_RUN`/`APPLY`) and crons |
+| GET | `/api/v1/scheme/state-sync/config?tenantCode={tenantCode}` | Effective flag, mode (`DRY_RUN`/`APPLY`) and crons. Always 200: `"configured": false` (and no crons) when `STATE_SYNC_TENANT_CODE` is unset or names another tenant, the case where the other state-sync endpoints answer 404 |
 | POST | `/api/v1/scheme/state-sync/runs?tenantCode={tenantCode}&kind={FULL\|DELTA}` | Start a run in the background → 202 `{runId}`; 409 while another run holds the lock |
 | POST | `/api/v1/scheme/state-sync/schemes/refresh?tenantCode={tenantCode}&ref={SCH-code\|IMIS id}` | Re-pull and reconcile one scheme now; returns the run's counts and issues |
 | GET | `/api/v1/scheme/state-sync/runs?tenantCode={tenantCode}&limit={n}` | Run history, newest first |
 | GET | `/api/v1/scheme/state-sync/issues?tenantCode={tenantCode}&runId={id?}&category={c?}&limit={n}&offset={n}` | What a run declined to write (conflicts, unmatched villages, spared archives …) |
+| GET | `/api/v1/scheme/state-sync/unmatched-schemes?tenantCode={tenantCode}&format={json\|csv}` | Our schemes the last successful full run did not find upstream: `NOT_IN_JJM` (never matched) and `NO_LONGER_LISTED` (code missing from the full list), with name, JJM code, IMIS / SMT ids and last reading date. `csv` downloads a file to review with the JJM team |
 
 ### Scheme Status Integer Mapping
 
@@ -185,30 +212,53 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 | GET | `/api/v1/analytics/submission-status` | Submission status summary |
 | GET | `/api/v1/analytics/water-supply/average-per-region` | Average water supply per region |
 | GET | `/api/v1/analytics/national/dashboard` | National dashboard data |
+| GET | `/api/v1/analytics/national/dashboard/district` | National dashboard at district level |
+| GET | `/api/v1/analytics/national/dashboard/boundary` | State boundaries (GeoJSON) for the national map |
+| GET | `/api/v1/analytics/national/dashboard/boundary/district` | National outline + district boundaries (GeoJSON) |
 | GET | `/api/v1/analytics/scheme-regularity/periodic/national` | National periodic scheme regularity |
 | GET | `/api/v1/analytics/schemes/status-count` | Scheme status counts |
 | GET | `/api/v1/analytics/schemes/dashboard` | Scheme dashboard |
+| GET | `/api/v1/analytics/schemes/dashboard/download` | Scheme dashboard as CSV |
+| GET | `/api/v1/analytics/critical-schemes` | Critical schemes (no supply in the last N days) for an area |
+| GET | `/api/v1/analytics/critical-schemes/user` | Critical schemes mapped to the caller |
+| GET | `/api/v1/analytics/continuous-schemes` | Schemes that reported in the date range, for an area |
+| GET | `/api/v1/analytics/continuous-schemes/user` | Continuous schemes mapped to a user |
 | GET | `/api/v1/analytics/schemes/region-report` | Scheme region report |
 | GET | `/api/v1/analytics/escalations` | Escalation analytics |
 | GET | `/api/v1/analytics/scheme-performance` | Scheme performance metrics |
 | GET | `/api/v1/analytics/tenants` | Tenant analytics |
 | GET | `/api/v1/analytics/tenant_data` | Tenant data |
+| GET | `/api/v1/analytics/tenant_boundaries` | Boundary GeoJSON for a parent area and its children |
+| GET | `/api/v1/analytics/tenant_performance_score` | Average performance score for a boundary |
 | GET | `/api/v1/analytics/schemes` | Analytics schemes list |
 | GET | `/api/v1/analytics/meter-readings` | Meter readings analytics |
 | GET | `/api/v1/analytics/scheme-regularity/average` | Average scheme regularity |
 | GET | `/api/v1/analytics/scheme-regularity/periodic` | Periodic scheme regularity |
 | GET | `/api/v1/analytics/reading-submission-rate` | Reading submission rate |
+| GET | `/api/v1/analytics/submission-activity/hourly` | Submissions by hour of day |
+| GET | `/api/v1/analytics/officer/dashboard` | An officer's escalation, anomaly, scheme and water totals |
+| GET | `/api/v1/analytics/operator-attendance` | A pump operator's day-wise attendance |
+| GET | `/api/v1/analytics/anomalies` | Paginated anomalies on a user's schemes |
 | GET | `/api/v1/analytics/anomalies/statuses` | Anomaly statuses list |
 | GET | `/api/v1/analytics/escalations/statuses` | Escalation statuses list |
 
 ---
 
-### Telemetry · Internal
+## Telemetry (`telemetry-service` · port 8084)
+
+Not behind the gateway's JWT check; each family has its own credential. The 27 chatbot webhooks
+(`X-Webhook-Token`) are listed in `WebhookRoutes`, and include
+`POST /api/v1/telemetry/reject-latest-reading`, which resets the operator's reading from today after
+they reject the value read from their photo.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/telemetry` | List telemetry records |
-| POST | `/api/v1/publish` | Dispatch a Kafka event |
+| POST | `/api/v1/telemetry/readings` | Submit a reading (`X-Api-Key`) |
+| PUT | `/api/v1/telemetry/readings` | Correct a submitted reading (`X-Api-Key`) |
+| POST | `/api/v1/telemetry/readings/formats/{format}` | Submit a reading in a registered partner format (`X-Api-Key`) |
+| POST | `/api/v1/telemetry/readings/reset-latest` | Reset the operator's latest reading, whatever its date (`X-Api-Key`) |
+| PATCH | `/api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading` | Correct a scheme's previous-day closing reading (`X-Api-Key`) |
+| POST | `/api/v1/telemetry/internal/readings/republish` | Re-send stored ELM/PDU readings to analytics (`X-Internal-Token` + `X-Tenant-Code`; see below) |
 
 ---
 
@@ -218,6 +268,8 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 |--------|----------|-------------|
 | POST | `/api/v1/message/notifications` | Send a notification (specify channel in body) |
 | POST | `/api/v1/message/events` | Dispatch a Kafka event |
+| POST | `/api/v1/message/trigger-welcome-message` | Send the welcome message (called by the chatbot flow; public) |
+| POST | `/api/v1/message/delivery-receipts/{providerId}` | Provider delivery-status push. Public; each provider's adapter checks its signature or shared secret → 200, 400, 401, or 404 for an unknown provider |
 
 ---
 
@@ -268,12 +320,12 @@ The tables below list every endpoint that changed across all services. If your f
 
 ---
 
-### Telemetry service — webhook base URL (affects all 26 chatbot webhook endpoints)
+### Telemetry service — webhook base URL (affects all 27 chatbot webhook endpoints)
 
-> ## Telemetry · Webhook (`telemetry-service` · port 8989)
+> ## Telemetry · Webhook (`telemetry-service` · port 8084)
 > These endpoints are called by the **WhatsApp chatbot platform**, not by the frontend.
 >
-> **All 26 require the `X-Webhook-Token: <token>` header.** Ingress exposes them publicly, bypassing
+> **All 27 require the `X-Webhook-Token: <token>` header.** Ingress exposes them publicly, bypassing
 > the API gateway, so this shared secret is the only thing in front of them. Requests without a valid
 > token get `401 {"success":false,"message":"Unauthorized"}`. Configure via
 > `TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES` (comma-separated SHA-256 hex of the accepted tokens);
@@ -480,8 +532,8 @@ the WhatsApp flows share one correlation id across several readings (analytics V
 
 | Old | New |
 |-----|-----|
-| `GET /api/telemetry` | `GET /api/v1/telemetry` |
-| `POST /api/publish` | `POST /api/v1/publish` |
+| `GET /api/telemetry` | — (removed) |
+| `POST /api/publish` | — (removed) |
 
 ---
 

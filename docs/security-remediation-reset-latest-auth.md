@@ -100,7 +100,7 @@ project's PII rule.
 |------|--------|
 | `TelemetryApiKeyAuthFilterTest` (10) | Missing/unknown key → 401 and the handler is never invoked; a not-yet-existing `/readings/**` route is protected by default; chatbot webhook routes stay reachable; encoded/dot-segment/double-slash paths still match; the rejection body never echoes the submitted key |
 | `BfmReadingServiceResetLatestTenantScopeTest` (8) | Cross-tenant reset refused with no write and no event published; refusal indistinguishable from an unknown contact; missing tenant → 401; the destroyed value is returned |
-| `SingleTenantTelemetryControllerUnitTest` (updated) | No key / invalid key → 401 **and the reset does not run**; valid key scopes to its tenant; the filter-resolved tenant is trusted without a second lookup; audit line contains the destroyed value and no raw phone |
+| `SingleTenantTelemetryControllerUnitTest` (updated; now `ReadingIngestControllerUnitTest`) | No key / invalid key → 401 **and the reset does not run**; valid key scopes to its tenant; the filter-resolved tenant is trusted without a second lookup; audit line contains the destroyed value and no raw phone |
 
 `resetLatestReadingIsPublicAndDoesNotRequireApiKey` — which pinned the vulnerable behaviour as
 intended — is replaced by `resetLatestReadingRejectsARequestWithNoApiKey`.
@@ -137,11 +137,11 @@ State-IT integration already sends. `X-Tenant-Code` is no longer consulted on th
 Callers already sending a valid key on the `/readings` routes need no change. The two rows in bold
 are the behavioural break.
 
-**WhatsApp chatbot flow — owned separately.** The bot calls `reset-latest` and currently sends no
-key, so it will receive 401 until its webhook action carries one. That change is being handled by
-another developer and is deliberately **not** part of this commit; the chatbot's flow
-exports are untouched here. Coordinate the two deploys, and note that the production flow
-export is not in this repo.
+**WhatsApp chatbot flow — resolved separately.** The bot called `reset-latest` with no key, so it
+received 401 after this change. Since `24946b40` it calls the webhook
+`POST /api/v1/telemetry/reject-latest-reading` instead, authenticated by `X-Webhook-Token`, which
+only resets a reading taken today (`ReadingRejectionService`). `reset-latest` is now for `X-Api-Key`
+holders only. The production flow export is not in this repo.
 
 Verification:
 

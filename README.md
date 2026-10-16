@@ -64,7 +64,7 @@ JalSoochak follows a **microservices-based architecture** with loosely coupled c
 * **User Service**
 * **Telemetry Service**
 * **Analytics Service**
-* **Anamoly Service**
+* **Anomaly Service**
 * **Scheme Service**
 * **Message Service**
 
@@ -74,19 +74,24 @@ The platform is designed to be **event-driven**, with observations as the core d
 
 ## Key APIs
 
-### Submit Observation (Meter Reading)
+### Submit a Meter Reading
+
+Field operators submit over a WhatsApp chatbot flow. State IT systems submit through the partner
+ingestion API, authenticated by a per-tenant `X-Api-Key`:
 
 ```http
-POST /v1/observations
+POST /api/v1/telemetry/readings
 ```
 
-Supports multiple channels:
+Supported reading channels:
 
-* `BULK FLOW METER`
-* `ELECTRIC METER`
-* `PUMP RUNTIME DURATION`
-* `MANUAL`
-* `IOT`
+* `BFM` — bulk flow meter
+* `ELM` — electricity meter
+* `PDU` — pump run duration
+* `MAN` — manual
+* `IOT` — IoT device
+
+The full endpoint list is in [`backend/API_ENDPOINTS.md`](backend/API_ENDPOINTS.md).
 
 ---
 
@@ -104,33 +109,34 @@ Supports multiple channels:
 
 ### Prerequisites
 
-* Java (JDK 11+)
-* PostgreSQL
-* Docker (optional)
+* Java 21 and Maven 3.9+
+* PostgreSQL 16
+* Apache Kafka (KRaft mode)
+* Redis
+* Docker
 
 ### Setup
 
 ```bash
-git clone https://github.com/arghyam/JalSoochak.git
-cd JalSoochak
+git clone https://github.com/arghyam/Jalsoochak-V2.git
+cd Jalsoochak-V2
 ```
 
 ### Configuration
 
-Update `application.yml`:
-
-```yaml
-database:
-  host: localhost
-  port: 5432
-  name: jalsoochak
-```
+Each service reads `src/main/resources/application.yml`, overridable by environment variables such
+as `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD`.
 
 ### Run
 
+Each service under `backend/` is a separate Maven project:
+
 ```bash
-./mvnw spring-boot:run
+cd backend/<service-name>
+mvn spring-boot:run
 ```
+
+See [`backend/README.md`](backend/README.md) for infrastructure setup and service ports.
 
 ---
 

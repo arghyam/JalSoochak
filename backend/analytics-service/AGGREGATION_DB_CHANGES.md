@@ -3,13 +3,11 @@
 Schema: `analytics_schema`. All times IST; day = 12am→12am; week = Sunday→Saturday.
 
 > **Naming:** tables follow the house `fact_` / `dim_` + `_table` convention (matching
-> `fact_water_quantity_table`, `dim_scheme_table`, …). **Migration map after the latest `dev` merge:**
+> `fact_water_quantity_table`, `dim_scheme_table`, …). **Migration map:**
 > V42 `included_work_statuses`, V43 water-quantity dedup index, V44 `regularity_threshold_percent`,
-> and V45–V49 from `dev` (water quantity to BIGINT litres, scheme status code comments, meter
-> reading to NUMERIC, anomaly/submission linkage, attendance/anomaly tables renamed to `fact_`).
-> This branch's objects follow contiguously: **V50** Sunday-week columns, **V51–V53** the
-> pre-aggregation facts, **V54–V55** the two SCD-2 history tables. None of them has been deployed,
-> so they were renumbered past `dev`'s V45–V49 rather than colliding with them.
+> V45–V49 (water quantity to BIGINT litres, scheme status code comments, meter reading to NUMERIC,
+> anomaly/submission linkage, attendance/anomaly tables renamed to `fact_`), **V50** Sunday-week
+> columns, **V51–V53** the pre-aggregation facts, **V54–V55** the two SCD-2 history tables.
 
 ## The single water figure (important)
 

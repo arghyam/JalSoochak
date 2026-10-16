@@ -88,4 +88,41 @@ class SchemeReassignmentServiceTest {
 
         verifyNoInteractions(repository, factIngestionRepository, recalculation, refreshQueue);
     }
+
+    private static org.arghyam.jalsoochak.analytics.dto.event.SchemeRetiredEvent retired(Integer schemeId) {
+        org.arghyam.jalsoochak.analytics.dto.event.SchemeRetiredEvent e = new org.arghyam.jalsoochak.analytics.dto.event.SchemeRetiredEvent();
+        e.setTenantId(1);
+        e.setSchemeId(schemeId);
+        return e;
+    }
+
+    @Test
+    void aRetiredSchemeLeavesTheDashboardsAndItsReadingDaysAreReaggregated() {
+        when(repository.readingDateRange(1, 21)).thenReturn(java.util.Optional.of(new SchemeReassignmentRepository.DateRange(D1, D2)));
+
+        service.retire(retired(21));
+
+        InOrder order = inOrder(factIngestionRepository, repository, refreshQueue);
+        order.verify(factIngestionRepository).lockSchemes(1, Set.of(21));
+        order.verify(repository).dropScheme(1, 21);
+        order.verify(refreshQueue).refresh(any(), any(), anyString());
+        verify(refreshQueue).refresh(org.mockito.ArgumentMatchers.eq(D1), org.mockito.ArgumentMatchers.eq(D2), anyString());
+    }
+
+    @Test
+    void aRetiredSchemeWithoutReadingsNeedsNoReaggregation() {
+        when(repository.readingDateRange(1, 22)).thenReturn(java.util.Optional.empty());
+
+        service.retire(retired(22));
+
+        verify(repository).dropScheme(1, 22);
+        verifyNoInteractions(refreshQueue);
+    }
+
+    @Test
+    void anIncompleteRetirementIsIgnored() {
+        service.retire(retired(null));
+
+        verifyNoInteractions(repository, factIngestionRepository, refreshQueue);
+    }
 }

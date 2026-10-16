@@ -45,6 +45,24 @@ class StateVocabularyTest {
         assertThat(StateVocabulary.userType(null)).isEmpty();
     }
 
+    @Test
+    void knowsTheUpstreamsCompleteRoleSet() {
+        for (String role : java.util.List.of("executive-engineer", "section-officer", "sdo", "jal-mitra", "khalasi",
+                "jal-sahayak", "other", "Jal Mitra")) {
+            assertThat(StateVocabulary.isKnownRole(role)).as(role).isTrue();
+        }
+        assertThat(StateVocabulary.isKnownRole("plumber")).isFalse();
+        assertThat(StateVocabulary.isKnownRole(null)).isFalse();
+    }
+
+    @Test
+    void ranksTheManagedRolesFromJalMitraUpToExecutiveEngineer() {
+        assertThat(StateVocabulary.roleRank("EXECUTIVE_ENGINEER")).isGreaterThan(StateVocabulary.roleRank("SUB_DIVISIONAL_OFFICER"));
+        assertThat(StateVocabulary.roleRank("SUB_DIVISIONAL_OFFICER")).isGreaterThan(StateVocabulary.roleRank("SECTION_OFFICER"));
+        assertThat(StateVocabulary.roleRank("SECTION_OFFICER")).isGreaterThan(StateVocabulary.roleRank("PUMP_OPERATOR"));
+        assertThat(StateVocabulary.roleRank("PUMP_OPERATOR")).isGreaterThan(StateVocabulary.roleRank(null));
+    }
+
     @ParameterizedTest
     @CsvSource({"9100000001,919100000001", "+91 91000 00001,919100000001", "919100000001,919100000001",
             "09100000001,919100000001"})

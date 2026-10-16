@@ -10,7 +10,8 @@ under a per-scheme lock.
 (calculation), `tenant-service` (ELM formula config), `user-service` and `scheme-service` (SO/SDO
 screens), plus `backend/database/`.
 
-**Shipped as:** branch `elm-pdu-mock-impl`, not yet merged. The decisions and the questions answered
+**Shipped as:** branch `elm-pdu-mock-impl`, merged to `dev` in PR #509 (`33d41c2a`); the ELM OCR model
+followed in PR #527 (`c5abd3eb`). The decisions and the questions answered
 along the way are in [ELM_PDU_CHANNEL_ADDITION_PLAN.md](../ELM_PDU_CHANNEL_ADDITION_PLAN.md).
 
 | Commits | Service | Contents |
@@ -25,8 +26,8 @@ along the way are in [ELM_PDU_CHANNEL_ADDITION_PLAN.md](../ELM_PDU_CHANNEL_ADDIT
 | `b11003ed`, `4b7369f7` | telemetry | PDU 1,440-minute day limit, under a lock |
 | `ddd704f7`, `74a786d5`, `9190c90b`, `e0db17f5`, `5feecc54` | telemetry | Republish endpoint for ELM and PDU readings |
 
-**Not included:** ELM and PDU over WhatsApp (phase 6 of the plan). An ELM OCR model. An API for pump
-ratings or `k_factor`. Showing ELM or PDU readings on the SO/SDO screens. The IOT and MAN channels.
+**Not included:** dedicated ELM and PDU WhatsApp flows (phase 6 of the plan); WhatsApp photos and
+values do go through the same pipeline (§4.3). An API for pump ratings or `k_factor`. Showing ELM or PDU readings on the SO/SDO screens. The IOT and MAN channels.
 
 ---
 
@@ -821,7 +822,7 @@ export JAVA_HOME=<local JDK 21>
 
 ## 16. Known limitations
 
-- **ELM and PDU over WhatsApp (phase 6) are not built.** There is no PDU minutes flow, and a WhatsApp
+- **Dedicated ELM and PDU WhatsApp flows (phase 6) are not built.** There is no PDU minutes flow, and a WhatsApp
   manual value from a PDU operator overwrites their latest row today instead of adding a run.
 - **Pump ratings and `k_factor` are entered by SQL.** Nothing validates their units at entry.
 - **Saving configuration doesn't recalculate.** Readings stored before it stay without a total until
@@ -832,4 +833,5 @@ export JAVA_HOME=<local JDK 21>
 - **Operator attendance isn't moved with a reading.** A correction that moves a reading to another
   day or scheme recalculates the day it left but keeps that day's attendance row.
 - **`BfmReadingService` now handles every channel**, despite its name. Renaming it is out of scope.
-- **A rejected WhatsApp ELM or PDU photo is still uploaded to storage** before the rejection.
+- **A rejected WhatsApp PDU photo is still uploaded to storage** before the rejection, as is an ELM
+  photo for a tenant with no ELM OCR provider.
