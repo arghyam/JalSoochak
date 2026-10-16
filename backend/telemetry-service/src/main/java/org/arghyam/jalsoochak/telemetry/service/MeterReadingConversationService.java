@@ -1385,13 +1385,16 @@ public class MeterReadingConversationService {
             // - If isManualReading=false, compare against the most recent confirmed reading strictly before today.
             // - If the meter is replaced, load latest snapshot for anomaly/audit context only.
             // - A PDU reading is one run's duration rather than a running total, so it has none.
+            // The row this value is written over is never its own baseline: after a photo it holds the
+            // OCR value the operator is correcting, so a misread low value would refuse the right one.
             boolean compareWithLatest = request.getIsManualReading() == null || Boolean.TRUE.equals(request.getIsManualReading());
             Optional<TelemetryConfirmedReadingSnapshot> previousSnapshotOpt;
             if (resolvedChannel == ReadingChannel.PDU) {
                 previousSnapshotOpt = Optional.empty();
             } else if (isMeterReplaced || compareWithLatest) {
                 previousSnapshotOpt = telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
-                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, captured.register(), null);
+                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, captured.register(),
+                        rowTheManualValueReplaces(operatorWithSchema, schemeId, pendingOpt, today));
             } else {
                 previousSnapshotOpt = telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate(
                         operatorWithSchema.schemaName(), schemeId, resolvedChannel, captured.register(), today,
