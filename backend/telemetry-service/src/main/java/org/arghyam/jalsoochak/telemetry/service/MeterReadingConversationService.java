@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
@@ -1212,6 +1213,25 @@ public class MeterReadingConversationService {
                 .orElse(null);
     }
 
+    /**
+     * The register of the operator's row today when {@link #writeManualReading} writes the value over
+     * it; empty when the value goes on the pending meter-change row or opens a row. A register the
+     * operator's channel doesn't have, on a row another channel left, gives the standard one.
+     */
+    private Optional<MeterRegister> registerOfTodaysRowOverwritten(TelemetryOperatorWithSchema operatorWithSchema,
+                                                                 Long schemeId,
+                                                                 Optional<TelemetryPendingMeterChangeRecord> pendingOpt,
+                                                                 LocalDate today,
+                                                                 ReadingChannel channel) {
+        if (pendingOpt.isPresent()) {
+            return Optional.empty();
+        }
+        return telemetryTenantRepository.findLatestFlowReadingForDate(
+                        operatorWithSchema.schemaName(), schemeId, operatorWithSchema.operator().id(), today)
+                .map(row -> MeterRegister.of(row.submittedUnit()))
+                .map(register -> channel.storedUnit(register).isPresent() ? register : MeterRegister.STANDARD);
+    }
+
     public CreateReadingResponse manualReadingMessage(ManualReadingRequest request) {
         try {
             if (request.getContactId() == null || request.getContactId().isBlank()) {
@@ -1273,19 +1293,27 @@ public class MeterReadingConversationService {
                     operatorWithSchema.schemaName(), request.getContactId());
 
             // The same rules as any other submitted value. WhatsApp has no unit field, so the value is
-            // in the channel's standard unit.
+            // in the channel's standard unit, except over the operator's row today: there it corrects
+            // that row and, like a correction with no unit, stays on its register, so a value typed over
+            // a kVAh photo isn't stored in kWh beside OCR's kVAh reading.
+            LocalDate today = ReadingTime.today();
+            CaptureOutcome outcome = registerOfTodaysRowOverwritten(
+                            operatorWithSchema, schemeId, pendingOpt, today, resolvedChannel)
+                    .map(register -> submittedValueCapture.captureCorrection(
+                            tenantId, resolvedChannel, register, manualReadingValue, null))
+                    .orElseGet(() -> submittedValueCapture.capture(new CaptureInput(
+                            operatorWithSchema.schemaName(),
+                            tenantId,
+                            operatorWithSchema.operator().id(),
+                            schemeId,
+                            resolvedChannel,
+                            null,
+                            manualReadingValue,
+                            null,
+                            false,
+                            OcrRetryMode.NONE)));
             CapturedReading captured;
-            switch (submittedValueCapture.capture(new CaptureInput(
-                    operatorWithSchema.schemaName(),
-                    tenantId,
-                    operatorWithSchema.operator().id(),
-                    schemeId,
-                    resolvedChannel,
-                    null,
-                    manualReadingValue,
-                    null,
-                    false,
-                    OcrRetryMode.NONE))) {
+            switch (outcome) {
                 case CaptureOutcome.Captured(CapturedReading reading) -> captured = reading;
                 case CaptureOutcome.Rejected rejected -> {
                     return rejectedManualReading(rejected.message(), languageKey, correlationId, manualReadingValue);
@@ -1294,22 +1322,22 @@ public class MeterReadingConversationService {
                         throw new IllegalStateException("A submitted value is never retried");
             }
 
-            // Validation baseline, from readings on the same channel only:
+            // Validation baseline, from readings on the same channel and register only:
             // - If the meter is not replaced, compare against the most recent confirmed reading by default.
             // - If isManualReading=false, compare against the most recent confirmed reading strictly before today.
             // - If the meter is replaced, load latest snapshot for anomaly/audit context only.
             // - A PDU reading is one run's duration rather than a running total, so it has none.
-            LocalDate today = ReadingTime.today();
             boolean compareWithLatest = request.getIsManualReading() == null || Boolean.TRUE.equals(request.getIsManualReading());
             Optional<TelemetryConfirmedReadingSnapshot> previousSnapshotOpt;
             if (resolvedChannel == ReadingChannel.PDU) {
                 previousSnapshotOpt = Optional.empty();
             } else if (isMeterReplaced || compareWithLatest) {
                 previousSnapshotOpt = telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
-                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, null);
+                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, captured.register(), null);
             } else {
                 previousSnapshotOpt = telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate(
-                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, today, null);
+                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, captured.register(), today,
+                        null);
             }
 
             BigDecimal effectiveConfirmedReading = captured.value();
@@ -1850,10 +1878,12 @@ public class MeterReadingConversationService {
             TelemetryLatestFlowReadingRecord targetDayRecord = targetDayRecordOpt.get();
 
             // The corrected value follows the rules of the target row's channel, as a submission on it
-            // would. WhatsApp has no unit field, so the value is in that channel's standard unit.
+            // would. WhatsApp has no unit field, so the value stays on the row's register: kVAh on a kVAh
+            // row, the channel's standard unit otherwise.
             ReadingChannel channel = ReadingChannel.fromCode(targetDayRecord.channel());
             CapturedReading captured;
-            switch (submittedValueCapture.captureCorrection(tenantId, channel, readingValue, null)) {
+            switch (submittedValueCapture.captureCorrection(tenantId, channel,
+                    MeterRegister.of(targetDayRecord.submittedUnit()), readingValue, null)) {
                 case CaptureOutcome.Captured(CapturedReading correction) -> captured = correction;
                 case CaptureOutcome.Rejected rejected -> {
                     return rejectedManualReading(rejected.message(), languageKey, request.getContactId(), readingValue);

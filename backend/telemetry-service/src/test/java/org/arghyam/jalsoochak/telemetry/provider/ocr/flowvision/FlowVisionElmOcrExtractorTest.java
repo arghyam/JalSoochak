@@ -1,11 +1,15 @@
 package org.arghyam.jalsoochak.telemetry.provider.ocr.flowvision;
 
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingUnit;
 import org.arghyam.jalsoochak.telemetry.dto.response.OcrReadingResult;
 import org.arghyam.jalsoochak.telemetry.service.OcrProviderSettings;
 import org.arghyam.jalsoochak.telemetry.service.OcrTransientFailures;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -158,6 +162,7 @@ class FlowVisionElmOcrExtractorTest {
         OcrReadingResult result = extractor.extractReadingOrThrow(IMAGE_URL, null);
 
         assertThat(result.getAdjustedReading()).isEqualByComparingTo("19712.7");
+        assertThat(result.getReadingUnit()).isEqualTo(ReadingUnit.KILOWATT_HOUR);
         assertThat(result.getRawMeterReading()).isEqualTo("0019712.7");
         assertThat(result.getQualityStatus()).isEqualTo("SUCCESS");
         assertThat(result.getCorrelationId()).isEqualTo("5f0c2a8e-1b7d-4c1e-9d3a-2f7e0b6a9c41");
@@ -192,14 +197,41 @@ class FlowVisionElmOcrExtractorTest {
     }
 
     @Test
-    void rejectsAKvahReadingBecauseTheElmFormulasExpectKwh() {
+    @DisplayName("a kVAh reading is accepted as displayed, in kVAh, for analytics to turn into kWh")
+    void acceptsAKvahReadingAsDisplayed() {
         restTemplate.enqueue(ok(accepted("0019712.7", "kVAh")));
 
         OcrReadingResult result = extractor.extractReadingOrThrow(IMAGE_URL, null);
 
+        assertThat(result.getAdjustedReading()).isEqualByComparingTo("19712.7");
+        assertThat(result.getReadingUnit()).isEqualTo(ReadingUnit.KILOVOLT_AMPERE_HOUR);
+        assertThat(result.getQualityStatus()).isEqualTo("SUCCESS");
+        assertThat(result.getRejectionReason()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"KWH", " kW.h "})
+    void acceptsAnySpellingOfKwh(String unit) {
+        restTemplate.enqueue(ok(accepted("0019712.7", unit)));
+
+        assertThat(extractor.extractReadingOrThrow(IMAGE_URL, null).getReadingUnit())
+                .isEqualTo(ReadingUnit.KILOWATT_HOUR);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"kVArh", "m3", ""})
+    @DisplayName("a reading in another unit, or in none, is rejected: only kWh and kVAh have a formula")
+    void rejectsAReadingInAnyOtherUnit(String unit) {
+        restTemplate.enqueue(ok(accepted("0019712.7", unit)));
+
+        OcrReadingResult result = extractor.extractReadingOrThrow(IMAGE_URL, null);
+
         assertThat(result.getAdjustedReading()).isNull();
+        assertThat(result.getReadingUnit()).isNull();
         assertThat(result.getQualityStatus()).isEqualTo("REJECTED");
-        assertThat(result.getRejectionReason()).contains("kWh");
+        assertThat(result.getRejectionReason())
+                .isEqualTo("Please send a photo of the meter showing its kWh or kVAh reading.");
     }
 
     @Test

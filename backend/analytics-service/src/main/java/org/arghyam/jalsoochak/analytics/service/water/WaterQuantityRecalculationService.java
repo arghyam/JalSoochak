@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
 import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
+import org.arghyam.jalsoochak.analytics.enums.MeterRegister;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.arghyam.jalsoochak.analytics.enums.ReadingKind;
 import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
@@ -296,13 +297,18 @@ public class WaterQuantityRecalculationService {
     }
 
     /**
-     * The latest reading on {@code reading}'s channel before its day, unless another channel has a
-     * reading dated in between. Those dates were counted on the other channel, so measuring across
-     * them would count their water twice.
+     * The latest reading on {@code reading}'s channel before its day, unless it is on another
+     * {@link MeterRegister register} or another channel has a reading dated in between.
+     *
+     * <p>A reading on another register is another quantity (kWh against kVAh), so the switch is treated
+     * like a new meter: the day has no starting point. Dates read on another channel were counted
+     * there, so measuring across them would count their water twice.
      */
     private Optional<FactMeterReading> startingPoint(FactMeterReading reading, ReadingChannel channel) {
+        MeterRegister register = MeterRegister.of(reading.getSubmittedUnit());
         return meterReadingRepository
                 .findLatestBefore(reading.getTenantId(), reading.getSchemeId(), reading.getReadingDate(), channel)
+                .filter(previous -> MeterRegister.of(previous.getSubmittedUnit()) == register)
                 .filter(previous -> !meterReadingRepository.existsOnAnotherChannelBetween(
                         reading.getTenantId(), reading.getSchemeId(),
                         previous.getReadingDate(), reading.getReadingDate(), channel.getCode()));
@@ -352,6 +358,7 @@ public class WaterQuantityRecalculationService {
                 .readingDate(reading.getReadingDate())
                 .channel(channel)
                 .amount(amount)
+                .register(MeterRegister.of(reading.getSubmittedUnit()))
                 .parameters(reading.getCalculationParameters())
                 .build();
     }

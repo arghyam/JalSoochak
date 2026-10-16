@@ -34,8 +34,9 @@ public class UpdateReadingRequest {
 
     /**
      * Optional unit of {@link #confirmedReading}, as a UCUM code accepted by the corrected reading's
-     * channel, case-insensitive. Null or blank means the channel's standard unit. Kept as raw text and
-     * checked once the reading, and so its channel, has been found.
+     * channel, case-insensitive. Null or blank means the unit the corrected reading is stored in: kVAh
+     * for a kVAh reading, the channel's standard unit otherwise. Kept as raw text and checked once the
+     * reading, and so its channel, has been found.
      */
     @JsonAlias("readingUnit")
     @JsonProperty("reading_unit")

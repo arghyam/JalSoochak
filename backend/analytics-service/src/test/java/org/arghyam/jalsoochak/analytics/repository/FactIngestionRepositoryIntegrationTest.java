@@ -198,7 +198,7 @@ class FactIngestionRepositoryIntegrationTest {
         CalculationParameters snapshot = new CalculationParameters(1, "F2", new BigDecimal("0.95"), List.of(
                 new CalculationParameters.Pump(12L, new BigDecimal("500"), new BigDecimal("0.7"),
                         new BigDecimal("40"), new BigDecimal("7.5"), "HP", new BigDecimal("0.85"),
-                        new BigDecimal("5"))));
+                        new BigDecimal("5"), new BigDecimal("0.9"))));
         FactMeterReading reading = submission(TENANT, SCHEME, 501L, "2026-01-02T08:00:00", "40");
         reading.setChannel(ReadingChannel.ELM.getCode());
         reading.setCalculationParameters(snapshot);
@@ -210,6 +210,35 @@ class FactIngestionRepositoryIntegrationTest {
                 .usingRecursiveComparison()
                 .withComparatorForType(BigDecimal::compareTo, BigDecimal.class)
                 .isEqualTo(snapshot);
+    }
+
+    @Test
+    void upsert_storesTheSubmittedUnitAndANewerVersionReplacesIt() {
+        FactMeterReading kvah = submission(TENANT, SCHEME, 501L, "2026-01-02T08:00:00", "40");
+        kvah.setChannel(ReadingChannel.ELM.getCode());
+        kvah.setSubmittedUnit("kV.A.h");
+        long id = repository.upsertMeterReading(kvah).orElseThrow();
+        assertThat(meterReadingRepository.findById(id)).get()
+                .extracting(FactMeterReading::getSubmittedUnit).isEqualTo("kV.A.h");
+
+        FactMeterReading kwh = submission(TENANT, SCHEME, 501L, "2026-01-02T09:00:00", "41");
+        kwh.setChannel(ReadingChannel.ELM.getCode());
+        kwh.setSubmittedUnit("kW.h");
+        repository.upsertMeterReading(kwh);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT submitted_unit FROM analytics_schema.fact_meter_reading_table WHERE id = ?",
+                String.class, id)).isEqualTo("kW.h");
+    }
+
+    @Test
+    void upsert_aReadingWithNoUnitStoresNull() {
+        long id = repository.upsertMeterReading(
+                submission(TENANT, SCHEME, 501L, "2026-01-02T08:00:00", "140")).orElseThrow();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT submitted_unit FROM analytics_schema.fact_meter_reading_table WHERE id = ?",
+                String.class, id)).isNull();
     }
 
     // ---- findSchemeDay ----------------------------------------------------------------------

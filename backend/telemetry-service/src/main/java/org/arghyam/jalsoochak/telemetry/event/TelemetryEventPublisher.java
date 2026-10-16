@@ -186,6 +186,7 @@ public class TelemetryEventPublisher {
                                             Long userId,
                                             BigDecimal extractedReading,
                                             BigDecimal confirmedReading,
+                                            String submittedUnit,
                                             BigDecimal confidence,
                                             String imageUrl,
                                             LocalDateTime readingAt,
@@ -198,8 +199,9 @@ public class TelemetryEventPublisher {
                                             LocalDateTime sourceUpdatedAt,
                                             CalculationParameters calculationParameters) {
         sendMeterReadingRecorded(meterReadingRecordedEvent(tenantId, schemeId, userId, extractedReading,
-                confirmedReading, confidence, imageUrl, readingAt, channel, readingDate, submissionStatus,
-                readingType, correlationId, sourceReadingId, sourceUpdatedAt, calculationParameters));
+                confirmedReading, submittedUnit, confidence, imageUrl, readingAt, channel, readingDate,
+                submissionStatus, readingType, correlationId, sourceReadingId, sourceUpdatedAt,
+                calculationParameters));
     }
 
     /** Publishes an event built by {@link #meterReadingRecordedEvent}, as the method above does. */
@@ -238,6 +240,7 @@ public class TelemetryEventPublisher {
                                                               Long userId,
                                                               BigDecimal extractedReading,
                                                               BigDecimal confirmedReading,
+                                                              String submittedUnit,
                                                               BigDecimal confidence,
                                                               String imageUrl,
                                                               LocalDateTime readingAt,
@@ -257,6 +260,7 @@ public class TelemetryEventPublisher {
                 .userId(toInt(userId))
                 .extractedReading(extractedReading)
                 .confirmedReading(confirmedReading)
+                .submittedUnit(submittedUnit)
                 .confidence(toConfidenceInt(confidence))
                 .imageUrl(imageUrl)
                 .readingAt(readingAt != null ? readingAt.toString() : null)

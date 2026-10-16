@@ -51,7 +51,13 @@ class RouteParityTest {
             "GET /api/v1/scheme/schemes/download",
             "GET /api/v1/scheme/schemes/mappings/download",
             // Analytics resync
-            "POST /api/v1/scheme/schemes/analytics-resync"
+            "POST /api/v1/scheme/schemes/analytics-resync",
+            // State master-data sync (JJM Brain) — operator surface
+            "GET /api/v1/scheme/state-sync/config",
+            "POST /api/v1/scheme/state-sync/runs",
+            "GET /api/v1/scheme/state-sync/runs",
+            "POST /api/v1/scheme/state-sync/schemes/refresh",
+            "GET /api/v1/scheme/state-sync/issues"
     );
 
     @Test

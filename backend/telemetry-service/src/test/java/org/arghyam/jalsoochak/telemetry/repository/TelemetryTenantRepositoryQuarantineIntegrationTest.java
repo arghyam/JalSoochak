@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
 import org.junit.jupiter.api.BeforeAll;
@@ -134,7 +135,8 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
     @Test
     void quarantinedRowIsNotTheLatestBaseline() {
         Optional<TelemetryConfirmedReadingSnapshot> snapshot =
-                repository().findLatestConfirmedReadingSnapshot(MIGRATED_SCHEMA, SCHEME, ReadingChannel.BFM, null);
+                repository().findLatestConfirmedReadingSnapshot(
+                        MIGRATED_SCHEMA, SCHEME, ReadingChannel.BFM, MeterRegister.STANDARD, null);
 
         assertTrue(snapshot.isPresent());
         assertEquals(0, snapshot.get().confirmedReading().compareTo(new BigDecimal("220")),
@@ -144,7 +146,8 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
     @Test
     void quarantinedRowIsNotTheBaselineBeforeALaterDate() {
         Optional<TelemetryConfirmedReadingSnapshot> snapshot = repository()
-                .findLatestConfirmedReadingSnapshotBeforeDate(MIGRATED_SCHEMA, SCHEME, ReadingChannel.BFM, DAY_3.plusDays(1), null);
+                .findLatestConfirmedReadingSnapshotBeforeDate(
+                        MIGRATED_SCHEMA, SCHEME, ReadingChannel.BFM, MeterRegister.STANDARD, DAY_3.plusDays(1), null);
 
         assertTrue(snapshot.isPresent());
         assertEquals(0, snapshot.get().confirmedReading().compareTo(new BigDecimal("220")));
@@ -155,7 +158,8 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
         // The band drives rollover resolution: a quarantined value must not shape which candidate the
         // resolver picks. The window is relative to today, so seed dates are reached with a wide span.
         List<DailyConfirmedReading> band = repository()
-                .findRecentDailyConfirmedReadings(MIGRATED_SCHEMA, SCHEME, ReadingChannel.BFM, null, 20000);
+                .findRecentDailyConfirmedReadings(
+                        MIGRATED_SCHEMA, SCHEME, ReadingChannel.BFM, MeterRegister.STANDARD, null, 20000);
 
         assertTrue(band.stream().noneMatch(r -> r.day().equals(DAY_3)),
                 "the quarantined day must not appear in the consumption band");
@@ -190,14 +194,16 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
         insertReading(MIGRATED_SCHEMA, 10, LocalDate.of(2026, 4, 1), "500", "corr-release", 1);
 
         assertEquals(1, storedQuarantineReason(10L));
-        assertTrue(repository.findLatestConfirmedReadingSnapshot(MIGRATED_SCHEMA, SCHEME, ReadingChannel.BFM, null)
+        assertTrue(repository.findLatestConfirmedReadingSnapshot(
+                MIGRATED_SCHEMA, SCHEME, ReadingChannel.BFM, MeterRegister.STANDARD, null)
                 .filter(s -> s.confirmedReading().compareTo(new BigDecimal("500")) == 0)
                 .isEmpty(), "while quarantined the row must not be a baseline");
 
         repository.applyQuarantineReason(MIGRATED_SCHEMA, 10L, 0);
 
         assertEquals(0, storedQuarantineReason(10L));
-        assertEquals(0, repository.findLatestConfirmedReadingSnapshot(MIGRATED_SCHEMA, SCHEME, ReadingChannel.BFM, null)
+        assertEquals(0, repository.findLatestConfirmedReadingSnapshot(
+                MIGRATED_SCHEMA, SCHEME, ReadingChannel.BFM, MeterRegister.STANDARD, null)
                         .orElseThrow().confirmedReading().compareTo(new BigDecimal("500")),
                 "clearing the marker releases the row into the baseline — this is what a passing "
                         + "correction does");
@@ -209,10 +215,11 @@ class TelemetryTenantRepositoryQuarantineIntegrationTest {
     void preMigrationSchemaKeepsItsLegacyBehaviour() {
         TelemetryTenantRepository repository = repository();
 
-        assertEquals(0, repository.findLatestConfirmedReadingSnapshot(PRE_MIGRATION_SCHEMA, SCHEME, ReadingChannel.BFM, null)
+        assertEquals(0, repository.findLatestConfirmedReadingSnapshot(
+                PRE_MIGRATION_SCHEMA, SCHEME, ReadingChannel.BFM, MeterRegister.STANDARD, null)
                 .orElseThrow().confirmedReading().compareTo(new BigDecimal("220")));
         assertTrue(repository.findLatestConfirmedReadingSnapshotBeforeDate(
-                        PRE_MIGRATION_SCHEMA, SCHEME, ReadingChannel.BFM, DAY_3, null)
+                        PRE_MIGRATION_SCHEMA, SCHEME, ReadingChannel.BFM, MeterRegister.STANDARD, DAY_3, null)
                 .isPresent());
         assertEquals(null,
                 repository.findFlowReadingDetailsByCorrelationId(PRE_MIGRATION_SCHEMA, "legacy-day2")

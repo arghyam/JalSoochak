@@ -15,6 +15,7 @@ final class PumpFixture {
     private String motorPowerUnit;
     private BigDecimal motorEfficiency;
     private BigDecimal unitsConsumedPerHour;
+    private BigDecimal powerFactor;
 
     private PumpFixture(long pumpId) {
         this.pumpId = pumpId;
@@ -55,8 +56,13 @@ final class PumpFixture {
         return this;
     }
 
+    PumpFixture powerFactor(String value) {
+        powerFactor = new BigDecimal(value);
+        return this;
+    }
+
     Pump build() {
         return new Pump(pumpId, dischargeCapacityLpm, pumpEfficiency, pumpHeadM, motorPower, motorPowerUnit,
-                motorEfficiency, unitsConsumedPerHour);
+                motorEfficiency, unitsConsumedPerHour, powerFactor);
     }
 }

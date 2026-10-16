@@ -40,7 +40,8 @@ public class SchemeCalculationInputRepository {
         SchemaNames.validate(schemaName);
         String sql = String.format("""
                 SELECT id, pump_discharge_capacity, pump_efficiency, pump_head,
-                       motor_power, motor_power_unit, motor_efficiency, units_consumed_per_hour
+                       motor_power, motor_power_unit, motor_efficiency, units_consumed_per_hour,
+                       power_factor
                 FROM %s.asset_pump_registry_table
                 WHERE scheme_id = ?
                   AND status = ?
@@ -55,7 +56,8 @@ public class SchemeCalculationInputRepository {
                 decimal(rs, "motor_power"),
                 rs.getString("motor_power_unit"),
                 decimal(rs, "motor_efficiency"),
-                decimal(rs, "units_consumed_per_hour")
+                decimal(rs, "units_consumed_per_hour"),
+                decimal(rs, "power_factor")
         ), schemeId, ACTIVE_PUMP_STATUS);
     }
 

@@ -192,5 +192,6 @@ CREATE TABLE tenant_as.asset_pump_registry_table (
     motor_power_unit         VARCHAR(20),
     motor_efficiency         FLOAT,
     units_consumed_per_hour  FLOAT,
+    power_factor             FLOAT,
     deleted_at               TIMESTAMP
 );

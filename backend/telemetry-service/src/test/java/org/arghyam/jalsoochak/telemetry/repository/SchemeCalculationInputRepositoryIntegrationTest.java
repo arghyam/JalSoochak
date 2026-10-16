@@ -61,8 +61,8 @@ class SchemeCalculationInputRepositoryIntegrationTest {
     private long insertPump(long schemeId, int status, LocalDateTime deletedAt) {
         return jdbcTemplate.queryForObject("INSERT INTO " + SCHEMA + ".asset_pump_registry_table "
                         + "(scheme_id, status, pump_discharge_capacity, pump_efficiency, pump_head, motor_power, "
-                        + " motor_power_unit, motor_efficiency, units_consumed_per_hour, deleted_at) "
-                        + "VALUES (?, ?, 500, 0.7, 40, 7.5, 'HP', 0.85, 5, ?) RETURNING id",
+                        + " motor_power_unit, motor_efficiency, units_consumed_per_hour, power_factor, deleted_at) "
+                        + "VALUES (?, ?, 500, 0.7, 40, 7.5, 'HP', 0.85, 5, 0.9, ?) RETURNING id",
                 Long.class, schemeId, status, deletedAt);
     }
 
@@ -116,6 +116,7 @@ class SchemeCalculationInputRepositoryIntegrationTest {
         assertThat(pump.motorPowerUnit()).isEqualTo("HP");
         assertThat(pump.motorEfficiency()).isEqualTo(new BigDecimal("0.85"));
         assertThat(pump.unitsConsumedPerHour()).isEqualByComparingTo("5");
+        assertThat(pump.powerFactor()).isEqualTo(new BigDecimal("0.9"));
     }
 
     @Test
@@ -132,6 +133,7 @@ class SchemeCalculationInputRepositoryIntegrationTest {
         assertThat(pump.motorPowerUnit()).isNull();
         assertThat(pump.motorEfficiency()).isNull();
         assertThat(pump.unitsConsumedPerHour()).isNull();
+        assertThat(pump.powerFactor()).isNull();
     }
 
     @Test

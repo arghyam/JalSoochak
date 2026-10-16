@@ -57,10 +57,26 @@ class AnalyticsKafkaConsumerTest {
     private FactService factService;
 
     @Mock
+    private org.arghyam.jalsoochak.analytics.service.SchemeReassignmentService schemeReassignmentService;
+
+    @Mock
     private NotificationDeliveryIngestionService notificationDeliveryIngestionService;
 
     @InjectMocks
     private AnalyticsKafkaConsumer consumer;
+
+    @Test
+    void consumeSchemeEvents_readingsReassigned_routesToTheReassignmentService() {
+        consumer.consumeSchemeEvents("""
+                {"eventType":"SCHEME_READINGS_REASSIGNED","tenantId":1,"fromSchemeId":99,"toSchemeId":10}
+                """);
+
+        ArgumentCaptor<org.arghyam.jalsoochak.analytics.dto.event.SchemeReadingsReassignedEvent> captor =
+                ArgumentCaptor.forClass(org.arghyam.jalsoochak.analytics.dto.event.SchemeReadingsReassignedEvent.class);
+        verify(schemeReassignmentService).reassign(captor.capture());
+        assertThat(captor.getValue().getFromSchemeId()).isEqualTo(99);
+        assertThat(captor.getValue().getToSchemeId()).isEqualTo(10);
+    }
 
     private static Object readField(Object target, String fieldName) {
         try {

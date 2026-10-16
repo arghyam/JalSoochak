@@ -42,7 +42,8 @@ public record CalculationParameters(
             BigDecimal motorPower,
             String motorPowerUnit,
             BigDecimal motorEfficiency,
-            BigDecimal unitsConsumedPerHour
+            BigDecimal unitsConsumedPerHour,
+            BigDecimal powerFactor
     ) {
     }
 }

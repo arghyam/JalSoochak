@@ -24,6 +24,12 @@ public class MeterReadingEvent {
      */
     private BigDecimal extractedReading;
     private BigDecimal confirmedReading;
+    /**
+     * {@code flow_reading_table.submitted_unit}, the UCUM code the reading arrived in; {@code kV.A.h}
+     * marks a reading off the kVAh register, whose values are in kVAh rather than the channel's
+     * standard unit. Analytics reads this exact name.
+     */
+    private String submittedUnit;
     private Integer confidence;
     private String imageUrl;
     private String readingAt;

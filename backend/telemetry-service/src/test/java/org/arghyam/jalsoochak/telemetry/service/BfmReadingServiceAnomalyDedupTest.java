@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.MeterRegister;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
@@ -168,7 +169,8 @@ class BfmReadingServiceAnomalyDedupTest {
                         .correlationId("ocr-correlation")
                         .build()
         );
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_up", 100L, ReadingChannel.BFM, null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
+                "tenant_up", 100L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("123"), ReadingTime.now().minusDays(1))));
         when(tenantConfigRepository.findConfigValue(anyInt(), anyString())).thenReturn(Optional.empty());
 

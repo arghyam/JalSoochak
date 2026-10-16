@@ -7,32 +7,47 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
- * A unit a reading can be submitted in, named by its UCUM code and tied to the one channel it
- * measures. A unit may also accept common non-UCUM spellings, such as {@code kWh} or {@code litre};
- * only {@link #code()} is ever stored.
+ * A unit a reading can be submitted in, named by its UCUM code and tied to the one channel and
+ * {@linkplain MeterRegister register} it measures. A unit may also accept common non-UCUM spellings,
+ * such as {@code kWh} or {@code litre}; only {@link #code()} is ever stored.
  *
- * <p>{@code flow_reading_table.confirmed_reading} always holds the channel's
- * {@linkplain ReadingChannel#standardUnit() standard unit}, because queries do arithmetic on that
- * column directly. {@code flow_reading_table.submitted_unit} stores {@link #code()} of the unit the
- * value arrived in.
+ * <p>{@code flow_reading_table.confirmed_reading} holds a value in its {@link #storedUnit()}: the
+ * channel's {@linkplain ReadingChannel#standardUnit() standard unit}, because queries do arithmetic on
+ * that column directly, except a kVAh reading, which is stored in kVAh because only the pumps' power
+ * factor turns it into kWh. {@code flow_reading_table.submitted_unit} stores {@link #code()} of the
+ * unit the value arrived in, which is what tells the registers apart.
  */
 public enum ReadingUnit {
     CUBIC_METRE("m3", ReadingChannel.BFM, BigDecimal.ONE, "m³"),
     KILOLITRE("kL", ReadingChannel.BFM, BigDecimal.ONE),
     LITRE("L", ReadingChannel.BFM, new BigDecimal("0.001"), "litre", "liter"),
     KILOWATT_HOUR("kW.h", ReadingChannel.ELM, BigDecimal.ONE, "kWh"),
+    KILOVOLT_AMPERE_HOUR("kV.A.h", ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, "kVAh"),
     MINUTE("min", ReadingChannel.PDU, BigDecimal.ONE),
     HOUR("h", ReadingChannel.PDU, new BigDecimal("60"), "hr");
 
     private final String code;
     private final ReadingChannel channel;
-    private final BigDecimal factorToStandardUnit;
+    private final MeterRegister register;
+    private final BigDecimal factorToStoredUnit;
     private final List<String> otherSpellings;
 
+    /** A unit of the channel's standard register, stored converted to the channel's standard unit. */
     ReadingUnit(String code, ReadingChannel channel, BigDecimal factorToStandardUnit, String... otherSpellings) {
+        this(code, channel, MeterRegister.STANDARD, factorToStandardUnit, otherSpellings);
+    }
+
+    /** The one unit of another register, stored as it is. */
+    ReadingUnit(String code, ReadingChannel channel, MeterRegister register, String... otherSpellings) {
+        this(code, channel, register, BigDecimal.ONE, otherSpellings);
+    }
+
+    ReadingUnit(String code, ReadingChannel channel, MeterRegister register, BigDecimal factorToStoredUnit,
+                String... otherSpellings) {
         this.code = code;
         this.channel = channel;
-        this.factorToStandardUnit = factorToStandardUnit;
+        this.register = register;
+        this.factorToStoredUnit = factorToStoredUnit;
         this.otherSpellings = List.of(otherSpellings);
     }
 
@@ -46,12 +61,25 @@ public enum ReadingUnit {
         return channel;
     }
 
+    /** The register a reading in this unit is taken from. */
+    public MeterRegister register() {
+        return register;
+    }
+
     /**
-     * {@code value}, given in this unit, expressed in the channel's standard unit. Exact: every factor
-     * is a terminating decimal, so the product needs no rounding.
+     * The unit a value given in this unit is stored in: the channel's standard unit, or this unit itself
+     * when it is the only unit of another register.
      */
-    public BigDecimal toStandardUnit(BigDecimal value) {
-        return value.multiply(factorToStandardUnit);
+    public ReadingUnit storedUnit() {
+        return register == MeterRegister.STANDARD ? channel.standardUnit().orElseThrow() : this;
+    }
+
+    /**
+     * {@code value}, given in this unit, expressed in {@link #storedUnit()}. Exact: every factor is a
+     * terminating decimal, so the product needs no rounding.
+     */
+    public BigDecimal toStoredUnit(BigDecimal value) {
+        return value.multiply(factorToStoredUnit);
     }
 
     /**

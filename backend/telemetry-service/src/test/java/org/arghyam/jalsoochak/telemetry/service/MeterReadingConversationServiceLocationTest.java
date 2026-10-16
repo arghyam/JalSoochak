@@ -262,7 +262,7 @@ class MeterReadingConversationServiceLocationTest {
         when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(eq(SCHEMA), eq(OPERATOR), any()))
                 .thenReturn(Optional.of(new TelemetrySchemeSelectionRecord(pendingRow, selectedScheme, "scheme-selection-x")));
         TelemetryFlowReadingDetails pending = new TelemetryFlowReadingDetails(
-                pendingRow, "scheme-selection-x", OPERATOR, BigDecimal.ZERO, BigDecimal.ZERO);
+                pendingRow, "scheme-selection-x", OPERATOR, BigDecimal.ZERO, BigDecimal.ZERO, null);
         when(telemetryTenantRepository.findLatestFlowReadingForDate(eq(SCHEMA), eq(selectedScheme), eq(OPERATOR), any()))
                 .thenReturn(Optional.of(pending));
         verdict(new LocationVerdict.Within(10.0d, 500.0d));

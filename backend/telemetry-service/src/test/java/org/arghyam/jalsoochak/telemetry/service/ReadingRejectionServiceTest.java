@@ -66,7 +66,8 @@ class ReadingRejectionServiceTest {
     private void latestReadingOn(LocalDate date) {
         when(telemetryTenantRepository.findLatestFlowReadingByOperator(SCHEMA, OPERATOR)).thenReturn(Optional.of(
                 new TelemetryLatestFlowReadingRecord(501L, 7L, OPERATOR, "corr-1", new BigDecimal("1234"),
-                        new BigDecimal("1234"), "https://img", date, null, ReadingChannel.BFM.getCode(), 0, null)));
+                        new BigDecimal("1234"), "https://img", date, null, ReadingChannel.BFM.getCode(), null, 0,
+                        null)));
     }
 
     private IntroResponse reject() {

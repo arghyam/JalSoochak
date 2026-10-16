@@ -101,6 +101,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
                 READING_DATE,
                 READING_AT,
                 ReadingChannel.BFM.getCode(),
+                null,
                 0,
                 null
         );

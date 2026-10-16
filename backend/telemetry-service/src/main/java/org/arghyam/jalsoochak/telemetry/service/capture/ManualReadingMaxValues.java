@@ -13,8 +13,9 @@ import java.math.BigDecimal;
 import java.util.Optional;
 
 /**
- * The largest value that may be typed in or asserted on a reading channel, in the channel's standard
- * unit. Configured per channel as {@code {"maxValues":{"BFM":"99999999"}}}: the tenant's
+ * The largest value that may be typed in or asserted on a reading channel, in the unit the value is
+ * stored in: the channel's standard unit, or kVAh, so an ELM maximum bounds either register's display.
+ * Configured per channel as {@code {"maxValues":{"BFM":"99999999"}}}: the tenant's
  * {@code TENANT_MANUAL_READING_MAX_VALUE} first, then the system's {@code MANUAL_READING_MAX_VALUE}
  * (tenant 0), channel by channel. tenant-service validates both on write.
  *

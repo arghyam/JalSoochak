@@ -48,4 +48,10 @@ public class MeterReadingEvent {
     private String sourceUpdatedAt;
     /** Pump and formula snapshot for ELM and PDU; null otherwise. */
     private CalculationParameters calculationParameters;
+    /**
+     * {@code flow_reading_table.submitted_unit}, the UCUM code the readings are in; {@code kV.A.h} for
+     * a kVAh reading. Null means the channel's standard unit, as on events from a telemetry-service
+     * that does not send it yet.
+     */
+    private String submittedUnit;
 }

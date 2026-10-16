@@ -154,6 +154,27 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
     }
 
     @Test
+    void aKvahRowStaysInKvah() {
+        targetRow(ReadingChannel.ELM, "kV.A.h", "5300");
+
+        CreateReadingResponse resp = update("5310.4");
+
+        assertEquals(true, resp.isSuccess());
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("5310.4"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL, "kV.A.h", ReportingChannel.WHATSAPP);
+    }
+
+    @Test
+    void aKwhRowStaysInKwh() {
+        targetRow(ReadingChannel.ELM, "kW.h", "4800");
+
+        update("4821.5");
+
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("4821.5"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL, "kW.h", ReportingChannel.WHATSAPP);
+    }
+
+    @Test
     void aPduRunLongerThanADayIsRejectedWithoutWritingAnything() {
         targetRow(ReadingChannel.PDU, "90");
         when(localizationService.localizeMessage(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE, "english"))
@@ -219,10 +240,15 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
     }
 
     private void targetRow(ReadingChannel channel, String confirmedReading) {
+        targetRow(channel, null, confirmedReading);
+    }
+
+    private void targetRow(ReadingChannel channel, String submittedUnit, String confirmedReading) {
         when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryLatestFlowReadingRecord(
                         22L, 10L, 1L, "corr-2", BigDecimal.ZERO, new BigDecimal(confirmedReading), "",
-                        TARGET_DATE, TARGET_DATE.atTime(7, 0), channel == null ? null : channel.getCode(), 0, TARGET_DATE.atTime(7, 0))));
+                        TARGET_DATE, TARGET_DATE.atTime(7, 0), channel == null ? null : channel.getCode(),
+                        submittedUnit, 0, TARGET_DATE.atTime(7, 0))));
     }
 
     private CreateReadingResponse update(String reading) {
