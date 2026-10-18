@@ -87,6 +87,9 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
+    @Mock
+    private ConversationSchemeResolver conversationSchemeResolver;
+
     @InjectMocks
     private MeterReadingConversationService service;
 
@@ -100,7 +103,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
     }
 
     @Test

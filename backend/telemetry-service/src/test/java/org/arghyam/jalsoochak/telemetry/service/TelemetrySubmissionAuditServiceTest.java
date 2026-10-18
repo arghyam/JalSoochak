@@ -3,7 +3,6 @@ package org.arghyam.jalsoochak.telemetry.service;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
-import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -15,7 +14,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
-import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -42,6 +40,8 @@ class TelemetrySubmissionAuditServiceTest {
     private OperatorContextService operatorContextService;
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
+    @Mock
+    private ConversationSchemeResolver conversationSchemeResolver;
 
     @InjectMocks
     private TelemetrySubmissionAuditService service;
@@ -120,32 +120,17 @@ class TelemetrySubmissionAuditServiceTest {
     class CaptureForContact {
 
         @Test
-        void prefersTodaysPendingSchemeSelection() {
+        void reportsTheSchemeOfTodaysConversation() {
             when(operatorContextService.resolveOperatorWithSchema(PHONE)).thenReturn(operator());
-            when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(
-                    anyString(), anyLong(), any(LocalDate.class)))
-                    .thenReturn(Optional.of(new TelemetrySchemeSelectionRecord(1L, 55L, "corr")));
+            when(conversationSchemeResolver.resolve(operator())).thenReturn(Optional.of(55L));
 
             assertThat(service.captureForContact(PHONE).schemeId()).isEqualTo(55L);
         }
 
         @Test
-        void fallsBackToTheOperatorsFirstMappedScheme() {
-            when(operatorContextService.resolveOperatorWithSchema(PHONE)).thenReturn(operator());
-            when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(
-                    anyString(), anyLong(), any(LocalDate.class))).thenReturn(Optional.empty());
-            when(telemetryTenantRepository.findFirstSchemeForUser(SCHEMA, 11L))
-                    .thenReturn(Optional.of(66L));
-
-            assertThat(service.captureForContact(PHONE).schemeId()).isEqualTo(66L);
-        }
-
-        @Test
         void reportsANullSchemeWhenTheOperatorHasNoMapping() {
             when(operatorContextService.resolveOperatorWithSchema(PHONE)).thenReturn(operator());
-            when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(
-                    anyString(), anyLong(), any(LocalDate.class))).thenReturn(Optional.empty());
-            when(telemetryTenantRepository.findFirstSchemeForUser(SCHEMA, 11L)).thenReturn(Optional.empty());
+            when(conversationSchemeResolver.resolve(operator())).thenReturn(Optional.empty());
 
             assertThat(service.captureForContact(PHONE).schemeId()).isNull();
         }
@@ -165,10 +150,6 @@ class TelemetrySubmissionAuditServiceTest {
         @Test
         void usesTheResolvedOperatorPhoneRatherThanTheSubmittedContactId() {
             when(operatorContextService.resolveOperatorWithSchema("abc")).thenReturn(operator());
-            when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(
-                    anyString(), anyLong(), any(LocalDate.class))).thenReturn(Optional.empty());
-            when(telemetryTenantRepository.findFirstSchemeForUser(anyString(), anyLong()))
-                    .thenReturn(Optional.empty());
 
             assertThat(service.captureForContact("abc").maskedPhone()).isEqualTo("****0001");
         }

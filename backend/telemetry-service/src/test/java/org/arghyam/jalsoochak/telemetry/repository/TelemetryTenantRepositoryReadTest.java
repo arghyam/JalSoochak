@@ -314,20 +314,6 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
         }
 
         @Test
-        void findUserIdByPhoneReturnsMappedOperatorId() {
-            onQuery("WHERE phone_number = ?", row(
-                    "id", 71L, "tenant_id", 3, "title", "Om",
-                    "email", "o@b.c", "phone_number", "919999900007", "language_id", 1));
-
-            assertThat(repository.findUserIdByPhone(SCHEMA, "919999900007")).contains(71L);
-        }
-
-        @Test
-        void findUserIdByPhoneReturnsEmptyForBlankPhone() {
-            assertThat(repository.findUserIdByPhone(SCHEMA, "")).isEmpty();
-        }
-
-        @Test
         void findUserIdByEmailIsNullForBlankEmail() {
             assertThat(repository.findUserIdByEmail(SCHEMA, "  ")).isNull();
             assertThat(repository.findUserIdByEmail(SCHEMA, null)).isNull();

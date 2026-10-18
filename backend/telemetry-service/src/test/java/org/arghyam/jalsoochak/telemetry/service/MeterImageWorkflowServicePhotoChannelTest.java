@@ -17,8 +17,6 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDate;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -50,6 +48,8 @@ class MeterImageWorkflowServicePhotoChannelTest {
     private TenantConfigRepository tenantConfigRepository;
     @Mock
     private UserChannelPreferenceRepository userChannelPreferenceRepository;
+    @Mock
+    private ConversationSchemeResolver conversationSchemeResolver;
 
     private MeterImageWorkflowService service;
 
@@ -63,7 +63,8 @@ class MeterImageWorkflowServicePhotoChannelTest {
                 new ConversationLocalizationService(operatorContextService),
                 tenantConfigRepository,
                 userChannelPreferenceRepository,
-                new ObjectMapper());
+                new ObjectMapper(),
+                conversationSchemeResolver);
     }
 
     @ParameterizedTest(name = "language={0}")
@@ -76,9 +77,7 @@ class MeterImageWorkflowServicePhotoChannelTest {
                 SCHEMA, new TelemetryOperator(11L, 22, "name", "name@example.com", CONTACT_ID, null));
         when(operatorContextService.resolveOperatorWithSchema(CONTACT_ID)).thenReturn(operator);
         when(operatorContextService.resolveOperatorLanguage(operator, 22)).thenReturn(language);
-        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(eq(SCHEMA), eq(11L), any(LocalDate.class)))
-                .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findFirstSchemeForUser(SCHEMA, 11L)).thenReturn(Optional.of(101L));
+        when(conversationSchemeResolver.require(operator)).thenReturn(101L);
         when(inboundMediaService.downloadImage(null, "https://media.glific.example/meter.jpg")).thenReturn(IMAGE);
         when(inboundMediaService.uploadImage(CONTACT_ID, IMAGE)).thenReturn(STORED_URL);
         when(bfmReadingService.createReading(any(), eq(SCHEMA), any(), eq(CONTACT_ID), eq(false), eq(OcrRetryMode.RESILIENT)))

@@ -32,14 +32,15 @@ import java.util.Set;
  * request. Spring Boot defaults {@code spring.mvc.dispatch-options-request} to {@code true}, so
  * {@code RequestMappingHandlerMapping.handleNoMatch} hands an unmatched OPTIONS to the framework's
  * built-in {@code HttpOptionsHandler}, which enumerates the mapped methods into {@code Allow} and
- * adds an empty {@code Accept-Patch}. Nothing intercepted it because this service runs without Spring
- * Security — see {@link WebhookAuthFilter} for why that is deliberate — and because neither
+ * adds an empty {@code Accept-Patch}. Nothing intercepted it because this service then ran without
+ * Spring Security — see {@link WebhookAuthFilter} for why the webhooks still do — and because neither
  * hand-rolled auth filter challenges a non-POST request on the chatbot webhook paths.
  *
  * <p><b>An allowlist, not a denylist.</b> The audit asked for OPTIONS/TRACE/TRACK to be disabled;
  * permitting only {@link #ALLOWED_METHODS} answers that and also covers {@code CONNECT} and any
- * invented method without enumerating them. {@code PATCH} is in the set because
- * {@code PATCH /api/v1/telemetry/schemes/{id}/yesterday-final-reading} is a live ingestion route.
+ * invented method without enumerating them. {@code PATCH} is in the set because the SO/SDO
+ * correction, {@code PATCH /api/v1/telemetry/staff/schemes/{id}/yesterday-final-reading}, is a live
+ * route.
  *
  * <p><b>Why {@code spring.mvc.dispatch-options-request=false} was rejected.</b> It makes the
  * disclosure strictly worse. {@code FrameworkServlet.doOptions} only returns early when the dispatch
@@ -56,9 +57,9 @@ import java.util.Set;
  * served. Rejecting before the dispatcher closes that path too.
  *
  * <p><b>No CORS preflight carve-out.</b> This service publishes no {@code CorsConfigurationSource},
- * so a genuine cross-origin preflight can only ever be rejected, and no browser client calls
- * telemetry-service — the chatbot and the partner ingestion callers are both server-to-server. Rather
- * than carry an unused conditional, {@code DisallowedHttpMethodFilterOrderTest} asserts that no such
+ * so a genuine cross-origin preflight can only ever be rejected. Its one browser client, the officer
+ * web UI, is served from the same origin and sends no preflight; the chatbot and the partner ingestion
+ * callers are server-to-server. Rather than carry an unused conditional, {@code DisallowedHttpMethodFilterOrderTest} asserts that no such
  * bean exists, so adding CORS here later fails the build and forces this decision to be revisited.
  *
  * <p><b>Why a filter and not a {@code HandlerInterceptor}.</b> Same reason as
@@ -82,7 +83,8 @@ public class DisallowedHttpMethodFilter extends OncePerRequestFilter {
 
     /**
      * Runs after {@link RequestCorrelationFilter} (10) so rejections carry the request id in the MDC,
-     * and ahead of {@link TelemetryApiKeyAuthFilter} (20), {@link WebhookAuthFilter} (30) and
+     * and ahead of Spring Security's staff chain ({@code spring.security.filter.order}, 18),
+     * {@link TelemetryApiKeyAuthFilter} (20), {@link WebhookAuthFilter} (30) and
      * {@link InternalAuthFilter} (40) so a disallowed method never triggers an API-key lookup against
      * the database and never reaches {@link TenantInterceptor}. Every path answers an identical 405,
      * so answering before authentication reveals nothing that authenticating first would have

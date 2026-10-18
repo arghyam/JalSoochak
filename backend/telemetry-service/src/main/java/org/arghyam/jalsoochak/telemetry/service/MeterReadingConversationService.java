@@ -24,7 +24,6 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRec
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryPendingMeterChangeRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
-import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.service.capture.CaptureInput;
 import org.arghyam.jalsoochak.telemetry.service.capture.CaptureOutcome;
@@ -192,6 +191,7 @@ public class MeterReadingConversationService {
     private final ReadingRepublisher readingRepublisher;
     private final SubmittedValueCapture submittedValueCapture;
     private final PduDayLimit pduDayLimit;
+    private final ConversationSchemeResolver conversationSchemeResolver;
 
     public MeterReadingConversationService(OperatorContextService operatorContextService,
                                            ConversationLocalizationService localizationService,
@@ -204,7 +204,8 @@ public class MeterReadingConversationService {
                                            ReadingChannelResolver readingChannelResolver,
                                            ReadingRepublisher readingRepublisher,
                                            SubmittedValueCapture submittedValueCapture,
-                                           PduDayLimit pduDayLimit) {
+                                           PduDayLimit pduDayLimit,
+                                           ConversationSchemeResolver conversationSchemeResolver) {
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
         this.tenantConfigRepository = tenantConfigRepository;
@@ -217,6 +218,7 @@ public class MeterReadingConversationService {
         this.readingRepublisher = readingRepublisher;
         this.submittedValueCapture = submittedValueCapture;
         this.pduDayLimit = pduDayLimit;
+        this.conversationSchemeResolver = conversationSchemeResolver;
     }
 
     public IntroResponse meterChangeMessage(IntroRequest request) {
@@ -294,7 +296,7 @@ public class MeterReadingConversationService {
             String selectedReason = resolveSelection(request.getReason(), reasons)
                     .orElseThrow(() -> new IllegalStateException("Invalid meter change reason selection"));
 
-            Long schemeId = resolveSchemeForToday(operatorWithSchema);
+            Long schemeId = conversationSchemeResolver.require(operatorWithSchema);
 
             String correlationId = telemetryTenantRepository.upsertPendingMeterChangeRecord(
                     operatorWithSchema.schemaName(),
@@ -618,7 +620,7 @@ public class MeterReadingConversationService {
             String selectedReason = selectedReasonNode.path("name").asText().trim();
             String selectedKey = selectedReasonNode.path("id").asText().trim();
 
-            Long schemeId = resolveSchemeForToday(operatorWithSchema);
+            Long schemeId = conversationSchemeResolver.require(operatorWithSchema);
 
             String correlationId = telemetryTenantRepository.upsertPendingMeterChangeRecord(
                     operatorWithSchema.schemaName(),
@@ -732,7 +734,7 @@ public class MeterReadingConversationService {
             String responseSelectedKey = normalizeIssueReportSelectedKey(selectedKey);
             String anomalySelectedKey = isReasonKey(selectedKey) ? responseSelectedKey : selectedKey;
 
-            Long schemeId = resolveSchemeForToday(operatorWithSchema);
+            Long schemeId = conversationSchemeResolver.require(operatorWithSchema);
             List<Long> analyticsUserIds = resolveAnalyticsUserIds(
                     operatorWithSchema.schemaName(),
                     schemeId,
@@ -969,7 +971,7 @@ public class MeterReadingConversationService {
                 );
             }
 
-            Long schemeId = resolveSchemeForToday(operatorWithSchema);
+            Long schemeId = conversationSchemeResolver.require(operatorWithSchema);
             List<Long> analyticsUserIds = resolveAnalyticsUserIds(
                     operatorWithSchema.schemaName(),
                     schemeId,
@@ -1049,7 +1051,7 @@ public class MeterReadingConversationService {
                 throw new IllegalStateException("Operator tenant could not be resolved");
             }
 
-            Long schemeId = resolveSchemeForToday(operatorWithSchema);
+            Long schemeId = conversationSchemeResolver.require(operatorWithSchema);
             List<Long> analyticsUserIds = resolveAnalyticsUserIds(
                     operatorWithSchema.schemaName(),
                     schemeId,
@@ -1326,18 +1328,7 @@ public class MeterReadingConversationService {
             }
             String languageKey = localizationService.normalizeLanguageKey(operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
 
-            Long schemeId = telemetryTenantRepository
-                    .findLatestPendingSchemeSelectionForDate(
-                            operatorWithSchema.schemaName(),
-                            operatorWithSchema.operator().id(),
-                            ReadingTime.today()
-                    )
-                    .map(TelemetrySchemeSelectionRecord::schemeId)
-                    .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
-                            operatorWithSchema.schemaName(),
-                            operatorWithSchema.operator().id()
-                    ))
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = conversationSchemeResolver.require(operatorWithSchema);
             List<Long> analyticsUserIds = resolveAnalyticsUserIds(
                     operatorWithSchema.schemaName(),
                     schemeId,
@@ -1394,13 +1385,16 @@ public class MeterReadingConversationService {
             // - If isManualReading=false, compare against the most recent confirmed reading strictly before today.
             // - If the meter is replaced, load latest snapshot for anomaly/audit context only.
             // - A PDU reading is one run's duration rather than a running total, so it has none.
+            // The row this value is written over is never its own baseline: after a photo it holds the
+            // OCR value the operator is correcting, so a misread low value would refuse the right one.
             boolean compareWithLatest = request.getIsManualReading() == null || Boolean.TRUE.equals(request.getIsManualReading());
             Optional<TelemetryConfirmedReadingSnapshot> previousSnapshotOpt;
             if (resolvedChannel == ReadingChannel.PDU) {
                 previousSnapshotOpt = Optional.empty();
             } else if (isMeterReplaced || compareWithLatest) {
                 previousSnapshotOpt = telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
-                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, captured.register(), null);
+                        operatorWithSchema.schemaName(), schemeId, resolvedChannel, captured.register(),
+                        rowTheManualValueReplaces(operatorWithSchema, schemeId, pendingOpt, today));
             } else {
                 previousSnapshotOpt = telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate(
                         operatorWithSchema.schemaName(), schemeId, resolvedChannel, captured.register(), today,
@@ -1785,11 +1779,7 @@ public class MeterReadingConversationService {
             // The scheme selected earlier in this conversation, as the image and manual-reading paths
             // resolve it. The first mapped scheme is only a fallback: checking it for an operator
             // with several schemes measured the boundary of a scheme they were not submitting for.
-            Long schemeId = telemetryTenantRepository
-                    .findLatestPendingSchemeSelectionForDate(operatorWithSchema.schemaName(), operatorId, ReadingTime.today())
-                    .map(TelemetrySchemeSelectionRecord::schemeId)
-                    .or(() -> telemetryTenantRepository.findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorId))
-                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long schemeId = conversationSchemeResolver.require(operatorWithSchema);
 
             String correlationId = null;
             Long readingId = null;
@@ -1925,7 +1915,7 @@ public class MeterReadingConversationService {
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
 
-            Long schemeId = resolveSchemeForToday(operatorWithSchema);
+            Long schemeId = conversationSchemeResolver.require(operatorWithSchema);
 
             LocalDate today = ReadingTime.today();
 
@@ -2284,26 +2274,6 @@ public class MeterReadingConversationService {
             }
         }
         return out.toString();
-    }
-
-    /**
-     * NUDGE-SCHEME: the scheme this conversation is about — the one the operator picked today via
-     * {@code /scheme/selected} — falling back to their first mapped scheme, which is also the only
-     * one for a single-scheme operator (the flow asks only when there are several).
-     */
-    private Long resolveSchemeForToday(TelemetryOperatorWithSchema operatorWithSchema) {
-        return telemetryTenantRepository
-                .findLatestPendingSchemeSelectionForDate(
-                        operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        ReadingTime.today()
-                )
-                .map(TelemetrySchemeSelectionRecord::schemeId)
-                .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
-                        operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id()
-                ))
-                .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
     }
 
     private List<Long> resolveAnalyticsUserIds(String schemaName, Long schemeId, Long fallbackUserId) {

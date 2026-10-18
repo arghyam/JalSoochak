@@ -225,7 +225,7 @@ class WebhookAuthFilterTest {
                 "PUT,   /api/v1/telemetry/readings",
                 "POST,  /api/v1/telemetry/readings/reset-latest",
                 "POST,  /api/v1/telemetry/readings/formats/assam",
-                "PATCH, /api/v1/telemetry/schemes/7/yesterday-final-reading",
+                "PATCH, /api/v1/telemetry/staff/schemes/7/yesterday-final-reading",
                 "GET,   /actuator/health",
                 "GET,   /actuator/prometheus",
                 "GET,   /v3/api-docs",

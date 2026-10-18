@@ -75,9 +75,6 @@ class SchemeServiceImplReportStorageTest {
     @Spy
     StorageProperties storageProperties = storageProperties();
 
-    @Mock
-    PiiEncryptionService piiEncryptionService;
-
     @InjectMocks
     SchemeServiceImpl schemeService;
 

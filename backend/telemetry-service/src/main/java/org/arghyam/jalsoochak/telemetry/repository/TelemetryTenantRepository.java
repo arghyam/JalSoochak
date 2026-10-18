@@ -347,6 +347,56 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /**
+     * NUDGE-SCHEME: the scheme of the operator's latest row on {@code readingDate} last written through
+     * WhatsApp, among the schemes they are still actively mapped to.
+     *
+     * <p>This finds the selected scheme once {@link #findLatestPendingSchemeSelectionForDate} no longer
+     * can: a meter photo is written onto the {@code scheme-selection-*} placeholder and replaces its
+     * correlation id, so every later step of the same conversation used to fall back to the operator's
+     * first mapped scheme. Every row a conversation writes is on the scheme it selected, so the
+     * operator's latest one names it.
+     *
+     * <p>Rows are ordered by reading time, not id: re-selecting a scheme re-points an older placeholder
+     * in place, so its id can be older than another scheme's rows from earlier in the day. An officer's
+     * or an API's correction moves no reading time, and it overwrites {@code reported_via_id}, so a
+     * corrected row drops out of this lookup instead of taking it over. Rows written through the
+     * reading API are left out, so a state-IT submission for another scheme never redirects the
+     * conversation. Empty on a pre-V61 schema, which has no {@code reported_via_id} to tell them apart.
+     */
+    public Optional<Long> findSchemeOfLatestWhatsAppRowForDate(String schemaName,
+                                                               Long operatorId,
+                                                               LocalDate readingDate) {
+        validateSchemaName(schemaName);
+        if (!hasReportedViaColumn(schemaName)) {
+            return Optional.empty();
+        }
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT fr.scheme_id
+                FROM %1$s.flow_reading_table fr
+                WHERE fr.created_by = ?
+                  AND fr.reading_date = ?
+                  AND fr.%2$s = ?
+                  AND fr.deleted_at IS NULL
+                  AND EXISTS (
+                      SELECT 1
+                      FROM %1$s.user_scheme_mapping_table usm
+                      JOIN %1$s.scheme_master_table sm ON sm.id = usm.scheme_id
+                      WHERE usm.user_id = fr.created_by
+                        AND usm.scheme_id = fr.scheme_id
+                        AND usm.status = 1
+                        AND usm.deleted_at IS NULL
+                        AND sm.deleted_at IS NULL
+                  )
+                ORDER BY fr.%3$s DESC, fr.id DESC
+                LIMIT 1
+                """, schemaName, REPORTED_VIA_COLUMN, timeColumn);
+        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("scheme_id")),
+                operatorId, readingDate, ReportingChannel.WHATSAPP.getCode());
+        return rows.stream().findFirst();
+    }
+
     public String upsertPendingSchemeSelectionRecord(String schemaName,
                                                      Long schemeId,
                                                      Long operatorId,
@@ -3025,18 +3075,26 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst().orElse(null);
     }
 
-    public Optional<Long> findUserIdByPhone(String schemaName, String phoneNumber) {
+    /**
+     * The live, active user whose {@code uuid} is {@code uuid}. user-service overwrites {@code uuid}
+     * with the Keycloak user id at provisioning, so this resolves the holder of a staff token from its
+     * subject. An officer deactivated since the token was issued resolves to nothing.
+     */
+    public Optional<Long> findUserIdByUuid(String schemaName, String uuid) {
         validateSchemaName(schemaName);
-        Optional<TelemetryOperator> operatorOpt = findOperatorByPhone(schemaName, phoneNumber);
-        return operatorOpt.map(TelemetryOperator::id);
-    }
-
-    private Optional<TelemetryOperator> findOperatorByPhone(String schemaName, String phoneNumber) {
-        String normalized = normalizePhone(phoneNumber);
-        if (normalized == null || normalized.isBlank()) {
+        if (uuid == null || uuid.isBlank()) {
             return Optional.empty();
         }
-        return findOperatorByPhone(schemaName, phoneNumber, normalized);
+        String sql = String.format("""
+                SELECT id
+                FROM %s.user_table
+                WHERE uuid = ?
+                  AND status = 1
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """, schemaName);
+        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), uuid.trim());
+        return rows.stream().findFirst();
     }
 
     private Long toLong(Object value) {

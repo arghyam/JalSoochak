@@ -3,7 +3,6 @@ package org.arghyam.jalsoochak.telemetry.service;
 import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CanonicalReadingRequest;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
-import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.springframework.stereotype.Service;
@@ -20,6 +19,7 @@ public class TelemetrySubmissionAuditService {
 
     private final OperatorContextService operatorContextService;
     private final TelemetryTenantRepository telemetryTenantRepository;
+    private final ConversationSchemeResolver conversationSchemeResolver;
 
     private final Map<LocalDate, Set<String>> dailyUniqueSubmitters = new ConcurrentHashMap<>();
 
@@ -35,7 +35,7 @@ public class TelemetrySubmissionAuditService {
             String resolvedPhone = operatorWithSchema.operator().phoneNumber();
             maskedPhone = maskPhone(resolvedPhone);
             uniqueKey = normalizePhone(resolvedPhone);
-            schemeId = resolveActiveScheme(operatorWithSchema).orElse(null);
+            schemeId = conversationSchemeResolver.resolve(operatorWithSchema).orElse(null);
         } catch (Exception ignored) {
             // Best-effort logging only. Controller logs must not depend on audit resolution.
         }
@@ -86,19 +86,6 @@ public class TelemetrySubmissionAuditService {
         Set<String> submitters = dailyUniqueSubmitters.computeIfAbsent(date, ignored -> ConcurrentHashMap.newKeySet());
         submitters.add(effectiveKey);
         return submitters.size();
-    }
-
-    private Optional<Long> resolveActiveScheme(TelemetryOperatorWithSchema operatorWithSchema) {
-        return telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(
-                        operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        ReadingTime.today()
-                )
-                .map(TelemetrySchemeSelectionRecord::schemeId)
-                .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
-                        operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id()
-                ));
     }
 
     private Optional<Long> resolveCanonicalSchemeId(TelemetryOperatorWithSchema operatorWithSchema,

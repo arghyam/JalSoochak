@@ -281,7 +281,6 @@ class DisallowedHttpMethodFilterTest {
                     {"PUT", "/api/v1/telemetry/readings"},
                     {"POST", "/api/v1/telemetry/readings/formats/assam"},
                     {"POST", "/api/v1/telemetry/readings/reset-latest"},
-                    {"PATCH", "/api/v1/telemetry/schemes/42/yesterday-final-reading"},
             };
 
             for (String[] route : routes) {
@@ -295,6 +294,19 @@ class DisallowedHttpMethodFilterTest {
                         .isNotNull();
                 assertThat(response.getStatus()).isEqualTo(200);
             }
+        }
+
+        @Test
+        @DisplayName("the SO/SDO staff correction is untouched")
+        void staffCorrectionRouteIsUntouched() throws Exception {
+            MockFilterChain chain = new MockFilterChain();
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter().doFilter(request("PATCH", "/api/v1/telemetry/staff/schemes/42/yesterday-final-reading"),
+                    response, chain);
+
+            assertThat(chain.getRequest()).isNotNull();
+            assertThat(response.getStatus()).isEqualTo(200);
         }
 
         @Test

@@ -42,6 +42,10 @@ defaults, is in its `application.yml`):
 - `STORAGE_BUCKET`
 - `STORAGE_PUBLIC_BASE_URL`
 
+telemetry-service validates Keycloak tokens on `/api/v1/telemetry/staff/**`, so it needs
+`KEYCLOAK_ISSUER_URI` like the other services. The default is the production realm: set it to the
+environment's own realm everywhere else, or every staff request gets `401`.
+
 ---
 
 ## Auth & Users (`user-service` · port 8082)
@@ -246,7 +250,7 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 
 ## Telemetry (`telemetry-service` · port 8084)
 
-Not behind the gateway's JWT check; each family has its own credential. The 27 chatbot webhooks
+Not behind the gateway's JWT check, apart from `/staff`; each other family has its own credential. The 27 chatbot webhooks
 (`X-Webhook-Token`) are listed in `WebhookRoutes`, and include
 `POST /api/v1/telemetry/reject-latest-reading`, which resets the operator's reading from today after
 they reject the value read from their photo.
@@ -257,7 +261,7 @@ they reject the value read from their photo.
 | PUT | `/api/v1/telemetry/readings` | Correct a submitted reading (`X-Api-Key`) |
 | POST | `/api/v1/telemetry/readings/formats/{format}` | Submit a reading in a registered partner format (`X-Api-Key`) |
 | POST | `/api/v1/telemetry/readings/reset-latest` | Reset the operator's latest reading, whatever its date (`X-Api-Key`) |
-| PATCH | `/api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading` | Correct a scheme's previous-day closing reading (`X-Api-Key`) |
+| PATCH | `/api/v1/telemetry/staff/schemes/{schemeId}/yesterday-final-reading` | SO/SDO correction of a scheme's latest BFM reading (officer's JWT; see *Telemetry service — SO/SDO Fix-readings save*) |
 | POST | `/api/v1/telemetry/internal/readings/republish` | Re-send stored ELM/PDU readings to analytics (`X-Internal-Token` + `X-Tenant-Code`; see below) |
 
 ---
@@ -332,8 +336,8 @@ The tables below list every endpoint that changed across all services. If your f
 > `TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT` is the kill switch, `OFF` is for local development.
 >
 > Note this is a **different credential** from the `X-Api-Key` used by the partner ingestion
-> endpoints (`/readings`, `/readings/formats/{format}`, `/schemes/{id}/yesterday-final-reading`),
-> which share the same `/api/v1/telemetry` prefix.
+> endpoints (`/readings`, `/readings/formats/{format}`), which share the same `/api/v1/telemetry`
+> prefix.
 
 ### Partner ingestion — the optional `channel` parameter
 
@@ -344,7 +348,7 @@ operator's stored channel preference; omitted, the preference decides and falls 
 is what every caller did before the field existed.
 
 An unsupported value returns `400` with `errorCode: CHANNEL_NOT_SUPPORTED`. `PUT /readings` and
-`PATCH /schemes/{id}/yesterday-final-reading` do not take it — a correction keeps the channel
+`PATCH /staff/schemes/{id}/yesterday-final-reading` do not take it — a correction keeps the channel
 recorded when the reading was first submitted.
 
 ### Partner ingestion — the optional `reading_unit` parameter
@@ -367,7 +371,7 @@ Only these spellings are accepted. An alternative spelling is stored as the unit
 spellings, such as plurals like `litres` or `hrs`, are rejected rather than guessed at. The channel is
 the one the reading is recorded under: on `POST`, the declared `channel` or else the operator's
 stored preference; on `PUT`, the channel of the reading being corrected.
-`PATCH /schemes/{id}/yesterday-final-reading` does not take a unit; its value is always in `m3`.
+`PATCH /staff/schemes/{id}/yesterday-final-reading` does not take a unit; its value is always in `m3`.
 
 **kVAh readings.** An electricity meter may show apparent energy (kVAh) instead of, or as well as,
 active energy (kWh). Each is its own running total, or register, so a kVAh value is stored in kVAh as
@@ -525,6 +529,40 @@ WHERE tenant_id = :tenantId AND channel IN (2, 3) AND source_reading_id IS NULL;
 Only readings telemetry still holds are sent again, so a fact row whose reading has since been
 deleted doesn't come back. Don't link the old rows to their readings by `correlation_id` instead:
 the WhatsApp flows share one correlation id across several readings (analytics V48).
+
+---
+
+### Telemetry service — SO/SDO Fix-readings save
+
+| Old | New | Notes |
+|-----|-----|-------|
+| `PATCH /api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading` | `PATCH /api/v1/telemetry/staff/schemes/{schemeId}/yesterday-final-reading` | The officer's own JWT instead of `X-Api-Key`; `phoneNumber` dropped from the body; `X-Tenant-Code` not read |
+| `phoneNumber` on each item of `GET /api/v1/scheme/schemes/yesterday-final-readings` | — (removed) | It was the caller's own number, which only the old `PATCH` body needed |
+
+The new route takes `Authorization: Bearer <token>` from a section or sub-divisional officer
+(`USER_TYPE_SECTION_OFFICER`, `USER_TYPE_SUB_DIVISIONAL_OFFICER`). The tenant comes from the token's
+`tenant_state_code` and the officer from its `sub`, which must be the `user_table.uuid` of an active,
+undeleted user mapped to the scheme. The body is `{ "reading": <m3, greater than 0> }`; an optional `?date=YYYY-MM-DD` targets
+that day's latest BFM reading instead of the scheme's latest. The corrected row is recorded as
+reported via `WEB` (`channel_master_table` id 10, V66).
+
+| Status | When | Body |
+|--------|------|------|
+| `200` | Corrected | `{ success, schemeId, readingDate, finalReading, message }` |
+| `400` | Invalid or malformed body, or a value the BFM capture rules refuse | The same envelope, `success: false` |
+| `401` | No token, or an invalid one | None; `WWW-Authenticate: Bearer` |
+| `403` | Not a section or sub-divisional officer | None |
+| `403` | Unknown tenant claim, no active user for `sub`, or not mapped to the scheme | The envelope |
+| `404` | No submitted BFM reading to correct | The envelope |
+
+**Deploying**, in this order:
+
+1. tenant-service, which applies V66. Until it has, every correction fails with `500` on
+   `flow_reading_table.reported_via_id`'s foreign key.
+2. telemetry-service, with `KEYCLOAK_ISSUER_URI` set (see *Required Environment Variables*), together
+   with the officer UI: the old route is gone.
+3. api-gateway, at any time. It now asks for a valid token on `/staff`, in both path forms, instead
+   of passing it through.
 
 ---
 

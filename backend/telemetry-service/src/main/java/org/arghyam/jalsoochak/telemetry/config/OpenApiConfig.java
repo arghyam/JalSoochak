@@ -16,6 +16,9 @@ import io.swagger.v3.oas.models.servers.Server;
 @Configuration
 public class OpenApiConfig {
 
+    /** OpenAPI name of the Keycloak JWT scheme; referenced by {@code @SecurityRequirement}. */
+    public static final String BEARER_SCHEME = "Bearer";
+
     /** OpenAPI name of the {@code X-Api-Key} scheme; referenced by {@code @SecurityRequirement}. */
     public static final String API_KEY_SCHEME = "ApiKey";
 
@@ -40,17 +43,18 @@ public class OpenApiConfig {
                         new Server().url("http://localhost:8080").description("Local API gateway (:8080)"),
                         new Server().url("http://localhost:8089").description("Local service (direct, this application.yml)"),
                         new Server().url("http://localhost:8084").description("Local service (README default :8084)")))
-                .addSecurityItem(new SecurityRequirement().addList("Bearer"))
+                .addSecurityItem(new SecurityRequirement().addList(BEARER_SCHEME))
                 .components(new Components()
-                        .addSecuritySchemes("Bearer",
+                        // The SO/SDO staff routes authenticate with the officer's Keycloak token,
+                        // checked in SecurityConfig.
+                        .addSecuritySchemes(BEARER_SCHEME,
                                 new SecurityScheme()
                                         .type(SecurityScheme.Type.HTTP)
                                         .scheme("bearer")
                                         .bearerFormat("JWT"))
-                        // Server-to-server ingestion (the /readings routes and the yesterday-final-reading
-                        // correction) authenticates with a per-tenant API key, not a JWT. Declared here so
-                        // the published contract states the requirement instead of leaving readers to infer
-                        // it from the handler code.
+                        // Server-to-server ingestion (the /readings routes) authenticates with a per-tenant
+                        // API key, not a JWT. Declared here so the published contract states the
+                        // requirement instead of leaving readers to infer it from the handler code.
                         .addSecuritySchemes(API_KEY_SCHEME,
                                 new SecurityScheme()
                                         .type(SecurityScheme.Type.APIKEY)

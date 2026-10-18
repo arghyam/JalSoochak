@@ -10,10 +10,10 @@ import java.util.Set;
  * <p><b>Why a closed allowlist rather than a prefix rule on {@code /api/v1/telemetry/**}.</b>
  * That prefix is shared with the vendor ingestion endpoints on {@code ReadingIngestController}
  * and {@code MultiFormatReadingController}, which authenticate with a different credential
- * ({@code X-Api-Key}, issued per tenant to state IT departments). {@code /readings} and
- * {@code /schemes} are each shared prefixes across both families — {@code POST /schemes} is a chatbot
- * webhook while {@code PATCH /schemes/{id}/yesterday-final-reading} is an ingestion route. A prefix
- * rule would therefore reject vendor traffic that carries the correct credential for its own family.
+ * ({@code X-Api-Key}, issued per tenant to state IT departments). {@code /readings} is a shared
+ * prefix across both families — {@code POST /readings/whatsapp} is a chatbot webhook while
+ * {@code POST /readings} is an ingestion route. A prefix rule would therefore reject vendor traffic
+ * that carries the correct credential for its own family.
  *
  * <p><b>The allowlist's weakness, and how it is closed.</b> A newly added webhook would be silently
  * unprotected. {@code WebhookRouteCoverageTest} asserts this set is exactly equal to the routes
