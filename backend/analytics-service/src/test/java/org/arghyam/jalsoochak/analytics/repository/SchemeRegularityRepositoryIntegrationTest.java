@@ -22,6 +22,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 @JdbcTest
 @Testcontainers
@@ -494,6 +495,9 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(own.totalWaterSuppliedLiters()).isEqualTo(districtAsChild.totalWaterSuppliedLiters());
         assertThat(own.totalAchievedFhtcCount()).isEqualTo(districtAsChild.totalAchievedFhtcCount());
         assertThat(own.schemeCount()).isEqualTo(districtAsChild.schemeCount());
+        // The LPCD denominator is de-duplicated the same way: Scheme A's FHTC 10 on its one supply day.
+        assertThat(own.totalSuppliedFhtcDays()).isEqualTo(10L);
+        assertThat(own.totalSuppliedFhtcDays()).isEqualTo(districtAsChild.totalSuppliedFhtcDays());
     }
 
     @Test
@@ -529,6 +533,50 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(own.schemeCount()).isEqualTo(1);
         assertThat(own.totalWaterSuppliedLiters()).isEqualTo(200L);
         assertThat(own.totalAchievedFhtcCount()).isEqualTo(10L);
+    }
+
+    @Test
+    void suppliedFhtcDays_countFhtcOnlyOnDaysTheSchemeSuppliedWater_onEveryLiveWaterQuery() {
+        // Seeded: Scheme A (FHTC 10) supplied on D2 only; Scheme B (FHTC 20) never. Add a D3 supply day
+        // for A, and for B a zero SUBMITTED row on D2 (not a supply day) and a NULL-status legacy row on
+        // D3 (a supply day). Over D1..D3: A 2 days x 10 + B 1 day x 20 = 40, not (10 + 20) x 3 = 90.
+        for (Object[] row : List.of(
+                new Object[]{1, 150, D3, SubmissionStatus.SUBMITTED.getCode()},
+                new Object[]{2, 0, D2, SubmissionStatus.SUBMITTED.getCode()},
+                new Object[]{2, 60, D3, null})) {
+            jdbcTemplate.update("""
+                    INSERT INTO analytics_schema.fact_water_quantity_table
+                    (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                    VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                    """, 1, row[0], 11, row[1], row[2], row[3], null, null);
+        }
+
+        assertThat(repository.getAverageWaterSupplyPerNation(D1, D3))
+                .extracting(SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalSuppliedFhtcDays)
+                .containsExactly(40L);
+        assertThat(repository.getRegionOwnWaterSupplyByLgd(1, 100, D1, D3).totalSuppliedFhtcDays()).isEqualTo(40L);
+        assertThat(repository.getRegionOwnWaterSupplyByDepartment(1, 200, D1, D3).totalSuppliedFhtcDays())
+                .isEqualTo(40L);
+        assertThat(repository.getAverageWaterSupplyPerCurrentRegionByLgd(1, 100, D1, D3))
+                .extracting(SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::lgdId,
+                        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalSuppliedFhtcDays)
+                .containsExactly(tuple(101, 20L), tuple(102, 20L));
+        assertThat(repository.getAverageWaterSupplyPerCurrentRegionByDepartment(1, 200, D1, D3))
+                .extracting(SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::departmentId,
+                        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalSuppliedFhtcDays)
+                .containsExactly(tuple(201, 20L), tuple(202, 20L));
+        assertThat(repository.getLgdLevel2WiseWaterSupplyMetricsForNation(D1, D3))
+                .extracting(SchemeRegularityRepository.Level2WaterSupplyMetrics::lgdId,
+                        SchemeRegularityRepository.Level2WaterSupplyMetrics::totalSuppliedFhtcDays)
+                .containsExactly(tuple(101, 20L), tuple(102, 20L));
+
+        // Day buckets: nothing supplied on D1, Scheme A alone on D2, both schemes on D3.
+        assertThat(repository.getPeriodicWaterQuantityByLgdId(1, 100, D1, D3, PeriodScale.DAY))
+                .extracting(SchemeRegularityRepository.PeriodicWaterQuantityMetrics::totalSuppliedFhtcDays)
+                .containsExactly(0L, 10L, 30L);
+        assertThat(repository.getPeriodicSchemeRegularityForNation(D1, D3, PeriodScale.DAY))
+                .extracting(SchemeRegularityRepository.PeriodicSchemeRegularityMetrics::totalSuppliedFhtcDays)
+                .containsExactly(0L, 10L, 30L);
     }
 
     @Test

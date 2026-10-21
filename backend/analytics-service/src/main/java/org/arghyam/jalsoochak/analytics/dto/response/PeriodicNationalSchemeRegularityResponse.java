@@ -36,6 +36,9 @@ public class PeriodicNationalSchemeRegularityResponse {
         private Integer totalSupplyDays;
         private Integer regularSchemeCount;
         private Long totalWaterQuantity;
+        // LPCD denominator for the bucket: each scheme's achieved FHTC summed over the days it supplied water,
+        // so LPCD = totalWaterQuantity / (totalSuppliedFhtcDays * persons per household).
+        private Long totalSuppliedFhtcDays;
         private BigDecimal averageRegularity;
     }
 }

@@ -36,5 +36,7 @@ public class PeriodicWaterQuantityResponse {
         private Long householdCount;
         private Long achievedFhtcCount;
         private Long plannedFhtcCount;
+        // LPCD denominator for the bucket: each scheme's achieved FHTC summed over the days it supplied water.
+        private Long totalSuppliedFhtcDays;
     }
 }

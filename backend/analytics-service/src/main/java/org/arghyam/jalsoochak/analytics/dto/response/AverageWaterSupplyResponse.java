@@ -63,5 +63,8 @@ public class AverageWaterSupplyResponse {
         private Long totalWaterSuppliedLiters;
         private Integer schemeCount;
         private BigDecimal avgWaterSupplyPerScheme;
+        // LPCD denominator: each scheme's achieved FHTC summed over the days it supplied water, so
+        // LPCD = totalWaterSuppliedLiters / (totalSuppliedFhtcDays * persons per household).
+        private Long totalSuppliedFhtcDays;
     }
 }

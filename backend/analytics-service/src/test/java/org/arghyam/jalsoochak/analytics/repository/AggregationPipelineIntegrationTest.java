@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.tuple;
 @Testcontainers
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ImportAutoConfiguration(FlywayAutoConfiguration.class)
-@Import({AggregationRepository.class, AggregateReadRepository.class})
+@Import({AggregationRepository.class, AggregateReadRepository.class, SchemeRegularityRepository.class})
 class AggregationPipelineIntegrationTest {
 
     @Container
@@ -68,6 +68,8 @@ class AggregationPipelineIntegrationTest {
     private AggregationRepository aggregationRepository;
     @Autowired
     private AggregateReadRepository aggregateReadRepository;
+    @Autowired
+    private SchemeRegularityRepository schemeRegularityRepository;
 
     private static final LocalDate D1 = LocalDate.of(2026, 1, 4); // Sunday
     private static final LocalDate D2 = LocalDate.of(2026, 1, 5); // Monday (same Sun-week)
@@ -286,6 +288,65 @@ class AggregationPipelineIntegrationTest {
             assertThat(stored).as("stored level-2 rows of region %d", child.regionId())
                     .isEqualTo(child.totalSuppliedFhtcDays());
         }
+    }
+
+    @Test
+    void lpcdParts_liveQueriesMatchAggregates() {
+        // ANALYTICS_READ_FROM_AGGREGATES switches each endpoint between these two read paths, so the
+        // litres and supplied FHTC-days behind LPCD must not move when the flag does. Same fan-out as above.
+        jdbcTemplate.update("UPDATE analytics_schema.dim_scheme_table SET fhtc_count = 30 WHERE tenant_id = 1 AND scheme_id = 2");
+        insertScheme(2, 2, 11, 1, 2, 5, "NOW()");
+        for (int[] lgd : new int[][]{{1, 1, 0}, {10, 2, 10}, {11, 2, 11}}) {
+            jdbcTemplate.update("""
+                    INSERT INTO analytics_schema.dim_lgd_location_table
+                    (lgd_id, tenant_id, lgd_code, lgd_c_name, title, lgd_level,
+                     level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                     geom, created_at, updated_at)
+                    VALUES (?, 1, ?, ?, ?, ?, 1, ?, NULL, NULL, NULL, NULL, NULL, NOW(), NOW())
+                    """, lgd[0], "L" + lgd[0], "R" + lgd[0], "Region " + lgd[0], lgd[1], lgd[2] == 0 ? null : lgd[2]);
+        }
+        aggregationRepository.upsertSchemeDaily(D1, D2);
+        aggregationRepository.upsertRegionMetrics(PeriodScale.DAY, D1, D1, true);
+        aggregationRepository.upsertRegionMetrics(PeriodScale.DAY, D2, D2, true);
+
+        var national = aggregateReadRepository.getNationalRegionMetrics(1, D1, D2).orElseThrow();
+        assertThat(schemeRegularityRepository.getAverageWaterSupplyPerNation(D1, D2))
+                .extracting(SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalWaterSuppliedLiters,
+                        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalSuppliedFhtcDays)
+                .containsExactlyElementsOf(national.stream()
+                        .map(r -> tuple(r.totalWaterSuppliedLiters(), r.totalSuppliedFhtcDays()))
+                        .toList())
+                .containsExactly(tuple(1019L, 50L));
+        assertThat(schemeRegularityRepository.getRegionOwnWaterSupplyByLgd(1, 1, D1, D2).totalSuppliedFhtcDays())
+                .isEqualTo(50L);
+
+        var nationalDistricts = aggregateReadRepository.getNationalRegionMetrics(2, D1, D2).orElseThrow();
+        assertThat(schemeRegularityRepository.getLgdLevel2WiseWaterSupplyMetricsForNation(D1, D2))
+                .extracting(SchemeRegularityRepository.Level2WaterSupplyMetrics::lgdId,
+                        SchemeRegularityRepository.Level2WaterSupplyMetrics::totalWaterSuppliedLiters,
+                        SchemeRegularityRepository.Level2WaterSupplyMetrics::totalSuppliedFhtcDays)
+                .containsExactlyElementsOf(nationalDistricts.stream()
+                        .map(r -> tuple(r.regionId(), r.totalWaterSuppliedLiters(), r.totalSuppliedFhtcDays()))
+                        .toList())
+                .containsExactly(tuple(10, 1019L, 50L), tuple(11, 999L, 5L));
+
+        var children = aggregateReadRepository.getChildRegionMetrics(1, "LGD", 1, 1, D1, D2).orElseThrow();
+        assertThat(schemeRegularityRepository.getAverageWaterSupplyPerCurrentRegionByLgd(1, 1, D1, D2))
+                .extracting(SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::lgdId,
+                        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalWaterSuppliedLiters,
+                        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalSuppliedFhtcDays)
+                .containsExactlyElementsOf(children.stream()
+                        .map(r -> tuple(r.regionId(), r.totalWaterSuppliedLiters(), r.totalSuppliedFhtcDays()))
+                        .toList())
+                .containsExactly(tuple(10, 1019L, 50L), tuple(11, 999L, 5L));
+
+        var periodic = aggregateReadRepository.getPeriodicRegionMetrics(1, "LGD", 1, "DAY", D1, D2);
+        assertThat(schemeRegularityRepository.getPeriodicWaterQuantityByLgdId(1, 1, D1, D2, PeriodScale.DAY))
+                .extracting(SchemeRegularityRepository.PeriodicWaterQuantityMetrics::totalSuppliedFhtcDays)
+                .containsExactlyElementsOf(periodic.stream()
+                        .map(AggregateReadRepository.PeriodicRegionRow::totalSuppliedFhtcDays)
+                        .toList())
+                .containsExactly(40L, 10L);
     }
 
     @Test
@@ -644,6 +705,7 @@ class AggregationPipelineIntegrationTest {
                     analytics_schema.fact_meter_reading_table,
                     analytics_schema.fact_water_quantity_table,
                     analytics_schema.dim_scheme_table,
+                    analytics_schema.dim_lgd_location_table,
                     analytics_schema.dim_user_table,
                     analytics_schema.dim_tenant_table,
                     analytics_schema.dim_date_table

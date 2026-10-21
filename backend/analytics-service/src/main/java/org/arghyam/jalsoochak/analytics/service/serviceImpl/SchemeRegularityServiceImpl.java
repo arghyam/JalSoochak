@@ -969,7 +969,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         String cacheKey = ":water_supply:nation"
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v4";
+                + ":v5";
         AverageWaterSupplyResponse cached = readFromCache(cacheKey, AverageWaterSupplyResponse.class);
         if (cached != null) {
             return cached;
@@ -990,6 +990,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .totalWaterSuppliedLiters(m.totalWaterSuppliedLiters())
                         .schemeCount(m.schemeCount())
                         .avgWaterSupplyPerScheme(m.avgWaterSupplyPerScheme())
+                        .totalSuppliedFhtcDays(m.totalSuppliedFhtcDays())
                         .build())
                 .toList();
 
@@ -1073,7 +1074,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         String cacheKey = NATIONAL_DASHBOARD_LEVEL2_METRICS_CACHE_PREFIX
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v1";
+                + ":v2";
         NationalDashboardLevel2MetricsResponse cached =
                 readFromCache(cacheKey, NationalDashboardLevel2MetricsResponse.class);
         if (cached != null) {
@@ -1176,6 +1177,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                             .avgWaterSupplyPerScheme(row.avgWaterSupplyPerScheme())
                             .supplyDaysInEfficientRange(
                                     supplyDaysInEfficientRangeByKey.getOrDefault(key, 0L))
+                            .totalSuppliedFhtcDays(row.totalSuppliedFhtcDays())
                             .totalSupplyDays(totalSupplyDays)
                             .regularSchemeCount(regularSchemeCount)
                             .averageRegularity(averageRegularity)
@@ -1203,7 +1205,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         return NATIONAL_DASHBOARD_CACHE_PREFIX
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v5";
+                + ":v6";
     }
 
     /**
@@ -1264,6 +1266,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .avgWaterSupplyPerScheme(r.schemeCount() > 0
                                 ? aggregateRatio(r.totalWaterSuppliedLiters(), r.schemeCount()) : BigDecimal.ZERO)
                         .supplyDaysInEfficientRange(r.supplyDaysInEfficientRange())
+                        .totalSuppliedFhtcDays(r.totalSuppliedFhtcDays())
                         .totalSupplyDays(regularitySupplyDays
                                 .getOrDefault(List.of(r.tenantId(), r.regionId()), 0L).intValue())
                         .regularSchemeCount(regularSchemeCount)
@@ -1307,6 +1310,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .avgWaterSupplyPerScheme(r.schemeCount() > 0
                                 ? aggregateRatio(r.totalWaterSuppliedLiters(), r.schemeCount()) : BigDecimal.ZERO)
                         .supplyDaysInEfficientRange(r.supplyDaysInEfficientRange())
+                        .totalSuppliedFhtcDays(r.totalSuppliedFhtcDays())
                         .build())
                 .toList();
 
@@ -1430,6 +1434,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .avgWaterSupplyPerScheme(metric.avgWaterSupplyPerScheme())
                         .supplyDaysInEfficientRange(
                                 supplyDaysInEfficientRangeByTenantId.getOrDefault(metric.tenantId(), 0L))
+                        .totalSuppliedFhtcDays(metric.totalSuppliedFhtcDays())
                         .build();
                 })
                 .toList();
@@ -1559,7 +1564,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":lgd:" + lgdId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v5";
+                + ":v6";
         AverageWaterSupplyResponse cached = readFromCache(cacheKey, AverageWaterSupplyResponse.class);
         if (cached != null) {
             return cached;
@@ -1606,6 +1611,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .totalWaterSuppliedLiters(m.totalWaterSuppliedLiters())
                         .schemeCount(m.schemeCount())
                         .avgWaterSupplyPerScheme(m.avgWaterSupplyPerScheme())
+                        .totalSuppliedFhtcDays(m.totalSuppliedFhtcDays())
                         .build())
                 .toList();
 
@@ -1640,6 +1646,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .totalWaterSuppliedLiters(m.totalWaterSuppliedLiters())
                 .schemeCount(m.schemeCount())
                 .avgWaterSupplyPerScheme(m.avgWaterSupplyPerScheme())
+                .totalSuppliedFhtcDays(m.totalSuppliedFhtcDays())
                 .build();
     }
 
@@ -1676,7 +1683,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":department:" + parentDepartmentId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v5";
+                + ":v6";
         AverageWaterSupplyResponse cached = readFromCache(cacheKey, AverageWaterSupplyResponse.class);
         if (cached != null) {
             return cached;
@@ -1724,6 +1731,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .totalWaterSuppliedLiters(m.totalWaterSuppliedLiters())
                         .schemeCount(m.schemeCount())
                         .avgWaterSupplyPerScheme(m.avgWaterSupplyPerScheme())
+                        .totalSuppliedFhtcDays(m.totalSuppliedFhtcDays())
                         .build())
                 .toList();
 
@@ -1889,7 +1897,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":scale:" + scale.name().toLowerCase()
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v2";
+                + ":v3";
         PeriodicWaterQuantityResponse cached = readFromCache(cacheKey, PeriodicWaterQuantityResponse.class);
         if (cached != null) {
             return cached;
@@ -1952,7 +1960,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                             : BigDecimal.ZERO;
                     return new SchemeRegularityRepository.PeriodicWaterQuantityMetrics(
                             r.periodStart(), r.periodEnd(), null, avg,
-                            r.totalHouseholdCount(), r.totalAchievedFhtc(), r.totalPlannedFhtc());
+                            r.totalHouseholdCount(), r.totalAchievedFhtc(), r.totalPlannedFhtc(),
+                            r.totalSuppliedFhtcDays());
                 })
                 .toList();
     }
@@ -2135,7 +2144,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                 r.totalWaterSuppliedLiters(), r.schemeCount(),
                                 r.schemeCount() > 0
                                         ? aggregateRatio(r.totalWaterSuppliedLiters(), r.schemeCount())
-                                        : BigDecimal.ZERO))
+                                        : BigDecimal.ZERO,
+                                r.totalSuppliedFhtcDays()))
                         .toList())
                 .orElse(null);
     }
@@ -2266,7 +2276,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":scale:" + scale.name().toLowerCase()
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v2";
+                + ":v3";
     }
 
     @Override
@@ -3687,6 +3697,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .householdCount(metric.householdCount())
                         .achievedFhtcCount(metric.achievedFhtcCount())
                         .plannedFhtcCount(metric.plannedFhtcCount())
+                        .totalSuppliedFhtcDays(metric.totalSuppliedFhtcDays())
                         .build())
                 .toList();
 
@@ -3777,6 +3788,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                     .totalSupplyDays(metric.totalSupplyDays())
                                     .regularSchemeCount(metric.regularSchemeCount())
                                     .totalWaterQuantity(metric.totalWaterQuantity())
+                                    .totalSuppliedFhtcDays(metric.totalSuppliedFhtcDays())
                                     .averageRegularity(averageRegularity)
                                     .build();
                         })
