@@ -77,7 +77,10 @@ public class WeeklyReportKpiDTO {
         /** Schemes at or below the low-LPCD threshold across the week. */
         private int schemesLowLpcd;
 
-        /** Litres over the week ÷ (population × 7), across all the officer's handed-over schemes. */
+        /**
+         * Litres over the week ÷ (Σ each scheme's FHTC × the days it supplied water × persons per
+         * household): the LPCD of the schemes that supplied, on the days they did.
+         */
         private double avgLpcd;
     }
 

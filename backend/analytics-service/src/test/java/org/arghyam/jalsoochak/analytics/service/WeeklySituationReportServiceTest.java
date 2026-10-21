@@ -202,21 +202,33 @@ class WeeklySituationReportServiceTest {
         }
 
         @Test
-        void dividesAcrossAllSevenDaysSoItIsComparableWithTheDailyReport() {
-            givenWeek(new SchemeWeekSnapshot(1, 100, 7, 100 * 5 * 7 * 20));
+        void dividesByTheDaysTheSchemeSuppliedRatherThanTheWholeWeek() {
+            // 20 LPCD on each of 3 days reads 20, not the 8.6 that spreading it over 7 days would give.
+            givenWeek(new SchemeWeekSnapshot(1, 100, 3, 100 * 5 * 3 * 20));
 
             assertThat(build(SO).getWeek().getAvgLpcd()).isEqualTo(20.0);
         }
 
         @Test
-        void usesTheFullSchemeSetUnlikeTheDailyReport() {
-            // The weekly template carries no "supplying only" footnote: a scheme that never ran still
-            // drags the average down, because its households still went without.
+        void weightsEachSchemeByTheDaysItSupplied() {
+            // 70,000 L + 25,000 L over (100 × 7 + 100 × 1) FHTC-days × 5 = 23.8 — not 35, the mean of
+            // the two schemes' rates, and not 13.6, the same litres spread over both schemes' full week.
+            givenWeek(
+                    new SchemeWeekSnapshot(1, 100, 7, 100 * 5 * 7 * 20),
+                    new SchemeWeekSnapshot(2, 100, 1, 100 * 5 * 50));
+
+            assertThat(build(SO).getWeek().getAvgLpcd()).isEqualTo(23.8);
+        }
+
+        @Test
+        void leavesOutSchemesThatSuppliedOnNoDayLikeTheDailyReport() {
+            // A scheme that never ran is already counted under "Not Supplying"; folding its households
+            // into the LPCD as well would let one idle scheme halve the figure for every scheme that ran.
             givenWeek(
                     new SchemeWeekSnapshot(1, 100, 7, 100 * 5 * 7 * 20),
                     new SchemeWeekSnapshot(2, 100, 0, 0));
 
-            assertThat(build(SO).getWeek().getAvgLpcd()).isEqualTo(10.0);
+            assertThat(build(SO).getWeek().getAvgLpcd()).isEqualTo(20.0);
         }
 
         @Test
@@ -224,6 +236,28 @@ class WeeklySituationReportServiceTest {
             givenWeek(new SchemeWeekSnapshot(1, 0, 7, 5000));
 
             assertThat(build(SO).getWeek().getAvgLpcd()).isZero();
+        }
+
+        @Test
+        void reportsZeroWhenNoSchemeSupplied() {
+            givenWeek(new SchemeWeekSnapshot(1, 100, 0, 0));
+
+            assertThat(build(SO).getWeek().getAvgLpcd()).isZero();
+        }
+
+        @Test
+        void appliesTheSameDenominatorToEachSectionOfficerRow() {
+            when(reportRepository.listSchemeWeekSnapshots(TENANT, 21L, WEEK_START, WEEK_END, SDO))
+                    .thenReturn(List.of(
+                            new SchemeWeekSnapshot(1, 100, 3, 100 * 5 * 3 * 20),
+                            new SchemeWeekSnapshot(2, 100, 0, 0)));
+
+            WeeklyReportKpiDTO kpis = service.buildReport(TENANT, SDO, SDO_ROLE,
+                    WEEK_START, WEEK_END, PREV_START, PREV_END, List.of(21L));
+
+            assertThat(kpis.getSectionOfficerSummaries()).singleElement()
+                    .extracting(WeeklyReportKpiDTO.SectionOfficerWeekSummary::getAvgLpcd)
+                    .isEqualTo(20.0);
         }
     }
 

@@ -68,6 +68,13 @@ public class WeeklyReportPdfService {
     private static final String KPI_NOT_SUPPLYING = "Schemes Not Supplying Water at all";
     private static final String KPI_NOT_SUPPLYING_SDO = "Schemes Not Supplying Water (0 days in the week)";
     private static final String KPI_LOW_LPCD = "Schemes With Supply <=15 LPCD (average)";
+    /**
+     * The asterisk is load-bearing, as on the daily report: this LPCD divides by the households of the
+     * schemes that supplied, on the days they supplied, so it reads higher than an LPCD spread over the
+     * whole command area and the whole week, and must say so wherever it is printed.
+     */
+    private static final String KPI_AVG_LPCD = "Average LPCD*";
+    private static final String AVG_LPCD_FOOTNOTE = "* of schemes that have supplied water";
 
     /**
      * KPIs where a rise is a deterioration, so the arrow colouring inverts: more schemes not
@@ -191,9 +198,10 @@ public class WeeklyReportPdfService {
                     week.getSchemesSupplying(), prev.getSchemesSupplying()));
             rows.add(intRow(KPI_NOT_SUPPLYING, week.getSchemesNotSupplying(), prev.getSchemesNotSupplying()));
         }
-        rows.add(dblRow("Average LPCD", week.getAvgLpcd(), prev.getAvgLpcd()));
+        rows.add(dblRow(KPI_AVG_LPCD, week.getAvgLpcd(), prev.getAvgLpcd()));
 
         c.drawTable(cols, header, rows, 9.5f, 9.5f, center);
+        c.footnote(AVG_LPCD_FOOTNOTE);
         // Both columns are computed from today's scheme mappings, which carry no validity dates — so
         // a reassignment moves the comparison week's figure too. Saying so beats a reader concluding
         // the numbers are wrong.
@@ -209,7 +217,7 @@ public class WeeklyReportPdfService {
                 CONTENT_WIDTH * 0.12f, CONTENT_WIDTH * 0.11f};
         String[] header = {"S.No.", "Section Officer Name", "SO Mobile No.", "Total Schemes",
                 "Schemes Supplying Water (>=4 days)", "Schemes Not Supplying Water (0 days)",
-                "Schemes with Supply <=15 LPCD", "Average LPCD"};
+                "Schemes with Supply <=15 LPCD", KPI_AVG_LPCD};
         boolean[] center = {true, false, false, true, true, true, true, true};
 
         List<String[]> rows = new ArrayList<>();
@@ -226,6 +234,7 @@ public class WeeklyReportPdfService {
         }
 
         c.drawTable(cols, header, rows, 8f, 8f, DENSE_CELL_PAD, center);
+        c.footnote(AVG_LPCD_FOOTNOTE);
         // Each row covers only the schemes that officer shares with this SDO, so the column will not
         // generally sum to the SDO's own total — and an officer's own report shows more schemes.
         c.footnote("Each officer's figures cover only the schemes they share with you.");

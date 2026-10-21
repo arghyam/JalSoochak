@@ -12,6 +12,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.arghyam.jalsoochak.analytics.service.ReportMaths.perDayRatio;
+import static org.arghyam.jalsoochak.analytics.service.ReportMaths.ratio;
 
 /**
  * Builds the {@link WeeklyReportKpiDTO} for one officer over the week carried by the request,
@@ -124,7 +125,10 @@ public class WeeklySituationReportService {
     private WeeklyReportKpiDTO.WeekKpis summarise(
             List<SchemeWeekSnapshot> schemes, int minSupplyDays, int personsPerHousehold) {
         long litres = schemes.stream().mapToLong(SchemeWeekSnapshot::litres).sum();
-        long households = schemes.stream().mapToLong(SchemeWeekSnapshot::fhtc).sum();
+        // Each scheme's households count only on the days it supplied water — the same denominator as
+        // the dashboards' LPCD, so a scheme that ran on two days does not dilute the figure with five
+        // days nobody was served.
+        long suppliedFhtcDays = schemes.stream().mapToLong(s -> s.fhtc() * s.supplyDays()).sum();
 
         return WeeklyReportKpiDTO.WeekKpis.builder()
                 .totalSchemes(schemes.size())
@@ -133,7 +137,7 @@ public class WeeklySituationReportService {
                 .schemesLowLpcd((int) schemes.stream().filter(s -> isLowLpcd(s, personsPerHousehold)).count())
                 // Summed before dividing, not an average of per-scheme LPCDs: the latter would weight a
                 // 10-connection scheme the same as a 10,000-connection one.
-                .avgLpcd(perDayRatio(litres, households * personsPerHousehold, DAYS_IN_WEEK))
+                .avgLpcd(ratio(litres, suppliedFhtcDays * personsPerHousehold))
                 .build();
     }
 

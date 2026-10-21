@@ -284,9 +284,9 @@ avgLpcd      = round1(litres / popSupplying)        -- 0 when popSupplying = 0
 ```
 
 Non-supplying schemes contribute nothing to `{{SWS}}`, so the numerator is identical whether taken
-over **S** or **T**; only the denominator narrows. **This is the one place in the system where the LPCD
-denominator is not the full scheme set** — it answers "how well did the schemes that ran actually
-serve?", not "how well was the whole command area served". The weekly reports use the full set.
+over **S** or **T**; only the denominator narrows. **The LPCD denominator is the supplying schemes, not
+the full scheme set** — it answers "how well did the schemes that ran actually serve?", not "how well
+was the whole command area served". The weekly reports (§4.3) and the dashboards use the same rule.
 
 **Anomalous Submissions** — `deleted_at IS NULL`, joined to the officer's schemes on `scheme_id`,
 `created_at` inside the UTC-converted window of §3.1. Counted `DISTINCT a.id`.
@@ -384,17 +384,24 @@ Three columns: **Previous Week** (W), **Previous Week − 1** (W-1), **Trend**.
 | Total Schemes                                           | `COUNT(DISTINCT scheme_id)` with `{{WS}}`                |
 | Schemes Supplying Water (for minimum 1 day in the week) | schemes with `supply_days >= 1`                          |
 | Schemes Not Supplying Water at all                      | schemes with `supply_days = 0`, i.e. `Total − supplying` |
-| Average LPCD                                            | `round1(litresW / (population × 7))`                     |
+| Average LPCD\*                                          | `round1(litresW / (suppliedFhtcDays × pph))`             |
 
 ```
-litresW    = {{SWS}} over W for the officer's schemes
-population = Σ fhtc_count over ALL the officer's handed-over schemes × person_count_per_household
+litresW          = {{SWS}} over W for the officer's schemes
+suppliedFhtcDays = Σ over the officer's handed-over schemes of (schemeFhtc × supply_days)
+pph              = person_count_per_household
 ```
 
-**Unlike the daily report, the weekly LPCD denominator is the full scheme set** — the weekly template
-carries no "supplying only" footnote, and over a whole week the question being asked is how well the
-command area as a whole was served. The `× 7` makes it a per-day figure comparable with the daily
-report's LPCD.
+where `schemeFhtc` is the scheme's de-duplicated `fhtc_count` (§2.3) and `supply_days` its count of
+days in W that pass `{{SWD}}` (§4.2).
+
+**Like the daily report, the weekly LPCD covers only the schemes that supplied water, and only on the
+days they did** — the PDF prints it as `Average LPCD*` with the footnote `* of schemes that have
+supplied water`. A scheme with `supply_days = 0` adds nothing to the denominator; it is already counted
+under _Schemes Not Supplying Water at all_. A scheme that ran on 3 days counts its households 3 times,
+not 7. This is the same denominator as the dashboards' LPCD (`totalSuppliedFhtcDays`). The litres and
+the FHTC-days are each summed across schemes before dividing, so a large scheme weighs more than a
+small one.
 
 **Trend** = `value(W) − value(W-1)`, rendered `▲ +n` / `▼ -n` / `—`. Colour follows _direction of
 improvement_, not sign: green when the officer is better off. `Schemes Not Supplying Water at all` is
@@ -450,7 +457,7 @@ Three columns: **Last Week** (W), **Previous Week** (W-1), **Trend**.
 | Schemes Supplying Water (≥4 days in the week)    | schemes with `supply_days >= 4`                       |
 | Schemes Not Supplying Water (0 days in the week) | schemes with `supply_days = 0`                        |
 | Schemes With Supply ≤15 LPCD (average)           | schemes whose weekly LPCD (§4.4) `<= 15`              |
-| Average LPCD                                     | `round1(litresW / (population × 7))`, full scheme set |
+| Average LPCD\*                                   | same as §4.3, over the SDO's schemes                  |
 
 > **The SO and SDO reports use different supply bars — ≥1 day and ≥4 days — and this is intentional.**
 > The SO's report asks "did each of my schemes run at all this week?"; the SDO's asks "did it run
@@ -500,7 +507,7 @@ AND (CAST(:supervisor_user_id AS bigint) IS NULL
 | Schemes Supplying Water (≥4 days)          | as §5.1, over the intersection                                                  |
 | Schemes Not Supplying Water (0 days)       | as §5.1, over the intersection                                                  |
 | Schemes with Supply ≤15 LPCD (average)     | as §4.4, over the intersection                                                  |
-| Average LPCD (total schemes under command) | `round1(litresW / (population × 7))` over the intersection, **full** scheme set |
+| Average LPCD\*                             | as §4.3, over the intersection: supplying schemes, on the days they supplied    |
 
 Two consequences of the intersection, both correct and both worth stating so they are not mistaken
 for defects:
@@ -853,11 +860,16 @@ From this single result set:
 | B §2 / C §3 list                      | rows `WHERE supply_days = 0`                                                              |
 | B §3 list                             | rows `WHERE supply_days BETWEEN 1 AND 3`                                                  |
 | B §4 / C §4 list, C §1 ≤15 LPCD count | rows `WHERE scheme_lpcd_week <= 15 AND supply_days >= 1`                                  |
-| B/C Average LPCD                      | `ROUND(SUM(litres_week)::numeric / NULLIF(SUM(fhtc) * :pph * 7, 0), 1)` over **all** rows |
+| B/C Average LPCD\*                    | `ROUND(SUM(litres_week)::numeric / NULLIF(SUM(fhtc * supply_days) * :pph, 0), 1)`         |
 
-Note the last row sums `litres_week` and `fhtc` across the whole set before dividing — it is _not_ the
-average of the per-scheme LPCD column, which would weight a 10-connection scheme the same as a
-10,000-connection one.
+Note the last row sums `litres_week` and `fhtc × supply_days` across the whole set before dividing — it
+is _not_ the average of the per-scheme LPCD column, which would weight a 10-connection scheme the same
+as a 10,000-connection one. Rows with `supply_days = 0` add nothing to the denominator, so the figure
+covers only the schemes that supplied, on the days they did (§4.3). It returns `NULL` where the PDF
+prints `0`: no scheme supplied, or none that did has connections.
+
+`scheme_lpcd_week`, which drives the ≤15 LPCD lists and count, still divides by all 7 days of the week
+(§4.4).
 
 ### 9.8 Section Officer breakdown (C §2)
 
