@@ -377,7 +377,7 @@ class SchemeRegularityServiceImplTest {
         when(aggregateReadRepository.getPeriodicRegionMetrics(1, "LGD", 101, "WEEK", START, END))
                 .thenReturn(List.of(new AggregateReadRepository.PeriodicRegionRow(
                         LocalDate.of(2025, 12, 28), LocalDate.of(2026, 1, 3),
-                        2, 3L, 300L, 30L, 20L, 25L)));
+                        2, 3L, 300L, 30L, 20L, 25L, 0L)));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
         PeriodicWaterQuantityResponse response =
@@ -401,8 +401,8 @@ class SchemeRegularityServiceImplTest {
         when(valueOperations.get(any())).thenReturn(null);
         when(aggregateReadRepository.getPeriodicRegionMetrics(1, "LGD", 101, "DAY", START, END))
                 .thenReturn(List.of(
-                        new AggregateReadRepository.PeriodicRegionRow(START, START, 2, 1L, 100L, 30L, 20L, 25L),
-                        new AggregateReadRepository.PeriodicRegionRow(END, END, 2, 1L, 100L, 30L, 20L, 25L)));
+                        new AggregateReadRepository.PeriodicRegionRow(START, START, 2, 1L, 100L, 30L, 20L, 25L, 0L),
+                        new AggregateReadRepository.PeriodicRegionRow(END, END, 2, 1L, 100L, 30L, 20L, 25L, 0L)));
         when(schemeRegularityRepository.getPeriodicWaterQuantityByLgdId(1, 101, START, END, PeriodScale.DAY))
                 .thenReturn(List.of());
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
@@ -420,13 +420,13 @@ class SchemeRegularityServiceImplTest {
         LocalDate qEnd = LocalDate.of(2026, 3, 31);
         when(aggregateReadRepository.getPeriodicRegionMetrics(1, "DEPT", 201, "QUARTER", qStart, qEnd))
                 .thenReturn(List.of(new AggregateReadRepository.PeriodicRegionRow(
-                        qStart, qEnd, 2, 2L, 200L, 30L, 20L, 25L)));
+                        qStart, qEnd, 2, 2L, 200L, 30L, 20L, 25L, 0L)));
         when(aggregateReadRepository.getPeriodicRegionMetrics(1, "DEPT", 201, "MONTH", qStart, qEnd))
                 .thenReturn(List.of(
                         new AggregateReadRepository.PeriodicRegionRow(
-                                qStart, LocalDate.of(2026, 1, 31), 2, 1L, 100L, 30L, 20L, 25L),
+                                qStart, LocalDate.of(2026, 1, 31), 2, 1L, 100L, 30L, 20L, 25L, 0L),
                         new AggregateReadRepository.PeriodicRegionRow(
-                                LocalDate.of(2026, 3, 1), qEnd, 2, 1L, 100L, 30L, 20L, 25L)));
+                                LocalDate.of(2026, 3, 1), qEnd, 2, 1L, 100L, 30L, 20L, 25L, 0L)));
         when(schemeRegularityRepository.getPeriodicWaterQuantityByDepartment(1, 201, qStart, qEnd, PeriodScale.QUARTER))
                 .thenReturn(List.of());
 
@@ -442,15 +442,15 @@ class SchemeRegularityServiceImplTest {
         LocalDate qEnd = LocalDate.of(2026, 3, 31);
         when(aggregateReadRepository.getPeriodicRegionMetrics(1, "DEPT", 201, "QUARTER", qStart, qEnd))
                 .thenReturn(List.of(new AggregateReadRepository.PeriodicRegionRow(
-                        qStart, qEnd, 2, 3L, 300L, 30L, 20L, 25L)));
+                        qStart, qEnd, 2, 3L, 300L, 30L, 20L, 25L, 0L)));
         when(aggregateReadRepository.getPeriodicRegionMetrics(1, "DEPT", 201, "MONTH", qStart, qEnd))
                 .thenReturn(List.of(
                         new AggregateReadRepository.PeriodicRegionRow(
-                                qStart, LocalDate.of(2026, 1, 31), 2, 1L, 100L, 30L, 20L, 25L),
+                                qStart, LocalDate.of(2026, 1, 31), 2, 1L, 100L, 30L, 20L, 25L, 0L),
                         new AggregateReadRepository.PeriodicRegionRow(
-                                LocalDate.of(2026, 2, 1), LocalDate.of(2026, 2, 28), 2, 1L, 100L, 30L, 20L, 25L),
+                                LocalDate.of(2026, 2, 1), LocalDate.of(2026, 2, 28), 2, 1L, 100L, 30L, 20L, 25L, 0L),
                         new AggregateReadRepository.PeriodicRegionRow(
-                                LocalDate.of(2026, 3, 1), qEnd, 2, 1L, 100L, 30L, 20L, 25L)));
+                                LocalDate.of(2026, 3, 1), qEnd, 2, 1L, 100L, 30L, 20L, 25L, 0L)));
 
         PeriodicWaterQuantityResponse response =
                 service.getPeriodicWaterQuantityByDepartment(1, 201, qStart, qEnd, PeriodScale.QUARTER);
@@ -1815,7 +1815,7 @@ class SchemeRegularityServiceImplTest {
                 .thenReturn(Optional.of(List.of(
                         new AggregateReadRepository.NationalRegionRow(
                                 1, 100, "mp", "Madhya Pradesh", 1, "Madhya Pradesh",
-                                5, 12L, 10L, 64000L, 7L, 120L, 110L, 140L)
+                                5, 12L, 10L, 64000L, 7L, 120L, 110L, 140L, 0L)
                 )));
         when(schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent())
                 .thenReturn(new BigDecimal("90"));
@@ -1845,11 +1845,11 @@ class SchemeRegularityServiceImplTest {
         when(aggregateReadRepository.getNationalRegionMetrics(1, END, END))
                 .thenReturn(Optional.of(List.of(new AggregateReadRepository.NationalRegionRow(
                         1, 100, "mp", "Madhya Pradesh", 1, "Madhya Pradesh",
-                        5, 4L, 3L, 5000L, 2L, 120L, 110L, 140L))));
+                        5, 4L, 3L, 5000L, 2L, 120L, 110L, 140L, 0L))));
         when(aggregateReadRepository.getNationalRegionMetrics(1, lookbackStart, END))
                 .thenReturn(Optional.of(List.of(new AggregateReadRepository.NationalRegionRow(
                         1, 100, "mp", "Madhya Pradesh", 1, "Madhya Pradesh",
-                        5, 120L, 90L, 150000L, 60L, 120L, 110L, 140L))));
+                        5, 120L, 90L, 150000L, 60L, 120L, 110L, 140L, 0L))));
         when(schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent())
                 .thenReturn(new BigDecimal("90"));
         // 90% of the 30-day window -> 27 days.
@@ -1879,7 +1879,7 @@ class SchemeRegularityServiceImplTest {
         when(aggregateReadRepository.getNationalRegionMetrics(1, END, END))
                 .thenReturn(Optional.of(List.of(new AggregateReadRepository.NationalRegionRow(
                         1, 100, "mp", "Madhya Pradesh", 1, "Madhya Pradesh",
-                        5, 4L, 3L, 5000L, 2L, 120L, 110L, 140L))));
+                        5, 4L, 3L, 5000L, 2L, 120L, 110L, 140L, 0L))));
         when(aggregateReadRepository.getNationalRegionMetrics(1, lookbackStart, END)).thenReturn(Optional.empty());
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -1897,11 +1897,11 @@ class SchemeRegularityServiceImplTest {
         when(aggregateReadRepository.getNationalRegionMetrics(2, END, END))
                 .thenReturn(Optional.of(List.of(new AggregateReadRepository.NationalRegionRow(
                         1, 101, "mp", "Madhya Pradesh", 1, "District-1",
-                        5, 4L, 3L, 5000L, 2L, 120L, 110L, 140L))));
+                        5, 4L, 3L, 5000L, 2L, 120L, 110L, 140L, 0L))));
         when(aggregateReadRepository.getNationalRegionMetrics(2, lookbackStart, END))
                 .thenReturn(Optional.of(List.of(new AggregateReadRepository.NationalRegionRow(
                         1, 101, "mp", "Madhya Pradesh", 1, "District-1",
-                        5, 120L, 90L, 150000L, 60L, 120L, 110L, 140L))));
+                        5, 120L, 90L, 150000L, 60L, 120L, 110L, 140L, 0L))));
         when(schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent())
                 .thenReturn(new BigDecimal("90"));
         when(aggregateReadRepository.getNationalRegularSchemeCount(1, "LGD", 101, lookbackStart, END, 27))
@@ -1930,7 +1930,7 @@ class SchemeRegularityServiceImplTest {
                 .thenReturn(Optional.of(List.of(
                         new AggregateReadRepository.NationalRegionRow(
                                 1, 101, "mp", "Madhya Pradesh", 1, "District-1",
-                                5, 12L, 10L, 64000L, 7L, 120L, 110L, 140L)
+                                5, 12L, 10L, 64000L, 7L, 120L, 110L, 140L, 0L)
                 )));
         when(schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent())
                 .thenReturn(new BigDecimal("90"));

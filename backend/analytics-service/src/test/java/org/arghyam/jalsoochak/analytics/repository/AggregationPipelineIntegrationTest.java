@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * End-to-end test of the pre-aggregation population (fact_scheme_daily_table -> region
@@ -231,6 +232,60 @@ class AggregationPipelineIntegrationTest {
         assertThat(state.schemeCount()).isEqualTo(2);
         assertThat(state.totalSupplyDays()).isEqualTo(3L);
         assertThat(state.totalWaterSuppliedLiters()).isEqualTo(1019L);
+    }
+
+    @Test
+    void suppliedFhtcDays_sumFhtcOverSupplyDaysOnly_onEveryReadPath() {
+        // Scheme 2 is three times scheme 1's size. Its second, smaller mapping row (region 11) must
+        // neither replace nor add to its FHTC in region 1 or region 10.
+        jdbcTemplate.update("UPDATE analytics_schema.dim_scheme_table SET fhtc_count = 30 WHERE tenant_id = 1 AND scheme_id = 2");
+        insertScheme(2, 2, 11, 1, 2, 5, "NOW()");
+
+        aggregationRepository.upsertSchemeDaily(D1, D2);
+        aggregationRepository.upsertRegionMetrics(PeriodScale.DAY, D1, D1, true);
+        aggregationRepository.upsertRegionMetrics(PeriodScale.DAY, D2, D2, true);
+        aggregationRepository.upsertRegionMetrics(PeriodScale.WEEK, D1, LocalDate.of(2026, 1, 10), true);
+        aggregationRepository.upsertRegionMetrics(PeriodScale.MONTH, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), true);
+
+        // D1: both schemes supplied (10 + 30). D2: scheme 2 is NOT_SUBMITTED, so only scheme 1's 10.
+        assertThat(suppliedFhtcDays(PeriodScale.DAY, D1, 1, 1)).isEqualTo(40L);
+        assertThat(suppliedFhtcDays(PeriodScale.DAY, D2, 1, 1)).isEqualTo(10L);
+        assertThat(suppliedFhtcDays(PeriodScale.WEEK, D1, 1, 1)).isEqualTo(50L);
+        // Region 11 holds only scheme 2's smaller mapping row.
+        assertThat(suppliedFhtcDays(PeriodScale.DAY, D1, 2, 11)).isEqualTo(5L);
+
+        assertThat(aggregateReadRepository.getPeriodicRegionMetrics(1, "LGD", 1, "DAY", D1, D2))
+                .extracting(AggregateReadRepository.PeriodicRegionRow::totalSuppliedFhtcDays)
+                .containsExactly(40L, 10L);
+        assertThat(aggregateReadRepository.getPeriodicRegionMetrics(
+                        1, "LGD", 1, "QUARTER", LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 31)))
+                .extracting(AggregateReadRepository.PeriodicRegionRow::totalSuppliedFhtcDays)
+                .containsExactly(50L);
+
+        var national = aggregateReadRepository.getNationalRegionMetrics(1, D1, D2);
+        assertThat(national).isPresent();
+        assertThat(national.get()).extracting(AggregateReadRepository.NationalRegionRow::totalSuppliedFhtcDays)
+                .containsExactly(50L);
+
+        // The child rollup reads the base grain directly; it must agree with the stored level-2 rows.
+        var children = aggregateReadRepository.getChildRegionMetrics(1, "LGD", 1, 1, D1, D2);
+        assertThat(children).isPresent();
+        assertThat(children.get())
+                .extracting(AggregateReadRepository.ChildRegionAggRow::regionId,
+                        AggregateReadRepository.ChildRegionAggRow::totalSuppliedFhtcDays)
+                .containsExactly(
+                        tuple(10, 50L),
+                        tuple(11, 5L));
+        for (var child : children.get()) {
+            Long stored = jdbcTemplate.queryForObject("""
+                    SELECT SUM(total_supplied_fhtc_days) FROM analytics_schema.fact_region_metrics_table
+                    WHERE period_scale = 'DAY' AND work_status_scope = 'TENANT'
+                      AND tenant_id = 1 AND hierarchy = 'LGD' AND region_level = 2 AND region_id = ?
+                      AND period_start BETWEEN ? AND ?
+                    """, Long.class, child.regionId(), D1, D2);
+            assertThat(stored).as("stored level-2 rows of region %d", child.regionId())
+                    .isEqualTo(child.totalSuppliedFhtcDays());
+        }
     }
 
     @Test
@@ -534,6 +589,16 @@ class AggregationPipelineIntegrationTest {
                 ((Number) row.get("operating_status_unknown_count")).intValue()})
                 .as("operating status breakdown (%s %s)", scope, periodStart)
                 .containsExactly(operating);
+    }
+
+    /** total_supplied_fhtc_days of one TENANT-scope LGD row. */
+    private long suppliedFhtcDays(PeriodScale scale, LocalDate periodStart, int level, int regionId) {
+        Long value = jdbcTemplate.queryForObject("""
+                SELECT total_supplied_fhtc_days FROM analytics_schema.fact_region_metrics_table
+                WHERE period_scale = ? AND period_start = ? AND work_status_scope = 'TENANT'
+                  AND tenant_id = 1 AND hierarchy = 'LGD' AND region_level = ? AND region_id = ?
+                """, Long.class, scale.name(), periodStart, level, regionId);
+        return value == null ? 0L : value;
     }
 
     /**

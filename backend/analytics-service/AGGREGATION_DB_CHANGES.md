@@ -7,7 +7,8 @@ Schema: `analytics_schema`. All times IST; day = 12am→12am; week = Sunday→Sa
 > V42 `included_work_statuses`, V43 water-quantity dedup index, V44 `regularity_threshold_percent`,
 > V45–V49 (water quantity to BIGINT litres, scheme status code comments, meter reading to NUMERIC,
 > anomaly/submission linkage, attendance/anomaly tables renamed to `fact_`), **V50** Sunday-week
-> columns, **V51–V53** the pre-aggregation facts, **V54–V55** the two SCD-2 history tables.
+> columns, **V51–V53** the pre-aggregation facts, **V54–V55** the two SCD-2 history tables,
+> **V61** `fact_region_metrics_table.total_supplied_fhtc_days` (the LPCD denominator).
 
 ## The single water figure (important)
 
@@ -75,7 +76,7 @@ grain with the tenant chain — there is **no** pre-rolled distribution table (s
 | 2 | `dim_tenant_table.regularity_threshold_percent` | V44 *(from dev)* | Altered (+1 col) | Per-tenant regularity threshold %; NULL → 3-tier fallback (tenant → national → env) |
 | 3 | `dim_date_table` | V50 | Altered (+2 cols) | Sunday-aligned week boundaries |
 | 4 | `fact_scheme_daily_table` | V51 | New table | Base scheme×day pre-aggregation (midnight grain, unfiltered) |
-| 5 | `fact_region_metrics_table` | V52 | New table | Pre-rolled region KPIs per DAY/WEEK/MONTH bucket × filter scope |
+| 5 | `fact_region_metrics_table` | V52, V61 | New table (V61 +1 col) | Pre-rolled region KPIs per DAY/WEEK/MONTH bucket × filter scope |
 | 6 | `fact_submission_activity_hourly_table` | V53 | New table | Hourly reading-submission activity (state-level fast path) |
 | 7 | `dim_tenant_work_status_filter_table` | V54 | New table | SCD-2 history of the work-status filter per tier (tenant / national) |
 | 8 | `dim_tenant_water_norm_table` | V55 | New table | SCD-2 history of water-norm values used in KPI calcs |
@@ -164,7 +165,7 @@ into `water_supplied_liters`), `water_quantity_row_count` (equals `supplied` aft
 
 ---
 
-## 4. `fact_region_metrics_table` (V52) — new (region × period bucket)
+## 4. `fact_region_metrics_table` (V52, V61) — new (region × period bucket)
 
 | Column | Type | Constraints | Use / Need |
 |--------|------|-------------|------------|
@@ -191,6 +192,7 @@ into `water_supplied_liters`), `water_quantity_row_count` (equals `supplied` aft
 | `operating_status_partially_operative_count` | INT | NOT NULL, DEFAULT 0 | 2 Partially Operative |
 | `operating_status_unknown_count` | INT | NOT NULL, DEFAULT 0 | NULL or any other code |
 | `total_water_supplied_liters` | BIGINT | NOT NULL, DEFAULT 0 | Σ `water_supplied_liters` — the **only** water total; national **and** region-wise cards read this |
+| `total_supplied_fhtc_days` | BIGINT | NOT NULL, DEFAULT 0 (V61) | Σ over supply scheme-days (`supplied = 1`) of the scheme's achieved FHTC, from the same de-duplicated `dim_scheme_table` row as `total_achieved_fhtc` (not the daily row's snapshot) → LPCD = `total_water_supplied_liters` ÷ (this × persons per household). Additive |
 | `total_household_count` | BIGINT | NOT NULL, DEFAULT 0 | Σ households over distinct schemes |
 | `total_achieved_fhtc` | BIGINT | NOT NULL, DEFAULT 0 | Σ achieved FHTC |
 | `total_planned_fhtc` | BIGINT | NOT NULL, DEFAULT 0 | Σ planned FHTC |
@@ -221,6 +223,14 @@ the status on its latest-written `dim_scheme_table` row (the dimension writer on
 row, so a fanned-out scheme's other rows can hold a stale status). In `TENANT`/`NATIONAL` rows the
 counts cover the filtered scheme set, so excluded statuses read 0 there; use `ALL` rows for the
 full picture.
+
+**LPCD denominator (V61).** `total_supplied_fhtc_days` counts a scheme's FHTC only on the days it
+supplied water, so a scheme that did not supply adds nothing to that day's population and cannot
+dilute the litres the supplying schemes delivered. A scheme that supplied on every day of the bucket
+adds its FHTC × `days_in_range`, just as the old denominator did. Like `total_supply_days` it is summed
+across day buckets and regions; `total_achieved_fhtc` stays the region's household total. Rows built
+before V61 read 0 until `AggregateBackfillRunner` rebuilds them, so keep
+`ANALYTICS_READ_FROM_AGGREGATES` off until the backfill has finished.
 
 **No derived-ratio columns are stored.** The three convenience averages
 `average_regularity` / `reading_submission_rate` / `avg_water_supply_per_scheme` were **dropped**:

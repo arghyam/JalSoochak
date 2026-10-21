@@ -237,7 +237,11 @@ public class AggregateReadRepository {
                 .collect(Collectors.joining(" OR "));
     }
 
-    /** One pre-rolled bucket of a region's periodic series (single unified water figure). */
+    /**
+     * One pre-rolled bucket of a region's periodic series (single unified water figure).
+     * {@code totalSuppliedFhtcDays} is the LPCD denominator: the achieved FHTC of each scheme,
+     * summed over the bucket's days on which it supplied water.
+     */
     public record PeriodicRegionRow(LocalDate periodStart,
                                     LocalDate periodEnd,
                                     int schemeCount,
@@ -245,7 +249,8 @@ public class AggregateReadRepository {
                                     long totalWaterSuppliedLiters,
                                     long totalHouseholdCount,
                                     long totalAchievedFhtc,
-                                    long totalPlannedFhtc) {
+                                    long totalPlannedFhtc,
+                                    long totalSuppliedFhtcDays) {
     }
 
     /**
@@ -271,7 +276,8 @@ public class AggregateReadRepository {
                            SUM(total_water_supplied_liters) AS total_water_supplied_liters,
                            MAX(total_household_count) AS total_household_count,
                            MAX(total_achieved_fhtc) AS total_achieved_fhtc,
-                           MAX(total_planned_fhtc) AS total_planned_fhtc
+                           MAX(total_planned_fhtc) AS total_planned_fhtc,
+                           SUM(total_supplied_fhtc_days) AS total_supplied_fhtc_days
                     FROM analytics_schema.fact_region_metrics_table
                     WHERE period_scale = 'MONTH' AND work_status_scope = 'TENANT'
                       AND tenant_id = ? AND hierarchy = ? AND region_id = ?
@@ -284,7 +290,7 @@ public class AggregateReadRepository {
             sql = """
                     SELECT period_start, period_end, scheme_count, total_supply_days,
                            total_water_supplied_liters, total_household_count,
-                           total_achieved_fhtc, total_planned_fhtc
+                           total_achieved_fhtc, total_planned_fhtc, total_supplied_fhtc_days
                     FROM analytics_schema.fact_region_metrics_table
                     WHERE period_scale = ? AND work_status_scope = 'TENANT'
                       AND tenant_id = ? AND hierarchy = ? AND region_id = ?
@@ -301,7 +307,8 @@ public class AggregateReadRepository {
                 rs.getLong("total_water_supplied_liters"),
                 rs.getLong("total_household_count"),
                 rs.getLong("total_achieved_fhtc"),
-                rs.getLong("total_planned_fhtc")),
+                rs.getLong("total_planned_fhtc"),
+                rs.getLong("total_supplied_fhtc_days")),
                 params);
     }
 
@@ -486,7 +493,10 @@ public class AggregateReadRepository {
         return Optional.of(rows);
     }
 
-    /** Per-child-region rollup (one row per child of a parent node; single unified water figure). */
+    /**
+     * Per-child-region rollup (one row per child of a parent node; single unified water figure).
+     * {@code totalSuppliedFhtcDays} as in {@link PeriodicRegionRow}.
+     */
     public record ChildRegionAggRow(int regionId,
                                     String title,
                                     int schemeCount,
@@ -496,7 +506,8 @@ public class AggregateReadRepository {
                                     long supplyDaysInEfficientRange,
                                     long totalHouseholdCount,
                                     long totalAchievedFhtc,
-                                    long totalPlannedFhtc) {
+                                    long totalPlannedFhtc,
+                                    long totalSuppliedFhtcDays) {
     }
 
     private static final java.util.Set<String> ALLOWED_LEVELS = java.util.Set.of("1", "2", "3", "4", "5", "6");
@@ -535,17 +546,28 @@ public class AggregateReadRepository {
             return Optional.empty();
         }
 
-        // Child membership comes from the dim_scheme mapping rows: a multi-mapped scheme counts
+        // Child membership (m) comes from the dim_scheme mapping rows: a multi-mapped scheme counts
         // once per child region (DISTINCT ON dedup) but appears under every child it maps to,
         // and its activity is joined per mapping — the same semantics as the legacy queries.
-        // Both subqueries apply the tenant-chain filter as of the range end.
+        // The tenant-chain filter applies as of the range end. A supply day's FHTC is read from m,
+        // the same row as achieved_fhtc, not from the daily row's snapshot.
         String schemeFilter = workStatusFilter.andHistoryPredicate("ds", dateLiteral(end));
         String sql = ("""
+                WITH m AS (
+                    SELECT DISTINCT ON (ds.%2$s, ds.tenant_id, ds.scheme_id)
+                           ds.%2$s AS region_id, ds.tenant_id, ds.scheme_id,
+                           ds.house_hold_count, ds.fhtc_count, ds.planned_fhtc
+                    FROM analytics_schema.dim_scheme_table ds
+                    WHERE ds.tenant_id = ? AND ds.%1$s = ? AND ds.%2$s IS NOT NULL%5$s
+                    ORDER BY ds.%2$s, ds.tenant_id, ds.scheme_id,
+                             COALESCE(ds.fhtc_count, 0) DESC, COALESCE(ds.house_hold_count, 0) DESC, COALESCE(ds.planned_fhtc, 0) DESC
+                )
                 SELECT c.region_id, loc.title, c.scheme_count,
-                       COALESCE(a.supply_days, 0)     AS supply_days,
-                       COALESCE(a.submission_days, 0) AS submission_days,
-                       COALESCE(a.water, 0)           AS water,
-                       COALESCE(a.eff_days, 0)        AS eff_days,
+                       COALESCE(a.supply_days, 0)        AS supply_days,
+                       COALESCE(a.submission_days, 0)    AS submission_days,
+                       COALESCE(a.water, 0)              AS water,
+                       COALESCE(a.eff_days, 0)           AS eff_days,
+                       COALESCE(a.supplied_fhtc_days, 0) AS supplied_fhtc_days,
                        c.households, c.achieved_fhtc, c.planned_fhtc
                 FROM (
                     SELECT region_id, tenant_id,
@@ -553,15 +575,7 @@ public class AggregateReadRepository {
                            SUM(COALESCE(house_hold_count, 0))::bigint AS households,
                            SUM(COALESCE(fhtc_count, 0))::bigint AS achieved_fhtc,
                            SUM(COALESCE(planned_fhtc, 0))::bigint AS planned_fhtc
-                    FROM (
-                        SELECT DISTINCT ON (ds.%2$s, ds.tenant_id, ds.scheme_id)
-                               ds.%2$s AS region_id, ds.tenant_id, ds.scheme_id,
-                               ds.house_hold_count, ds.fhtc_count, ds.planned_fhtc
-                        FROM analytics_schema.dim_scheme_table ds
-                        WHERE ds.tenant_id = ? AND ds.%1$s = ? AND ds.%2$s IS NOT NULL%5$s
-                        ORDER BY ds.%2$s, ds.tenant_id, ds.scheme_id,
-                                 COALESCE(ds.fhtc_count, 0) DESC, COALESCE(ds.house_hold_count, 0) DESC, COALESCE(ds.planned_fhtc, 0) DESC
-                    ) dedup
+                    FROM m
                     GROUP BY region_id, tenant_id
                 ) c
                 LEFT JOIN (
@@ -569,12 +583,9 @@ public class AggregateReadRepository {
                            SUM(sd.supplied) AS supply_days,
                            SUM(sd.submitted) AS submission_days,
                            SUM(sd.water_supplied_liters) AS water,
-                           SUM(sd.is_supply_efficient) AS eff_days
-                    FROM (
-                        SELECT DISTINCT ds.%2$s AS region_id, ds.tenant_id, ds.scheme_id
-                        FROM analytics_schema.dim_scheme_table ds
-                        WHERE ds.tenant_id = ? AND ds.%1$s = ? AND ds.%2$s IS NOT NULL%5$s
-                    ) m
+                           SUM(sd.is_supply_efficient) AS eff_days,
+                           SUM(COALESCE(m.fhtc_count, 0)) FILTER (WHERE sd.supplied = 1) AS supplied_fhtc_days
+                    FROM m
                     JOIN analytics_schema.fact_scheme_daily_table sd
                       ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
                     WHERE sd.reading_date BETWEEN ? AND ?
@@ -595,8 +606,9 @@ public class AggregateReadRepository {
                 rs.getLong("eff_days"),
                 rs.getLong("households"),
                 rs.getLong("achieved_fhtc"),
-                rs.getLong("planned_fhtc")),
-                tenantId, parentRegionId, tenantId, parentRegionId, start, end);
+                rs.getLong("planned_fhtc"),
+                rs.getLong("supplied_fhtc_days")),
+                tenantId, parentRegionId, start, end);
         return Optional.of(rows);
     }
 
@@ -670,7 +682,8 @@ public class AggregateReadRepository {
                                     long supplyDaysInEfficientRange,
                                     long totalHouseholdCount,
                                     long totalAchievedFhtc,
-                                    long totalPlannedFhtc) {
+                                    long totalPlannedFhtc,
+                                    long totalSuppliedFhtcDays) {
     }
 
     /**
@@ -702,7 +715,8 @@ public class AggregateReadRepository {
                        SUM(m.supply_days_in_efficient_range) AS eff_days,
                        MAX(m.total_household_count) AS households,
                        MAX(m.total_achieved_fhtc) AS achieved_fhtc,
-                       MAX(m.total_planned_fhtc) AS planned_fhtc
+                       MAX(m.total_planned_fhtc) AS planned_fhtc,
+                       SUM(m.total_supplied_fhtc_days) AS supplied_fhtc_days
                 FROM analytics_schema.fact_region_metrics_table m
                 JOIN analytics_schema.dim_tenant_table t ON t.tenant_id = m.tenant_id
                 LEFT JOIN analytics_schema.dim_lgd_location_table loc
@@ -727,7 +741,8 @@ public class AggregateReadRepository {
                 rs.getLong("eff_days"),
                 rs.getLong("households"),
                 rs.getLong("achieved_fhtc"),
-                rs.getLong("planned_fhtc")),
+                rs.getLong("planned_fhtc"),
+                rs.getLong("supplied_fhtc_days")),
                 regionLevel, start, end);
         return Optional.of(rows);
     }
