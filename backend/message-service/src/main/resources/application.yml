@@ -353,6 +353,10 @@ notifications:
     # can be verified end to end before delivery goes live. Set to false once the template ids below
     # are configured — startup then refuses to proceed if they are still blank.
     dry-run: ${NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN:false}
+    # DOCUMENT | LINK, as for the daily report above; each mode needs its own approved weekly templates
+    # (whatsapp.template.weekly-report-*). LINK is the weekly report's original shape. Choose DOCUMENT
+    # only where Meta can download the report: from the store of record, or from storage.delivery.
+    delivery-mode: ${NOTIFICATIONS_WEEKLY_REPORT_DELIVERY_MODE:LINK}
   sms:
     dry-run: ${NOTIFICATIONS_SMS_DRY_RUN:false}
     # Where SMSCountry should push each OTP's delivery report (DeliveryReceiptController). Include the
@@ -426,10 +430,14 @@ whatsapp:
     daily-report-so-link-id: ${WHATSAPP_DAILY_REPORT_SO_LINK_TEMPLATE_ID:}
     # Optional — falls back to the SO link template when blank.
     daily-report-sdo-link-id: ${WHATSAPP_DAILY_REPORT_SDO_LINK_TEMPLATE_ID:}
-    # Weekly report templates (LINK only — the weekly report has no DOCUMENT path, because that is
-    # the one Meta has to fetch through the India-only firewall).
+    # Weekly report templates, per notifications.weekly-report.delivery-mode. Blank until the Meta
+    # templates are approved; weekly delivery stays in dry-run until then.
+    # Document templates — used only when the weekly delivery-mode is DOCUMENT. Numeric.
+    weekly-report-so-id: ${WHATSAPP_WEEKLY_REPORT_SO_TEMPLATE_ID:}
+    # Optional — falls back to the SO weekly document template when blank.
+    weekly-report-sdo-id: ${WHATSAPP_WEEKLY_REPORT_SDO_TEMPLATE_ID:}
+    # Link templates — used only when the weekly delivery-mode is LINK.
     # Variables: {{1}} officer name, {{2}} week start (dd-MM-yyyy), then the button's URL suffix.
-    # Blank until the Meta templates are approved; weekly delivery stays in dry-run until then.
     weekly-report-so-link-id: ${WHATSAPP_WEEKLY_REPORT_SO_LINK_TEMPLATE_ID:}
     # Optional — falls back to the SO weekly template when blank.
     weekly-report-sdo-link-id: ${WHATSAPP_WEEKLY_REPORT_SDO_LINK_TEMPLATE_ID:}
@@ -443,6 +451,9 @@ whatsapp:
     # report covers (D-1) is appended at send time, e.g. "… Report 13-08-2026" for a 14 Aug delivery,
     # so configure the name only — do not put a date here.
     daily-report-caption: ${WHATSAPP_DAILY_REPORT_CAPTION:Daily Water Service Situation Report}
+    # As above, for the weekly report in DOCUMENT mode: the week's first and last day are appended,
+    # e.g. "… Report 13-07-2026 to 19-07-2026".
+    weekly-report-caption: ${WHATSAPP_WEEKLY_REPORT_CAPTION:Weekly Water Service Situation Report}
 
   # ────────────────────────────────────────────────────────────
   # Delivery-status reconciliation (WhatsAppDeliveryReconciliationService)
@@ -578,7 +589,7 @@ storage:
 
   # External delivery store, for a deployment whose store above Meta cannot download from (a State Data
   # Centre). The store above stays the store of record and every report still goes there. A report sent
-  # as a WhatsApp DOCUMENT (every escalation; the daily report when its delivery-mode is DOCUMENT) is also
+  # as a WhatsApp DOCUMENT (every escalation; a daily or weekly report when its delivery-mode is DOCUMENT) is also
   # copied here, under <record bucket>/<random UUID>/<file>.pdf, and that copy's URL is what Meta fetches.
   # LINK sends keep the store-of-record URL their approved template is frozen to, and a report suppressed
   # by its dry-run flag is not copied.

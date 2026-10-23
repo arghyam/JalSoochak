@@ -342,12 +342,12 @@ class WhatsAppChannelTest {
 
     @Test
     void sendWeeklyReport_reportsTheStageAndErrorKeyTheProviderAssigned() {
-        when(whatsAppSender.sendWeeklyReportHsm(anyLong(), anyString(), anyString(), any(), any()))
+        when(whatsAppSender.sendWeeklyReportHsm(anyLong(), anyString(), anyString(), any(), any(), any()))
                 .thenThrow(new WhatsAppSendException(WhatsAppSendStage.SEND, "receiver",
                         "Receiver does not exist"));
 
-        ReportSendOutcome outcome = whatsAppChannel.sendWeeklyReport(
-                42L, "https://storage.example.org/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 24), "Binod");
+        ReportSendOutcome outcome = whatsAppChannel.sendWeeklyReport(42L, "https://storage.example.org/r.pdf",
+                "SECTION_OFFICER", LocalDate.of(2026, 8, 24), LocalDate.of(2026, 8, 30), "Binod");
 
         assertThat(outcome.accepted()).isFalse();
         assertThat(outcome.failure().stage()).isEqualTo(WhatsAppSendStage.SEND);

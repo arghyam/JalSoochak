@@ -99,6 +99,8 @@ class WhatsAppDeliveryReconciliationServiceTest {
         ReflectionTestUtils.setField(service, "dailyReportSdoTemplateId", "");
         ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "");
         ReflectionTestUtils.setField(service, "dailyReportSdoLinkTemplateId", "");
+        ReflectionTestUtils.setField(service, "weeklyReportSoTemplateId", "");
+        ReflectionTestUtils.setField(service, "weeklyReportSdoTemplateId", "");
         ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", String.valueOf(WEEKLY_REPORT_TEMPLATE));
         ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "");
 
@@ -451,6 +453,17 @@ class WhatsAppDeliveryReconciliationServiceTest {
             ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "7002");
 
             assertThat(service.resolveTemplateIds()).contains("7001", "7002");
+        }
+
+        /** The weekly document templates too, labelled weekly, so a week sent as documents is still counted. */
+        @Test
+        void includesTheWeeklyDocumentTemplates_asWeekly() {
+            ReflectionTestUtils.setField(service, "weeklyReportSoTemplateId", "7101");
+            ReflectionTestUtils.setField(service, "weeklyReportSdoTemplateId", "7102");
+
+            assertThat(service.resolveTemplateKinds().kinds())
+                    .containsEntry("7101", WhatsAppDeliveryReconciliationService.ReportKind.WEEKLY)
+                    .containsEntry("7102", WhatsAppDeliveryReconciliationService.ReportKind.WEEKLY);
         }
 
         /** Both reports share a provider account, so only the template id tells them apart. */

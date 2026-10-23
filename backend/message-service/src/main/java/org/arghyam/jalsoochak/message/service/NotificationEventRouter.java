@@ -1377,8 +1377,8 @@ public class NotificationEventRouter {
         // land under [Router/WEEKLY_REPORT] alongside this officer's GENERATED line, rather than under
         // the daily prefix the shared helpers are also used by.
         ReportLogCtx logCtx = new ReportLogCtx(ReportKind.WEEKLY, corr, role, tenantId, officerUserId);
-        ReportSendOutcome outcome =
-                whatsAppChannel.sendWeeklyReport(contactId, reportUrl, officerUserType, weekStart, officerName);
+        ReportSendOutcome outcome = whatsAppChannel.sendWeeklyReport(
+                contactId, reportUrl, officerUserType, weekStart, weekEnd, officerName);
         ledger.close(ref, outcomeOf(outcome));
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
         if (!outcome.accepted()) {

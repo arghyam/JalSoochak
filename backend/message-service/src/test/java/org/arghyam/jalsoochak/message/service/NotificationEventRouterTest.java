@@ -1814,7 +1814,7 @@ class NotificationEventRouterTest {
         when(objectStorageService.publicUrl(anyString(), anyString()))
                 .thenReturn(URI.create("https://storage.example.org/weekly.pdf"));
         when(whatsAppChannel.sendWeeklyReport(12345L, "https://storage.example.org/weekly.pdf", "SECTION_OFFICER",
-                LocalDate.of(2026, 7, 13), "Binod Nimoli")).thenReturn(acceptedSend());
+                LocalDate.of(2026, 7, 13), LocalDate.of(2026, 7, 19), "Binod Nimoli")).thenReturn(acceptedSend());
 
         router.route(WEEKLY_SO_JSON);
 
@@ -1825,7 +1825,7 @@ class NotificationEventRouterTest {
         verify(objectStorageService).upload(eq(ReportFileNaming.WEEKLY_BUCKET), anyString(), any(InputStream.class),
                 eq((long) PDF_BYTES.length), eq("application/pdf"));
         verify(whatsAppChannel).sendWeeklyReport(12345L, "https://storage.example.org/weekly.pdf", "SECTION_OFFICER",
-                LocalDate.of(2026, 7, 13), "Binod Nimoli");
+                LocalDate.of(2026, 7, 13), LocalDate.of(2026, 7, 19), "Binod Nimoli");
         verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any(), any());
     }
 
@@ -1837,7 +1837,7 @@ class NotificationEventRouterTest {
                 anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString()))
                 .thenReturn(URI.create("https://storage.example.org/weekly.pdf"));
-        when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))
+        when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), any(), anyString()))
                 .thenReturn(acceptedSend());
 
         router.route(WEEKLY_SO_JSON);
@@ -1857,7 +1857,7 @@ class NotificationEventRouterTest {
                 anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly_sdo.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString()))
                 .thenReturn(URI.create("https://storage.example.org/weekly_sdo.pdf"));
-        when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))
+        when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), any(), anyString()))
                 .thenReturn(acceptedSend());
 
         router.route(WEEKLY_SO_JSON.replace("SECTION_OFFICER", "SUB_DIVISIONAL_OFFICER"));
@@ -1931,7 +1931,7 @@ class NotificationEventRouterTest {
 
         assertThatThrownBy(() -> router.route(WEEKLY_SO_JSON)).isInstanceOf(RuntimeException.class);
 
-        verify(whatsAppChannel, never()).sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString());
+        verify(whatsAppChannel, never()).sendWeeklyReport(anyLong(), anyString(), anyString(), any(), any(), anyString());
     }
 
     private static ReportSendOutcome acceptedSend() {
@@ -2056,7 +2056,30 @@ class NotificationEventRouterTest {
 
         verifyNoInteractions(deliveryStore);
         verify(whatsAppChannel).sendWeeklyReport(12345L, "https://storage.example.org/weekly.pdf", "SECTION_OFFICER",
-                LocalDate.of(2026, 7, 13), "Binod Nimoli");
+                LocalDate.of(2026, 7, 13), LocalDate.of(2026, 7, 19), "Binod Nimoli");
+    }
+
+    @Test
+    void handleWeeklyReport_sendsTheDeliveryCopy_whenTheSenderSendsDocuments() throws Exception {
+        withDeliveryStore();
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
+                anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
+        when(whatsAppSender.weeklyReportDeliveryMode()).thenReturn(ReportDeliveryMode.DOCUMENT);
+        when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), any(), anyString()))
+                .thenReturn(acceptedSend());
+
+        router.route(WEEKLY_SO_JSON);
+
+        verify(objectStorageService).upload(eq(ReportFileNaming.WEEKLY_BUCKET),
+                eq("SO/2026-07-13_to_2026-07-19/weekly.pdf"), any(InputStream.class), anyLong(), anyString());
+        ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
+        verify(deliveryStore).upload(eq(DELIVERY_BUCKET), key.capture(), any(InputStream.class), anyLong(), anyString());
+        assertThat(key.getValue()).startsWith(ReportFileNaming.WEEKLY_BUCKET + "/").endsWith("/weekly.pdf");
+        verify(whatsAppChannel).sendWeeklyReport(12345L,
+                "https://reports.example.org/" + DELIVERY_BUCKET + "/" + key.getValue(),
+                "SECTION_OFFICER", LocalDate.of(2026, 7, 13), LocalDate.of(2026, 7, 19), "Binod Nimoli");
     }
 
     @Test
@@ -2349,7 +2372,7 @@ class NotificationEventRouterTest {
                 anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString()))
                 .thenReturn(URI.create("https://storage.example.org/weekly.pdf"));
-        when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))
+        when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), any(), anyString()))
                 .thenReturn(outcome);
     }
 
