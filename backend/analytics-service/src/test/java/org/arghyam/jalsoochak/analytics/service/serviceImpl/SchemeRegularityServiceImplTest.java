@@ -688,7 +688,7 @@ class SchemeRegularityServiceImplTest {
                                         2,
                                         1,
                                         115L,
-                                        123L)));
+                                        246L)));
 
         var response =
                 service.getPeriodicSchemeRegularityForNationForApi(START, requestedEnd, PeriodScale.WEEK);
@@ -697,7 +697,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getSchemeCount()).isEqualTo(2);
         assertThat(response.getTotalAchievedFhtcCount()).isEqualTo(123L);
         assertThat(response.getMetrics().getFirst().getTotalWaterQuantity()).isEqualTo(115L);
-        assertThat(response.getMetrics().getFirst().getTotalSuppliedFhtcDays()).isEqualTo(123L);
+        assertThat(response.getMetrics().getFirst().getTotalSuppliedFhtcDays()).isEqualTo(246L);
         verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
