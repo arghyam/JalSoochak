@@ -19,6 +19,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * Handles Glific GraphQL operations: opt-in a contact and send HSM messages.
@@ -34,6 +35,8 @@ import java.util.Map;
  * <p>Daily report: either shape, chosen by {@code notifications.daily-report.delivery-mode} — see
  * {@link ReportDeliveryMode}. {@code LINK} mode is a single {@code sendHsmMessage} with
  * {{1}} = officer name, {{2}} = report date and the button's URL suffix last.</p>
+ * <p>Weekly report: the same two shapes, chosen by {@code notifications.weekly-report.delivery-mode},
+ * with the week start as {{2}} in {@code LINK} mode and the whole week in the document's name.</p>
  *
  * <p>Configured entirely through {@link GlificWhatsAppSettings}; only the GraphQL client reads its
  * own connection properties. A mutation Glific rejects surfaces as a {@link GlificMutationException},
@@ -58,7 +61,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
 
     /**
      * The plain HSM send. Shared by every template whose variables are all text — the nudge, the
-     * login OTP and the daily report in {@link ReportDeliveryMode#LINK} mode. Only the document
+     * login OTP and both reports in {@link ReportDeliveryMode#LINK} mode. Only the document
      * templates need the two-step {@code createMessageMedia} + {@code createAndSendMessage} pair.
      */
     private static final String NUDGE_HSM_MUTATION = """
@@ -158,33 +161,60 @@ public class GlificWhatsAppSender implements WhatsAppSender {
             // Only the templates the configured mode actually sends are required. A LINK deployment
             // never reads the document ids and vice versa, so demanding both would force every
             // environment to carry configuration it does not use.
-            switch (deliveryMode()) {
+            switch (dailyDeliveryMode()) {
                 case DOCUMENT -> validateDailyReportDocumentTemplates();
                 case LINK -> validateDailyReportLinkTemplates();
             }
         }
         if (!settings.dryRun().weeklyReport()) {
-            validateWeeklyReportTemplates();
+            switch (weeklyDeliveryMode()) {
+                case DOCUMENT -> validateWeeklyReportDocumentTemplates();
+                case LINK -> validateWeeklyReportLinkTemplates();
+            }
         }
         validateMediaBaseUrl();
     }
 
     /**
-     * Refuses to start when weekly delivery is live without an approved template.
+     * Refuses to start when weekly delivery is live in {@link ReportDeliveryMode#LINK} mode without an
+     * approved template.
      *
      * <p>Without this the job would run on each tenant's weekly schedule, generate and upload a PDF, and then fail per
      * message at send time — a failure discovered from the logs rather than at deploy, with officers
      * silently receiving nothing meanwhile.</p>
      */
-    private void validateWeeklyReportTemplates() {
+    private void validateWeeklyReportLinkTemplates() {
         if (isBlank(settings.templates().weeklyReportSoLink())) {
             throw new IllegalStateException(
                     "whatsapp.template.weekly-report-so-link-id (WHATSAPP_WEEKLY_REPORT_SO_LINK_TEMPLATE_ID)"
                     + " must be configured when weekly-report delivery"
-                    + " is enabled (set NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN=true to generate and upload the"
+                    + " is enabled and notifications.weekly-report.delivery-mode=LINK"
+                    + " (set NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN=true to generate and upload the"
                     + " reports without sending them, until the Meta template is approved)");
         }
         validateLinkButtonBaseUrl();
+    }
+
+    /**
+     * As {@link #validateWeeklyReportLinkTemplates}, for {@link ReportDeliveryMode#DOCUMENT} mode — whose
+     * template ids are sent as integers, so a non-numeric one fails here rather than per message.
+     */
+    private void validateWeeklyReportDocumentTemplates() {
+        if (isBlank(settings.templates().weeklyReportSo())) {
+            throw new IllegalStateException(
+                    "whatsapp.template.weekly-report-so-id (WHATSAPP_WEEKLY_REPORT_SO_TEMPLATE_ID) must be"
+                    + " configured when weekly-report delivery is enabled and"
+                    + " notifications.weekly-report.delivery-mode=DOCUMENT"
+                    + " (set NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN=true to suppress weekly reports,"
+                    + " or NOTIFICATIONS_WEEKLY_REPORT_DELIVERY_MODE=LINK to send a link button)");
+        }
+        requireNumericTemplateId(settings.templates().weeklyReportSo(),
+                "whatsapp.template.weekly-report-so-id (WHATSAPP_WEEKLY_REPORT_SO_TEMPLATE_ID)");
+        // Optional, like the daily SDO id: resolveWeeklyReportTemplateId falls back to the SO template.
+        if (!isBlank(settings.templates().weeklyReportSdo())) {
+            requireNumericTemplateId(settings.templates().weeklyReportSdo(),
+                    "whatsapp.template.weekly-report-sdo-id (WHATSAPP_WEEKLY_REPORT_SDO_TEMPLATE_ID)");
+        }
     }
 
     private void validateDailyReportDocumentTemplates() {
@@ -194,8 +224,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
                     + " configured when daily-report delivery is enabled"
                     + " (set NOTIFICATIONS_DAILY_REPORT_DRY_RUN=true to suppress daily reports)");
         }
-        // sendDailyReportDocumentHsm does Integer.parseInt on the resolved template id, so fail fast at
-        // startup on a non-numeric id rather than per-message (retry → DLT) at delivery time.
+        // sendDocumentHsm does Integer.parseInt on the resolved template id, so fail fast at startup on a
+        // non-numeric id rather than per-message (retry → DLT) at delivery time.
         requireNumericTemplateId(settings.templates().dailyReportSo(),
                 "whatsapp.template.daily-report-so-id (WHATSAPP_DAILY_REPORT_SO_TEMPLATE_ID)");
         // The SDO id is optional (resolveDailyReportTemplateId falls back to the SO template),
@@ -258,17 +288,18 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * startup keeps that from reaching officers at all.
      *
      * <p>Each live purpose is checked against the base it actually hands out. Documents (the
-     * escalation, and the daily report in {@link ReportDeliveryMode#DOCUMENT} mode) use
-     * {@link GlificWhatsAppSettings.Media#documentBaseUrl()}, which Meta downloads from. Links (the
-     * weekly report, and the daily report in {@link ReportDeliveryMode#LINK} mode) use
-     * {@link GlificWhatsAppSettings.Media#baseUrl()}, which the officer's phone opens and the approved
-     * template is frozen to.</p>
+     * escalation, and each report in {@link ReportDeliveryMode#DOCUMENT} mode) use
+     * {@link GlificWhatsAppSettings.Media#documentBaseUrl()}, which Meta downloads from. Links (each
+     * report in {@link ReportDeliveryMode#LINK} mode) use {@link GlificWhatsAppSettings.Media#baseUrl()},
+     * which the officer's phone opens and the approved template is frozen to.</p>
      */
     private void validateMediaBaseUrl() {
         GlificWhatsAppSettings.DryRun dryRun = settings.dryRun();
-        boolean dailyLive = !dryRun.dailyReport();
-        boolean sendsDocuments = !dryRun.escalation() || (dailyLive && deliveryMode() == ReportDeliveryMode.DOCUMENT);
-        boolean sendsLinks = !dryRun.weeklyReport() || (dailyLive && deliveryMode() == ReportDeliveryMode.LINK);
+        ReportDeliveryMode daily = dryRun.dailyReport() ? null : dailyDeliveryMode();
+        ReportDeliveryMode weekly = dryRun.weeklyReport() ? null : weeklyDeliveryMode();
+        boolean sendsDocuments = !dryRun.escalation()
+                || daily == ReportDeliveryMode.DOCUMENT || weekly == ReportDeliveryMode.DOCUMENT;
+        boolean sendsLinks = daily == ReportDeliveryMode.LINK || weekly == ReportDeliveryMode.LINK;
         if (sendsDocuments) {
             String reason = PublicUrlValidator.unreachableReason(settings.media().documentBaseUrl());
             if (reason != null) {
@@ -421,8 +452,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
 
     /**
      * Registers a document with Glific by its publicly reachable URL, the first step of every document
-     * template send. Not dry-run guarded: both callers return before reaching it when their purpose is
-     * suppressed.
+     * template send. Not dry-run guarded: every document send returns before reaching it when its purpose
+     * is suppressed.
      *
      * @param publicUrl publicly reachable URL of the file
      * @param caption   the name the recipient sees for the document
@@ -452,6 +483,32 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         String mediaId = response.path("createMessageMedia").path("messageMedia").path("id").asText();
         log.info("[WhatsApp] Media uploaded, mediaId={}", mediaId);
         return mediaId;
+    }
+
+    /**
+     * The two-step send every document template shares: register the PDF under the name the recipient
+     * sees, then send the template with it as the document header. No body variable travels — the
+     * approved document templates carry none.
+     *
+     * @param templateId the template id, which {@code createAndSendMessage} takes as an integer
+     * @return the {@code createAndSendMessage} response, its errors already checked, for the caller to
+     *         take the message id from as strictly as its purpose requires
+     */
+    private JsonNode sendDocumentHsm(Long contactId, String documentUrl, String documentName, String templateId) {
+        String mediaId = uploadMedia(documentUrl, documentName);
+
+        Map<String, Object> input = new HashMap<>();
+        input.put("templateId", Integer.parseInt(templateId));
+        input.put("receiverId", contactId.intValue());
+        input.put("isHsm", true);
+        input.put("params", List.of());
+        if (mediaId != null && !mediaId.isBlank()) {
+            input.put("mediaId", Integer.parseInt(mediaId));
+        }
+
+        JsonNode response = client.execute(CREATE_AND_SEND_MESSAGE_MUTATION, Map.of("input", input));
+        checkErrors(response, "createAndSendMessage");
+        return response;
     }
 
     /**
@@ -485,34 +542,22 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         if (isDryRun(settings.dryRun().dailyReport(), "sendDailyReportHsm")) {
             // Reported leniently: a suppressed send must not start failing because the mode property
             // has a typo, which is the behaviour before this method returned anything at all.
-            return WhatsAppSendResult.suppressed(deliveryModeOrNull());
+            return WhatsAppSendResult.suppressed(modeOrNull(this::dailyDeliveryMode));
         }
         // Checked before the media upload so a missing contact id costs no Glific round-trip.
         requireContactId(contactId, "sendDailyReportHsm");
 
-        return switch (deliveryMode()) {
+        return switch (dailyDeliveryMode()) {
             case DOCUMENT -> sendDailyReportDocumentHsm(contactId, documentUrl, officerUserType, reportDate);
             case LINK -> sendDailyReportLinkHsm(contactId, documentUrl, officerUserType, reportDate, officerName);
         };
     }
 
-    /** The original two-step document send: register the PDF as media, then send it as the header. */
+    /** The original document send, under the dated document name. */
     private WhatsAppSendResult sendDailyReportDocumentHsm(Long contactId, String documentUrl, String officerUserType,
                                                           LocalDate reportDate) {
         String templateId = resolveDailyReportTemplateId(officerUserType);
-        String mediaId = uploadMedia(documentUrl, dailyReportDocumentName(reportDate));
-
-        Map<String, Object> input = new HashMap<>();
-        input.put("templateId", Integer.parseInt(templateId));
-        input.put("receiverId", contactId.intValue());
-        input.put("isHsm", true);
-        input.put("params", List.of());
-        if (mediaId != null && !mediaId.isBlank()) {
-            input.put("mediaId", Integer.parseInt(mediaId));
-        }
-
-        JsonNode response = client.execute(CREATE_AND_SEND_MESSAGE_MUTATION, Map.of("input", input));
-        checkErrors(response, "createAndSendMessage");
+        JsonNode response = sendDocumentHsm(contactId, documentUrl, dailyReportDocumentName(reportDate), templateId);
         String messageId = extractMessageId(response, "createAndSendMessage");
         log.debug("[WhatsApp] Daily report HSM sent to contactId={} providerMsgId={}", contactId, messageId);
         return new WhatsAppSendResult(messageId, templateId, ReportDeliveryMode.DOCUMENT);
@@ -601,24 +646,30 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         return prefix + "/";
     }
 
-    /** The configured delivery mode; parsed on use so an unknown value fails loudly wherever it is read. */
-    private ReportDeliveryMode deliveryMode() {
-        return ReportDeliveryMode.from(settings.dailyReportDeliveryMode());
+    /** The configured daily-report mode; parsed on use so an unknown value fails loudly wherever it is read. */
+    private ReportDeliveryMode dailyDeliveryMode() {
+        return ReportDeliveryMode.from(settings.dailyReportDeliveryMode(), ReportDeliveryMode.DOCUMENT,
+                "notifications.daily-report.delivery-mode");
+    }
+
+    /** As {@link #dailyDeliveryMode()}; unset means LINK, the weekly report's only shape before it had a mode. */
+    private ReportDeliveryMode weeklyDeliveryMode() {
+        return ReportDeliveryMode.from(settings.weeklyReportDeliveryMode(), ReportDeliveryMode.LINK,
+                "notifications.weekly-report.delivery-mode");
     }
 
     /**
-     * The configured delivery mode, or {@code null} when the property is unparseable.
+     * The given report's mode, or {@code null} when its property is unparseable.
      *
-     * <p>Used only on the dry-run path, which reports the mode for the log line but must not start
-     * throwing on a typo it never used to read. A live send still goes through {@link #deliveryMode()}
-     * and still fails loudly.</p>
+     * <p>Used only on the dry-run paths, which report the mode for the log line but must not start
+     * throwing on a typo they never used to read. A live send still parses the mode directly and still
+     * fails loudly.</p>
      */
-    private ReportDeliveryMode deliveryModeOrNull() {
+    private static ReportDeliveryMode modeOrNull(Supplier<ReportDeliveryMode> mode) {
         try {
-            return deliveryMode();
+            return mode.get();
         } catch (IllegalStateException e) {
-            log.warn("[WhatsApp] Suppressed daily report: delivery-mode '{}' is not DOCUMENT or LINK;"
-                    + " reporting mode as unknown", settings.dailyReportDeliveryMode());
+            log.warn("[WhatsApp] Suppressed report: {}; reporting mode as unknown", e.getMessage());
             return null;
         }
     }
@@ -637,6 +688,18 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         return reportDate == null
                 ? settings.media().dailyReportCaption()
                 : settings.media().dailyReportCaption() + " " + reportDate.format(DOCUMENT_NAME_DATE);
+    }
+
+    /**
+     * As {@link #dailyReportDocumentName}, for the weekly report: the caption followed by the week it
+     * covers, e.g. {@code "Weekly Water Service Situation Report 13-07-2026 to 19-07-2026"}. Falls back
+     * to the bare caption when either bound is unknown.
+     */
+    String weeklyReportDocumentName(LocalDate weekStart, LocalDate weekEnd) {
+        String caption = settings.media().weeklyReportCaption();
+        return weekStart == null || weekEnd == null
+                ? caption
+                : caption + " " + weekStart.format(DOCUMENT_NAME_DATE) + " to " + weekEnd.format(DOCUMENT_NAME_DATE);
     }
 
     /**
@@ -671,27 +734,51 @@ public class GlificWhatsAppSender implements WhatsAppSender {
     }
 
     /**
-     * Sends the Weekly Water Service Situation Report as a dynamic-URL button HSM.
+     * Sends the Weekly Water Service Situation Report to an officer, in whichever shape
+     * {@code notifications.weekly-report.delivery-mode} selects — the same two as
+     * {@link #sendDailyReportHsm}, with the same shared dry-run guard and contact-id check.
      *
-     * <p>LINK only, with no DOCUMENT counterpart: the attachment path requires Meta to fetch the PDF
-     * from our object store, which the India-only firewall in front of production blocks
-     * ({@code (#131053)}). The daily report keeps DOCUMENT mode for environments where that works;
-     * there is no reason to introduce the same trap for a new report.</p>
-     *
-     * <p>Parameter order is Glific's, not ours: body variables first, the button's URL suffix last.</p>
-     *
-     * @param weekStart the first day of the reported week — template variable {{2}}
+     * @param weekStart the first day of the reported week — template variable {{2}} in LINK mode, and
+     *                  the start of the document's name in DOCUMENT mode
+     * @param weekEnd   the last day of the reported week, the end of the document's name. Unused in LINK
+     *                  mode, whose approved template names the week by its start alone
      * @return the Glific message id, template id and mode of the accepted send; a dry run returns
      *         {@link WhatsAppSendResult#suppressed}
      */
     @Override
     public WhatsAppSendResult sendWeeklyReportHsm(Long contactId, String documentUrl, String officerUserType,
-                                                  LocalDate weekStart, String officerName) {
+                                                  LocalDate weekStart, LocalDate weekEnd, String officerName) {
         if (isDryRun(settings.dryRun().weeklyReport(), "sendWeeklyReportHsm")) {
-            return WhatsAppSendResult.suppressed(ReportDeliveryMode.LINK);
+            return WhatsAppSendResult.suppressed(modeOrNull(this::weeklyDeliveryMode));
         }
         requireContactId(contactId, "sendWeeklyReportHsm");
 
+        return switch (weeklyDeliveryMode()) {
+            case DOCUMENT -> sendWeeklyReportDocumentHsm(contactId, documentUrl, officerUserType, weekStart, weekEnd);
+            case LINK -> sendWeeklyReportLinkHsm(contactId, documentUrl, officerUserType, weekStart, officerName);
+        };
+    }
+
+    /** The document send, named for the whole week. */
+    private WhatsAppSendResult sendWeeklyReportDocumentHsm(Long contactId, String documentUrl, String officerUserType,
+                                                           LocalDate weekStart, LocalDate weekEnd) {
+        String templateId = resolveWeeklyReportTemplateId(officerUserType);
+        String role = isBlank(officerUserType) ? "UNKNOWN" : officerUserType.trim();
+        JsonNode response = sendDocumentHsm(contactId, documentUrl, weeklyReportDocumentName(weekStart, weekEnd),
+                templateId);
+        String messageId = extractMessageId(response, "createAndSendMessage");
+        log.info("[WhatsApp] Weekly report HSM sent mode=DOCUMENT role={} providerMsgId={} templateId={}",
+                role, messageId, templateId);
+        log.debug("[WhatsApp] Weekly report document HSM sent to contactId={}", contactId);
+        return new WhatsAppSendResult(messageId, templateId, ReportDeliveryMode.DOCUMENT);
+    }
+
+    /**
+     * The link send, as {@link #sendDailyReportLinkHsm}. Parameter order is Glific's, not ours: body
+     * variables first, the button's URL suffix last.
+     */
+    private WhatsAppSendResult sendWeeklyReportLinkHsm(Long contactId, String documentUrl, String officerUserType,
+                                                       LocalDate weekStart, String officerName) {
         String templateId = resolveWeeklyReportLinkTemplateId(officerUserType);
         if (isBlank(templateId)) {
             throw new IllegalStateException(
@@ -719,6 +806,15 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         return new WhatsAppSendResult(messageId, templateId, ReportDeliveryMode.LINK);
     }
 
+    /** SDO→SO fallback over the weekly document templates, as {@link #resolveDailyReportTemplateId}. */
+    private String resolveWeeklyReportTemplateId(String officerUserType) {
+        if (officerUserType != null && officerUserType.trim().equalsIgnoreCase("SUB_DIVISIONAL_OFFICER")
+                && !isBlank(settings.templates().weeklyReportSdo())) {
+            return settings.templates().weeklyReportSdo();
+        }
+        return settings.templates().weeklyReportSo();
+    }
+
     /** SDO→SO fallback, so a deployment with only one approved weekly template still serves both roles. */
     private String resolveWeeklyReportLinkTemplateId(String officerUserType) {
         if (officerUserType != null && officerUserType.trim().equalsIgnoreCase("SUB_DIVISIONAL_OFFICER")
@@ -741,13 +837,17 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      */
     @Override
     public ReportDeliveryMode dailyReportDeliveryMode() {
-        return settings.dryRun().dailyReport() ? null : deliveryMode();
+        return settings.dryRun().dailyReport() ? null : dailyDeliveryMode();
     }
 
-    /** {@link ReportDeliveryMode#LINK} while live: the weekly report has no document path. */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>As for the daily report, the mode is parsed only for a live report.
+     */
     @Override
     public ReportDeliveryMode weeklyReportDeliveryMode() {
-        return settings.dryRun().weeklyReport() ? null : ReportDeliveryMode.LINK;
+        return settings.dryRun().weeklyReport() ? null : weeklyDeliveryMode();
     }
 
     @Override
@@ -783,23 +883,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         // Checked before the media upload so a missing contact id costs no Glific round-trip.
         requireContactId(contactId, "sendEscalationHsm");
 
-        String mediaId = uploadMedia(documentUrl, settings.media().escalationCaption());
-
-        Map<String, Object> input = new HashMap<>();
-        input.put("templateId", Integer.parseInt(settings.templates().escalation()));
-        input.put("receiverId", contactId.intValue());
-        input.put("isHsm", true);
-        input.put("params", List.of());
-
-        if (mediaId != null && !mediaId.isBlank()) {
-            input.put("mediaId", Integer.parseInt(mediaId));
-        }
-
-        JsonNode response = client.execute(
-                CREATE_AND_SEND_MESSAGE_MUTATION,
-                Map.of("input", input)
-        );
-        checkErrors(response, "createAndSendMessage");
+        JsonNode response = sendDocumentHsm(contactId, documentUrl, settings.media().escalationCaption(),
+                settings.templates().escalation());
 
         log.debug("[WhatsApp] Escalation HSM sent to contactId={}", contactId);
         return new WhatsAppSendResult(optionalMessageId(response, "createAndSendMessage"),

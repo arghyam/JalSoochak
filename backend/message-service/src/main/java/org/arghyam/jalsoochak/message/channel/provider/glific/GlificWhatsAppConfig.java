@@ -51,6 +51,12 @@ public class GlificWhatsAppConfig {
     @Value("${whatsapp.template.daily-report-sdo-link-id:}")
     private String dailyReportSdoLinkTemplateId;
 
+    @Value("${whatsapp.template.weekly-report-so-id:}")
+    private String weeklyReportSoTemplateId;
+
+    @Value("${whatsapp.template.weekly-report-sdo-id:}")
+    private String weeklyReportSdoTemplateId;
+
     @Value("${whatsapp.template.weekly-report-so-link-id:}")
     private String weeklyReportSoLinkTemplateId;
 
@@ -81,8 +87,14 @@ public class GlificWhatsAppConfig {
     @Value("${whatsapp.media.daily-report-caption:Daily Water Service Situation Report}")
     private String dailyReportCaption;
 
+    @Value("${whatsapp.media.weekly-report-caption:Weekly Water Service Situation Report}")
+    private String weeklyReportCaption;
+
     @Value("${notifications.daily-report.delivery-mode:DOCUMENT}")
     private String dailyReportDeliveryMode;
+
+    @Value("${notifications.weekly-report.delivery-mode:LINK}")
+    private String weeklyReportDeliveryMode;
 
     @Value("${daily-report.link.button-base-url:}")
     private String dailyReportLinkButtonBaseUrl;
@@ -100,6 +112,8 @@ public class GlificWhatsAppConfig {
                         dailyReportSdoTemplateId,
                         dailyReportSoLinkTemplateId,
                         dailyReportSdoLinkTemplateId,
+                        weeklyReportSoTemplateId,
+                        weeklyReportSdoTemplateId,
                         weeklyReportSoLinkTemplateId,
                         weeklyReportSdoLinkTemplateId),
                 new GlificWhatsAppSettings.Flows(nudgeFlowId, welcomeFlowId),
@@ -108,8 +122,10 @@ public class GlificWhatsAppConfig {
                         deliveryStoreEnabled ? deliveryBaseUrl : mediaBaseUrl,
                         escalationCaption,
                         escalationThumbnail,
-                        dailyReportCaption),
+                        dailyReportCaption,
+                        weeklyReportCaption),
                 dailyReportDeliveryMode,
+                weeklyReportDeliveryMode,
                 dailyReportLinkButtonBaseUrl);
     }
 }

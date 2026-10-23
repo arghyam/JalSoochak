@@ -66,6 +66,8 @@ class GlificWhatsAppSenderTest {
         String dailyReportSdoTemplateId;
         String dailyReportSoLinkTemplateId;
         String dailyReportSdoLinkTemplateId;
+        String weeklyReportSoTemplateId;
+        String weeklyReportSdoTemplateId;
         String weeklyReportSoLinkTemplateId;
         String weeklyReportSdoLinkTemplateId;
         String nudgeFlowId;
@@ -76,7 +78,9 @@ class GlificWhatsAppSenderTest {
         String escalationCaption;
         String escalationThumbnail;
         String dailyReportCaption;
+        String weeklyReportCaption;
         String dailyReportDeliveryMode;
+        String weeklyReportDeliveryMode;
         String dailyReportLinkButtonBaseUrl;
 
         GlificWhatsAppSettings toSettings() {
@@ -91,6 +95,8 @@ class GlificWhatsAppSenderTest {
                             dailyReportSdoTemplateId,
                             dailyReportSoLinkTemplateId,
                             dailyReportSdoLinkTemplateId,
+                            weeklyReportSoTemplateId,
+                            weeklyReportSdoTemplateId,
                             weeklyReportSoLinkTemplateId,
                             weeklyReportSdoLinkTemplateId),
                     new GlificWhatsAppSettings.Flows(nudgeFlowId, welcomeFlowId),
@@ -99,8 +105,10 @@ class GlificWhatsAppSenderTest {
                             documentBaseUrl != null ? documentBaseUrl : mediaBaseUrl,
                             escalationCaption,
                             escalationThumbnail,
-                            dailyReportCaption),
+                            dailyReportCaption,
+                            weeklyReportCaption),
                     dailyReportDeliveryMode,
+                    weeklyReportDeliveryMode,
                     dailyReportLinkButtonBaseUrl);
         }
     }
@@ -1054,7 +1062,7 @@ class GlificWhatsAppSenderTest {
 
         @Test
         void validateTemplates_failsFast_whenOnlyTheWeeklyReportIsLiveButMediaBaseUrlIsInternal() {
-            // The weekly report is LINK-only, so Meta never downloads the file — but the same prefix
+            // In LINK mode, the weekly default, Meta never downloads the file — but the same prefix
             // is what the officer's phone opens and what is frozen into the approved template. The
             // gate used to consult only the daily and escalation flags, so a weekly-only deployment
             // started happily and delivered buttons that lead nowhere.
@@ -1237,16 +1245,20 @@ class GlificWhatsAppSenderTest {
             assertThat(sender().dailyReportDeliveryMode()).isNull();
         }
 
-        @Test
-        void weeklyReportDeliveryMode_isLink_whileLive() {
+        @ParameterizedTest(name = "delivery-mode={0} → {1}")
+        @CsvSource({"DOCUMENT, DOCUMENT", "link, LINK", "'', LINK"})
+        void weeklyReportDeliveryMode_isTheConfiguredMode_whileLive(String configured, ReportDeliveryMode expected) {
             settings.weeklyReportDryRun = false;
+            settings.weeklyReportDeliveryMode = configured;
 
-            assertThat(sender().weeklyReportDeliveryMode()).isEqualTo(ReportDeliveryMode.LINK);
+            assertThat(sender().weeklyReportDeliveryMode()).isEqualTo(expected);
         }
 
-        @Test
-        void weeklyReportDeliveryMode_isNull_whileSuppressed() {
+        @ParameterizedTest(name = "delivery-mode={0}")
+        @CsvSource({"DOCUMENT", "pdf"})
+        void weeklyReportDeliveryMode_isNull_whileSuppressed(String configured) {
             settings.weeklyReportDryRun = true;
+            settings.weeklyReportDeliveryMode = configured;
 
             assertThat(sender().weeklyReportDeliveryMode()).isNull();
         }
@@ -1275,7 +1287,7 @@ class GlificWhatsAppSenderTest {
      * fails with {@code (#131053)} behind the India-only firewall in front of the production object store.
      */
 @Nested
-    @DisplayName("weekly report")
+    @DisplayName("weekly report, LINK mode (the default)")
     class WeeklyReport {
 
         private static final String PUBLIC_BASE = "https://jalsoochak.jjmbrain.in/minio";
@@ -1283,6 +1295,7 @@ class GlificWhatsAppSenderTest {
                 "weekly-water-reports/SO/2026-07-13_to_2026-07-19/weekly_water_report_SECTION_OFFICER_21343_2026-07-13_to_2026-07-19.pdf";
         private static final String PUBLIC_URL = PUBLIC_BASE + "/" + OBJECT_PATH;
         private static final LocalDate WEEK_START = LocalDate.of(2026, 7, 13);
+        private static final LocalDate WEEK_END = LocalDate.of(2026, 7, 19);
 
         @BeforeEach
         void enableWeeklyDelivery() {
@@ -1299,11 +1312,11 @@ class GlificWhatsAppSenderTest {
 
         @Test
         void sendsOneHsmAndNeverRegistersMedia() throws Exception {
-            // No DOCUMENT path at all: registering media would make Meta fetch the PDF through the
-            // India-only firewall, which is the failure the link mode exists to avoid.
+            // Registering media would make Meta fetch the PDF through the India-only firewall, which is
+            // the failure the link mode exists to avoid.
             stubSendHsm();
 
-            sender().sendWeeklyReportHsm(21343L, PUBLIC_URL, "SECTION_OFFICER", WEEK_START, "Binod Nimoli");
+            sender().sendWeeklyReportHsm(21343L, PUBLIC_URL, "SECTION_OFFICER", WEEK_START, WEEK_END, "Binod Nimoli");
 
             verify(client).execute(contains("sendHsmMessage"), anyMap());
             verify(client, never()).execute(contains("createMessageMedia"), anyMap());
@@ -1317,7 +1330,7 @@ class GlificWhatsAppSenderTest {
             // suffix last. Reordering them sends the officer a message addressed to a date.
             stubSendHsm();
 
-            sender().sendWeeklyReportHsm(21343L, PUBLIC_URL, "SECTION_OFFICER", WEEK_START, "Binod Nimoli");
+            sender().sendWeeklyReportHsm(21343L, PUBLIC_URL, "SECTION_OFFICER", WEEK_START, WEEK_END, "Binod Nimoli");
 
             ArgumentCaptor<Map<String, Object>> vars = ArgumentCaptor.forClass(Map.class);
             verify(client).execute(contains("sendHsmMessage"), vars.capture());
@@ -1331,7 +1344,7 @@ class GlificWhatsAppSenderTest {
             settings.weeklyReportSdoLinkTemplateId = "7002";
 
             WhatsAppSendResult result = sender().sendWeeklyReportHsm(5521L, PUBLIC_URL,
-                    "SUB_DIVISIONAL_OFFICER", WEEK_START, "Bharat Sharma");
+                    "SUB_DIVISIONAL_OFFICER", WEEK_START, WEEK_END, "Bharat Sharma");
 
             assertThat(result.templateId()).isEqualTo("7002");
         }
@@ -1342,7 +1355,7 @@ class GlificWhatsAppSenderTest {
             settings.weeklyReportSdoLinkTemplateId = "";
 
             WhatsAppSendResult result = sender().sendWeeklyReportHsm(5521L, PUBLIC_URL,
-                    "SUB_DIVISIONAL_OFFICER", WEEK_START, "Bharat Sharma");
+                    "SUB_DIVISIONAL_OFFICER", WEEK_START, WEEK_END, "Bharat Sharma");
 
             assertThat(result.templateId()).isEqualTo("7001");
         }
@@ -1352,7 +1365,7 @@ class GlificWhatsAppSenderTest {
             // Meta appends the remainder to the template's frozen prefix verbatim, so a foreign URL
             // yields a button pointing nowhere — and Glific would accept the send regardless.
             assertThatThrownBy(() -> sender().sendWeeklyReportHsm(21343L,
-                    "https://elsewhere.example.com/x.pdf", "SECTION_OFFICER", WEEK_START, "Binod"))
+                    "https://elsewhere.example.com/x.pdf", "SECTION_OFFICER", WEEK_START, WEEK_END, "Binod"))
                     .isInstanceOf(IllegalStateException.class);
 
             verify(client, never()).execute(anyString(), anyMap());
@@ -1361,7 +1374,7 @@ class GlificWhatsAppSenderTest {
         @Test
         void requiresTheWeekStartSinceItIsATemplateVariable() {
             assertThatThrownBy(() -> sender().sendWeeklyReportHsm(21343L, PUBLIC_URL,
-                    "SECTION_OFFICER", null, "Binod"))
+                    "SECTION_OFFICER", null, WEEK_END, "Binod"))
                     .isInstanceOf(IllegalArgumentException.class);
         }
 
@@ -1370,7 +1383,7 @@ class GlificWhatsAppSenderTest {
             settings.weeklyReportDryRun = true;
 
             WhatsAppSendResult result = sender().sendWeeklyReportHsm(21343L, PUBLIC_URL,
-                    "SECTION_OFFICER", WEEK_START, "Binod");
+                    "SECTION_OFFICER", WEEK_START, WEEK_END, "Binod");
 
             assertThat(result.messageId()).isNull();
             assertThat(sender().isWeeklyReportDeliveryEnabled()).isFalse();
@@ -1397,6 +1410,202 @@ class GlificWhatsAppSenderTest {
             settings.dailyReportDryRun = true;
 
             sender().validateTemplates();
+        }
+    }
+
+    /**
+     * {@code notifications.weekly-report.delivery-mode=DOCUMENT}: the weekly PDF as a document HSM, for a
+     * deployment Meta can download it from — in a State Data Centre, the external delivery store.
+     */
+    @Nested
+    @DisplayName("weekly report, DOCUMENT mode")
+    class WeeklyDocumentMode {
+
+        private static final String DELIVERY_URL = "https://reports.example.org/report-delivery/weekly-water-reports/"
+                + "6f1c2a/weekly_water_report_SECTION_OFFICER_21343_2026-07-13_to_2026-07-19.pdf";
+        private static final LocalDate WEEK_START = LocalDate.of(2026, 7, 13);
+        private static final LocalDate WEEK_END = LocalDate.of(2026, 7, 19);
+
+        @BeforeEach
+        void enableWeeklyDocuments() {
+            settings.weeklyReportDryRun = false;
+            settings.weeklyReportDeliveryMode = "DOCUMENT";
+            settings.weeklyReportSoTemplateId = "7101";
+            settings.weeklyReportCaption = "Weekly Water Service Situation Report";
+            settings.documentBaseUrl = "https://reports.example.org";
+            settings.loginOtpTemplateId = "otp-1";
+            settings.dailyReportDryRun = true;
+        }
+
+        private void stubDocumentSend(String sentMessage) throws Exception {
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree("""
+                    {"createMessageMedia":{"messageMedia":{"id":"28569193"},"errors":[]}}
+                    """));
+            when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(mapper.readTree(
+                    "{\"createAndSendMessage\":{\"message\":" + sentMessage + ",\"errors\":[]}}"));
+        }
+
+        /** The URL is the delivery store's, which a link send would refuse for missing the template's prefix. */
+        @Test
+        @SuppressWarnings("unchecked")
+        void registersTheUrlUnderTheWeeksName_thenSendsItAsTheDocumentHeader() throws Exception {
+            stubDocumentSend("{\"id\":241952800}");
+
+            WhatsAppSendResult result = sender().sendWeeklyReportHsm(21343L, DELIVERY_URL, "SECTION_OFFICER",
+                    WEEK_START, WEEK_END, "Binod Nimoli");
+
+            ArgumentCaptor<Map<String, Object>> media = varsCaptor();
+            ArgumentCaptor<Map<String, Object>> send = varsCaptor();
+            InOrder inOrder = inOrder(client);
+            inOrder.verify(client).execute(contains("createMessageMedia"), media.capture());
+            inOrder.verify(client).execute(contains("createAndSendMessage"), send.capture());
+            verify(client, never()).execute(contains("sendHsmMessage"), anyMap());
+            assertThat((Map<String, Object>) media.getValue().get("input"))
+                    .containsEntry("url", DELIVERY_URL)
+                    .containsEntry("caption", "Weekly Water Service Situation Report 13-07-2026 to 19-07-2026");
+            assertThat((Map<String, Object>) send.getValue().get("input"))
+                    .containsEntry("templateId", 7101)
+                    .containsEntry("receiverId", 21343)
+                    .containsEntry("mediaId", 28569193)
+                    .containsEntry("params", List.of());
+            assertThat(result.messageId()).isEqualTo("241952800");
+            assertThat(result.templateId()).isEqualTo("7101");
+            assertThat(result.mode()).isEqualTo(ReportDeliveryMode.DOCUMENT);
+        }
+
+        @Test
+        void sdoUsesItsOwnDocumentTemplate_whenConfigured() throws Exception {
+            stubDocumentSend("{\"id\":1}");
+            settings.weeklyReportSdoTemplateId = "7102";
+
+            WhatsAppSendResult result = sender().sendWeeklyReportHsm(5521L, DELIVERY_URL, "SUB_DIVISIONAL_OFFICER",
+                    WEEK_START, WEEK_END, "Bharat Sharma");
+
+            assertThat(result.templateId()).isEqualTo("7102");
+        }
+
+        @Test
+        void sdoFallsBackToTheSoDocumentTemplate_whenItsOwnIsBlank() throws Exception {
+            stubDocumentSend("{\"id\":1}");
+            settings.weeklyReportSdoTemplateId = "";
+
+            WhatsAppSendResult result = sender().sendWeeklyReportHsm(5521L, DELIVERY_URL, "SUB_DIVISIONAL_OFFICER",
+                    WEEK_START, WEEK_END, "Bharat Sharma");
+
+            assertThat(result.templateId()).isEqualTo("7101");
+        }
+
+        /** As for the daily report: an accepted send with no id could never be reconciled. */
+        @Test
+        void aSendThatReturnsNoIdIsRefused() throws Exception {
+            stubDocumentSend("{}");
+
+            assertThatThrownBy(() -> sender().sendWeeklyReportHsm(21343L, DELIVERY_URL, "SECTION_OFFICER",
+                    WEEK_START, WEEK_END, "Binod Nimoli"))
+                    .isInstanceOf(GlificMissingMessageIdException.class);
+        }
+
+        @Test
+        void refusesAnUnresolvedContactId_beforeAnyGlificCall() {
+            assertThatThrownBy(() -> sender().sendWeeklyReportHsm(0L, DELIVERY_URL, "SECTION_OFFICER",
+                    WEEK_START, WEEK_END, "Binod Nimoli"))
+                    .isInstanceOf(IllegalArgumentException.class);
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void documentName_withoutEitherBound_fallsBackToTheBareCaption() {
+            assertThat(sender().weeklyReportDocumentName(WEEK_START, null))
+                    .isEqualTo("Weekly Water Service Situation Report");
+            assertThat(sender().weeklyReportDocumentName(null, WEEK_END))
+                    .isEqualTo("Weekly Water Service Situation Report");
+        }
+
+        /** A muted weekly report used to be reported as a link whatever the deployment sends. */
+        @Test
+        void aDryRunReportsTheConfiguredMode() {
+            settings.weeklyReportDryRun = true;
+
+            WhatsAppSendResult result = sender().sendWeeklyReportHsm(21343L, DELIVERY_URL, "SECTION_OFFICER",
+                    WEEK_START, WEEK_END, "Binod Nimoli");
+
+            assertThat(result.isSuppressed()).isTrue();
+            assertThat(result.mode()).isEqualTo(ReportDeliveryMode.DOCUMENT);
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void aDryRunToleratesAnUnparseableMode() {
+            settings.weeklyReportDryRun = true;
+            settings.weeklyReportDeliveryMode = "pdf";
+
+            WhatsAppSendResult result = sender().sendWeeklyReportHsm(21343L, DELIVERY_URL, "SECTION_OFFICER",
+                    WEEK_START, WEEK_END, "Binod Nimoli");
+
+            assertThat(result.mode()).isNull();
+        }
+
+        @Test
+        void aLiveSendRefusesAnUnparseableMode_namingTheWeeklyProperty() {
+            settings.weeklyReportDeliveryMode = "pdf";
+
+            assertThatThrownBy(() -> sender().sendWeeklyReportHsm(21343L, DELIVERY_URL, "SECTION_OFFICER",
+                    WEEK_START, WEEK_END, "Binod Nimoli"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("notifications.weekly-report.delivery-mode");
+        }
+
+        @Test
+        void startupRequiresTheSoDocumentTemplate_andNotTheLinkOne() {
+            settings.weeklyReportSoTemplateId = "";
+            settings.weeklyReportSoLinkTemplateId = "";
+
+            assertThatThrownBy(() -> sender().validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("whatsapp.template.weekly-report-so-id")
+                    .hasMessageContaining("WHATSAPP_WEEKLY_REPORT_SO_TEMPLATE_ID")
+                    .hasMessageNotContaining("link-id");
+        }
+
+        @Test
+        void startupPasses_withTheDocumentTemplateAlone() {
+            settings.weeklyReportSoLinkTemplateId = "";
+
+            assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
+        }
+
+        @ParameterizedTest(name = "so={0} sdo={1}")
+        @CsvSource({"weekly_v1, ''", "7101, weekly_sdo_v1"})
+        void startupRejectsANonNumericDocumentTemplate(String so, String sdo) {
+            settings.weeklyReportSoTemplateId = so;
+            settings.weeklyReportSdoTemplateId = sdo;
+
+            assertThatThrownBy(() -> sender().validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("must be a numeric Glific template id");
+        }
+
+        /** Meta downloads a weekly document like any other, so it is judged on the delivery store's base. */
+        @Test
+        void startupFails_whenTheDocumentBaseUrlIsInternal() {
+            settings.escalationDryRun = true;
+            settings.documentBaseUrl = "http://10.0.0.5:9000";
+
+            assertThatThrownBy(() -> sender().validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("http://10.0.0.5:9000")
+                    .hasMessageContaining("STORAGE_DELIVERY_PUBLIC_BASE_URL");
+        }
+
+        /** The SDC case: only documents are live, and only the delivery store is reachable from outside. */
+        @Test
+        void startupPasses_whenOnlyTheDeliveryBaseUrlIsPublic() {
+            settings.escalationDryRun = true;
+            settings.whatsappDryRun = true;
+            settings.mediaBaseUrl = "http://10.0.0.5:9000";
+
+            assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
         }
     }
 
@@ -1603,23 +1812,32 @@ class GlificWhatsAppSenderTest {
 
     // ─────────────────── delivery mode parsing ─────────────────────────────────
 
+    private static final String MODE_PROPERTY = "notifications.weekly-report.delivery-mode";
+
     @Test
-    void deliveryMode_defaultsToDocument_soAnUnsetPropertyChangesNothing() {
-        assertThat(ReportDeliveryMode.from(null)).isEqualTo(ReportDeliveryMode.DOCUMENT);
-        assertThat(ReportDeliveryMode.from("  ")).isEqualTo(ReportDeliveryMode.DOCUMENT);
+    void deliveryMode_isTheGivenDefault_soAnUnsetPropertyChangesNothing() {
+        assertThat(ReportDeliveryMode.from(null, ReportDeliveryMode.DOCUMENT, MODE_PROPERTY))
+                .isEqualTo(ReportDeliveryMode.DOCUMENT);
+        assertThat(ReportDeliveryMode.from("  ", ReportDeliveryMode.LINK, MODE_PROPERTY))
+                .isEqualTo(ReportDeliveryMode.LINK);
     }
 
     @Test
     void deliveryMode_toleratesCaseAndWhitespace() {
-        assertThat(ReportDeliveryMode.from("link")).isEqualTo(ReportDeliveryMode.LINK);
-        assertThat(ReportDeliveryMode.from(" LINK ")).isEqualTo(ReportDeliveryMode.LINK);
-        assertThat(ReportDeliveryMode.from("Document")).isEqualTo(ReportDeliveryMode.DOCUMENT);
+        assertThat(ReportDeliveryMode.from("link", ReportDeliveryMode.DOCUMENT, MODE_PROPERTY))
+                .isEqualTo(ReportDeliveryMode.LINK);
+        assertThat(ReportDeliveryMode.from(" LINK ", ReportDeliveryMode.DOCUMENT, MODE_PROPERTY))
+                .isEqualTo(ReportDeliveryMode.LINK);
+        assertThat(ReportDeliveryMode.from("Document", ReportDeliveryMode.LINK, MODE_PROPERTY))
+                .isEqualTo(ReportDeliveryMode.DOCUMENT);
     }
 
+    /** Each report has its own property, so the error has to say which one is wrong. */
     @Test
-    void deliveryMode_rejectsAnUnknownValue_namingTheValidOnes() {
-        assertThatThrownBy(() -> ReportDeliveryMode.from("pdf"))
+    void deliveryMode_rejectsAnUnknownValue_namingThePropertyAndTheValidOnes() {
+        assertThatThrownBy(() -> ReportDeliveryMode.from("pdf", ReportDeliveryMode.LINK, MODE_PROPERTY))
                 .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(MODE_PROPERTY)
                 .hasMessageContaining("DOCUMENT or LINK")
                 .hasMessageContaining("pdf");
     }

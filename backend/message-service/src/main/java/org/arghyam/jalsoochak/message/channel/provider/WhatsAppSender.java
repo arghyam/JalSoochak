@@ -111,14 +111,16 @@ public interface WhatsAppSender {
                                           LocalDate reportDate, String officerName);
 
     /**
-     * Sends the Weekly Water Service Situation Report as a link-button template
-     * ({@link ReportDeliveryMode#LINK} only).
+     * Sends the Weekly Water Service Situation Report, in the shape the configured
+     * {@link ReportDeliveryMode} selects.
      *
      * @param weekStart the first day of the reported week
+     * @param weekEnd   the last day of the reported week; with {@code weekStart}, the name the recipient
+     *                  sees for the document
      * @return as {@link #sendDailyReportHsm}
      */
     WhatsAppSendResult sendWeeklyReportHsm(Long contactId, String documentUrl, String officerUserType,
-                                           LocalDate weekStart, String officerName);
+                                           LocalDate weekStart, LocalDate weekEnd, String officerName);
 
     /**
      * Whether daily reports are actually delivered rather than suppressed. Lets a caller tell an
