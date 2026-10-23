@@ -39,14 +39,6 @@ final class ReportMaths {
         return round1(100.0 * part / whole);
     }
 
-    /** {@code numerator / (denominator × days)}, to one decimal place; 0 when either is 0. */
-    static double perDayRatio(long numerator, long denominator, int days) {
-        if (denominator <= 0 || days <= 0) {
-            return 0.0;
-        }
-        return round1((double) numerator / ((double) denominator * days));
-    }
-
     static double round1(double value) {
         return BigDecimal.valueOf(value).setScale(SCALE, RoundingMode.HALF_UP).doubleValue();
     }

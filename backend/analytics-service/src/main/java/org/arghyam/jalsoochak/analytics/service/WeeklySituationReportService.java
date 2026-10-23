@@ -11,7 +11,6 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.util.List;
 
-import static org.arghyam.jalsoochak.analytics.service.ReportMaths.perDayRatio;
 import static org.arghyam.jalsoochak.analytics.service.ReportMaths.ratio;
 
 /**
@@ -29,7 +28,6 @@ import static org.arghyam.jalsoochak.analytics.service.ReportMaths.ratio;
 @Slf4j
 public class WeeklySituationReportService {
 
-    private static final int DAYS_IN_WEEK = 7;
     private static final String SDO_ROLE = "SUB_DIVISIONAL_OFFICER";
 
     private final WeeklySituationReportRepository reportRepository;
@@ -142,7 +140,11 @@ public class WeeklySituationReportService {
     }
 
     /**
-     * Whether a scheme averaged at or below the low-LPCD bar across the week.
+     * Whether a scheme averaged at or below the low-LPCD bar on the days it supplied water.
+     *
+     * <p>Divided by the scheme's supply days, not the 7 days of the week: the days it did not supply are
+     * already reported as low supply days, so counting them here would flag a scheme that ran well on
+     * the days it ran. This matches the denominator of the report's Average LPCD.</p>
      *
      * <p>Two exclusions, both deliberate. A scheme with no connections has an <em>undefined</em> LPCD,
      * not a zero one, so it is not under-supplying. A scheme that supplied on no day is already listed
@@ -153,7 +155,7 @@ public class WeeklySituationReportService {
         if (scheme.fhtc() <= 0 || scheme.supplyDays() == 0) {
             return false;
         }
-        return perDayRatio(scheme.litres(), scheme.fhtc() * personsPerHousehold, DAYS_IN_WEEK) <= lowLpcdThreshold;
+        return ratio(scheme.litres(), scheme.fhtc() * scheme.supplyDays() * personsPerHousehold) <= lowLpcdThreshold;
     }
 
     private static List<Integer> schemeIds(

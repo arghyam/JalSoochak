@@ -70,10 +70,10 @@ class WeeklySituationReportServiceTest {
         return service.buildReport(TENANT, OFFICER, role, WEEK_START, WEEK_END, PREV_START, PREV_END, null);
     }
 
-    /** A scheme supplying enough litres to clear the 15 LPCD bar for its size over a week. */
+    /** A scheme supplying enough litres to clear the 15 LPCD bar on each day it supplied. */
     private static SchemeWeekSnapshot healthy(int id, int supplyDays) {
-        // 100 households × 5 people × 7 days × 20 LPCD = 70,000 L
-        return new SchemeWeekSnapshot(id, 100, supplyDays, 70_000);
+        // 100 households × 5 people × 20 LPCD on each supply day
+        return new SchemeWeekSnapshot(id, 100, supplyDays, 100 * 5 * 20 * supplyDays);
     }
 
     @Nested
@@ -147,13 +147,25 @@ class WeeklySituationReportServiceTest {
 
         @Test
         void includesASchemeAveragingAtOrBelowTheThreshold() {
-            // 100 households × 5 × 7 days × 15 LPCD = 52,500 L is exactly at the bar, so it counts.
-            givenWeek(new SchemeWeekSnapshot(1, 100, 5, 52_500), healthy(2, 5));
+            // 100 households × 5 × 5 supply days × 15 LPCD = 37,500 L is exactly at the bar, so it counts.
+            givenWeek(new SchemeWeekSnapshot(1, 100, 5, 37_500), healthy(2, 5));
 
             WeeklyReportKpiDTO kpis = build(SO);
 
             assertThat(kpis.getLowLpcdSchemeIds()).containsExactly(1);
             assertThat(kpis.getWeek().getSchemesLowLpcd()).isEqualTo(1);
+        }
+
+        @Test
+        void judgesASchemeOnlyOnTheDaysItSupplied() {
+            // 40 LPCD on each of 2 supply days. Spread over all 7 days it would read 11.4 and be listed,
+            // but the days it did not supply are already reported as low supply days, not low LPCD.
+            givenWeek(new SchemeWeekSnapshot(1, 100, 2, 100 * 5 * 2 * 40));
+
+            WeeklyReportKpiDTO kpis = build(SO);
+
+            assertThat(kpis.getLowLpcdSchemeIds()).isEmpty();
+            assertThat(kpis.getWeek().getSchemesLowLpcd()).isZero();
         }
 
         @Test

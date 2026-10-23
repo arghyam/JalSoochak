@@ -426,10 +426,15 @@ the operational schema exactly as §3.4.
 
 ```
 schemeLpcdW = round1( {{SWS}} for that scheme over W
-                      / (schemeFhtc × person_count_per_household × 7) )
+                      / (schemeFhtc × person_count_per_household × supply_days) )
 ```
 
-where `schemeFhtc` is that scheme's de-duplicated `fhtc_count` (§2.3).
+where `schemeFhtc` is that scheme's de-duplicated `fhtc_count` (§2.3) and `supply_days` its count of
+days in W that pass `{{SWD}}` (§4.2).
+
+**It divides by the days the scheme supplied, not by 7** — the same denominator as the Average LPCD
+(§4.3). The days it did not supply are already reported under the supply-day KPIs, so a scheme that
+gave 40 LPCD on each of 2 days reads 40 and is not listed; divided by 7 it would read 11.4.
 
 Two deliberate exclusions from section 4:
 
@@ -842,9 +847,9 @@ SELECT sf.scheme_id,
        sf.fhtc,
        COALESCE(sp.supply_days, 0) AS supply_days,
        COALESCE(sp.litres_week, 0) AS litres_week,
-       CASE WHEN sf.fhtc > 0
-            THEN ROUND(COALESCE(sp.litres_week, 0)::numeric / (sf.fhtc * :pph * 7), 1)
-            END AS scheme_lpcd_week          -- NULL when fhtc = 0: undefined, not zero
+       CASE WHEN sf.fhtc > 0 AND sp.supply_days > 0
+            THEN ROUND(sp.litres_week::numeric / (sf.fhtc * :pph * sp.supply_days), 1)
+            END AS scheme_lpcd_week          -- NULL when fhtc = 0 or no supply day: undefined, not zero
 FROM scheme_fhtc sf
 LEFT JOIN supply sp ON sp.scheme_id = sf.scheme_id
 ORDER BY sf.scheme_id;
@@ -868,8 +873,8 @@ as a 10,000-connection one. Rows with `supply_days = 0` add nothing to the denom
 covers only the schemes that supplied, on the days they did (§4.3). It returns `NULL` where the PDF
 prints `0`: no scheme supplied, or none that did has connections.
 
-`scheme_lpcd_week`, which drives the ≤15 LPCD lists and count, still divides by all 7 days of the week
-(§4.4).
+`scheme_lpcd_week`, which drives the ≤15 LPCD lists and count, divides by the same scheme-days: each
+scheme's litres over its own `fhtc × supply_days` (§4.4).
 
 ### 9.8 Section Officer breakdown (C §2)
 
