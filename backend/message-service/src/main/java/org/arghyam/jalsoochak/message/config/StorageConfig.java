@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.message.config;
 
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
+import org.arghyam.jalsoochak.message.storage.ReportPublisher;
 import org.arghyam.jalsoochak.message.storage.S3CompatibleStorageService;
 import org.arghyam.jalsoochak.message.util.PublicUrlValidator;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -18,7 +19,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 
 /**
- * Wires the S3-compatible {@link ObjectStorageService} when {@code storage.enabled=true}.
+ * Wires the S3-compatible {@link ObjectStorageService} and the {@link ReportPublisher} over it when
+ * {@code storage.enabled=true}.
  *
  * <p>There is deliberately no no-op fallback for a disabled store: this service has no degraded
  * mode for storage, so anything that needs {@link ObjectStorageService} fails at startup rather
@@ -29,6 +31,9 @@ import java.net.URISyntaxException;
 @Slf4j
 public class StorageConfig {
 
+    private static final String STORAGE_SWITCH = "storage.enabled";
+    private static final String DELIVERY_SWITCH = "storage.delivery.enabled";
+
     /**
      * Talks to {@code storage.endpoint} with path-style access, which most S3-compatible stores other
      * than AWS require. The endpoint is required: there is no implicit AWS default, so a deployment
@@ -37,25 +42,18 @@ public class StorageConfig {
     @Bean
     @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")
     public S3Client s3Client(StorageProperties props) {
-        validateEndpoint(props);
-        validateCredentials(props);
+        requireConfigured(props.getEndpoint(), "storage.endpoint", STORAGE_SWITCH);
+        requireConfigured(props.getAccessKey(), "storage.access-key", STORAGE_SWITCH);
+        requireConfigured(props.getSecretKey(), "storage.secret-key", STORAGE_SWITCH);
         log.info("[Storage] Using endpoint: {} (path-style enabled)", sanitizeEndpoint(props.getEndpoint()));
-        return S3Client.builder()
-                .credentialsProvider(StaticCredentialsProvider.create(
-                        AwsBasicCredentials.create(props.getAccessKey(), props.getSecretKey())))
-                .region(Region.of(props.getRegion()))
-                .endpointOverride(URI.create(props.getEndpoint()))
-                .serviceConfiguration(S3Configuration.builder()
-                        .pathStyleAccessEnabled(true)
-                        .build())
-                .build();
+        return buildClient(props.getEndpoint(), props.getRegion(), props.getAccessKey(), props.getSecretKey());
     }
 
     @Bean
     @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")
     public ObjectStorageService objectStorageService(S3Client s3Client, StorageProperties props) {
-        validatePublicBaseUrl(props.getPublicBaseUrl());
-        warnIfPublicBaseUrlIsNotPublic(props.getPublicBaseUrl());
+        validatePublicBaseUrl(props.getPublicBaseUrl(), "storage.public-base-url", STORAGE_SWITCH);
+        warnIfPublicBaseUrlIsNotPublic(props.getPublicBaseUrl(), "storage.public-base-url", "STORAGE_PUBLIC_BASE_URL");
         log.info("[Storage] Activating S3-compatible storage [bucket={}, endpoint={}, publicBaseUrl={}]",
                 props.getBucket(),
                 sanitizeEndpoint(props.getEndpoint()),
@@ -63,21 +61,57 @@ public class StorageConfig {
         return new S3CompatibleStorageService(s3Client, props.getPublicBaseUrl());
     }
 
-    private static void validateEndpoint(StorageProperties props) {
-        if (props.getEndpoint() == null || props.getEndpoint().isBlank()) {
-            throw new IllegalStateException(
-                    "[Storage] storage.endpoint must be provided when storage.enabled=true");
+    /**
+     * Publishes to {@code objectStorageService}, and with {@code storage.delivery.enabled=true} also
+     * stages document sends in the external delivery store.
+     *
+     * <p>The delivery store's client and adapter are built here and handed to the publisher alone,
+     * which closes the client when the context shuts down. They are not beans: a second
+     * {@link S3Client} or {@link ObjectStorageService} bean would make every existing injection of
+     * those by type ambiguous.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")
+    public ReportPublisher reportPublisher(ObjectStorageService objectStorageService, StorageProperties props) {
+        StorageProperties.Delivery delivery = props.getDelivery();
+        if (!delivery.isEnabled()) {
+            return new ReportPublisher(objectStorageService);
         }
+        requireConfigured(delivery.getEndpoint(), "storage.delivery.endpoint", DELIVERY_SWITCH);
+        requireConfigured(delivery.getRegion(), "storage.delivery.region", DELIVERY_SWITCH);
+        requireConfigured(delivery.getAccessKey(), "storage.delivery.access-key", DELIVERY_SWITCH);
+        requireConfigured(delivery.getSecretKey(), "storage.delivery.secret-key", DELIVERY_SWITCH);
+        requireConfigured(delivery.getBucket(), "storage.delivery.bucket", DELIVERY_SWITCH);
+        validatePublicBaseUrl(delivery.getPublicBaseUrl(), "storage.delivery.public-base-url", DELIVERY_SWITCH);
+        warnIfPublicBaseUrlIsNotPublic(delivery.getPublicBaseUrl(), "storage.delivery.public-base-url",
+                "STORAGE_DELIVERY_PUBLIC_BASE_URL");
+        log.info("[Storage] Activating external delivery store for document sends [bucket={}, endpoint={},"
+                        + " publicBaseUrl={}]",
+                delivery.getBucket(), sanitizeEndpoint(delivery.getEndpoint()), delivery.getPublicBaseUrl());
+        S3Client deliveryClient = buildClient(delivery.getEndpoint(), delivery.getRegion(),
+                delivery.getAccessKey(), delivery.getSecretKey());
+        return new ReportPublisher(objectStorageService,
+                new S3CompatibleStorageService(deliveryClient, delivery.getPublicBaseUrl()),
+                delivery.getBucket(), deliveryClient);
     }
 
-    private static void validateCredentials(StorageProperties props) {
-        if (props.getAccessKey() == null || props.getAccessKey().isBlank()) {
+    /** Path-style access, which most S3-compatible stores other than AWS require. */
+    private static S3Client buildClient(String endpoint, String region, String accessKey, String secretKey) {
+        return S3Client.builder()
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create(accessKey, secretKey)))
+                .region(Region.of(region))
+                .endpointOverride(URI.create(endpoint))
+                .serviceConfiguration(S3Configuration.builder()
+                        .pathStyleAccessEnabled(true)
+                        .build())
+                .build();
+    }
+
+    private static void requireConfigured(String value, String property, String switchProperty) {
+        if (value == null || value.isBlank()) {
             throw new IllegalStateException(
-                    "[Storage] storage.access-key must be provided when storage.enabled=true");
-        }
-        if (props.getSecretKey() == null || props.getSecretKey().isBlank()) {
-            throw new IllegalStateException(
-                    "[Storage] storage.secret-key must be provided when storage.enabled=true");
+                    "[Storage] " + property + " must be provided when " + switchProperty + "=true");
         }
     }
 
@@ -86,27 +120,24 @@ public class StorageConfig {
      * value would fail each report after its PDF is already stored. Checked here instead, so the
      * deployment stops rather than the reports.
      */
-    private static void validatePublicBaseUrl(String publicBaseUrl) {
-        if (publicBaseUrl == null || publicBaseUrl.isBlank()) {
-            throw new IllegalStateException(
-                    "[Storage] storage.public-base-url must be provided when storage.enabled=true");
-        }
+    private static void validatePublicBaseUrl(String publicBaseUrl, String property, String switchProperty) {
+        requireConfigured(publicBaseUrl, property, switchProperty);
         URI base;
         try {
             base = new URI(publicBaseUrl.strip());
         } catch (URISyntaxException e) {
-            throw invalidPublicBaseUrl();
+            throw invalidPublicBaseUrl(property);
         }
         boolean httpScheme = "http".equalsIgnoreCase(base.getScheme()) || "https".equalsIgnoreCase(base.getScheme());
         if (!httpScheme || base.getHost() == null || base.getRawUserInfo() != null
                 || base.getRawQuery() != null || base.getRawFragment() != null) {
-            throw invalidPublicBaseUrl();
+            throw invalidPublicBaseUrl(property);
         }
     }
 
     /** Does not echo the value, which may carry credentials in its user-info. */
-    private static IllegalStateException invalidPublicBaseUrl() {
-        return new IllegalStateException("[Storage] storage.public-base-url must be an absolute http(s) URL "
+    private static IllegalStateException invalidPublicBaseUrl(String property) {
+        return new IllegalStateException("[Storage] " + property + " must be an absolute http(s) URL "
                 + "with a host and no user-info, query or fragment");
     }
 
@@ -122,15 +153,15 @@ public class StorageConfig {
      * An internal address uploads fine and then fails inside Meta with {@code (#131053) … blocked by a
      * destination filter}.
      */
-    private static void warnIfPublicBaseUrlIsNotPublic(String publicBaseUrl) {
+    private static void warnIfPublicBaseUrlIsNotPublic(String publicBaseUrl, String property, String envVar) {
         String reason = PublicUrlValidator.unreachableReason(publicBaseUrl);
         if (reason != null) {
-            log.warn("[Storage] storage.public-base-url '{}' is not publicly reachable ({}). The WhatsApp"
+            log.warn("[Storage] {} '{}' is not publicly reachable ({}). The WhatsApp"
                             + " provider hands report URLs to Meta, which downloads them from the public"
                             + " internet, so documents built on this base will fail there with '(#131053) …"
-                            + " blocked by a destination filter'. Set STORAGE_PUBLIC_BASE_URL to the public"
+                            + " blocked by a destination filter'. Set {} to the public"
                             + " URL before enabling delivery.",
-                    publicBaseUrl, reason);
+                    property, publicBaseUrl, reason, envVar);
         }
     }
 

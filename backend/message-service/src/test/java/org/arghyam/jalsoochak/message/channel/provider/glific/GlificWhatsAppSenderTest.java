@@ -71,6 +71,8 @@ class GlificWhatsAppSenderTest {
         String nudgeFlowId;
         String welcomeFlowId;
         String mediaBaseUrl;
+        /** Null stands for the external delivery store being off, so documents use {@link #mediaBaseUrl}. */
+        String documentBaseUrl;
         String escalationCaption;
         String escalationThumbnail;
         String dailyReportCaption;
@@ -93,7 +95,11 @@ class GlificWhatsAppSenderTest {
                             weeklyReportSdoLinkTemplateId),
                     new GlificWhatsAppSettings.Flows(nudgeFlowId, welcomeFlowId),
                     new GlificWhatsAppSettings.Media(
-                            mediaBaseUrl, escalationCaption, escalationThumbnail, dailyReportCaption),
+                            mediaBaseUrl,
+                            documentBaseUrl != null ? documentBaseUrl : mediaBaseUrl,
+                            escalationCaption,
+                            escalationThumbnail,
+                            dailyReportCaption),
                     dailyReportDeliveryMode,
                     dailyReportLinkButtonBaseUrl);
         }
@@ -1079,6 +1085,70 @@ class GlificWhatsAppSenderTest {
             assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
         }
 
+        /**
+         * With the external delivery store on, documents are fetched from it and not from the store of
+         * record — so a deployment that sends only documents is judged on that base alone.
+         */
+        @Test
+        void validateTemplates_failsFast_whenEscalationIsLiveButTheDeliveryBaseUrlIsInternal() {
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = false;
+            settings.dailyReportDryRun = true;
+            settings.mediaBaseUrl = "https://jalsoochak.jjmbrain.in/minio";
+            settings.documentBaseUrl = "http://10.0.0.5:9000";
+
+            assertThatThrownBy(() -> sender().validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("http://10.0.0.5:9000")
+                    .hasMessageContaining("STORAGE_DELIVERY_PUBLIC_BASE_URL");
+        }
+
+        @Test
+        void validateTemplates_passes_whenOnlyDocumentsAreLiveAndOnlyTheDeliveryBaseUrlIsPublic() {
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = false;
+            settings.dailyReportDryRun = false;
+            settings.dailyReportDeliveryMode = "DOCUMENT";
+            settings.dailyReportSoTemplateId = "42";
+            settings.mediaBaseUrl = "http://10.0.0.5:9000";
+            settings.documentBaseUrl = "https://reports.example.org";
+
+            assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
+        }
+
+        @Test
+        void validateTemplates_failsFast_whenDailyLinksAreLiveButTheRecordBaseUrlIsInternal() {
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = false;
+            settings.dailyReportDeliveryMode = "LINK";
+            settings.dailyReportSoLinkTemplateId = "88";
+            settings.mediaBaseUrl = "http://10.0.0.5:9000";
+            settings.documentBaseUrl = "https://reports.example.org";
+
+            assertThatThrownBy(() -> sender().validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("storage.public-base-url")
+                    .hasMessageContaining("STORAGE_PUBLIC_BASE_URL");
+        }
+
+        @Test
+        void validateTemplates_passes_whenOnlyLinksAreLiveAndTheDeliveryBaseUrlIsInternal() {
+            settings.whatsappDryRun = true;
+            settings.nudgeDryRun = true;
+            settings.escalationDryRun = true;
+            settings.dailyReportDryRun = false;
+            settings.dailyReportDeliveryMode = "LINK";
+            settings.dailyReportSoLinkTemplateId = "88";
+            settings.mediaBaseUrl = "https://jalsoochak.jjmbrain.in/minio";
+            settings.documentBaseUrl = "http://10.0.0.5:9000";
+
+            assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
+        }
+
         /** A localhost object store is normal for local and CI runs, where nothing is delivered. */
         @Test
         void validateTemplates_toleratesAnInternalBaseUrl_whenNoDocumentIsEverSent() {
@@ -1139,6 +1209,60 @@ class GlificWhatsAppSenderTest {
             Map<String, Object> input = (Map<String, Object>) vars.getValue().get("input");
             assertThat(input).containsEntry("url", publicUrl).containsEntry("source_url", publicUrl);
             verify(client).execute(contains("createAndSendMessage"), anyMap());
+        }
+    }
+
+    /**
+     * What the router asks before storing a report, so it knows which URL the send will need. A
+     * suppressed report needs none, so no copy of it leaves the store of record.
+     */
+    @Nested
+    class ReportedDeliveryMode {
+
+        @ParameterizedTest(name = "delivery-mode={0} → {1}")
+        @CsvSource({"LINK, LINK", "document, DOCUMENT", "'', DOCUMENT"})
+        void dailyReportDeliveryMode_isTheConfiguredMode_whileLive(String configured, ReportDeliveryMode expected) {
+            settings.dailyReportDeliveryMode = configured;
+
+            assertThat(sender().dailyReportDeliveryMode()).isEqualTo(expected);
+        }
+
+        /** A suppressed daily report can start with a typo in the mode, and must keep running. */
+        @ParameterizedTest(name = "delivery-mode={0}")
+        @CsvSource({"DOCUMENT", "pdf"})
+        void dailyReportDeliveryMode_isNull_whileSuppressed(String configured) {
+            settings.dailyReportDryRun = true;
+            settings.dailyReportDeliveryMode = configured;
+
+            assertThat(sender().dailyReportDeliveryMode()).isNull();
+        }
+
+        @Test
+        void weeklyReportDeliveryMode_isLink_whileLive() {
+            settings.weeklyReportDryRun = false;
+
+            assertThat(sender().weeklyReportDeliveryMode()).isEqualTo(ReportDeliveryMode.LINK);
+        }
+
+        @Test
+        void weeklyReportDeliveryMode_isNull_whileSuppressed() {
+            settings.weeklyReportDryRun = true;
+
+            assertThat(sender().weeklyReportDeliveryMode()).isNull();
+        }
+
+        @Test
+        void escalationDeliveryMode_isDocument_whileLive() {
+            settings.escalationDryRun = false;
+
+            assertThat(sender().escalationDeliveryMode()).isEqualTo(ReportDeliveryMode.DOCUMENT);
+        }
+
+        @Test
+        void escalationDeliveryMode_isNull_whileSuppressed() {
+            settings.escalationDryRun = true;
+
+            assertThat(sender().escalationDeliveryMode()).isNull();
         }
     }
 

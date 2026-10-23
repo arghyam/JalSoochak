@@ -338,7 +338,8 @@ notifications:
     #
     #   DOCUMENT — the PDF as a WhatsApp document. The provider registers the report URL and META
     #              DOWNLOADS IT ITSELF. The production object store answers Indian source addresses
-    #              only, so that download fails inside Meta
+    #              only, so that download fails inside Meta — unless storage.delivery is enabled, in
+    #              which case Meta fetches a copy from that store instead
     #   LINK     — a text HSM whose "View Report" button carries the report's path. Meta fetches
     #              nothing; the officer's phone opens the PDF, from inside India, when they tap it.
     #              Requires an approved link template (whatsapp.template.daily-report-*-link-id).
@@ -574,6 +575,26 @@ storage:
   secret-key: ${STORAGE_SECRET_KEY:}
   bucket: ${STORAGE_BUCKET:escalation-reports}
   public-base-url: ${STORAGE_PUBLIC_BASE_URL:} # required; public prefix of report URLs, fetched by Meta
+
+  # External delivery store, for a deployment whose store above Meta cannot download from (a State Data
+  # Centre). The store above stays the store of record and every report still goes there. A report sent
+  # as a WhatsApp DOCUMENT (every escalation; the daily report when its delivery-mode is DOCUMENT) is also
+  # copied here, under <record bucket>/<random UUID>/<file>.pdf, and that copy's URL is what Meta fetches.
+  # LINK sends keep the store-of-record URL their approved template is frozen to, and a report suppressed
+  # by its dry-run flag is not copied.
+  #
+  # Off by default. When enabled every value below is required, or startup fails. The bucket is never
+  # created by this service: pre-create it with anonymous GET on objects, NO anonymous listing, and a
+  # lifecycle rule that expires objects after a few days. The copies carry officer and Jal Mitra phone
+  # numbers, and only the random path segment keeps them from being found.
+  delivery:
+    enabled: ${STORAGE_DELIVERY_ENABLED:false}
+    endpoint: ${STORAGE_DELIVERY_ENDPOINT:}
+    region: ${STORAGE_DELIVERY_REGION:}
+    access-key: ${STORAGE_DELIVERY_ACCESS_KEY:}
+    secret-key: ${STORAGE_DELIVERY_SECRET_KEY:}
+    bucket: ${STORAGE_DELIVERY_BUCKET:}
+    public-base-url: ${STORAGE_DELIVERY_PUBLIC_BASE_URL:} # public prefix of the copies' URLs, fetched by Meta
 
 logging:
   file:

@@ -130,6 +130,22 @@ public interface WhatsAppSender {
     boolean isWeeklyReportDeliveryEnabled();
 
     /**
+     * The shape {@link #sendDailyReportHsm} sends in, so the caller can store the report where that
+     * shape's URL has to point: a document must be reachable by Meta, while a link's prefix is frozen
+     * into its approved template.
+     *
+     * @return the configured mode, or {@code null} when a dry-run flag suppresses the send, in which
+     *         case no copy is needed beyond the store of record
+     */
+    ReportDeliveryMode dailyReportDeliveryMode();
+
+    /** As {@link #dailyReportDeliveryMode}, for {@link #sendWeeklyReportHsm}. */
+    ReportDeliveryMode weeklyReportDeliveryMode();
+
+    /** As {@link #dailyReportDeliveryMode}, for {@link #sendEscalationHsm}, which is always a document. */
+    ReportDeliveryMode escalationDeliveryMode();
+
+    /**
      * The provider this adapter sends through, as recorded in the delivery ledger — a short lower-case
      * identifier that stays stable across releases.
      */
