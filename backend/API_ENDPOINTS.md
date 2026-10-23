@@ -206,7 +206,7 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/v1/analytics/water-quantity/region-wise` | Water quantity by region |
-| GET | `/api/v1/analytics/water-quantity/periodic` | Periodic water quantity |
+| GET | `/api/v1/analytics/water-quantity/periodic` | Periodic water quantity; each bucket carries `totalSuppliedFhtcDays`¹ |
 | GET | `/api/v1/analytics/outage-reasons` | Outage reasons summary |
 | GET | `/api/v1/analytics/outage-reasons/periodic` | Periodic outage reasons |
 | GET | `/api/v1/analytics/outage-reasons/user` | Outage reasons by user |
@@ -214,12 +214,12 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 | GET | `/api/v1/analytics/non-submission-reasons/user` | Non-submission reasons by user |
 | GET | `/api/v1/analytics/submission-status/user` | Submission status by user |
 | GET | `/api/v1/analytics/submission-status` | Submission status summary |
-| GET | `/api/v1/analytics/water-supply/average-per-region` | Average water supply per region |
-| GET | `/api/v1/analytics/national/dashboard` | National dashboard data |
-| GET | `/api/v1/analytics/national/dashboard/district` | National dashboard at district level |
+| GET | `/api/v1/analytics/water-supply/average-per-region` | Average water supply per region; `childRegions[]` and `currentRegion` carry `totalSuppliedFhtcDays`¹ |
+| GET | `/api/v1/analytics/national/dashboard` | National dashboard data; `stateWiseQuantityPerformance[]` carries `totalSuppliedFhtcDays`¹ |
+| GET | `/api/v1/analytics/national/dashboard/district` | National dashboard at district level; `districts[]` carries `totalSuppliedFhtcDays`¹ |
 | GET | `/api/v1/analytics/national/dashboard/boundary` | State boundaries (GeoJSON) for the national map |
 | GET | `/api/v1/analytics/national/dashboard/boundary/district` | National outline + district boundaries (GeoJSON) |
-| GET | `/api/v1/analytics/scheme-regularity/periodic/national` | National periodic scheme regularity |
+| GET | `/api/v1/analytics/scheme-regularity/periodic/national` | National periodic scheme regularity; each bucket carries `totalSuppliedFhtcDays`¹ |
 | GET | `/api/v1/analytics/schemes/status-count` | Scheme status counts |
 | GET | `/api/v1/analytics/schemes/dashboard` | Scheme dashboard |
 | GET | `/api/v1/analytics/schemes/dashboard/download` | Scheme dashboard as CSV |
@@ -245,6 +245,10 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 | GET | `/api/v1/analytics/anomalies` | Paginated anomalies on a user's schemes |
 | GET | `/api/v1/analytics/anomalies/statuses` | Anomaly statuses list |
 | GET | `/api/v1/analytics/escalations/statuses` | Escalation statuses list |
+
+¹ `totalSuppliedFhtcDays` is the LPCD denominator: each scheme's achieved FHTC summed over the days it
+supplied water. LPCD = litres ÷ (`totalSuppliedFhtcDays` × persons per household), so schemes that did not
+supply add no households. `totalAchievedFhtcCount` is still the region's household total.
 
 ---
 

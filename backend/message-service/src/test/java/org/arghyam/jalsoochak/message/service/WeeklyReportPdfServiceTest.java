@@ -233,11 +233,35 @@ class WeeklyReportPdfServiceTest {
         }
 
         @Test
+        void marksEachOfficersAverageLpcdAsCoveringSupplyingSchemesOnly() throws Exception {
+            String text = render(SDO, kpis(142, 140), List.of(), List.of(), List.of(), officerRows());
+            String officerTable = text.substring(text.indexOf("2. Section Officers Performance"),
+                    text.indexOf("3. List of Schemes with No Supply"));
+
+            assertThat(officerTable).contains("LPCD*").contains("* of schemes that have supplied water");
+        }
+
+        @Test
         void hasNoOneToThreeDaySection() throws Exception {
             String text = render(SDO, kpis(142, 140), List.of(), List.of(), List.of(), officerRows());
 
             assertThat(text).doesNotContain("1 to 3 days of supply");
             assertThat(text).contains("3. List of Schemes with No Supply (zero days)");
+        }
+    }
+
+    @Nested
+    @DisplayName("average LPCD")
+    class AverageLpcd {
+
+        @Test
+        void marksTheSummaryFigureAsCoveringSupplyingSchemesOnly() throws Exception {
+            // It divides by the households of the schemes that supplied, on the days they did, so it
+            // reads higher than an LPCD over the whole command area; the footnote is what says so.
+            String text = render(SO, kpis(142, 140), List.of(), List.of(), List.of(), List.of());
+
+            assertThat(text).contains("Average LPCD* 63 61");
+            assertThat(text).contains("* of schemes that have supplied water");
         }
     }
 

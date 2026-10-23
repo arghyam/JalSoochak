@@ -347,16 +347,17 @@ public class AggregationRepository {
 
         // cs = one status per scheme, from the row the dimension writer last touched; the
         //      work-status filter is applied to it, never to the individual mapping rows.
-        // m  = region membership at this level for schemes passing the filter, from every mapping row.
-        // s  = scheme set per region (from dim_scheme — authoritative, includes schemes with no
-        //      activity). dim_scheme_table holds one row per parent mapping, so schemes are
-        //      de-duplicated per region (DISTINCT ON, household counts from the row with the most
-        //      FHTCs) before counting/summing — a multi-mapped scheme counts once per region node
-        //      but still appears under every region it maps to (same semantics as the legacy queries).
-        // a  = additive activity sums per region: region membership comes from the dim_scheme mapping
-        //      rows joined to fact_scheme_daily_table by (tenant, scheme), NOT from the single location
-        //      chain stored on the daily row — a multi-mapped scheme's activity must land in every
-        //      region it maps to at this level.
+        // m  = region membership at this level for schemes passing the filter. dim_scheme_table holds
+        //      one row per parent mapping, so schemes are de-duplicated per region (DISTINCT ON,
+        //      household counts from the row with the most FHTCs) — a multi-mapped scheme counts once
+        //      per region node but still appears under every region it maps to (same semantics as the
+        //      legacy queries).
+        // s  = scheme set per region, from m (dim_scheme — authoritative, includes schemes with no activity).
+        // a  = additive activity sums per region: region membership comes from m joined to
+        //      fact_scheme_daily_table by (tenant, scheme), NOT from the single location chain stored on
+        //      the daily row — a multi-mapped scheme's activity must land in every region it maps to at
+        //      this level. A supply day's FHTC is read from m, the same row as total_achieved_fhtc, not
+        //      from the daily row's snapshot, which goes stale when the scheme's FHTC changes.
         // c  = per-scheme activity (for non-additive continuous / distinct-submitting counts)
         String sql = ("""
                 WITH cs AS (
@@ -365,17 +366,20 @@ public class AggregationRepository {
                     ORDER BY tenant_id, scheme_id, %3$s
                 ),
                 m AS (
-                    SELECT DISTINCT %1$s AS region_id, ds.tenant_id, ds.scheme_id
+                    SELECT DISTINCT ON (%1$s, ds.tenant_id, ds.scheme_id)
+                           %1$s AS region_id, ds.tenant_id, ds.scheme_id,
+                           ds.house_hold_count, ds.fhtc_count, ds.planned_fhtc
                     FROM analytics_schema.dim_scheme_table ds
                     JOIN cs ON cs.tenant_id = ds.tenant_id AND cs.scheme_id = ds.scheme_id
                     WHERE %1$s IS NOT NULL%2$s
+                    ORDER BY %1$s, ds.tenant_id, ds.scheme_id, %4$s
                 )
                 INSERT INTO analytics_schema.fact_region_metrics_table (
                     period_scale, period_start, period_end, tenant_id, hierarchy, region_level, region_id,
                     work_status_scope,
                     days_in_range, scheme_count, total_supply_days, total_submission_days,
                     %5$s,
-                    total_water_supplied_liters,
+                    total_water_supplied_liters, total_supplied_fhtc_days,
                     total_household_count, total_achieved_fhtc, total_planned_fhtc,
                     supply_days_in_efficient_range, compliant_submission_count, anomalous_submission_count,
                     continuous_scheme_count, critical_scheme_count, distinct_submitting_schemes,
@@ -387,7 +391,7 @@ public class AggregationRepository {
                        ?, s.scheme_count,
                        COALESCE(a.total_supply_days, 0), COALESCE(a.total_submission_days, 0),
                        %6$s,
-                       COALESCE(a.total_water_supplied_liters, 0),
+                       COALESCE(a.total_water_supplied_liters, 0), COALESCE(a.total_supplied_fhtc_days, 0),
                        s.total_household_count, s.total_achieved_fhtc, s.total_planned_fhtc,
                        COALESCE(a.supply_days_in_efficient_range, 0),
                        COALESCE(a.compliant_submission_count, 0), COALESCE(a.anomalous_submission_count, 0),
@@ -397,29 +401,22 @@ public class AggregationRepository {
                        a.norm_required_lpcd, a.norm_persons_per_household, a.norm_over_supply_pct, a.norm_under_supply_pct,
                        CURRENT_TIMESTAMP, ?
                 FROM (
-                    SELECT dedup.region_id, dedup.tenant_id,
+                    SELECT m.region_id, m.tenant_id,
                            COUNT(*) AS scheme_count,
                            %7$s,
-                           SUM(COALESCE(dedup.house_hold_count, 0))::bigint AS total_household_count,
-                           SUM(COALESCE(dedup.fhtc_count, 0))::bigint AS total_achieved_fhtc,
-                           SUM(COALESCE(dedup.planned_fhtc, 0))::bigint AS total_planned_fhtc
-                    FROM (
-                        SELECT DISTINCT ON (%1$s, ds.tenant_id, ds.scheme_id)
-                               %1$s AS region_id, ds.tenant_id, ds.scheme_id,
-                               ds.house_hold_count, ds.fhtc_count, ds.planned_fhtc
-                        FROM analytics_schema.dim_scheme_table ds
-                        JOIN cs ON cs.tenant_id = ds.tenant_id AND cs.scheme_id = ds.scheme_id
-                        WHERE %1$s IS NOT NULL%2$s
-                        ORDER BY %1$s, ds.tenant_id, ds.scheme_id, %4$s
-                    ) dedup
-                    JOIN cs ON cs.tenant_id = dedup.tenant_id AND cs.scheme_id = dedup.scheme_id
-                    GROUP BY dedup.region_id, dedup.tenant_id
+                           SUM(COALESCE(m.house_hold_count, 0))::bigint AS total_household_count,
+                           SUM(COALESCE(m.fhtc_count, 0))::bigint AS total_achieved_fhtc,
+                           SUM(COALESCE(m.planned_fhtc, 0))::bigint AS total_planned_fhtc
+                    FROM m
+                    JOIN cs ON cs.tenant_id = m.tenant_id AND cs.scheme_id = m.scheme_id
+                    GROUP BY m.region_id, m.tenant_id
                 ) s
                 LEFT JOIN (
                     SELECT m.region_id, sd.tenant_id,
                            SUM(sd.supplied) AS total_supply_days,
                            SUM(sd.submitted) AS total_submission_days,
                            SUM(sd.water_supplied_liters) AS total_water_supplied_liters,
+                           SUM(COALESCE(m.fhtc_count, 0)) FILTER (WHERE sd.supplied = 1) AS total_supplied_fhtc_days,
                            SUM(sd.is_supply_efficient) AS supply_days_in_efficient_range,
                            SUM(sd.compliant_count) AS compliant_submission_count,
                            SUM(sd.anomalous_count) AS anomalous_submission_count,
@@ -456,6 +453,7 @@ public class AggregationRepository {
                     total_supply_days = EXCLUDED.total_supply_days, total_submission_days = EXCLUDED.total_submission_days,
                     %8$s,
                     total_water_supplied_liters = EXCLUDED.total_water_supplied_liters,
+                    total_supplied_fhtc_days = EXCLUDED.total_supplied_fhtc_days,
                     total_household_count = EXCLUDED.total_household_count,
                     total_achieved_fhtc = EXCLUDED.total_achieved_fhtc, total_planned_fhtc = EXCLUDED.total_planned_fhtc,
                     supply_days_in_efficient_range = EXCLUDED.supply_days_in_efficient_range,

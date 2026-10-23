@@ -557,9 +557,11 @@ public final class SwaggerExamples {
                   {
                     "periodStartDate": "2026-01-01",
                     "periodEndDate": "2026-01-01",
-                    "schemeCount": 2,
+                    "averageWaterQuantity": 55.2,
                     "householdCount": 150,
-                    "averageWaterQuantity": 55.2
+                    "achievedFhtcCount": 140,
+                    "plannedFhtcCount": 160,
+                    "totalSuppliedFhtcDays": 120
                   }
                 ]
               }
@@ -692,26 +694,36 @@ public final class SwaggerExamples {
             {
               "success": true,
               "data": {
-                "schemeCount": 0,
-                "childRegionCount": 0,
-                "schemes": [
-                  {
-                    "schemeId": 1,
-                    "schemeName": "Scheme A",
-                    "householdCount": 150,
-                    "averageWaterSupply": 55.2
-                  }
-                ],
+                "tenantId": 10,
+                "stateCode": "MP",
+                "parentLgdLevel": 1,
+                "startDate": "2026-01-01",
+                "endDate": "2026-01-31",
+                "daysInRange": 31,
+                "childRegionCount": 1,
                 "childRegions": [
                   {
-                    "childLgdId": 110,
-                    "childLgdCName": "Child Region",
-                    "childLgdTitle": "Child Region Title",
+                    "lgdId": 110,
+                    "title": "Child Region",
+                    "totalHouseholdCount": 150,
+                    "totalAchievedFhtcCount": 140,
+                    "totalPlannedFhtcCount": 160,
+                    "totalWaterSuppliedLiters": 1078000,
                     "schemeCount": 2,
-                    "householdCount": 150,
-                    "averageWaterSupply": 55.2
+                    "avgWaterSupplyPerScheme": 539000.0,
+                    "totalSuppliedFhtcDays": 3920
                   }
-                ]
+                ],
+                "currentRegion": {
+                  "lgdId": 23001428,
+                  "totalHouseholdCount": 150,
+                  "totalAchievedFhtcCount": 140,
+                  "totalPlannedFhtcCount": 160,
+                  "totalWaterSuppliedLiters": 1078000,
+                  "schemeCount": 2,
+                  "avgWaterSupplyPerScheme": 539000.0,
+                  "totalSuppliedFhtcDays": 3920
+                }
               }
             }
             """;
@@ -737,7 +749,8 @@ public final class SwaggerExamples {
                     "totalAchievedFhtcCount": 900,
                     "totalPlannedFhtcCount": 950,
                     "totalWaterSuppliedLiters": 500000,
-                    "avgWaterSupplyPerScheme": 12800.0
+                    "avgWaterSupplyPerScheme": 12800.0,
+                    "totalSuppliedFhtcDays": 2000
                   }
                 ],
                 "stateWiseRegularity": [
@@ -849,6 +862,7 @@ public final class SwaggerExamples {
                     "totalWaterSuppliedLiters": 500000,
                     "avgWaterSupplyPerScheme": 12800.0,
                     "supplyDaysInEfficientRange": 275,
+                    "totalSuppliedFhtcDays": 2000,
                     "totalSupplyDays": 275,
                     "regularSchemeCount": 9,
                     "averageRegularity": 0.75,
@@ -878,6 +892,7 @@ public final class SwaggerExamples {
                     "totalSupplyDays": 275,
                     "regularSchemeCount": 7,
                     "totalWaterQuantity": 500000,
+                    "totalSuppliedFhtcDays": 810,
                     "averageRegularity": 0.7
                   }
                 ]
