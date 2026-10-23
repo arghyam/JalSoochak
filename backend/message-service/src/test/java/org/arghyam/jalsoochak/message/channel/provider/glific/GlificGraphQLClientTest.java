@@ -293,7 +293,7 @@ class GlificGraphQLClientTest {
                 new GlificWhatsAppSettings.DryRun(dry, dry, dry, dry, dry),
                 new GlificWhatsAppSettings.Templates(null, null, null, null, null, null, null, null, null),
                 new GlificWhatsAppSettings.Flows(null, null),
-                new GlificWhatsAppSettings.Media(null, null, null, null),
+                new GlificWhatsAppSettings.Media(null, null, null, null, null),
                 null,
                 null);
     }

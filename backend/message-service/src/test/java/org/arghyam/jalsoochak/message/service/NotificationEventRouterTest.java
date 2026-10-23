@@ -44,6 +44,7 @@ import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
 import org.arghyam.jalsoochak.message.exception.StorageException;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
+import org.arghyam.jalsoochak.message.storage.ReportPublisher;
 import reactor.core.publisher.Mono;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -97,8 +98,13 @@ class NotificationEventRouterTest {
     @Mock
     private WeeklyReportPdfService weeklyReportPdfService;
 
+    /** The store of record, behind the real {@link ReportPublisher} each test runs with. */
     @Mock
     private ObjectStorageService objectStorageService;
+
+    /** The external delivery store, for the tests that switch it on with {@link #withDeliveryStore()}. */
+    @Mock
+    private ObjectStorageService deliveryStore;
 
     /** The shipped defaults, so escalations upload to {@code escalation-reports}. */
     @Spy
@@ -162,6 +168,8 @@ class NotificationEventRouterTest {
         ReflectionTestUtils.setField(router, "objectMapper", new ObjectMapper());
         ReflectionTestUtils.setField(router, "reportDir", tempDir.toString() + "/");
         ReflectionTestUtils.setField(router, "baseUrl", "https://example.com");
+        // A real publisher over the mocked store, so the upload assertions below still see each call.
+        ReflectionTestUtils.setField(router, "reportPublisher", new ReportPublisher(objectStorageService));
         lenient().when(piiEncryptionService.hmac(anyString()))
                 .thenAnswer(inv -> "hash_" + inv.getArgument(0, String.class));
         // Default: pass the halves through unresolved. Tests that care stub a full resolution.
@@ -291,11 +299,10 @@ class NotificationEventRouterTest {
                 """);
 
         verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq("JE"), eq("corr-stored"));
-        // Escalations keep the original flat single-bucket upload; only the water reports are foldered,
-        // and only their buckets are created on demand.
+        // Escalations keep the original flat single-bucket upload; only the water reports are foldered.
+        verify(objectStorageService).ensureBucket("escalation-reports");
         verify(objectStorageService).upload(eq("escalation-reports"), eq("report.pdf"), any(InputStream.class),
                 eq((long) PDF_BYTES.length), eq("application/pdf"));
-        verify(objectStorageService, never()).ensureBucket(anyString());
         verify(whatsAppChannel).sendDocumentForOutcome(eq(77L), eq("https://storage.example.org/report.pdf"));
         verify(whatsAppSender, never()).optIn(anyString());
         verify(kafkaProducer, never()).publishJson(anyString(), any());
@@ -1930,6 +1937,144 @@ class NotificationEventRouterTest {
     private static ReportSendOutcome acceptedSend() {
         return ReportSendOutcome.accepted(
                 new WhatsAppSendResult("241952654", "880557", ReportDeliveryMode.LINK));
+    }
+
+    // ── external delivery store ──────────────────────────────────────────────────
+    //
+    // Meta downloads a document itself and cannot reach every deployment's store of record, so a
+    // document send is staged in the delivery store and sent from there. A link send keeps the record
+    // URL, which its approved template's button prefix is frozen to.
+
+    private static final String DELIVERY_BUCKET = "report-delivery";
+    private static final String RECORD_URL = "https://storage.example.org/daily_report_x.pdf";
+
+    /** Switches the external delivery store on, answering each staged copy with a URL that names its key. */
+    private void withDeliveryStore() {
+        ReflectionTestUtils.setField(router, "reportPublisher",
+                new ReportPublisher(objectStorageService, deliveryStore, DELIVERY_BUCKET, mock(AutoCloseable.class)));
+        lenient().when(deliveryStore.publicUrl(eq(DELIVERY_BUCKET), anyString()))
+                .thenAnswer(inv -> URI.create("https://reports.example.org/" + DELIVERY_BUCKET + "/"
+                        + inv.getArgument(1, String.class)));
+    }
+
+    private void stubDailyReport() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+    }
+
+    private static final String DELIVERY_ESCALATION_JSON = """
+            {"eventType":"ESCALATION","officerPhone":"919876500000","officerName":"DO Singh",
+             "escalationLevel":2,"tenantId":1,"officerLanguageId":1,
+             "officerId":20,"officerWhatsappConnectionId":77,"tenantSchema":"tenant_mp",
+             "officerUserType":"JE","correlationId":"corr-delivery",
+             "operators":[{"name":"Op A","phoneNumber":"911111111111","schemeName":"S1",
+                           "schemeId":"1","soName":"SO X","consecutiveDaysMissed":8,
+                           "lastRecordedBfmDate":"2024-01-01"}]}
+            """;
+
+    @Test
+    void escalation_isSentFromTheDeliveryStore_whenOneIsConfigured() throws Exception {
+        withDeliveryStore();
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString()))
+                .thenAnswer(inv -> escalationPdf("report.pdf"));
+        when(whatsAppSender.escalationDeliveryMode()).thenReturn(ReportDeliveryMode.DOCUMENT);
+        when(whatsAppChannel.sendDocumentForOutcome(anyLong(), anyString())).thenReturn(ACCEPTED_SEND);
+
+        router.route(DELIVERY_ESCALATION_JSON);
+
+        verify(objectStorageService).upload(eq("escalation-reports"), eq("report.pdf"), any(InputStream.class),
+                anyLong(), anyString());
+        ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
+        verify(deliveryStore).upload(eq(DELIVERY_BUCKET), key.capture(), any(InputStream.class), anyLong(), anyString());
+        assertThat(key.getValue()).startsWith("escalation-reports/").endsWith("/report.pdf");
+        verify(whatsAppChannel).sendDocumentForOutcome(77L,
+                "https://reports.example.org/" + DELIVERY_BUCKET + "/" + key.getValue());
+    }
+
+    /** The sender answers no mode for a suppressed escalation, so no copy leaves the store of record. */
+    @Test
+    void escalation_isNotStaged_whenTheSenderSuppressesIt() throws Exception {
+        withDeliveryStore();
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString()))
+                .thenAnswer(inv -> escalationPdf("report.pdf"));
+        when(whatsAppSender.escalationDeliveryMode()).thenReturn(null);
+        when(objectStorageService.publicUrl(anyString(), anyString()))
+                .thenReturn(URI.create("https://storage.example.org/report.pdf"));
+        when(whatsAppChannel.sendDocumentForOutcome(anyLong(), anyString())).thenReturn(ACCEPTED_SEND);
+
+        router.route(DELIVERY_ESCALATION_JSON);
+
+        verify(objectStorageService).upload(eq("escalation-reports"), eq("report.pdf"), any(InputStream.class),
+                anyLong(), anyString());
+        verifyNoInteractions(deliveryStore);
+        verify(whatsAppChannel).sendDocumentForOutcome(77L, "https://storage.example.org/report.pdf");
+    }
+
+    @Test
+    void handleDailyReport_sendsTheDeliveryCopy_whenTheSenderSendsDocuments() throws Exception {
+        withDeliveryStore();
+        stubDailyReport();
+        when(whatsAppSender.dailyReportDeliveryMode()).thenReturn(ReportDeliveryMode.DOCUMENT);
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any())).thenReturn(acceptedSend());
+
+        router.route(DAILY_REPORT_JSON);
+
+        verify(objectStorageService).upload(eq(ReportFileNaming.DAILY_BUCKET), anyString(), any(InputStream.class),
+                anyLong(), anyString());
+        ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
+        verify(deliveryStore).upload(eq(DELIVERY_BUCKET), key.capture(), any(InputStream.class), anyLong(), anyString());
+        assertThat(key.getValue()).startsWith(ReportFileNaming.DAILY_BUCKET + "/").endsWith("/daily_report_x.pdf");
+        verify(whatsAppChannel).sendDailyReport(12345L,
+                "https://reports.example.org/" + DELIVERY_BUCKET + "/" + key.getValue(),
+                "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli");
+    }
+
+    @Test
+    void handleDailyReport_sendsTheRecordUrl_whenTheSenderSendsLinks() throws Exception {
+        withDeliveryStore();
+        stubDailyReport();
+        when(whatsAppSender.dailyReportDeliveryMode()).thenReturn(ReportDeliveryMode.LINK);
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create(RECORD_URL));
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any())).thenReturn(acceptedSend());
+
+        router.route(DAILY_REPORT_JSON);
+
+        verifyNoInteractions(deliveryStore);
+        verify(whatsAppChannel).sendDailyReport(12345L, RECORD_URL, "SECTION_OFFICER", LocalDate.of(2026, 7, 7),
+                "Binod Nimoli");
+    }
+
+    @Test
+    void handleWeeklyReport_storesInTheShapeTheSenderSendsTheWeeklyReportIn() throws Exception {
+        withDeliveryStore();
+        stubWeeklySend(acceptedSend());
+        when(whatsAppSender.weeklyReportDeliveryMode()).thenReturn(ReportDeliveryMode.LINK);
+
+        router.route(WEEKLY_SO_JSON);
+
+        verifyNoInteractions(deliveryStore);
+        verify(whatsAppChannel).sendWeeklyReport(12345L, "https://storage.example.org/weekly.pdf", "SECTION_OFFICER",
+                LocalDate.of(2026, 7, 13), "Binod Nimoli");
+    }
+
+    @Test
+    void handleDailyReport_aFailedDeliveryUpload_isRecordedAsAnUploadFailure_andRetried() throws Exception {
+        withDeliveryStore();
+        when(ledger.open(any())).thenReturn(LEDGER_REF);
+        stubDailyReport();
+        when(whatsAppSender.dailyReportDeliveryMode()).thenReturn(ReportDeliveryMode.DOCUMENT);
+        doThrow(new StorageException("Upload failed"))
+                .when(deliveryStore).upload(anyString(), anyString(), any(InputStream.class), anyLong(), anyString());
+
+        assertThatThrownBy(() -> router.route(DAILY_REPORT_JSON)).isInstanceOf(RuntimeException.class);
+
+        ArgumentCaptor<LedgerOutcome> outcome = ArgumentCaptor.forClass(LedgerOutcome.class);
+        verify(ledger).close(eq(LEDGER_REF), outcome.capture());
+        assertThat(outcome.getValue().status()).isEqualTo(DispatchStatus.FAILED_UPLOAD);
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any(), any());
+        assertThat(tempDir.resolve("daily_report_x.pdf")).as("kept for recovery").exists();
     }
 
     // ── weekly terminal log lines ────────────────────────────────────────────────

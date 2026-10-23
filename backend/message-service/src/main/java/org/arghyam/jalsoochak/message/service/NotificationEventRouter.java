@@ -28,7 +28,7 @@ import org.arghyam.jalsoochak.message.ledger.LedgerOutcome;
 import org.arghyam.jalsoochak.message.ledger.LedgerRef;
 import org.arghyam.jalsoochak.message.ledger.NotificationLedger;
 import org.arghyam.jalsoochak.message.ledger.NotificationType;
-import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
+import org.arghyam.jalsoochak.message.storage.ReportPublisher;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -40,8 +40,6 @@ import org.springframework.stereotype.Service;
 
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -140,7 +138,7 @@ public class NotificationEventRouter {
     private final EscalationPdfService escalationPdfService;
     private final DailyReportPdfService dailyReportPdfService;
     private final WeeklyReportPdfService weeklyReportPdfService;
-    private final ObjectStorageService objectStorageService;
+    private final ReportPublisher reportPublisher;
     private final StorageProperties storageProperties;
     private final MessageTemplateService messageTemplateService;
     private final AccountEmailService accountEmailService;
@@ -159,8 +157,6 @@ public class NotificationEventRouter {
 
     /** Any query string on a report URL — stripped before the URL is logged. */
     private static final String URL_QUERY_SUFFIX = "\\?.*$";
-
-    private static final String PDF_CONTENT_TYPE = "application/pdf";
 
     @PostConstruct
     void validateBaseUrl() {
@@ -1079,7 +1075,8 @@ public class NotificationEventRouter {
         java.nio.file.Path localPath = Paths.get(reportDir, filename);
         String reportUrl;
         try {
-            reportUrl = uploadPdf(localPath, storageProperties.getBucket(), localPath.getFileName().toString());
+            reportUrl = reportPublisher.publish(localPath, storageProperties.getBucket(),
+                    localPath.getFileName().toString(), whatsAppSender.escalationDeliveryMode());
         } catch (Exception uploadEx) {
             log.error("[Router/ESCALATION] Storage upload failed, retaining local PDF for recovery: {} — {}",
                     localPath, uploadEx.getMessage());
@@ -1242,8 +1239,9 @@ public class NotificationEventRouter {
         String filename = localPath.getFileName().toString();
         String reportUrl;
         try {
-            reportUrl = uploadWaterReport(localPath, ReportFileNaming.DAILY_BUCKET,
-                    ReportFileNaming.dailyObjectKey(officerUserType, filename, reportDate));
+            reportUrl = reportPublisher.publish(localPath, ReportFileNaming.DAILY_BUCKET,
+                    ReportFileNaming.dailyObjectKey(officerUserType, filename, reportDate),
+                    whatsAppSender.dailyReportDeliveryMode());
         } catch (Exception uploadEx) {
             log.error("[Router/DAILY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
                             + " retaining local PDF for recovery: {} — {}",
@@ -1362,8 +1360,9 @@ public class NotificationEventRouter {
         String filename = localPath.getFileName().toString();
         String reportUrl;
         try {
-            reportUrl = uploadWaterReport(localPath, ReportFileNaming.WEEKLY_BUCKET,
-                    ReportFileNaming.weeklyObjectKey(officerUserType, filename, weekStart, weekEnd));
+            reportUrl = reportPublisher.publish(localPath, ReportFileNaming.WEEKLY_BUCKET,
+                    ReportFileNaming.weeklyObjectKey(officerUserType, filename, weekStart, weekEnd),
+                    whatsAppSender.weeklyReportDeliveryMode());
         } catch (Exception uploadEx) {
             log.error("[Router/WEEKLY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
                             + " retaining local PDF for recovery: {} — {}",
@@ -1531,27 +1530,6 @@ public class NotificationEventRouter {
     /** A report URL with any query string stripped, so a signature never reaches a log line. */
     private static String loggableUrl(String url) {
         return url.replaceFirst(URL_QUERY_SUFFIX, "");
-    }
-
-    /**
-     * Uploads a rendered PDF and returns the permanent public URL handed to the WhatsApp provider,
-     * which Meta or the officer's phone fetches without credentials.
-     */
-    private String uploadPdf(java.nio.file.Path localPath, String bucket, String objectKey) throws IOException {
-        try (InputStream content = Files.newInputStream(localPath)) {
-            objectStorageService.upload(bucket, objectKey, content, Files.size(localPath), PDF_CONTENT_TYPE);
-        }
-        return objectStorageService.publicUrl(bucket, objectKey).toString();
-    }
-
-    /**
-     * As {@link #uploadPdf}, into one of the water-report buckets, which is created first when a new
-     * environment does not have it yet. Its anonymous read is still granted out of band.
-     */
-    private String uploadWaterReport(java.nio.file.Path localPath, String bucket, String objectKey)
-            throws IOException {
-        objectStorageService.ensureBucket(bucket);
-        return uploadPdf(localPath, bucket, objectKey);
     }
 
     /**

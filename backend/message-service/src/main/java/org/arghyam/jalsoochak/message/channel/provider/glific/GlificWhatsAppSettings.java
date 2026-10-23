@@ -17,7 +17,7 @@ import java.util.Objects;
  * @param dryRun                  which purposes are suppressed
  * @param templates               the approved HSM template ids
  * @param flows                   the flow ids
- * @param media                   the public media prefix and the document captions
+ * @param media                   the public media prefixes and the document captions
  * @param dailyReportDeliveryMode {@code notifications.daily-report.delivery-mode}, unparsed — see
  *                                {@link org.arghyam.jalsoochak.message.channel.provider.ReportDeliveryMode}.
  *                                Parsed on use so an unrecognised value fails loudly with the valid
@@ -116,17 +116,23 @@ public record GlificWhatsAppSettings(
     }
 
     /**
-     * @param baseUrl             the prefix of every media URL handed to Glific ({@code storage.public-base-url}).
-     *                            Read by the sender — not only by the storage service — because the
-     *                            sender owns the Glific contract and is the only class that knows
-     *                            whether a document-sending purpose is live. Meta downloads the URL from
-     *                            the public internet, so an internal address must stop the service from
-     *                            starting rather than reach officers as an unopenable attachment
+     * @param baseUrl             the store-of-record prefix ({@code storage.public-base-url}), which every
+     *                            link send hands out and its approved template is frozen to. Read by
+     *                            the sender, not only by the storage service, because the sender owns
+     *                            the Glific contract and is the only class that knows which purposes
+     *                            are live. An address the recipient cannot reach must stop the service
+     *                            from starting rather than reach officers as a dead link
+     * @param documentBaseUrl     the prefix of every document URL handed to Glific:
+     *                            {@code storage.delivery.public-base-url} while the external delivery
+     *                            store is enabled, otherwise {@link #baseUrl()}. Meta downloads these
+     *                            URLs from the public internet, so an internal address must stop the
+     *                            service from starting rather than reach officers as an unopenable
+     *                            attachment
      * @param escalationCaption   the escalation document's caption
      * @param escalationThumbnail the thumbnail registered with every document
      * @param dailyReportCaption  the daily report's document name, before the report date is appended
      */
-    public record Media(String baseUrl, String escalationCaption, String escalationThumbnail,
-                        String dailyReportCaption) {
+    public record Media(String baseUrl, String documentBaseUrl, String escalationCaption,
+                        String escalationThumbnail, String dailyReportCaption) {
     }
 }

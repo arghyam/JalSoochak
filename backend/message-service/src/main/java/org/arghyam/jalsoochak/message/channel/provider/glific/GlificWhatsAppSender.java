@@ -252,37 +252,48 @@ public class GlificWhatsAppSender implements WhatsAppSender {
     }
 
     /**
-     * Refuses to start when a purpose that hands out a report URL is live but
-     * {@code storage.public-base-url} is an address the recipient cannot reach. The escalation and the
-     * daily report attach a stored PDF, and a wrong prefix here is invisible on our side: the upload succeeds,
-     * {@code createMessageMedia} returns a media id, the send is accepted, and only the recipient
-     * discovers the document will not open. Failing at startup keeps that from reaching officers at
-     * all.
+     * Refuses to start when a live purpose hands out report URLs on a base the recipient cannot reach.
+     * A wrong prefix is invisible on our side: the upload succeeds, the send is accepted, and only the
+     * officer discovers that the document will not open or the button leads nowhere. Failing at
+     * startup keeps that from reaching officers at all.
      *
-     * <p>The weekly report counts too, even though it is LINK-only and Meta never downloads the
-     * file: the same prefix is what the officer's phone opens and what is frozen into the approved
-     * template. Leaving it out meant a deployment that sends only weekly reports — daily and
-     * escalations muted — started happily with an internal prefix and delivered buttons that lead
-     * nowhere.</p>
+     * <p>Each live purpose is checked against the base it actually hands out. Documents (the
+     * escalation, and the daily report in {@link ReportDeliveryMode#DOCUMENT} mode) use
+     * {@link GlificWhatsAppSettings.Media#documentBaseUrl()}, which Meta downloads from. Links (the
+     * weekly report, and the daily report in {@link ReportDeliveryMode#LINK} mode) use
+     * {@link GlificWhatsAppSettings.Media#baseUrl()}, which the officer's phone opens and the approved
+     * template is frozen to.</p>
      */
     private void validateMediaBaseUrl() {
         GlificWhatsAppSettings.DryRun dryRun = settings.dryRun();
-        boolean handsOutReportUrls = !dryRun.dailyReport() || !dryRun.escalation() || !dryRun.weeklyReport();
-        if (!handsOutReportUrls) {
-            return;
+        boolean dailyLive = !dryRun.dailyReport();
+        boolean sendsDocuments = !dryRun.escalation() || (dailyLive && deliveryMode() == ReportDeliveryMode.DOCUMENT);
+        boolean sendsLinks = !dryRun.weeklyReport() || (dailyLive && deliveryMode() == ReportDeliveryMode.LINK);
+        if (sendsDocuments) {
+            String reason = PublicUrlValidator.unreachableReason(settings.media().documentBaseUrl());
+            if (reason != null) {
+                throw new IllegalStateException(
+                        "The document base URL must be publicly reachable when WhatsApp document delivery is"
+                        + " enabled, but '" + settings.media().documentBaseUrl() + "' is unusable: " + reason
+                        + ". Glific hands document URLs to Meta, which downloads them from the public internet"
+                        + " and rejects internal addresses with '(#131053) … blocked by a destination filter'."
+                        + " Set STORAGE_DELIVERY_PUBLIC_BASE_URL (storage.delivery.public-base-url) when"
+                        + " storage.delivery.enabled=true, otherwise STORAGE_PUBLIC_BASE_URL"
+                        + " (storage.public-base-url) — note storage.endpoint stays internal, it is only the"
+                        + " upload address.");
+            }
         }
-        String reason = PublicUrlValidator.unreachableReason(settings.media().baseUrl());
-        if (reason != null) {
-            throw new IllegalStateException(
-                    "storage.public-base-url must be a publicly reachable URL when WhatsApp document delivery is"
-                    + " enabled, but '" + settings.media().baseUrl() + "' is unusable: " + reason
-                    + ". Glific hands this URL to Meta, which downloads it from the public internet and"
-                    + " rejects internal addresses with '(#131053) … blocked by a destination filter'."
-                    + " Set STORAGE_PUBLIC_BASE_URL to the public URL (e.g. https://jalsoochak.jjmbrain.in/minio)"
-                    + " — note storage.endpoint stays internal, it is only the upload address."
-                    + " In LINK mode Meta no longer downloads the file, but this same prefix is what the"
-                    + " officer's phone opens and what is frozen into the approved template, so it must be"
-                    + " publicly reachable there too.");
+        if (sendsLinks) {
+            String reason = PublicUrlValidator.unreachableReason(settings.media().baseUrl());
+            if (reason != null) {
+                throw new IllegalStateException(
+                        "storage.public-base-url must be a publicly reachable URL when WhatsApp link delivery is"
+                        + " enabled, but '" + settings.media().baseUrl() + "' is unusable: " + reason
+                        + ". It is the prefix the officer's phone opens from the report button and the one"
+                        + " frozen into the approved template. Set STORAGE_PUBLIC_BASE_URL to the public URL"
+                        + " (e.g. https://jalsoochak.jjmbrain.in/minio) — note storage.endpoint stays internal,"
+                        + " it is only the upload address.");
+            }
         }
     }
 
@@ -425,8 +436,9 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         if (reason != null) {
             throw new IllegalStateException(
                     "Refusing to register media URL '" + publicUrl + "' with Glific: " + reason
-                    + ". Meta downloads this URL from the public internet — set STORAGE_PUBLIC_BASE_URL to"
-                    + " the public address of the object store.");
+                    + ". Meta downloads this URL from the public internet — set STORAGE_PUBLIC_BASE_URL, or"
+                    + " STORAGE_DELIVERY_PUBLIC_BASE_URL when the external delivery store is enabled, to the"
+                    + " public address of the object store.");
         }
         log.debug("[WhatsApp] Uploading media");
         JsonNode response = client.execute(CREATE_MESSAGE_MEDIA_MUTATION, Map.of(
@@ -720,6 +732,27 @@ public class GlificWhatsAppSender implements WhatsAppSender {
     @Override
     public boolean isWeeklyReportDeliveryEnabled() {
         return !settings.dryRun().weeklyReport();
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The mode is parsed only for a live report, which cannot start with an unparseable one.
+     */
+    @Override
+    public ReportDeliveryMode dailyReportDeliveryMode() {
+        return settings.dryRun().dailyReport() ? null : deliveryMode();
+    }
+
+    /** {@link ReportDeliveryMode#LINK} while live: the weekly report has no document path. */
+    @Override
+    public ReportDeliveryMode weeklyReportDeliveryMode() {
+        return settings.dryRun().weeklyReport() ? null : ReportDeliveryMode.LINK;
+    }
+
+    @Override
+    public ReportDeliveryMode escalationDeliveryMode() {
+        return settings.dryRun().escalation() ? null : ReportDeliveryMode.DOCUMENT;
     }
 
     /** The ledger's name for this provider. Stored on every row this adapter sends. */

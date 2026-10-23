@@ -66,6 +66,12 @@ public class GlificWhatsAppConfig {
     @Value("${storage.public-base-url:}")
     private String mediaBaseUrl;
 
+    @Value("${storage.delivery.enabled:false}")
+    private boolean deliveryStoreEnabled;
+
+    @Value("${storage.delivery.public-base-url:}")
+    private String deliveryBaseUrl;
+
     @Value("${whatsapp.media.escalation-caption:Escalations}")
     private String escalationCaption;
 
@@ -98,7 +104,11 @@ public class GlificWhatsAppConfig {
                         weeklyReportSdoLinkTemplateId),
                 new GlificWhatsAppSettings.Flows(nudgeFlowId, welcomeFlowId),
                 new GlificWhatsAppSettings.Media(
-                        mediaBaseUrl, escalationCaption, escalationThumbnail, dailyReportCaption),
+                        mediaBaseUrl,
+                        deliveryStoreEnabled ? deliveryBaseUrl : mediaBaseUrl,
+                        escalationCaption,
+                        escalationThumbnail,
+                        dailyReportCaption),
                 dailyReportDeliveryMode,
                 dailyReportLinkButtonBaseUrl);
     }
