@@ -65,21 +65,21 @@ public sealed interface Verdict permits Verdict.Skipped, Verdict.Accepted, Verdi
     }
 
     /**
-     * The implied daily supply is at or below the ceiling.
+     * The implied supply is at or below the ceiling.
      *
      * @param litres     whole litres implied by this reading
-     * @param ceiling    litres this scheme's population could consume in a day
+     * @param ceiling    litres this scheme's population could consume over the days since the baseline
      * @param population persons served, derived from the connection counts
      */
     record Accepted(BigDecimal litres, BigDecimal ceiling, BigDecimal population) implements Verdict {
     }
 
     /**
-     * The implied daily supply exceeds the ceiling. Strictly greater: a reading landing exactly on
+     * The implied supply exceeds the ceiling. Strictly greater: a reading landing exactly on
      * the ceiling is accepted.
      *
      * @param litres     whole litres implied by this reading
-     * @param ceiling    litres this scheme's population could consume in a day
+     * @param ceiling    litres this scheme's population could consume over the days since the baseline
      * @param population persons served, derived from the connection counts
      */
     record Quarantined(BigDecimal litres, BigDecimal ceiling, BigDecimal population) implements Verdict {

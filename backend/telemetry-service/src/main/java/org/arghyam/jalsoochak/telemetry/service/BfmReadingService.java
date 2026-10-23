@@ -404,7 +404,7 @@ public class BfmReadingService {
                     request.getSchemeId(),
                     LocalDate.from(readingAt),
                     effectiveConfirmedReading,
-                    supplyBaseline != null ? supplyBaseline.confirmedReading() : null,
+                    supplyBaseline,
                     SupplyPlausibilityGuard.Path.SUBMISSION);
             // Under AUDIT the guard has already logged and counted what it would have done; the
             // reading proceeds untouched from here.
@@ -988,7 +988,7 @@ public class BfmReadingService {
                     reading.schemeId(),
                     readingDate,
                     confirmedReading,
-                    baseline != null ? baseline.confirmedReading() : null,
+                    baseline,
                     SupplyPlausibilityGuard.Path.CORRECTION);
             // Under AUDIT the guard has already logged and counted what it would have refused; the
             // correction proceeds untouched from here.
