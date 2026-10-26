@@ -43,18 +43,25 @@ the explanation: the reading is there, it is simply not counted.
 ```
 litres     = (confirmed_reading − baseline) × 1000        -- m³ index to litres
 population = connections × AVERAGE_MEMBERS_PER_HOUSEHOLD
-ceiling    = population × limit-per-person-litres          -- default 150 L/person/day
+days       = reading's day − baseline's day                -- at least 1
+ceiling    = population × limit-per-person-litres × days   -- default 150 L/person/day
 quarantine iff litres > ceiling
 ```
 
-`baseline` is the latest **non-quarantined** confirmed reading strictly before this one.
-`connections` falls back `fhtc_count` → `planned_fhtc` → `house_hold_count`, first non-zero wins.
+`baseline` is the latest **non-quarantined** confirmed reading strictly before this one's day, and
+`days` counts from the day it was read on, not the day its row was written. `connections` falls back
+`fhtc_count` → `planned_fhtc` → `house_hold_count`, first non-zero wins.
 
-Two things follow that are worth holding onto:
+Three things follow that are worth holding onto:
 
 - The ceiling scales with the scheme. A hamlet and a town do not share an allowance.
 - Quarantined rows are excluded from the baseline, so one bad day cannot poison the next day's
   comparison.
+- The ceiling scales with the gap. A delta is the water supplied over every day since the baseline,
+  so a scheme that skipped a day of reporting, or whose last reading was quarantined, is judged on
+  its average supply. Until the gap was counted, the ceiling was always one day's: one quarantine
+  made the next reading's delta longer than a day, so it was quarantined too, and the scheme dropped
+  off the dashboards until someone intervened. §4 covers releasing what that left behind.
 
 ### When it does not run at all
 
@@ -123,8 +130,46 @@ back here.
 ## 4. Releasing a quarantined reading
 
 `PUT /api/v1/telemetry/readings` with a corrected `confirmed_reading`. A value that passes the check
-is written, clears `quarantine_reason`, and publishes the row to analytics for the first time. That
-is the only supported release path.
+is written, clears `quarantine_reason`, and publishes the row to analytics for the first time.
+
+### Releasing in bulk
+
+`POST /api/v1/telemetry/internal/readings/quarantine/release` assesses a tenant's stored quarantined
+readings again, as they stand, and releases the ones the check now accepts — readings quarantined
+before the ceiling counted the days since the baseline, or before a scheme's master data was
+corrected. An operations route: it takes the operations token in `X-Internal-Token` and the tenant in
+`X-Tenant-Code`, like `/internal/readings/republish`.
+
+```json
+{ "fromDate": "2026-09-01", "toDate": "2026-09-30", "stateSchemeId": "optional", "dryRun": true }
+```
+
+- **Each reading is judged as a new submission would be**: against the latest non-quarantined
+  reading before its day, with the scheme's master data and the configured limit as they are now.
+  One that passes, or that the check cannot assess, has its marker cleared and is published; one that
+  is still implausible stays quarantined. The mode does not change this.
+- **Oldest first, one at a time.** A released reading becomes the baseline its scheme's next reading
+  is judged against, exactly as if it had never been quarantined. For the same reason, release ranges
+  in date order: the earliest month first.
+- **`dryRun: true` gives the counts a release would give and changes nothing.** It runs the same pass
+  in a transaction it rolls back, and publishes nothing.
+- **A range is at most 31 days**, scheme ids optional (both blank covers every scheme). The answer
+  is `releasedCount` and `stillQuarantinedCount`. A `503` with `notSentCount` means Kafka stopped
+  acknowledging: the reading it stopped at was quarantined again, and releasing the same range again
+  carries on from there.
+- **What analytics does with it.** Each released reading is a new reading for its day: the day gets
+  its water quantity and attendance, and analytics recalculates the scheme's next reading's day,
+  which until then was measured from the last reading before the quarantine.
+- **What it leaves alone.** The type-10 anomaly rows stay, as after a passing correction. On the SO/SDO
+  pump-operator list, a released day shows the release time as the operator's last submission.
+- **Pre-aggregated dashboards.** With `ANALYTICS_READ_FROM_AGGREGATES` on, the dashboards read tables
+  the nightly job rebuilds only for the last `ANALYTICS_AGG_DAILY_LOOKBACK_DAYS` days, so released
+  days older than that do not show until they are re-aggregated — the same step as after a republish
+  (see `backend/API_ENDPOINTS.md`).
+
+Run it promptly after deploying the counted-days ceiling. Until then, the first new reading of a
+scheme that was stuck passes, and analytics puts the whole gap's water on that one day; releasing
+the quarantined days in between recalculates that day to its own share.
 
 The flag is cleared on **every** successful correction, including under `mode=OFF` — otherwise a row
 quarantined during an earlier `ENFORCE` window would sit outside every baseline with no route back.
@@ -179,10 +224,10 @@ If a refused reading was actually correct — a genuine burst, a tanker fill, or
 understates the scheme — the fix is upstream of the check, not around it:
 
 1. **Correct the scheme's master data** (`fhtc_count`, `planned_fhtc`, `house_hold_count`) if the
-   population is understated, then resubmit the correction. The ceiling is recomputed from current
-   master data on every attempt, so no replay is needed.
-2. **Or raise `limit-per-person-litres`** if the threshold itself is wrong for this deployment, and
-   restart.
+   population is understated, then resubmit the correction, or release the scheme's quarantined
+   readings in bulk (§4). The ceiling is recomputed from current master data on every attempt.
+2. **Or raise `limit-per-person-litres`** if the threshold itself is wrong for this deployment,
+   restart, and release the quarantined readings (§4) to have them judged against the new limit.
 3. **Or set `mode=OFF`** and restart if the check is misfiring broadly enough to be blocking field
    work, then correct the readings through `PUT` — the release path still clears markers under `OFF`.
 
@@ -193,7 +238,9 @@ is a signal that the threshold or the master data is wrong, not that operators a
 
 ## 7. Signals
 
-Metrics on `/actuator/prometheus`, all tagged `path` (`submission` | `correction`) and `mode`:
+Metrics on `/actuator/prometheus`, all tagged `path` (`submission` | `correction` | `release`) and
+`mode`. On `path="release"` an implausible reading always counts as `quarantined`, whatever the mode,
+and a dry run counts like a release:
 
 | Metric | Meaning |
 | --- | --- |
@@ -205,7 +252,7 @@ Metrics on `/actuator/prometheus`, all tagged `path` (`submission` | `correction
 Log lines, all prefixed `implausible_supply_`:
 
 - `implausible_supply_rejected` / `implausible_supply_would_reject` (WARN) — carries submitted value,
-  baseline, litres, ceiling and population
+  baseline, litres, ceiling, population and the days the ceiling covers
 - `implausible_supply_skipped reason=no_population` (WARN) — the fixable master-data gap
 - other skips and acceptances at DEBUG
 

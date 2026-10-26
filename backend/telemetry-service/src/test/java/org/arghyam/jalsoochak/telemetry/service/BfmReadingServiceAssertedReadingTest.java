@@ -118,7 +118,7 @@ class BfmReadingServiceAssertedReadingTest {
         lenient().when(repo.findLatestConfirmedReadingSnapshot(
                 SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
-                        new BigDecimal("140"), ReadingTime.now().minusDays(1))));
+                        new BigDecimal("140"), ReadingTime.now().minusDays(1), null)));
     }
 
     @Test

@@ -21,7 +21,8 @@
 --   litres      = round((confirmed_reading - baseline) * 1000)     -- m3 index -> litres, HALF_UP
 --   connections = first non-zero of fhtc_count, planned_fhtc, house_hold_count
 --   population  = connections * AVERAGE_MEMBERS_PER_HOUSEHOLD (tenant config, else the default 5)
---   ceiling     = population * limit_per_person_litres            -- 150 L/person/day
+--   days        = reading_date - the baseline's day, at least 1   -- the days the delta covers
+--   ceiling     = population * limit_per_person_litres * days     -- 150 L/person/day
 --   implausible iff litres > ceiling                               -- strictly greater
 --
 -- Skip conditions are mirrored too (non-BFM channel, meter replacement, no earlier reading,
@@ -151,7 +152,9 @@ assessed AS (
 verdicts AS (
     SELECT a.*,
            a.connections::numeric * a.members                                 AS population,
-           a.connections::numeric * a.members * p.limit_per_person_litres     AS ceiling_litres,
+           GREATEST(1, a.reading_date - a.baseline_observation_time::date)    AS days_since_baseline,
+           a.connections::numeric * a.members * p.limit_per_person_litres
+               * GREATEST(1, a.reading_date - a.baseline_observation_time::date) AS ceiling_litres,
            CASE WHEN a.baseline_reading IS NULL                     THEN NULL
                 WHEN a.confirmed_reading <= a.baseline_reading      THEN 0
                 ELSE round((a.confirmed_reading - a.baseline_reading) * 1000)
@@ -180,11 +183,12 @@ SELECT CASE WHEN baseline_reading IS NULL                THEN 'SKIPPED_NO_BASELI
        confirmed_reading - extracted_reading             AS confirmed_minus_extracted,
        ai_confidence_percentage,
        confirmed_reading - baseline_reading              AS delta_cubic_metres,
+       days_since_baseline,
        implied_litres,
        ceiling_litres,
        implied_litres - ceiling_litres                   AS litres_over_ceiling,
        round(implied_litres / NULLIF(ceiling_litres, 0), 2) AS times_over_ceiling,
-       round(implied_litres / NULLIF(population, 0), 1)  AS implied_lpcd,
+       round(implied_litres / NULLIF(population, 0) / days_since_baseline, 1) AS implied_lpcd,
        connections,
        connection_source,
        fhtc_count                                        AS achieved_fhtc_count,
