@@ -54,7 +54,7 @@ public class ImageReadingCapture implements ReadingCapture {
             "Could not read meter value from image. Please retry with a clearer photo.";
     /** Also sent to WhatsApp operators; {@code ConversationLocalizationService} translates it. */
     private static final String NO_METER_MESSAGE =
-            "No meter found in the photo. Please send a straight, clear photo of the water meter.";
+            "No meter found in the photo. Please send a straight, clear photo of the meter.";
     /** Also sent to WhatsApp operators; {@code ConversationLocalizationService} translates it. */
     private static final String IMAGE_NOT_SUPPORTED_MESSAGE =
             "Meter photos are not supported for your reading channel.";

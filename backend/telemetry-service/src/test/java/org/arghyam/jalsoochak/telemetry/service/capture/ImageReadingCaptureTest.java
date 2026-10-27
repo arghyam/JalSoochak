@@ -311,7 +311,7 @@ class ImageReadingCaptureTest {
 
         assertThat(outcome).isEqualTo(new CaptureOutcome.Rejected(
                 TelemetryErrorCode.NO_METER_DETECTED,
-                "No meter found in the photo. Please send a straight, clear photo of the water meter."));
+                "No meter found in the photo. Please send a straight, clear photo of the meter."));
         verify(telemetryTenantRepository).createTenantAnomalyRecord(eq(SCHEMA), argThat(anomaly ->
                 anomaly.userId() == OPERATOR_ID
                         && anomaly.schemeId() == SCHEME_ID
