@@ -56,6 +56,9 @@ class MeterReadingConversationServiceIssueReportTest {
     @Mock
     private ConversationSchemeResolver conversationSchemeResolver;
 
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
+
     @InjectMocks
     private MeterReadingConversationService service;
 
@@ -517,7 +520,7 @@ class MeterReadingConversationServiceIssueReportTest {
         return operatorWithSchema;
     }
 
-    private void stubLocalisedRejection(String defaultMessage) {
+    private void stubLocalisedRejection(ConversationMessageCode defaultMessage) {
         when(localizationService.resolveLanguageKeyForContact("919999999999")).thenReturn("english");
         when(localizationService.resolveUserFacingErrorMessage(
                 org.mockito.ArgumentMatchers.any(),
@@ -538,7 +541,7 @@ class MeterReadingConversationServiceIssueReportTest {
         stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        stubLocalisedRejection("Issue report could not be saved.");
+        stubLocalisedRejection(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED);
 
         IntroResponse resp = submitFreeText("<script>alert(1)</script>");
 
@@ -560,7 +563,7 @@ class MeterReadingConversationServiceIssueReportTest {
         stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        stubLocalisedRejection("Issue report could not be saved.");
+        stubLocalisedRejection(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED);
 
         IntroResponse resp = submitFreeText("Motor burnt out, 3 days");
 
@@ -598,7 +601,7 @@ class MeterReadingConversationServiceIssueReportTest {
         stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        stubLocalisedRejection("Issue report could not be saved.");
+        stubLocalisedRejection(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED);
 
         IntroResponse resp = submitFreeText("water‮reversed​hidden");
 
@@ -614,7 +617,7 @@ class MeterReadingConversationServiceIssueReportTest {
         stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        stubLocalisedRejection("Issue report could not be saved.");
+        stubLocalisedRejection(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED);
 
         // U+093E DEVANAGARI VOWEL SIGN AA (Mc) and U+094D VIRAMA (Mn), with no consonant to attach
         // to. Written as escapes because a bare mark renders onto its neighbour in a diff.
@@ -633,7 +636,7 @@ class MeterReadingConversationServiceIssueReportTest {
         stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        stubLocalisedRejection("Issue report could not be saved.");
+        stubLocalisedRejection(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED);
 
         IntroResponse resp = submitFreeText("water \u094Dhidden");
 
@@ -680,7 +683,7 @@ class MeterReadingConversationServiceIssueReportTest {
         // to fix the label, so the operator sees the caller's generic reply.
         when(localizationService.resolveUserFacingErrorMessage(
                 org.mockito.ArgumentMatchers.any(),
-                eq("Issue report could not be saved."),
+                eq(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED),
                 eq("english")
         )).thenReturn("Issue report could not be saved.");
 
@@ -735,7 +738,7 @@ class MeterReadingConversationServiceIssueReportTest {
         when(localizationService.resolveLanguageKeyForContact("919999999999")).thenReturn("english");
         when(localizationService.resolveUserFacingErrorMessage(
                 org.mockito.ArgumentMatchers.any(),
-                eq("Issue report could not be saved."),
+                eq(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED),
                 eq("english")
         )).thenReturn("Issue report could not be saved.");
 
@@ -836,7 +839,7 @@ class MeterReadingConversationServiceIssueReportTest {
     @Test
     void telemetryIssueReportSubmitRejectsHtmlTagsInFreeTextAndStoresNothing() {
         stubOperator();
-        stubLocalisedRejection("Issue report could not be saved.");
+        stubLocalisedRejection(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED);
 
         IntroResponse resp = service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")

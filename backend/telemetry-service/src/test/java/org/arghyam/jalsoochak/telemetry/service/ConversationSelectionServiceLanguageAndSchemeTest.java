@@ -91,7 +91,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
         when(templatesService.toTemplateLanguageCode("hindi")).thenReturn("hi");
         when(localizationService.localizeMessage(anyString(), anyString()))
                 .thenAnswer(inv -> inv.getArgument(0));
-        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
+        when(localizationService.resolveUserFacingErrorMessage(any(), any(), anyString()))
                 .thenAnswer(inv -> {
                     Exception e = inv.getArgument(0);
                     return e != null && e.getMessage() != null ? e.getMessage() : inv.getArgument(1);

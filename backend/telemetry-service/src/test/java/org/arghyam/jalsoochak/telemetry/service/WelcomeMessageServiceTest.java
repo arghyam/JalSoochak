@@ -52,6 +52,9 @@ class WelcomeMessageServiceTest {
     private LanguageLocaleResolver languageLocaleResolver =
             new LanguageLocaleResolver(mock(LanguageCatalogRepository.class));
 
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
+
     @InjectMocks
     private WelcomeMessageService service;
 

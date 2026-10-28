@@ -46,14 +46,12 @@ public class ConversationMessageService {
                     ? operatorWithSchema.operator().title()
                     : "there";
 
-            Optional<String> selectedLanguageOpt = Optional.of(operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
-            String languageKey = selectedLanguageOpt
-                    .map(localizationService::normalizeLanguageKey)
-                    .orElse("english");
+            String languageKey = localizationService.normalizeLanguageKey(
+                    operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
 
             String template = templatesService
                     .resolveScreenMessage(tenantId, "INTRO_MESSAGE", languageKey)
-                    .orElseGet(() -> resolveLegacyIntroMessage(tenantId, selectedLanguageOpt, languageKey));
+                    .orElseGet(() -> resolveLegacyMessage(tenantId, "intro_message", languageKey));
 
             log.info("Resolved intro message config with language key '{}'", languageKey);
             log.debug("Resolved intro message config for contactId {} with language key '{}'", introRequest.getContactId(), languageKey);
@@ -84,14 +82,12 @@ public class ConversationMessageService {
             if (tenantId == null) {
                 throw new IllegalStateException("Operator tenant could not be resolved");
             }
-            Optional<String> selectedLanguageOpt = Optional.of(operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
-            String languageKey = selectedLanguageOpt
-                    .map(localizationService::normalizeLanguageKey)
-                    .orElse("english");
+            String languageKey = localizationService.normalizeLanguageKey(
+                    operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
 
             String template = templatesService
                     .resolveScreenMessage(tenantId, "CLOSING_MESSAGE", languageKey)
-                    .orElseGet(() -> resolveLegacyClosingMessage(tenantId, selectedLanguageOpt, languageKey));
+                    .orElseGet(() -> resolveLegacyMessage(tenantId, "closing_message", languageKey));
 
             log.info("Resolved closing message config with language key '{}'", languageKey);
             log.debug("Resolved closing message config for contactId {} with language key '{}'", closingRequest.getContactId(), languageKey);
@@ -110,31 +106,22 @@ public class ConversationMessageService {
         }
     }
 
-    private String resolveLegacyIntroMessage(Integer tenantId, Optional<String> selectedLanguageOpt, String languageKey) {
-        if (selectedLanguageOpt.isPresent() && !"english".equals(languageKey)) {
-            return tenantConfigRepository
-                    .findConfigValue(tenantId, "intro_message_" + languageKey)
-                    .orElseThrow(() -> new IllegalStateException(
-                            "Intro message is not configured for selected language. Add intro_message_" + languageKey));
+    /**
+     * The legacy per-language config key {@code <baseKey>_<languageKey>}; for a language that has
+     * none, the English copy ({@code <baseKey>_english}, then {@code <baseKey>}) with a WARN.
+     */
+    private String resolveLegacyMessage(Integer tenantId, String baseKey, String languageKey) {
+        if (!"english".equals(languageKey)) {
+            Optional<String> localized = tenantConfigRepository.findConfigValue(tenantId, baseKey + "_" + languageKey);
+            if (localized.isPresent()) {
+                return localized.get();
+            }
+            log.warn("chatbot_translation_missing tenantId={} configKey={}_{} fallback=en",
+                    tenantId, baseKey, languageKey);
         }
-        return tenantConfigRepository
-                .findConfigValue(tenantId, "intro_message_" + languageKey)
-                .or(() -> tenantConfigRepository.findConfigValue(tenantId, "intro_message"))
+        return tenantConfigRepository.findConfigValue(tenantId, baseKey + "_english")
+                .or(() -> tenantConfigRepository.findConfigValue(tenantId, baseKey))
                 .orElseThrow(() -> new IllegalStateException(
-                        "Intro message is not configured. Add intro_message_" + languageKey + " or intro_message"));
-    }
-
-    private String resolveLegacyClosingMessage(Integer tenantId, Optional<String> selectedLanguageOpt, String languageKey) {
-        if (selectedLanguageOpt.isPresent() && !"english".equals(languageKey)) {
-            return tenantConfigRepository
-                    .findConfigValue(tenantId, "closing_message_" + languageKey)
-                    .orElseThrow(() -> new IllegalStateException(
-                            "Closing message is not configured for selected language. Add closing_message_" + languageKey));
-        }
-        return tenantConfigRepository
-                .findConfigValue(tenantId, "closing_message_" + languageKey)
-                .or(() -> tenantConfigRepository.findConfigValue(tenantId, "closing_message"))
-                .orElseThrow(() -> new IllegalStateException(
-                        "Closing message is not configured. Add closing_message_" + languageKey + " or closing_message"));
+                        baseKey + " is not configured. Add " + baseKey + "_" + languageKey + " or " + baseKey));
     }
 }

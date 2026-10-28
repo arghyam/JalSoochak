@@ -202,7 +202,8 @@ public class ConversationSelectionService {
             String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             return IntroResponse.builder()
                     .success(false)
-                    .message(localizationService.resolveUserFacingErrorMessage(e, "Language selection could not be saved.", languageKey))
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e, ConversationMessageCode.LANGUAGE_SELECTION_NOT_SAVED, languageKey))
                     .build();
         }
     }
@@ -313,7 +314,8 @@ public class ConversationSelectionService {
             String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             return IntroResponse.builder()
                     .success(false)
-                    .message(localizationService.resolveUserFacingErrorMessage(e, "Channel selection could not be saved.", languageKey))
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e, ConversationMessageCode.CHANNEL_SELECTION_NOT_SAVED, languageKey))
                     .build();
         }
     }
@@ -358,7 +360,7 @@ public class ConversationSelectionService {
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
                             e,
-                            "Scheme selection could not be prepared.",
+                            ConversationMessageCode.SCHEME_SELECTION_NOT_PREPARED,
                             languageKey
                     ))
                     .build();
@@ -413,7 +415,7 @@ public class ConversationSelectionService {
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
                             e,
-                            "Scheme selection could not be saved.",
+                            ConversationMessageCode.SCHEME_SELECTION_NOT_SAVED,
                             languageKey
                     ))
                     .build();
@@ -471,7 +473,7 @@ public class ConversationSelectionService {
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
                             e,
-                            "Item selection could not be prepared.",
+                            ConversationMessageCode.ITEM_SELECTION_NOT_PREPARED,
                             languageKey
                     ))
                     .build();
@@ -560,7 +562,8 @@ public class ConversationSelectionService {
             return SelectionResponse.builder()
                     .success(false)
                     .selected(null)
-                    .message(localizationService.resolveUserFacingErrorMessage(e, "Item selection could not be saved.", languageKey))
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e, ConversationMessageCode.ITEM_SELECTION_NOT_SAVED, languageKey))
                     .build();
         }
     }

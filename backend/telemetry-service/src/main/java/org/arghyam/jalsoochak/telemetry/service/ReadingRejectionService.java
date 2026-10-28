@@ -29,23 +29,22 @@ import java.util.Optional;
 @Service
 public class ReadingRejectionService {
 
-    static final String REJECTED_MESSAGE = "Please enter the correct meter reading.";
-    static final String NOTHING_TO_REJECT_MESSAGE = "No reading from today was found to correct. Please send a new meter image.";
-    static final String FAILURE_MESSAGE = "The reading could not be corrected. Please try again.";
-
     private final OperatorContextService operatorContextService;
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final BfmReadingService bfmReadingService;
     private final ConversationLocalizationService localizationService;
+    private final ConversationMessageResolver messageResolver;
 
     public ReadingRejectionService(OperatorContextService operatorContextService,
                                    TelemetryTenantRepository telemetryTenantRepository,
                                    BfmReadingService bfmReadingService,
-                                   ConversationLocalizationService localizationService) {
+                                   ConversationLocalizationService localizationService,
+                                   ConversationMessageResolver messageResolver) {
         this.operatorContextService = operatorContextService;
         this.telemetryTenantRepository = telemetryTenantRepository;
         this.bfmReadingService = bfmReadingService;
         this.localizationService = localizationService;
+        this.messageResolver = messageResolver;
     }
 
     public IntroResponse rejectTodaysLatestReading(IntroRequest request) {
@@ -65,7 +64,7 @@ public class ReadingRejectionService {
             if (latest.isEmpty() || !ReadingTime.today().equals(latest.get().readingDate())) {
                 return IntroResponse.builder()
                         .success(false)
-                        .message(localizationService.localizeMessage(NOTHING_TO_REJECT_MESSAGE, languageKey))
+                        .message(messageResolver.get(ConversationMessageCode.NOTHING_TO_REJECT, languageKey))
                         .build();
             }
 
@@ -73,14 +72,14 @@ public class ReadingRejectionService {
             bfmReadingService.resetLatestConfirmedReadingByPhone(contactId, tenantId, ReportingChannel.WHATSAPP);
             return IntroResponse.builder()
                     .success(true)
-                    .message(localizationService.localizeMessage(REJECTED_MESSAGE, languageKey))
+                    .message(messageResolver.get(ConversationMessageCode.READING_REJECTED, languageKey))
                     .build();
         } catch (Exception e) {
             log.warn("Rejecting latest reading failed: {}", e.getMessage());
             log.debug("Rejecting latest reading failed for contactId {}", contactId, e);
             return IntroResponse.builder()
                     .success(false)
-                    .message(localizationService.localizeMessage(FAILURE_MESSAGE, languageKey))
+                    .message(messageResolver.get(ConversationMessageCode.REJECTION_FAILED, languageKey))
                     .build();
         }
     }

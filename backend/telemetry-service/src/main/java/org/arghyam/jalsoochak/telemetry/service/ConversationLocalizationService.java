@@ -6,6 +6,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -24,9 +27,12 @@ public class ConversationLocalizationService {
     );
 
     private final OperatorContextService operatorContextService;
+    private final ConversationMessageResolver messageResolver;
 
-    public ConversationLocalizationService(OperatorContextService operatorContextService) {
+    public ConversationLocalizationService(OperatorContextService operatorContextService,
+                                           ConversationMessageResolver messageResolver) {
         this.operatorContextService = operatorContextService;
+        this.messageResolver = messageResolver;
     }
 
     public String normalizeLanguageKey(String language) {
@@ -81,26 +87,26 @@ public class ConversationLocalizationService {
      * user-facing message therefore means adding a rule — the safe default is not to disclose.
      * Suppressions are logged so an over-eager fallback is visible in ops rather than silent.
      */
-    public String resolveUserFacingErrorMessage(Exception e, String fallback, String languageKey) {
+    public String resolveUserFacingErrorMessage(Exception e, ConversationMessageCode fallback, String languageKey) {
         if (e == null) {
-            return localizeMessage(fallback, languageKey);
+            return messageResolver.get(fallback, languageKey);
         }
         String message = e.getMessage();
         if (message == null || message.isBlank()) {
-            return localizeMessage(fallback, languageKey);
+            return messageResolver.get(fallback, languageKey);
         }
 
         String normalized = message.trim().toLowerCase(Locale.ROOT);
 
         // The one message we pass through: our own code composes it, and it carries the operator's own
-        // submitted value and their scheme's previous reading — which the Hindi localizer also parses.
+        // submitted value and their scheme's previous reading — which localizeMessage also parses.
         if (normalized.contains("less than previous")) {
             return localizeMessage(message.trim(), languageKey);
         }
 
         for (UserFacingRule rule : USER_FACING_RULES) {
             if (normalized.contains(rule.match())) {
-                return localizeMessage(rule.safeMessage(), languageKey);
+                return messageResolver.get(rule.safeMessage(), languageKey);
             }
         }
 
@@ -108,14 +114,14 @@ public class ConversationLocalizationService {
         // this line names the message that was withheld so a missing rule is easy to spot and add.
         log.info("error_message_suppressed exceptionType={} message=\"{}\"",
                 e.getClass().getSimpleName(), sanitizeForLog(message));
-        return localizeMessage(fallback, languageKey);
+        return messageResolver.get(fallback, languageKey);
     }
 
     /** A recognised, safe-to-disclose error: {@code match} is compared against the lower-cased message. */
-    private record UserFacingRule(String match, String safeMessage) {
+    private record UserFacingRule(String match, ConversationMessageCode safeMessage) {
     }
 
-    private static UserFacingRule rule(String match, String safeMessage) {
+    private static UserFacingRule rule(String match, ConversationMessageCode safeMessage) {
         return new UserFacingRule(match, safeMessage);
     }
 
@@ -127,297 +133,204 @@ public class ConversationLocalizationService {
      * names a config key, column, schema, tenant, phone number, threshold or internal component.
      */
     private static final List<UserFacingRule> USER_FACING_RULES = List.of(
-            rule("duplicate image", "Duplicate image submission detected. Please submit a new image."),
+            rule("duplicate image", ConversationMessageCode.DUPLICATE_IMAGE),
 
             // ── Manual reading. MUST precede the generic "reading …" rules: the string
             // "manualreading is required" contains "reading is required". ─────────────────────────────
-            rule("manualreading is required", "manualReading is required."),
-            rule("manualreading must be numeric", "Manual Reading must be numeric value"),
-            rule("manualreading must be greater than zero", "manualReading must be greater than zero."),
+            rule("manualreading is required", ConversationMessageCode.MANUAL_READING_REQUIRED),
+            rule("manualreading must be numeric", ConversationMessageCode.MANUAL_READING_NOT_NUMERIC),
+            rule("manualreading must be greater than zero", ConversationMessageCode.MANUAL_READING_NOT_POSITIVE),
 
             // ── Reading values ──────────────────────────────────────────────────────────────────────
-            rule("reading is required", "Reading is required."),
-            rule("reading must be numeric", "Reading must be a numeric value."),
-            rule("reading must be greater than zero", "Reading must be greater than zero."),
-            rule("confirmedreading must be a non-negative number", "Reading must be a non-negative number."),
+            rule("reading is required", ConversationMessageCode.READING_REQUIRED),
+            rule("reading must be numeric", ConversationMessageCode.READING_NOT_NUMERIC),
+            rule("reading must be greater than zero", ConversationMessageCode.READING_NOT_POSITIVE),
+            rule("confirmedreading must be a non-negative number", ConversationMessageCode.READING_NEGATIVE),
             rule("either readingvalue or readingurl must be provided",
-                    "A meter image or a reading value is required."),
+                    ConversationMessageCode.READING_OR_IMAGE_REQUIRED),
 
             // ── Selections ──────────────────────────────────────────────────────────────────────────
-            rule("language selection is required",
-                    "Language selection is required. Please choose one of the listed options."),
-            rule("invalid language selection", "Invalid language selection. Please restart the process"),
-            rule("no language options configured", "Language options are not configured for this tenant."),
-            rule("channel selection is required",
-                    "Channel selection is required. Please choose one of the listed options."),
-            rule("invalid channel selection", "Invalid channel selection. Please restart the process"),
-            rule("no channel options configured", "Channel options are not configured for this tenant."),
-            rule("selected channel is no longer available",
-                    "Selected channel is no longer available. Please make sure you have a channel selected."),
-            rule("item selection is required",
-                    "Item selection is required. Please choose one of the listed options."),
-            rule("invalid item selection", "Invalid item selection. Please choose a valid option from the list."),
-            rule("no item options configured", "Item options are not configured for this tenant."),
-            rule("scheme selection is required",
-                    "Scheme selection is required. Please choose one of the listed options."),
-            rule("invalid scheme selection", "Invalid scheme selection. Please choose a valid option from the list."),
-            rule("meter change reason selection is required",
-                    "Meter change reason is required. Please choose one of the listed options."),
-            rule("invalid meter change reason selection",
-                    "Invalid meter change reason. Please choose a valid option from the list."),
+            rule("language selection is required", ConversationMessageCode.LANGUAGE_SELECTION_REQUIRED),
+            rule("invalid language selection", ConversationMessageCode.LANGUAGE_SELECTION_INVALID),
+            rule("no language options configured", ConversationMessageCode.LANGUAGE_OPTIONS_NOT_CONFIGURED),
+            rule("channel selection is required", ConversationMessageCode.CHANNEL_SELECTION_REQUIRED),
+            rule("invalid channel selection", ConversationMessageCode.CHANNEL_SELECTION_INVALID),
+            rule("no channel options configured", ConversationMessageCode.CHANNEL_OPTIONS_NOT_CONFIGURED),
+            rule("selected channel is no longer available", ConversationMessageCode.CHANNEL_NO_LONGER_AVAILABLE),
+            rule("item selection is required", ConversationMessageCode.ITEM_SELECTION_REQUIRED),
+            rule("invalid item selection", ConversationMessageCode.ITEM_SELECTION_INVALID),
+            rule("no item options configured", ConversationMessageCode.ITEM_OPTIONS_NOT_CONFIGURED),
+            rule("scheme selection is required", ConversationMessageCode.SCHEME_SELECTION_REQUIRED),
+            rule("invalid scheme selection", ConversationMessageCode.SCHEME_SELECTION_INVALID),
+            rule("meter change reason selection is required", ConversationMessageCode.METER_CHANGE_REASON_REQUIRED),
+            rule("invalid meter change reason selection", ConversationMessageCode.METER_CHANGE_REASON_INVALID),
             // Config keys are named in the thrown text; the reply says only that it is not set up.
-            rule("meter_change_reasons config", "Meter change reasons are not configured for this tenant."),
-            rule("supply_outage_reasons config", "Submission reasons are not configured for this tenant."),
+            rule("meter_change_reasons config", ConversationMessageCode.METER_CHANGE_REASONS_NOT_CONFIGURED),
+            rule("supply_outage_reasons config", ConversationMessageCode.SUBMISSION_REASONS_NOT_CONFIGURED),
 
             // ── Scheme / operator resolution. "scheme not found for the provided state or centre
             // scheme id" MUST precede the generic "scheme not found". ────────────────────────────────
             rule("scheme not found for the provided state or centre scheme id",
-                    "Scheme not found for the provided state or centre scheme id"),
+                    ConversationMessageCode.SCHEME_NOT_FOUND_FOR_ID),
             rule("no operator is mapped to the submitted scheme and no phone number was provided",
-                    "No operator is mapped to the submitted scheme and no phone number was provided"),
-            rule("operator is not mapped to any scheme", "No scheme is mapped to this operator."),
+                    ConversationMessageCode.NO_OPERATOR_FOR_SCHEME),
+            rule("operator is not mapped to any scheme", ConversationMessageCode.NO_SCHEME_FOR_OPERATOR),
             rule("operator is not mapped to the provided state or centre scheme",
-                    "Operator is not mapped to the provided state or centre scheme"),
+                    ConversationMessageCode.OPERATOR_NOT_MAPPED_TO_PROVIDED_SCHEME),
             rule("operator does not belong to the specified scheme",
-                    "Operator is not mapped to the selected scheme."),
-            rule("scheme not found", "Scheme not found."),
-            rule("not authorized for this scheme", "Not authorized for this scheme."),
-            rule("schemeid must be a positive integer", "Scheme id must be a positive integer."),
+                    ConversationMessageCode.OPERATOR_NOT_MAPPED_TO_SELECTED_SCHEME),
+            rule("scheme not found", ConversationMessageCode.SCHEME_NOT_FOUND),
+            rule("not authorized for this scheme", ConversationMessageCode.SCHEME_NOT_AUTHORIZED),
+            rule("schemeid must be a positive integer", ConversationMessageCode.SCHEME_ID_NOT_POSITIVE),
 
             // Catches "No operator found for contactId 91XXXXXXXXXX", which echoed the phone number back.
-            rule("no operator found", "Operator could not be resolved for this contact."),
-            rule("operator not found", "Operator could not be resolved for this contact."),
-            rule("operator could not be resolved", "Operator could not be resolved for this contact."),
-            rule("user not found", "Operator could not be resolved for this contact."),
+            rule("no operator found", ConversationMessageCode.OPERATOR_NOT_RESOLVED),
+            rule("operator not found", ConversationMessageCode.OPERATOR_NOT_RESOLVED),
+            rule("operator could not be resolved", ConversationMessageCode.OPERATOR_NOT_RESOLVED),
+            rule("user not found", ConversationMessageCode.OPERATOR_NOT_RESOLVED),
             // Also covers "Operator tenant could not be resolved".
-            rule("tenant could not be resolved", "Operator could not be resolved for this contact."),
+            rule("tenant could not be resolved", ConversationMessageCode.OPERATOR_NOT_RESOLVED),
 
             // ── Contact / request identity ──────────────────────────────────────────────────────────
-            rule("contactid is required", "Contact could not be identified. Please restart the process."),
-            rule("contactid must be provided", "Contact could not be identified. Please restart the process."),
-            rule("phonenumber is required", "Phone number is required."),
-            rule("phonenumber must be provided", "Phone number is required."),
-            rule("correlationid must be provided", "Request reference is missing. Please restart the process."),
+            rule("contactid is required", ConversationMessageCode.CONTACT_NOT_IDENTIFIED),
+            rule("contactid must be provided", ConversationMessageCode.CONTACT_NOT_IDENTIFIED),
+            rule("phonenumber is required", ConversationMessageCode.PHONE_NUMBER_REQUIRED),
+            rule("phonenumber must be provided", ConversationMessageCode.PHONE_NUMBER_REQUIRED),
+            rule("correlationid must be provided", ConversationMessageCode.REQUEST_REFERENCE_MISSING),
 
             // ── Media ───────────────────────────────────────────────────────────────────────────────
-            rule("invalid media", "Invalid media. Please submit a clear meter image."),
-            rule("failed to download image", "Image could not be processed. Please try again"),
+            rule("invalid media", ConversationMessageCode.INVALID_MEDIA),
+            rule("failed to download image", ConversationMessageCode.IMAGE_DOWNLOAD_FAILED),
 
             // ── Issue report ────────────────────────────────────────────────────────────────────────
-            rule("issuereason contains invalid characters",
-                    "Issue reason can only contain letters, numbers, and spaces."),
-            rule("issuereason is required", "Issue reason is required."),
+            rule("issuereason contains invalid characters", ConversationMessageCode.ISSUE_REASON_INVALID_CHARACTERS),
+            rule("issuereason is required", ConversationMessageCode.ISSUE_REASON_REQUIRED),
 
             // ── Location. One reply for every shape of bad geolocation. ─────────────────────────────
-            rule("latitude is required", "Location could not be saved. Please share a valid location."),
-            rule("longitude is required", "Location could not be saved. Please share a valid location."),
-            rule("latitude must be between", "Location could not be saved. Please share a valid location."),
-            rule("longitude must be between", "Location could not be saved. Please share a valid location."),
-            rule("geolocation", "Location could not be saved. Please share a valid location."),
+            rule("latitude is required", ConversationMessageCode.LOCATION_INVALID),
+            rule("longitude is required", ConversationMessageCode.LOCATION_INVALID),
+            rule("latitude must be between", ConversationMessageCode.LOCATION_INVALID),
+            rule("longitude must be between", ConversationMessageCode.LOCATION_INVALID),
+            rule("geolocation", ConversationMessageCode.LOCATION_INVALID),
 
             // ── Readings lookup ─────────────────────────────────────────────────────────────────────
             // Deliberately the same answer for "unknown contact" and "contact in another tenant".
-            rule("no reading found for operator", "No reading found for operator"),
-            rule("reading not found", "Reading not found."),
-            rule("target reading date is missing", "Target reading date is missing."),
+            rule("no reading found for operator", ConversationMessageCode.NO_READING_FOR_OPERATOR),
+            rule("reading not found", ConversationMessageCode.READING_NOT_FOUND),
+            rule("target reading date is missing", ConversationMessageCode.TARGET_READING_DATE_MISSING),
 
-            rule("invalid api key", "Invalid API key")
+            rule("invalid api key", ConversationMessageCode.INVALID_API_KEY)
     );
 
     /** Keeps a withheld message on one log line; it is server-side only and never returned. */
     private static String sanitizeForLog(String message) {
         return message.replace('\n', ' ').replace('\r', ' ').trim();
     }
-    public String localizeMessage(String message, String languageKey) {
-        if (message == null || message.isBlank()) {
-            return message;
-        }
-        if (!"hindi".equals(languageKey)) {
-            return message;
-        }
 
+    /**
+     * Translates English written outside the chatbot — reading results shared with the partner API,
+     * tenant-configured reason names, a tenant's language confirmation — by recognising the text and
+     * rendering the {@link ConversationMessageCode} it carries. Copy the chatbot writes itself is looked
+     * up by code instead, through {@link ConversationMessageResolver}.
+     *
+     * <p>English text, and text in a language that does not translate what it was recognised as, is
+     * returned unchanged; so is anything unrecognised.
+     */
+    public String localizeMessage(String message, String languageKey) {
+        if (message == null || message.isBlank() || messageResolver.isEnglish(languageKey)) {
+            return message;
+        }
         String normalized = message.trim().toLowerCase(Locale.ROOT);
-        if (normalized.contains("please enter the correct meter reading")) {
-            return "कृपया सही मीटर रीडिंग दर्ज करें।";
-        }
-        if (normalized.contains("no reading from today was found to correct")) {
-            return "आज की कोई रीडिंग सुधारने के लिए नहीं मिली। कृपया मीटर की नई इमेज भेजें।";
-        }
-        if (normalized.contains("the reading could not be corrected")) {
-            return "रीडिंग सुधारी नहीं जा सकी। कृपया फिर से प्रयास करें।";
-        }
-        if (normalized.contains("duplicate image submission detected")) {
-            return "डुप्लिकेट इमेज मिली है। कृपया नई इमेज सबमिट करें।";
-        }
-        if (normalized.contains("reading cannot be less than previous")) {
-            Matcher matcher = SUBMITTED_PREVIOUS_PATTERN.matcher(message);
-            if (matcher.find()) {
-                String submitted = matcher.group(1).trim();
-                String previous = matcher.group(2).trim();
-                return "रीडिंग पिछली पुष्टि की गई रीडिंग से कम नहीं हो सकती। जमा की गई रीडिंग: "
-                        + submitted + "। पिछली रीडिंग: " + previous + "।";
+        for (Recognizer recognizer : RECOGNIZERS) {
+            if (recognizer.matches().test(normalized)) {
+                Recognized recognized = recognizer.recognize().apply(message);
+                return messageResolver.translation(recognized.code(), languageKey, recognized.args())
+                        .map(recognized.assemble())
+                        .orElse(message);
             }
-            return "रीडिंग पिछली पुष्टि की गई रीडिंग से कम नहीं हो सकती।";
-        }
-        if (normalized.contains("manualreading is required")) {
-            return "manualReading अनिवार्य है।";
-        }
-        if (normalized.contains("manual reading must be numeric value")
-                || normalized.contains("manualreading must be numeric value")) {
-            return "manualReading केवल संख्या होना चाहिए।";
-        }
-        if (normalized.contains("manualreading must be greater than zero")) {
-            return "manualReading शून्य से बड़ा होना चाहिए।";
-        }
-        if (normalized.contains("language selection is required")) {
-            return "भाषा चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।";
-        }
-        if (normalized.contains("invalid language selection")) {
-            return "अमान्य भाषा चयन। कृपया सूची से सही संख्या या भाषा चुनें।";
-        }
-        if (normalized.contains("language options are not configured")) {
-            return "इस टेनेंट के लिए भाषा विकल्प कॉन्फ़िगर नहीं हैं।";
-        }
-        if (normalized.contains("language selected:")) {
-            return message.replaceFirst("(?i)language selected:", "भाषा चुनी गई:");
-        }
-        if (normalized.contains("channel selection is required")) {
-            return "चैनल चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।";
-        }
-        if (normalized.contains("invalid channel selection")) {
-            return "अमान्य चैनल चयन। कृपया सूची से सही संख्या या चैनल चुनें।";
-        }
-        if (normalized.contains("channel options are not configured")) {
-            return "इस टेनेंट के लिए चैनल विकल्प कॉन्फ़िगर नहीं हैं।";
-        }
-        if (normalized.contains("selected channel is no longer available")) {
-            return "चयनित चैनल अब उपलब्ध नहीं है। कृपया सुनिश्चित करें कि आपने एक चैनल चुना है।";
-        }
-        if (normalized.contains("item selection is required")) {
-            return "विकल्प चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।";
-        }
-        if (normalized.contains("invalid item selection")) {
-            return "अमान्य विकल्प चयन। कृपया सूची से सही विकल्प चुनें।";
-        }
-        if (normalized.contains("item options are not configured")) {
-            return "इस टेनेंट के लिए विकल्प कॉन्फ़िगर नहीं हैं।";
-        }
-        if (normalized.contains("no scheme is mapped to this operator")) {
-            return "इस ऑपरेटर के लिए कोई स्कीम मैप नहीं है।";
-        }
-        if (normalized.contains("operator could not be resolved")) {
-            return "इस संपर्क के लिए ऑपरेटर नहीं मिला।";
-        }
-        if (normalized.contains("invalid media")) {
-            return "मीडिया अमान्य है। कृपया स्पष्ट मीटर इमेज भेजें।";
-        }
-        if (normalized.contains("issue reason can only contain letters, numbers, and spaces")) {
-            return "समस्या का विवरण केवल अक्षर, अंक और स्पेस में ही दें।";
-        }
-        if (normalized.contains("successfully selected")) {
-            return "सफलतापूर्वक चयनित।";
-        }
-        if (normalized.contains("image could not be processed")) {
-            return "इमेज प्रोसेस नहीं हो सकी। कृपया दोबारा प्रयास करें।";
-        }
-        if (normalized.contains("manual reading could not be saved")) {
-            return "मैनुअल रीडिंग सेव नहीं हो सकी। कृपया दोबारा प्रयास करें।";
-        }
-        if (normalized.contains("please type your issue in a few words")) {
-            return "कृपया अपनी समस्या संक्षेप में लिखें।";
-        }
-        if (normalized.contains("please select your issue by typing any of the number")) {
-            return "कृपया नंबर टाइप करके अपनी समस्या चुनें";
-        }
-        if (normalized.contains("please select the no submission reasons by typing any of the number")) {
-            return "कृपया नंबर टाइप करके सबमिशन न होने के कारण चुनें";
-        }
-        if (normalized.contains("electricity supply disconnected")) {
-            return "बिजली आपूर्ति बंद है";
-        }
-        if (normalized.contains("no electricity supply today")) {
-            return "आज बिजली की आपूर्ति नहीं है";
-        }
-        if (normalized.contains("pump failure")) {
-            return "पंप खराब है";
-        }
-        if (normalized.contains("pipeline break")) {
-            return "पाइपलाइन टूटी है";
-        }
-        if (normalized.contains("water quality issues")) {
-            return "पानी की गुणवत्ता में समस्या है";
-        }
-        if (normalized.contains("source drying")) {
-            return "स्रोत सूख रहा है";
-        }
-        if (normalized.contains("natural calamity")) {
-            return "प्राकृतिक आपदा";
-        }
-        if (normalized.equals("others")) {
-            return "अन्य";
-        }
-        if (normalized.contains("meter replaced")) {
-            return "मीटर बदला गया";
-        }
-        if (normalized.contains("meter not working")) {
-            return "मीटर काम नहीं कर रहा";
-        }
-        if (normalized.contains("meter damaged") || normalized.contains("meter damage")) {
-            return "मीटर खराब है";
-        }
-        if (normalized.contains("reading captured successfully")) {
-            Matcher matcher = EXTRACTED_READING_PATTERN.matcher(message);
-            if (matcher.find()) {
-                String reading = matcher.group(1).trim();
-                return "रीडिंग सफलतापूर्वक दर्ज हुई। प्राप्त रीडिंग: " + reading;
-            }
-            return "रीडिंग सफलतापूर्वक दर्ज हुई।";
-        }
-        if (normalized.contains("low ocr confidence")) {
-            Matcher matcher = EXTRACTED_READING_PATTERN.matcher(message);
-            if (matcher.find()) {
-                String reading = matcher.group(1).trim();
-                return "OCR भरोसा कम है। प्राप्त रीडिंग: " + reading + "। कृपया रीडिंग की पुष्टि करें।";
-            }
-            return "OCR भरोसा कम है। कृपया रीडिंग की पुष्टि करें।";
-        }
-        if (normalized.contains("invalid reading value")) {
-            return "रीडिंग मान्य नहीं है।";
-        }
-        if (normalized.contains("no meter found in the photo")) {
-            return "फोटो में मीटर नहीं मिला। कृपया मीटर की सीधी और साफ़ फोटो भेजें।";
-        }
-        if (normalized.contains("could not read meter value from image")) {
-            return "इमेज से मीटर रीडिंग नहीं पढ़ी जा सकी। कृपया स्पष्ट फोटो भेजें।";
-        }
-        if (normalized.contains("meter photos are not supported for your reading channel")) {
-            return "आपके रीडिंग चैनल के लिए मीटर की फ़ोटो समर्थित नहीं है।";
-        }
-        if (normalized.startsWith("reading can't be more than")) {
-            Matcher matcher = ABOVE_MAXIMUM_PATTERN.matcher(message.trim());
-            if (matcher.find()) {
-                String unit = matcher.group(2).trim();
-                String hindiUnit = "minutes".equalsIgnoreCase(unit) ? "मिनट" : unit;
-                return "रीडिंग " + matcher.group(1) + (hindiUnit.isEmpty() ? "" : " " + hindiUnit)
-                        + " से अधिक नहीं हो सकती।";
-            }
-            return "रीडिंग तय सीमा से अधिक नहीं हो सकती।";
-        }
-        if (normalized.contains("total pump running time for the day can't be more than 24 hours")) {
-            return "दिन का कुल पंप चलने का समय 24 घंटे (1440 मिनट) से अधिक नहीं हो सकता।";
-        }
-        if (normalized.contains("pump running time can't be more than 24 hours")) {
-            return "पंप चलने का समय 24 घंटे (1440 मिनट) से अधिक नहीं हो सकता।";
-        }
-        if (normalized.contains("ocr failed")) {
-            return "मीटर रीडिंग पढ़ने में त्रुटि हुई। कृपया स्पष्ट फोटो भेजें।";
-        }
-        if (normalized.contains("location saved successfully")) {
-            return "लोकेशन सफलतापूर्वक सेव हो गई।";
-        }
-        if (normalized.contains("reading updated successfully")) {
-            return "रीडिंग सफलतापूर्वक अपडेट हुई।";
         }
         return message;
     }
+
+    /** Matches the lower-cased text, then reads the message and its arguments out of the original. */
+    private record Recognizer(Predicate<String> matches, Function<String, Recognized> recognize) {
+    }
+
+    /** What a text was recognised as; {@code assemble} turns the translation into the reply. */
+    private record Recognized(ConversationMessageCode code, Object[] args, UnaryOperator<String> assemble) {
+        Recognized(ConversationMessageCode code, Object... args) {
+            this(code, args, UnaryOperator.identity());
+        }
+    }
+
+    private static Recognizer recognize(String phrase, ConversationMessageCode code) {
+        return new Recognizer(normalized -> normalized.contains(phrase), text -> new Recognized(code));
+    }
+
+    /** In order: the first match wins. */
+    private static final List<Recognizer> RECOGNIZERS = List.of(
+            recognize("duplicate image submission detected", ConversationMessageCode.DUPLICATE_IMAGE),
+            new Recognizer(normalized -> normalized.contains("reading cannot be less than previous"), text -> {
+                Matcher matcher = SUBMITTED_PREVIOUS_PATTERN.matcher(text);
+                return matcher.find()
+                        ? new Recognized(ConversationMessageCode.READING_BELOW_PREVIOUS_WITH_VALUES,
+                                matcher.group(1).trim(), matcher.group(2).trim())
+                        : new Recognized(ConversationMessageCode.READING_BELOW_PREVIOUS);
+            }),
+            // A tenant's confirmation template: only its "Language selected:" label is translated.
+            new Recognizer(normalized -> normalized.contains("language selected:"),
+                    text -> new Recognized(ConversationMessageCode.LANGUAGE_SELECTED_LABEL, new Object[0],
+                            label -> text.replaceFirst("(?i)language selected:", Matcher.quoteReplacement(label)))),
+
+            // ── Default reason names, as stored in a tenant's reason config ─────────────────────────
+            recognize("electricity supply disconnected",
+                    ConversationMessageCode.SUPPLY_REASON_ELECTRICITY_DISCONNECTED),
+            recognize("no electricity supply today", ConversationMessageCode.SUPPLY_REASON_NO_ELECTRICITY_TODAY),
+            recognize("pump failure", ConversationMessageCode.SUPPLY_REASON_PUMP_FAILURE),
+            recognize("pipeline break", ConversationMessageCode.SUPPLY_REASON_PIPELINE_BREAK),
+            recognize("water quality issues", ConversationMessageCode.SUPPLY_REASON_WATER_QUALITY),
+            recognize("source drying", ConversationMessageCode.SUPPLY_REASON_SOURCE_DRYING),
+            recognize("natural calamity", ConversationMessageCode.SUPPLY_REASON_NATURAL_CALAMITY),
+            new Recognizer("others"::equals, text -> new Recognized(ConversationMessageCode.ISSUE_REASON_OTHERS)),
+            recognize("meter replaced", ConversationMessageCode.ISSUE_REASON_METER_REPLACED),
+            recognize("meter not working", ConversationMessageCode.ISSUE_REASON_METER_NOT_WORKING),
+            // Also covers "meter damaged".
+            recognize("meter damage", ConversationMessageCode.ISSUE_REASON_METER_DAMAGE),
+
+            // ── Reading results ─────────────────────────────────────────────────────────────────────
+            new Recognizer(normalized -> normalized.contains("reading captured successfully"), text -> {
+                Matcher matcher = EXTRACTED_READING_PATTERN.matcher(text);
+                return matcher.find()
+                        ? new Recognized(ConversationMessageCode.READING_CAPTURED_WITH_VALUE, matcher.group(1).trim())
+                        : new Recognized(ConversationMessageCode.READING_CAPTURED);
+            }),
+            new Recognizer(normalized -> normalized.contains("low ocr confidence"), text -> {
+                Matcher matcher = EXTRACTED_READING_PATTERN.matcher(text);
+                return matcher.find()
+                        ? new Recognized(ConversationMessageCode.LOW_OCR_CONFIDENCE_WITH_VALUE, matcher.group(1).trim())
+                        : new Recognized(ConversationMessageCode.LOW_OCR_CONFIDENCE);
+            }),
+            recognize("invalid reading value", ConversationMessageCode.INVALID_READING_VALUE),
+            recognize("no meter found in the photo", ConversationMessageCode.NO_METER_IN_PHOTO),
+            recognize("could not read meter value from image", ConversationMessageCode.UNREADABLE_IMAGE),
+            recognize("meter photos are not supported for your reading channel",
+                    ConversationMessageCode.PHOTO_NOT_SUPPORTED),
+            new Recognizer(normalized -> normalized.startsWith("reading can't be more than"), text -> {
+                Matcher matcher = ABOVE_MAXIMUM_PATTERN.matcher(text.trim());
+                if (!matcher.find()) {
+                    return new Recognized(ConversationMessageCode.READING_ABOVE_MAXIMUM);
+                }
+                String unit = matcher.group(2).trim();
+                if (unit.isEmpty()) {
+                    return new Recognized(ConversationMessageCode.READING_ABOVE_MAXIMUM_VALUE, matcher.group(1));
+                }
+                return new Recognized(ConversationMessageCode.READING_ABOVE_MAXIMUM_VALUE_UNIT, matcher.group(1),
+                        "minutes".equalsIgnoreCase(unit) ? ConversationMessageCode.UNIT_MINUTES : unit);
+            }),
+            recognize("total pump running time for the day can't be more than 24 hours",
+                    ConversationMessageCode.PDU_DAY_TOO_LONG),
+            recognize("pump running time can't be more than 24 hours", ConversationMessageCode.PDU_RUN_TOO_LONG),
+            recognize("ocr failed", ConversationMessageCode.OCR_FAILED),
+            recognize("reading updated successfully", ConversationMessageCode.READING_UPDATED)
+    );
 }

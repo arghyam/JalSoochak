@@ -21,6 +21,7 @@ public class WelcomeMessageService {
     private final ConversationLocalizationService localizationService;
     private final TenantConfigRepository tenantConfigRepository;
     private final LanguageLocaleResolver languageLocaleResolver;
+    private final ConversationMessageResolver messageResolver;
     private static final Pattern NON_ALNUM = Pattern.compile("[^a-z0-9]+");
 
     public IntroResponse triggerWelcomeMessage(String phoneNumber, boolean isSingleTenant) {
@@ -63,43 +64,8 @@ public class WelcomeMessageService {
     }
 
     private String buildWelcomeMessage(String languageKey, String name, String state, boolean isSingleTenant) {
-        String normalized = languageKey == null ? "english" : languageKey.toLowerCase(Locale.ROOT);
-        String startKeyword = resolveStartKeyword(isSingleTenant);
-        return switch (normalized) {
-            case "hindi" -> """
-                    प्रिय %s,
-
-                    आपको जलसूचक में %s के लिए पंप ऑपरेटर के रूप में पंजीकृत किया गया है।
-
-                    आप इस नंबर का उपयोग इन कार्यों के लिए कर सकते हैं:
-                    - बल्क फ्लो मीटर की फोटो साझा करना
-                    - जल आपूर्ति से जुड़ी समस्याएं रिपोर्ट करना
-
-                    शुरू करने के लिए %s लिखें।
-                    """.formatted(name, safeState(state), startKeyword);
-            case "assamese", "as", "as_in" -> """
-                    প্ৰিয় %s,
-
-                    আপুনি জলোসূচকত %s ৰ পাম্প অপাৰেটৰ হিচাপে নথিভুক্ত হৈছে।
-
-                    এই নম্বৰ ব্যৱহাৰ কৰি আপুনি:
-                    - বাল্ক ফ্ল’ মিটাৰৰ ফটো পঠাব পাৰে
-                    - পানী যোগানৰ সমস্যা জনাব পাৰে
-
-                    আৰম্ভ কৰিবলৈ %s লিখক।
-                    """.formatted(name, safeState(state), startKeyword);
-            default -> """
-                    Dear %s,
-
-                    You have been registered as Pump Operator for %s in Jalsoochak.
-
-                    You can use this number to:
-                    - Share photos of the bulk flow meter
-                    - Report water supply issues
-
-                    Reply %s to begin.
-                    """.formatted(name, safeState(state), startKeyword);
-        };
+        return messageResolver.get(ConversationMessageCode.WELCOME, languageKey,
+                name, safeState(state), resolveStartKeyword(isSingleTenant));
     }
 
     private String resolveStartKeyword(boolean isSingleTenant) {

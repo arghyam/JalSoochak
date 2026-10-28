@@ -189,7 +189,8 @@ class ConversationSelectionServiceSelectedItemTest {
     void selectedItemStillRejectsAnUnknownSelection() {
         ConversationSelectionService service = stubbedServiceWithMenu(false);
         org.mockito.Mockito.lenient().when(localizationService.resolveUserFacingErrorMessage(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
                 .thenReturn("Item selection could not be saved.");
 
         SelectionResponse resp = service.selectedItemMessage(

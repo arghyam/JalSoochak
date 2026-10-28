@@ -132,7 +132,7 @@ class ConversationMessageServiceTest {
         }
 
         @Test
-        void doesNotFallBackToTheUnscopedKeyForANonEnglishLanguage() {
+        void fallsBackToEnglishForALanguageWithNoLegacyCopy() {
             when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("Assamese");
             when(localizationService.normalizeLanguageKey("Assamese")).thenReturn("assamese");
             when(templatesService.resolveScreenMessage(anyInt(), anyString(), anyString()))
@@ -141,11 +141,25 @@ class ConversationMessageServiceTest {
             when(tenantConfigRepository.findConfigValue(3, "intro_message"))
                     .thenReturn(Optional.of("Generic hello {name}."));
 
-            // Silently serving English copy to an Assamese operator would be worse than the error path.
+            // A missing translation gets the English copy, with a WARN, not a failed reply.
             var response = service.introMessage(introRequest(CONTACT));
 
-            assertThat(response.isSuccess()).isFalse();
-            assertThat(response.getMessage()).isEqualTo(FALLBACK);
+            assertThat(response.isSuccess()).isTrue();
+            assertThat(response.getMessage()).isEqualTo("Generic hello Asha.");
+        }
+
+        @Test
+        void prefersTheOperatorsLanguageOverEnglish() {
+            when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("Assamese");
+            when(localizationService.normalizeLanguageKey("Assamese")).thenReturn("assamese");
+            when(templatesService.resolveScreenMessage(anyInt(), anyString(), anyString()))
+                    .thenReturn(Optional.empty());
+            when(tenantConfigRepository.findConfigValue(3, "intro_message_assamese"))
+                    .thenReturn(Optional.of("নমস্কাৰ {name}"));
+            when(tenantConfigRepository.findConfigValue(3, "intro_message_english"))
+                    .thenReturn(Optional.of("Legacy hello {name}."));
+
+            assertThat(service.introMessage(introRequest(CONTACT)).getMessage()).isEqualTo("নমস্কাৰ Asha");
         }
 
         @Test
@@ -232,14 +246,33 @@ class ConversationMessageServiceTest {
         }
 
         @Test
-        void doesNotFallBackToTheUnscopedKeyForANonEnglishLanguage() {
+        void fallsBackToEnglishForALanguageWithNoLegacyCopy() {
             when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("Hindi");
             when(localizationService.normalizeLanguageKey("Hindi")).thenReturn("hindi");
             when(templatesService.resolveScreenMessage(anyInt(), anyString(), anyString()))
                     .thenReturn(Optional.empty());
             when(tenantConfigRepository.findConfigValue(3, "closing_message_hindi")).thenReturn(Optional.empty());
+            when(tenantConfigRepository.findConfigValue(3, "closing_message_english"))
+                    .thenReturn(Optional.of("Legacy bye."));
 
-            assertThat(service.closingMessage(closingRequest(CONTACT)).isSuccess()).isFalse();
+            var response = service.closingMessage(closingRequest(CONTACT));
+
+            assertThat(response.isSuccess()).isTrue();
+            assertThat(response.getMessage()).isEqualTo("Legacy bye.");
+        }
+
+        @Test
+        void stillFailsWhenNoLanguageHasLegacyCopy() {
+            when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("Hindi");
+            when(localizationService.normalizeLanguageKey("Hindi")).thenReturn("hindi");
+            when(templatesService.resolveScreenMessage(anyInt(), anyString(), anyString()))
+                    .thenReturn(Optional.empty());
+            when(tenantConfigRepository.findConfigValue(anyInt(), anyString())).thenReturn(Optional.empty());
+
+            var response = service.closingMessage(closingRequest(CONTACT));
+
+            assertThat(response.isSuccess()).isFalse();
+            assertThat(response.getMessage()).isEqualTo(FALLBACK);
         }
 
         @Test

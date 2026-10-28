@@ -90,6 +90,9 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
     @Mock
     private ConversationSchemeResolver conversationSchemeResolver;
 
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
+
     @InjectMocks
     private MeterReadingConversationService service;
 

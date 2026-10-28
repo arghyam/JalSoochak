@@ -13,6 +13,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -26,8 +27,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 /**
- * Language-key normalisation and the English→Hindi message table used to localise every operator
- * reply. The tables are matched on substrings of the English source text, so these tests pin both
+ * Language-key normalisation, the error allowlist, and the recognition of English written outside
+ * the chatbot. Recognition matches substrings of the English source text, so these tests pin both
  * the mapping and the "leave anything unrecognised untouched" contract.
  */
 @ExtendWith(MockitoExtension.class)
@@ -37,9 +38,14 @@ class ConversationLocalizationServiceTest {
 
     private static final String CONTACT = "919999900001";
     private static final String HINDI = "hindi";
+    private static final ConversationMessageCode FALLBACK = ConversationMessageCode.READING_NOT_PROCESSED;
+    private static final String FALLBACK_TEXT = "Reading could not be processed.";
 
     @Mock
     private OperatorContextService operatorContextService;
+
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
 
     @InjectMocks
     private ConversationLocalizationService service;
@@ -123,16 +129,16 @@ class ConversationLocalizationServiceTest {
 
         @Test
         void usesTheFallbackForAMissingException() {
-            assertThat(service.resolveUserFacingErrorMessage(null, "Fallback.", "english"))
-                    .isEqualTo("Fallback.");
+            assertThat(service.resolveUserFacingErrorMessage(null, FALLBACK, "english"))
+                    .isEqualTo(FALLBACK_TEXT);
         }
 
         @Test
         void usesTheFallbackWhenTheExceptionHasNoMessage() {
-            assertThat(service.resolveUserFacingErrorMessage(new IllegalStateException(), "Fallback.", "english"))
-                    .isEqualTo("Fallback.");
-            assertThat(service.resolveUserFacingErrorMessage(new IllegalStateException("  "), "Fallback.", "english"))
-                    .isEqualTo("Fallback.");
+            assertThat(service.resolveUserFacingErrorMessage(new IllegalStateException(), FALLBACK, "english"))
+                    .isEqualTo(FALLBACK_TEXT);
+            assertThat(service.resolveUserFacingErrorMessage(new IllegalStateException("  "), FALLBACK, "english"))
+                    .isEqualTo(FALLBACK_TEXT);
         }
 
         /**
@@ -143,10 +149,10 @@ class ConversationLocalizationServiceTest {
         @MethodSource("technicalToUserFacing")
         void rewritesTechnicalMessagesIntoOperatorFacingCopy(String technical, String english, String hindi) {
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException(technical), "Fallback.", "english"))
+                    new IllegalStateException(technical), FALLBACK, "english"))
                     .isEqualTo(english);
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException(technical), "Fallback.", HINDI))
+                    new IllegalStateException(technical), FALLBACK, HINDI))
                     .isEqualTo(hindi);
         }
 
@@ -304,10 +310,10 @@ class ConversationLocalizationServiceTest {
             String message = "Reading cannot be less than previous. Submitted reading: 100. Previous reading: 200.";
 
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException(message), "Fallback.", "english"))
+                    new IllegalStateException(message), FALLBACK, "english"))
                     .isEqualTo(message);
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException(message), "Fallback.", HINDI))
+                    new IllegalStateException(message), FALLBACK, HINDI))
                     .isEqualTo("रीडिंग पिछली पुष्टि की गई रीडिंग से कम नहीं हो सकती। "
                             + "जमा की गई रीडिंग: 100। पिछली रीडिंग: 200।");
         }
@@ -318,17 +324,17 @@ class ConversationLocalizationServiceTest {
             // never echoed — the caller's fallback is already context-specific ("Manual reading could
             // not be saved.", "Image could not be processed.", …).
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException("  Something unusual happened  "), "Fallback.", "english"))
-                    .isEqualTo("Fallback.");
+                    new IllegalStateException("  Something unusual happened  "), FALLBACK, "english"))
+                    .isEqualTo(FALLBACK_TEXT);
         }
 
         @ParameterizedTest(name = "withholds: {0}")
         @MethodSource("internalDetailThatMustNotReachTheUser")
         void neverDisclosesInternalDetail(String internal) {
             String result = service.resolveUserFacingErrorMessage(
-                    new IllegalStateException(internal), "Fallback.", "english");
+                    new IllegalStateException(internal), FALLBACK, "english");
 
-            assertThat(result).isEqualTo("Fallback.");
+            assertThat(result).isEqualTo(FALLBACK_TEXT);
         }
 
         static Stream<Arguments> internalDetailThatMustNotReachTheUser() {
@@ -362,7 +368,7 @@ class ConversationLocalizationServiceTest {
             // caller — a PII echo that also confirmed which numbers are registered.
             String result = service.resolveUserFacingErrorMessage(
                     new IllegalStateException("No operator found for contactId 919999900001"),
-                    "Fallback.", "english");
+                    FALLBACK, "english");
 
             assertThat(result)
                     .isEqualTo("Operator could not be resolved for this contact.")
@@ -377,7 +383,7 @@ class ConversationLocalizationServiceTest {
                     new org.springframework.web.server.ResponseStatusException(
                             org.springframework.http.HttpStatus.BAD_REQUEST,
                             "Operator does not belong to the specified scheme"),
-                    "Fallback.", "english");
+                    FALLBACK, "english");
 
             assertThat(result)
                     .isEqualTo("Operator is not mapped to the selected scheme.")
@@ -389,10 +395,10 @@ class ConversationLocalizationServiceTest {
             // "manualreading is required" contains "reading is required": order in the allowlist decides
             // which reply the operator gets.
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException("manualReading is required"), "Fallback.", "english"))
+                    new IllegalStateException("manualReading is required"), FALLBACK, "english"))
                     .isEqualTo("manualReading is required.");
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException("reading is required"), "Fallback.", "english"))
+                    new IllegalStateException("reading is required"), FALLBACK, "english"))
                     .isEqualTo("Reading is required.");
         }
 
@@ -400,14 +406,14 @@ class ConversationLocalizationServiceTest {
         void stillLocalisesTheFallbackForAHindiOperator() {
             assertThat(service.resolveUserFacingErrorMessage(
                     new IllegalStateException("bad SQL grammar [SELECT 1]"),
-                    "Manual reading could not be saved.", HINDI))
+                    ConversationMessageCode.MANUAL_READING_NOT_SAVED, HINDI))
                     .isEqualTo("मैनुअल रीडिंग सेव नहीं हो सकी। कृपया दोबारा प्रयास करें।");
         }
 
         @Test
         void localisesTheRewrittenMessageWhenTheOperatorReadsHindi() {
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException("Duplicate image detected"), "Fallback.", HINDI))
+                    new IllegalStateException("Duplicate image detected"), FALLBACK, HINDI))
                     .isEqualTo("डुप्लिकेट इमेज मिली है। कृपया नई इमेज सबमिट करें।");
         }
     }
@@ -447,56 +453,8 @@ class ConversationLocalizationServiceTest {
 
         static Stream<Arguments> englishToHindi() {
             return Stream.of(
-                    Arguments.of("Please enter the correct meter reading.", "कृपया सही मीटर रीडिंग दर्ज करें।"),
-                    Arguments.of("No reading from today was found to correct. Please send a new meter image.",
-                            "आज की कोई रीडिंग सुधारने के लिए नहीं मिली। कृपया मीटर की नई इमेज भेजें।"),
-                    Arguments.of("The reading could not be corrected. Please try again.",
-                            "रीडिंग सुधारी नहीं जा सकी। कृपया फिर से प्रयास करें।"),
                     Arguments.of("Duplicate image submission detected. Please submit a new image.",
                             "डुप्लिकेट इमेज मिली है। कृपया नई इमेज सबमिट करें।"),
-                    Arguments.of("manualReading is required.", "manualReading अनिवार्य है।"),
-                    Arguments.of("Manual Reading must be numeric value", "manualReading केवल संख्या होना चाहिए।"),
-                    Arguments.of("manualReading must be numeric value", "manualReading केवल संख्या होना चाहिए।"),
-                    Arguments.of("manualReading must be greater than zero.", "manualReading शून्य से बड़ा होना चाहिए।"),
-                    Arguments.of("Language selection is required. Please choose one of the listed options.",
-                            "भाषा चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
-                    Arguments.of("Invalid language selection. Please restart the process",
-                            "अमान्य भाषा चयन। कृपया सूची से सही संख्या या भाषा चुनें।"),
-                    Arguments.of("Language options are not configured for this tenant.",
-                            "इस टेनेंट के लिए भाषा विकल्प कॉन्फ़िगर नहीं हैं।"),
-                    Arguments.of("Channel selection is required. Please choose one of the listed options.",
-                            "चैनल चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
-                    Arguments.of("Invalid channel selection. Please restart the process",
-                            "अमान्य चैनल चयन। कृपया सूची से सही संख्या या चैनल चुनें।"),
-                    Arguments.of("Channel options are not configured for this tenant.",
-                            "इस टेनेंट के लिए चैनल विकल्प कॉन्फ़िगर नहीं हैं।"),
-                    Arguments.of("Selected channel is no longer available.",
-                            "चयनित चैनल अब उपलब्ध नहीं है। कृपया सुनिश्चित करें कि आपने एक चैनल चुना है।"),
-                    Arguments.of("Item selection is required. Please choose one of the listed options.",
-                            "विकल्प चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
-                    Arguments.of("Invalid item selection. Please choose a valid option from the list.",
-                            "अमान्य विकल्प चयन। कृपया सूची से सही विकल्प चुनें।"),
-                    Arguments.of("Item options are not configured for this tenant.",
-                            "इस टेनेंट के लिए विकल्प कॉन्फ़िगर नहीं हैं।"),
-                    Arguments.of("No scheme is mapped to this operator.",
-                            "इस ऑपरेटर के लिए कोई स्कीम मैप नहीं है।"),
-                    Arguments.of("Operator could not be resolved for this contact.",
-                            "इस संपर्क के लिए ऑपरेटर नहीं मिला।"),
-                    Arguments.of("Invalid media. Please submit a clear meter image.",
-                            "मीडिया अमान्य है। कृपया स्पष्ट मीटर इमेज भेजें।"),
-                    Arguments.of("Issue reason can only contain letters, numbers, and spaces.",
-                            "समस्या का विवरण केवल अक्षर, अंक और स्पेस में ही दें।"),
-                    Arguments.of("Successfully selected.", "सफलतापूर्वक चयनित।"),
-                    Arguments.of("Image could not be processed. Please try again",
-                            "इमेज प्रोसेस नहीं हो सकी। कृपया दोबारा प्रयास करें।"),
-                    Arguments.of("Manual reading could not be saved.",
-                            "मैनुअल रीडिंग सेव नहीं हो सकी। कृपया दोबारा प्रयास करें।"),
-                    Arguments.of("Please type your issue in a few words",
-                            "कृपया अपनी समस्या संक्षेप में लिखें।"),
-                    Arguments.of("Please select your issue by typing any of the number",
-                            "कृपया नंबर टाइप करके अपनी समस्या चुनें"),
-                    Arguments.of("Please select the no submission reasons by typing any of the number",
-                            "कृपया नंबर टाइप करके सबमिशन न होने के कारण चुनें"),
                     Arguments.of("Electricity supply disconnected", "बिजली आपूर्ति बंद है"),
                     Arguments.of("No electricity supply today", "आज बिजली की आपूर्ति नहीं है"),
                     Arguments.of("Pump failure", "पंप खराब है"),
@@ -529,7 +487,6 @@ class ConversationLocalizationServiceTest {
                     Arguments.of("Reading can't be more than 12.5.",
                             "रीडिंग 12.5 से अधिक नहीं हो सकती।"),
                     Arguments.of("OCR failed", "मीटर रीडिंग पढ़ने में त्रुटि हुई। कृपया स्पष्ट फोटो भेजें।"),
-                    Arguments.of("Location saved successfully", "लोकेशन सफलतापूर्वक सेव हो गई।"),
                     Arguments.of("Reading updated successfully", "रीडिंग सफलतापूर्वक अपडेट हुई।")
             );
         }
