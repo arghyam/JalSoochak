@@ -64,6 +64,11 @@ public class ConversationMessageResolver {
         return Optional.ofNullable(text);
     }
 
+    /** The English copy for {@code code}, which every code has. */
+    public String english(ConversationMessageCode code) {
+        return render(code, ENGLISH, new Object[0]);
+    }
+
     /** Whether {@code languageKey} is English, whose copy needs no translation. */
     public boolean isEnglish(String languageKey) {
         return ENGLISH.equals(languageLocaleResolver.localeCodeFor(languageKey));

@@ -185,20 +185,18 @@ public class ConversationSelectionService {
             userLanguagePreferenceRepository.upsert(operatorWithSchema.schemaName(), request.getContactId(), selectedLanguage);
             whatsAppContactDirectory.syncContactLanguageAsync(request.getContactId(), selectedLanguage);
 
-            String confirmationTemplate = templatesService
+            String confirmation = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "LANGUAGE_SELECTION", selectedLanguageKey)
                     .or(() -> tenantConfigRepository.findConfigValue(tenantId, "language_selection_confirmation_template_" + selectedLanguageKey))
                     .or(() -> tenantConfigRepository.findConfigValue(tenantId, "language_selection_confirmation_template"))
-                    .orElse("Language selected: {language}");
-
-            String localizedConfirmation = localizationService.localizeMessage(
-                    confirmationTemplate.replace("{language}", selectedLanguageDisplayLabel),
-                    selectedLanguageKey
-            );
+                    .map(template -> localizationService.localizeMessage(
+                            template.replace("{language}", selectedLanguageDisplayLabel), selectedLanguageKey))
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.LANGUAGE_SELECTED,
+                            selectedLanguageKey, selectedLanguageDisplayLabel));
 
             return IntroResponse.builder()
                     .success(true)
-                    .message(localizedConfirmation)
+                    .message(confirmation)
                     .build();
         } catch (Exception e) {
             log.error("Error saving selected language: {}", e.getMessage(), e);

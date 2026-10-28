@@ -42,6 +42,7 @@ import java.time.LocalDateTime;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -134,6 +135,23 @@ public class MeterReadingConversationService {
             "noWaterSupply",
             "noWaterSupplied",
             "others"
+    );
+    /**
+     * The reasons tenant-service seeds into a tenant's {@code METER_CHANGE_REASONS} and
+     * {@code SUPPLY_OUTAGE_REASONS}, by id: its {@code tenant.defaults} in application.yml.
+     */
+    private static final Map<String, ConversationMessageCode> DEFAULT_REASON_CODES = Map.ofEntries(
+            Map.entry("METER_REPLACED", ConversationMessageCode.ISSUE_REASON_METER_REPLACED),
+            Map.entry("METER_NOT_WORKING", ConversationMessageCode.ISSUE_REASON_METER_NOT_WORKING),
+            Map.entry("METER_DAMAGED", ConversationMessageCode.ISSUE_REASON_METER_DAMAGED),
+            Map.entry("ELECTRICITY_SUPPLY_DISCONNECTED", ConversationMessageCode.SUPPLY_REASON_ELECTRICITY_DISCONNECTED),
+            Map.entry("NO_ELECTRICITY_SUPPLY_TODAY", ConversationMessageCode.SUPPLY_REASON_NO_ELECTRICITY_TODAY),
+            Map.entry("PUMP_FAILURE", ConversationMessageCode.SUPPLY_REASON_PUMP_FAILURE),
+            Map.entry("PIPELINE_BREAK", ConversationMessageCode.SUPPLY_REASON_PIPELINE_BREAK),
+            Map.entry("WATER_QUALITY_ISSUES", ConversationMessageCode.SUPPLY_REASON_WATER_QUALITY),
+            Map.entry("SOURCE_DRYING", ConversationMessageCode.SUPPLY_REASON_SOURCE_DRYING),
+            Map.entry("NATURAL_CALAMITY", ConversationMessageCode.SUPPLY_REASON_NATURAL_CALAMITY),
+            Map.entry("OTHERS", ConversationMessageCode.ISSUE_REASON_OTHERS)
     );
 
     private final OperatorContextService operatorContextService;
@@ -418,6 +436,21 @@ public class MeterReadingConversationService {
         return reasons.stream().map(reason -> messageResolver.get(reason, languageKey)).toList();
     }
 
+    /**
+     * A configured reason's label in the operator's language. A default reason still under its
+     * seeded name takes the built-in translation; a renamed or custom one is the tenant's own copy,
+     * shown as written, as is a default in a language that does not translate it.
+     */
+    private String reasonLabel(JsonNode reason, String name, String languageKey) {
+        ConversationMessageCode code = DEFAULT_REASON_CODES.get(
+                reason.path("id").asText().trim().toUpperCase(Locale.ROOT));
+        if (code == null || messageResolver.isEnglish(languageKey)
+                || !name.equalsIgnoreCase(messageResolver.english(code))) {
+            return name;
+        }
+        return messageResolver.translation(code, languageKey).orElse(name);
+    }
+
     public String issueReportTelemetryReasons(IntroRequest request) {
         if (request.getContactId() == null || request.getContactId().isBlank()) {
             throw new IllegalStateException("contactId is required");
@@ -464,7 +497,7 @@ public class MeterReadingConversationService {
             message.append("\n")
                     .append(i + 1)
                     .append(". ")
-                    .append(localizationService.localizeMessage(name.trim(), languageKey));
+                    .append(reasonLabel(reasons.get(i), name.trim(), languageKey));
         }
 
         try {
@@ -523,7 +556,7 @@ public class MeterReadingConversationService {
             message.append("\n")
                     .append(i + 1)
                     .append(". ")
-                    .append(localizationService.localizeMessage(name.trim(), languageKey));
+                    .append(reasonLabel(reasons.get(i), name.trim(), languageKey));
         }
 
         try {

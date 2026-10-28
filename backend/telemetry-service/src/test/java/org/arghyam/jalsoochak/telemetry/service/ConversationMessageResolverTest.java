@@ -170,6 +170,16 @@ class ConversationMessageResolverTest {
     }
 
     @Nested
+    @DisplayName("english")
+    class English {
+
+        @Test
+        void isTheEnglishCopy() {
+            assertThat(resolver.english(ConversationMessageCode.SUPPLY_REASON_PUMP_FAILURE)).isEqualTo("Pump failure");
+        }
+    }
+
+    @Nested
     @DisplayName("isEnglish")
     class IsEnglish {
 

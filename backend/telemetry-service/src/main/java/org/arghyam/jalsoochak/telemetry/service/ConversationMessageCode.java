@@ -101,6 +101,7 @@ public enum ConversationMessageCode {
     CHANNEL_SELECTED("conversation.channelSelected"),
     ITEM_PROMPT("conversation.itemPrompt"),
     ITEM_SELECTED("conversation.itemSelected"),
+    LANGUAGE_SELECTED("conversation.languageSelected"),
     SCHEME_PROMPT("conversation.schemePrompt"),
     SCHEME_SELECTED("conversation.schemeSelected"),
     UNNAMED_SCHEME("conversation.unnamedScheme"),
@@ -114,7 +115,7 @@ public enum ConversationMessageCode {
     DEFAULT_STATE_NAME("conversation.defaultStateName"),
     DEFAULT_GREETING_NAME("conversation.defaultGreetingName"),
 
-    // ── Built-in issue reasons, and the default reason names recognised in tenant config ───────────
+    // ── Built-in issue reasons, and the translations of a tenant's default reasons, by reason id ──
     ISSUE_REASON_METER_REPLACED("reason.meterReplaced"),
     ISSUE_REASON_METER_NOT_WORKING("reason.meterNotWorking"),
     ISSUE_REASON_METER_DAMAGE("reason.meterDamage"),

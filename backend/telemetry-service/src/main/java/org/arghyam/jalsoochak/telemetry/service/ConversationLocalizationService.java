@@ -229,9 +229,9 @@ public class ConversationLocalizationService {
 
     /**
      * Translates English written outside the chatbot — reading results shared with the partner API,
-     * tenant-configured reason names, a tenant's language confirmation — by recognising the text and
-     * rendering the {@link ConversationMessageCode} it carries. Copy the chatbot writes itself is looked
-     * up by code instead, through {@link ConversationMessageResolver}.
+     * a tenant's language confirmation — by recognising the text and rendering the
+     * {@link ConversationMessageCode} it carries. Copy the chatbot writes itself is looked up by code
+     * instead, through {@link ConversationMessageResolver}, and so are a tenant's default reasons.
      *
      * <p>English text, and text in a language that does not translate what it was recognised as, is
      * returned unchanged; so is anything unrecognised.
@@ -281,21 +281,6 @@ public class ConversationLocalizationService {
             new Recognizer(normalized -> normalized.contains("language selected:"),
                     text -> new Recognized(ConversationMessageCode.LANGUAGE_SELECTED_LABEL, new Object[0],
                             label -> text.replaceFirst("(?i)language selected:", Matcher.quoteReplacement(label)))),
-
-            // ── Default reason names, as stored in a tenant's reason config ─────────────────────────
-            recognize("electricity supply disconnected",
-                    ConversationMessageCode.SUPPLY_REASON_ELECTRICITY_DISCONNECTED),
-            recognize("no electricity supply today", ConversationMessageCode.SUPPLY_REASON_NO_ELECTRICITY_TODAY),
-            recognize("pump failure", ConversationMessageCode.SUPPLY_REASON_PUMP_FAILURE),
-            recognize("pipeline break", ConversationMessageCode.SUPPLY_REASON_PIPELINE_BREAK),
-            recognize("water quality issues", ConversationMessageCode.SUPPLY_REASON_WATER_QUALITY),
-            recognize("source drying", ConversationMessageCode.SUPPLY_REASON_SOURCE_DRYING),
-            recognize("natural calamity", ConversationMessageCode.SUPPLY_REASON_NATURAL_CALAMITY),
-            new Recognizer("others"::equals, text -> new Recognized(ConversationMessageCode.ISSUE_REASON_OTHERS)),
-            recognize("meter replaced", ConversationMessageCode.ISSUE_REASON_METER_REPLACED),
-            recognize("meter not working", ConversationMessageCode.ISSUE_REASON_METER_NOT_WORKING),
-            // Also covers "meter damaged".
-            recognize("meter damage", ConversationMessageCode.ISSUE_REASON_METER_DAMAGE),
 
             // ── Reading results ─────────────────────────────────────────────────────────────────────
             new Recognizer(normalized -> normalized.contains("reading captured successfully"), text -> {

@@ -431,12 +431,14 @@ class ConversationLocalizationServiceTest {
         @ParameterizedTest(name = "languageKey={0} leaves English copy untouched")
         @ValueSource(strings = {"english", "assamese", "bodo", ""})
         void leavesCopyUntouchedForEveryNonHindiLanguage(String languageKey) {
-            assertThat(service.localizeMessage("Meter replaced", languageKey)).isEqualTo("Meter replaced");
+            assertThat(service.localizeMessage("Reading updated successfully", languageKey))
+                    .isEqualTo("Reading updated successfully");
         }
 
         @Test
         void leavesCopyUntouchedForANullLanguageKey() {
-            assertThat(service.localizeMessage("Meter replaced", null)).isEqualTo("Meter replaced");
+            assertThat(service.localizeMessage("Reading updated successfully", null))
+                    .isEqualTo("Reading updated successfully");
         }
 
         @ParameterizedTest(name = "\"{0}\" -> \"{1}\"")
@@ -455,18 +457,6 @@ class ConversationLocalizationServiceTest {
             return Stream.of(
                     Arguments.of("Duplicate image submission detected. Please submit a new image.",
                             "डुप्लिकेट इमेज मिली है। कृपया नई इमेज सबमिट करें।"),
-                    Arguments.of("Electricity supply disconnected", "बिजली आपूर्ति बंद है"),
-                    Arguments.of("No electricity supply today", "आज बिजली की आपूर्ति नहीं है"),
-                    Arguments.of("Pump failure", "पंप खराब है"),
-                    Arguments.of("Pipeline break", "पाइपलाइन टूटी है"),
-                    Arguments.of("Water quality issues", "पानी की गुणवत्ता में समस्या है"),
-                    Arguments.of("Source drying", "स्रोत सूख रहा है"),
-                    Arguments.of("Natural calamity", "प्राकृतिक आपदा"),
-                    Arguments.of("Others", "अन्य"),
-                    Arguments.of("Meter replaced", "मीटर बदला गया"),
-                    Arguments.of("Meter not working", "मीटर काम नहीं कर रहा"),
-                    Arguments.of("Meter damaged", "मीटर खराब है"),
-                    Arguments.of("Meter damage", "मीटर खराब है"),
                     Arguments.of("Invalid reading value", "रीडिंग मान्य नहीं है।"),
                     Arguments.of("Could not read meter value from image",
                             "इमेज से मीटर रीडिंग नहीं पढ़ी जा सकी। कृपया स्पष्ट फोटो भेजें।"),
@@ -553,6 +543,12 @@ class ConversationLocalizationServiceTest {
         void translatesOnlyTheLabelOfALanguageConfirmation() {
             assertThat(service.localizeMessage("Language selected: Hindi", HINDI))
                     .isEqualTo("भाषा चुनी गई: Hindi");
+        }
+
+        /** Reason names are translated by id where they are listed, so text containing one is left alone. */
+        @Test
+        void leavesAReasonNameUntouched() {
+            assertThat(service.localizeMessage("Pump failure", HINDI)).isEqualTo("Pump failure");
         }
 
         @Test

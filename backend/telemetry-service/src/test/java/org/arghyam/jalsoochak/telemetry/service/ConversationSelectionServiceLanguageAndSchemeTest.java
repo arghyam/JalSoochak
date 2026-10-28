@@ -248,6 +248,25 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
         }
 
         @Test
+        void confirmsInTheChosenLanguageWithTheDefaultTemplate() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+
+            assertThat(service.selectedLanguageMessage(languageRequest(CONTACT, "2")).getMessage())
+                    .isEqualTo("भाषा चुनी गई: Hindi");
+            verify(messageResolver).get(ConversationMessageCode.LANGUAGE_SELECTED, "hindi", "Hindi");
+        }
+
+        @Test
+        void localizesATenantConfirmationTemplateInTheChosenLanguage() {
+            when(templatesService.resolveScreenConfirmationTemplate(anyInt(), eq("LANGUAGE_SELECTION"), anyString()))
+                    .thenReturn(Optional.of("Language selected: {language}"));
+
+            service.selectedLanguageMessage(languageRequest(CONTACT, "2"));
+
+            verify(localizationService).localizeMessage("Language selected: Hindi", "english");
+        }
+
+        @Test
         void prefersTheTenantConfirmationTemplate() {
             when(templatesService.resolveScreenConfirmationTemplate(anyInt(), eq("LANGUAGE_SELECTION"), anyString()))
                     .thenReturn(Optional.of("You picked {language}."));
