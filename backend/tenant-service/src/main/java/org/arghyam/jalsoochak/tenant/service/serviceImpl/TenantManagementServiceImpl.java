@@ -236,8 +236,8 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     /**
      * Maps a stored {@code config_key} to its {@link TenantConfigKeyEnum}, or {@code null} when the row is
      * not a UI-managed config key. {@code tenant_config_master_table} is shared with the runtime keys other
-     * services read (the pluggable OCR provider's {@code ocr_*}, {@code language_N}, {@code nudge_message_*},
-     * {@code channel_*}), so an unrecognised key is expected data — never a client error.
+     * services read (the pluggable OCR provider's {@code ocr_*}, {@code language_N}, {@code channel_*}), so an
+     * unrecognised key is expected data — never a client error.
      */
     private TenantConfigKeyEnum parseUiConfigKey(String configKey) {
         if (configKey == null || configKey.isBlank()) {
@@ -267,7 +267,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         for (ConfigDTO cfg : configs) {
             // tenant_config_master_table is a shared store: besides the UI-managed TenantConfigKeyEnum
             // keys it also carries runtime keys other services read directly (ocr_provider / ocr_url /
-            // ocr_api_key for the pluggable OCR provider, language_N, nudge_message_*, channel_*). Those
+            // ocr_api_key for the pluggable OCR provider, language_N, channel_*). Those
             // are not UI config, so they are skipped here. Previously any such row made this endpoint
             // fail with 400 for the whole tenant, even when the caller asked only for UI keys.
             TenantConfigKeyEnum key = parseUiConfigKey(cfg.getConfigKey());

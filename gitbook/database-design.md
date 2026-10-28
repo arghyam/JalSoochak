@@ -18,7 +18,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 **`common_schema.tenant_config_master_table`** — per-tenant key/value configuration
 
 * `tenant_id (FK)`
-* `config_key (text, e.g. WATER_NORM, nudge_message_hindi; one live row per tenant and key)`
+* `config_key (text, e.g. WATER_NORM, language_1; one live row per tenant and key)`
 * `config_value (text)`
 
 * **`common_schema.tenant_admin_user_master_table`** — Super Users and State Admins, with `admin_level` pointing at `user_type_master_table`
@@ -77,7 +77,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 
 ### 10.5 Messaging & Nudge Configuration
 
-* Notification templates and language keys live in `tenant_config_master_table` (`nudge_message_<lang>`, `escalation_message_<lang>`, `language_<id>`); the WhatsApp conversation's screens, prompts and options live under `WHATSAPP_MESSAGE_TEMPLATES`.
+* The tenant's languages live in `tenant_config_master_table` as `language_<n>` (the n-th language in the tenant's list), and the WhatsApp conversation's screens, prompts and options under `WHATSAPP_MESSAGE_TEMPLATES`. Notification wording (nudge, escalation, reports) is the WhatsApp provider's approved templates, not a config row.
 * **`channel_master_table`** (common schema) — submission/notification channel definitions. The reading channels (`channel_type` 1) are ids 1–5 (BFM, ELM, PDU, IOT, MAN), the codes `scheme_master_table.channel_id` and `flow_reading_table.channel_id` hold. The reporting channels (`channel_type` 2) are ids 6 WHATSAPP, 7 API and 10 WEB (V66: an SO/SDO correction from the web console), the codes `flow_reading_table.reported_via_id` holds; 8 EMAIL and 9 SMS (V63) are the notification channels the delivery ledger records.
 * **`language_master`** / **`language_alias`** (common schema) — canonical languages with locale codes, and the spellings that resolve to them; each tenant schema also carries its own `language_master_table`.
 * **`notification_table`** (tenant schema, and a `common_schema` twin for sends with no tenant) — the outbound delivery ledger since V63: one row per message per recipient, with what message-service sent, through which channel and provider, the provider's answer and the delivery status it later reports. Holds no phone number, email address or message text. See `docs/notification-delivery-ledger.md`.
