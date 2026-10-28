@@ -105,7 +105,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
 
         TenantUserRecord actor = userTenantRepository.findUserById(schemaName, (long) actorUserId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found for token"));
-        PreferredLanguage preferredLanguage = preferredLanguageService.resolvePreferredLanguage(actor.tenantId());
+        PreferredLanguage preferredLanguage = preferredLanguageService.resolvePreferredLanguage(actor.tenantId(), schemaName);
 
         Map<String, Integer> userTypeIds = resolveUserTypeIds();
 

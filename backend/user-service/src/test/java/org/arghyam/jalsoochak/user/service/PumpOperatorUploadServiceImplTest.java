@@ -90,7 +90,7 @@ class PumpOperatorUploadServiceImplTest {
         when(uploadAuthService.requireStateAdminUserId(eq("tenant_ka"), anyString())).thenReturn(10);
         when(userTenantRepository.findUserById(eq("tenant_ka"), eq(10L)))
                 .thenReturn(Optional.of(new TenantUserRecord(10L, 1, "9111111111", "admin@example.com", 1L, "STATE_ADMIN", "Admin", null, null, null)));
-        when(preferredLanguageService.resolvePreferredLanguage(eq(1))).thenReturn(LANGUAGE);
+        when(preferredLanguageService.resolvePreferredLanguage(eq(1), eq("tenant_ka"))).thenReturn(LANGUAGE);
         when(userCommonRepository.findUserTypeIdByName(eq("PUMP_OPERATOR"))).thenReturn(Optional.of(2));
         when(userCommonRepository.findUserTypeIdByName(eq("SECTION_OFFICER"))).thenReturn(Optional.of(3));
         when(userCommonRepository.findUserTypeIdByName(eq("SUB_DIVISIONAL_OFFICER"))).thenReturn(Optional.of(4));
@@ -120,7 +120,7 @@ class PumpOperatorUploadServiceImplTest {
         when(uploadAuthService.requireStateAdminUserId(eq("tenant_ka"), anyString())).thenReturn(10);
         when(userTenantRepository.findUserById(eq("tenant_ka"), eq(10L)))
                 .thenReturn(Optional.of(new TenantUserRecord(10L, 1, "9111111111", "admin@example.com", 1L, "STATE_ADMIN", "Admin", null, null, null)));
-        when(preferredLanguageService.resolvePreferredLanguage(eq(1))).thenReturn(LANGUAGE);
+        when(preferredLanguageService.resolvePreferredLanguage(eq(1), eq("tenant_ka"))).thenReturn(LANGUAGE);
         when(userCommonRepository.findUserTypeIdByName(eq("PUMP_OPERATOR"))).thenReturn(Optional.of(2));
         when(userCommonRepository.findUserTypeIdByName(eq("SECTION_OFFICER"))).thenReturn(Optional.of(3));
         when(userCommonRepository.findUserTypeIdByName(eq("SUB_DIVISIONAL_OFFICER"))).thenReturn(Optional.of(4));
@@ -159,7 +159,7 @@ class PumpOperatorUploadServiceImplTest {
         when(uploadAuthService.requireStateAdminUserId(eq("tenant_ka"), anyString())).thenReturn(10);
         when(userTenantRepository.findUserById(eq("tenant_ka"), eq(10L)))
                 .thenReturn(Optional.of(new TenantUserRecord(10L, 1, "9111111111", "admin@example.com", 1L, "STATE_ADMIN", "Admin", null, null, null)));
-        when(preferredLanguageService.resolvePreferredLanguage(eq(1))).thenReturn(LANGUAGE);
+        when(preferredLanguageService.resolvePreferredLanguage(eq(1), eq("tenant_ka"))).thenReturn(LANGUAGE);
         when(userCommonRepository.findUserTypeIdByName(eq("PUMP_OPERATOR"))).thenReturn(Optional.of(2));
         when(userCommonRepository.findUserTypeIdByName(eq("SECTION_OFFICER"))).thenReturn(Optional.of(3));
         when(userCommonRepository.findUserTypeIdByName(eq("SUB_DIVISIONAL_OFFICER"))).thenReturn(Optional.of(4));
@@ -193,7 +193,7 @@ class PumpOperatorUploadServiceImplTest {
         when(uploadAuthService.requireStateAdminUserId(eq("tenant_ka"), anyString())).thenReturn(10);
         when(userTenantRepository.findUserById(eq("tenant_ka"), eq(10L)))
                 .thenReturn(Optional.of(new TenantUserRecord(10L, 1, "9111111111", "admin@example.com", 1L, "STATE_ADMIN", "Admin", null, null, null)));
-        when(preferredLanguageService.resolvePreferredLanguage(eq(1))).thenReturn(LANGUAGE);
+        when(preferredLanguageService.resolvePreferredLanguage(eq(1), eq("tenant_ka"))).thenReturn(LANGUAGE);
         when(userCommonRepository.findUserTypeIdByName(eq("PUMP_OPERATOR"))).thenReturn(Optional.of(2));
         when(userCommonRepository.findUserTypeIdByName(eq("SECTION_OFFICER"))).thenReturn(Optional.of(3));
         when(userCommonRepository.findUserTypeIdByName(eq("SUB_DIVISIONAL_OFFICER"))).thenReturn(Optional.of(4));
@@ -227,7 +227,7 @@ class PumpOperatorUploadServiceImplTest {
         when(uploadAuthService.requireStateAdminUserId(eq("tenant_ka"), anyString())).thenReturn(10);
         when(userTenantRepository.findUserById(eq("tenant_ka"), eq(10L)))
                 .thenReturn(Optional.of(new TenantUserRecord(10L, 1, "9111111111", "admin@example.com", 1L, "STATE_ADMIN", "Admin", null, null, null)));
-        when(preferredLanguageService.resolvePreferredLanguage(eq(1))).thenReturn(LANGUAGE);
+        when(preferredLanguageService.resolvePreferredLanguage(eq(1), eq("tenant_ka"))).thenReturn(LANGUAGE);
         when(userCommonRepository.findUserTypeIdByName(eq("PUMP_OPERATOR"))).thenReturn(Optional.of(2));
         when(userCommonRepository.findUserTypeIdByName(eq("SECTION_OFFICER"))).thenReturn(Optional.of(3));
         when(userCommonRepository.findUserTypeIdByName(eq("SUB_DIVISIONAL_OFFICER"))).thenReturn(Optional.of(4));
@@ -261,7 +261,7 @@ class PumpOperatorUploadServiceImplTest {
         when(uploadAuthService.requireStateAdminUserId(eq("tenant_ka"), anyString())).thenReturn(10);
         when(userTenantRepository.findUserById(eq("tenant_ka"), eq(10L)))
                 .thenReturn(Optional.of(new TenantUserRecord(10L, 1, "9111111111", "admin@example.com", 1L, "STATE_ADMIN", "Admin", null, null, null)));
-        when(preferredLanguageService.resolvePreferredLanguage(eq(1))).thenReturn(LANGUAGE);
+        when(preferredLanguageService.resolvePreferredLanguage(eq(1), eq("tenant_ka"))).thenReturn(LANGUAGE);
         when(userCommonRepository.findUserTypeIdByName(eq("PUMP_OPERATOR"))).thenReturn(Optional.of(2));
         when(userCommonRepository.findUserTypeIdByName(eq("SECTION_OFFICER"))).thenReturn(Optional.of(3));
         when(userCommonRepository.findUserTypeIdByName(eq("SUB_DIVISIONAL_OFFICER"))).thenReturn(Optional.of(4));
@@ -290,7 +290,7 @@ class PumpOperatorUploadServiceImplTest {
         when(uploadAuthService.requireStateAdminUserId(eq("tenant_ka"), anyString())).thenReturn(10);
         when(userTenantRepository.findUserById(eq("tenant_ka"), eq(10L)))
                 .thenReturn(Optional.of(new TenantUserRecord(10L, 1, "9111111111", "admin@example.com", 1L, "STATE_ADMIN", "Admin", null, null, null)));
-        when(preferredLanguageService.resolvePreferredLanguage(eq(1))).thenReturn(LANGUAGE);
+        when(preferredLanguageService.resolvePreferredLanguage(eq(1), eq("tenant_ka"))).thenReturn(LANGUAGE);
         when(userCommonRepository.findUserTypeIdByName(eq("PUMP_OPERATOR"))).thenReturn(Optional.of(2));
         when(userCommonRepository.findUserTypeIdByName(eq("SECTION_OFFICER"))).thenReturn(Optional.of(3));
         when(userCommonRepository.findUserTypeIdByName(eq("SUB_DIVISIONAL_OFFICER"))).thenReturn(Optional.of(4));

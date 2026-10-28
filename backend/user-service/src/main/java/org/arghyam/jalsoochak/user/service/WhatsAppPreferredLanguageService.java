@@ -6,17 +6,26 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.user.repository.LanguageCatalogRepository;
+import org.arghyam.jalsoochak.user.repository.SupportedLanguageRepository;
 import org.arghyam.jalsoochak.user.repository.TenantConfigRepository;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 /**
- * Resolves the default/preferred language for a tenant from the first option of the
- * {@code LANGUAGE_SELECTION} screen in the consolidated {@code WHATSAPP_MESSAGE_TEMPLATES} tenant config.
+ * Resolves a tenant's default language: the first option of the chatbot's language menu, built from the
+ * {@code LANGUAGE_SELECTION} screen of the consolidated {@code WHATSAPP_MESSAGE_TEMPLATES} tenant config.
+ *
+ * <p>The menu is the options for the tenant's {@code SUPPORTED_LANGUAGES}, in preference order, matched
+ * through the language catalog. When no supported language has an option, or they cannot be read, the
+ * default is {@code OPTION_1}, else the option with the lowest positive order.</p>
  *
  * <p>Fallback: {@code 1} for either id that cannot be resolved.</p>
  */
@@ -32,17 +41,18 @@ public class WhatsAppPreferredLanguageService {
 
     private final TenantConfigRepository tenantConfigRepository;
     private final LanguageCatalogRepository languageCatalogRepository;
+    private final SupportedLanguageRepository supportedLanguageRepository;
     private final ObjectMapper objectMapper;
 
     /**
-     * @param languageId         the option's position in the tenant's language list, as stored in
-     *                           {@code user_table.language_id}
+     * @param languageId         the value stored in {@code user_table.language_id}: the option's order, or for
+     *                           an option without a positive order, its position in the whole template list
      * @param whatsappLanguageId the language's catalog id, which the WhatsApp provider expects
      */
     public record PreferredLanguage(int languageId, int whatsappLanguageId) {
     }
 
-    public PreferredLanguage resolvePreferredLanguage(Integer tenantId) {
+    public PreferredLanguage resolvePreferredLanguage(Integer tenantId, String schemaName) {
         if (tenantId == null || tenantId <= 0) {
             return FALLBACK;
         }
@@ -52,21 +62,30 @@ public class WhatsAppPreferredLanguageService {
             return FALLBACK;
         }
 
-        JsonNode option;
+        JsonNode options;
         try {
-            option = firstLanguageOption(objectMapper.readTree(rawOpt.get()));
+            options = languageOptions(objectMapper.readTree(rawOpt.get()));
         } catch (JsonProcessingException e) {
             log.warn("Invalid {} JSON for tenantId {}: {}", CONFIG_KEY, tenantId, e.getMessage());
             return FALLBACK;
         }
+        if (options == null) {
+            return FALLBACK;
+        }
+
+        Optional<PreferredLanguage> supported = firstSupportedLanguage(tenantId, schemaName, options);
+        if (supported.isPresent()) {
+            return supported.get();
+        }
+        JsonNode option = firstLanguageOption(options);
         if (option == null) {
             return FALLBACK;
         }
         return new PreferredLanguage(option.path("order").asInt(), resolveWhatsAppLanguageId(tenantId, option));
     }
 
-    /** OPTION_1 when its order is positive, else the option with the lowest positive order; null if none. */
-    private static JsonNode firstLanguageOption(JsonNode root) {
+    /** The {@code LANGUAGE_SELECTION} options object; null if absent. */
+    private static JsonNode languageOptions(JsonNode root) {
         if (root == null || root.isNull()) {
             return null;
         }
@@ -74,7 +93,69 @@ public class WhatsAppPreferredLanguageService {
         if (options.isMissingNode() || !options.isObject()) {
             return null;
         }
+        return options;
+    }
 
+    /**
+     * The option of the most preferred supported language that has one, as the chatbot's menu orders them;
+     * empty when none has, or they cannot be read. Of two options for one language, the lower order wins.
+     */
+    private Optional<PreferredLanguage> firstSupportedLanguage(Integer tenantId, String schemaName, JsonNode options) {
+        try {
+            List<String> supportedLanguages = supportedLanguageRepository.findLanguageNames(schemaName);
+            if (supportedLanguages.isEmpty()) {
+                return Optional.empty();
+            }
+
+            List<Map.Entry<String, JsonNode>> ordered = new ArrayList<>();
+            options.fields().forEachRemaining(ordered::add);
+            ordered.sort(Comparator
+                    .comparingInt((Map.Entry<String, JsonNode> e) -> e.getValue().path("order").asInt(0))
+                    .thenComparing(Map.Entry::getKey, String.CASE_INSENSITIVE_ORDER));
+
+            Map<Integer, PreferredLanguage> optionByCatalogId = new HashMap<>();
+            for (int i = 0; i < ordered.size(); i++) {
+                JsonNode option = ordered.get(i).getValue();
+                int order = option.path("order").asInt(0);
+                int languageId = order > 0 ? order : i + 1;
+                languageCatalogRepository.findLanguageIdByAlias(canonicalLabel(option)).ifPresent(catalogId ->
+                        optionByCatalogId.putIfAbsent(catalogId, new PreferredLanguage(languageId, catalogId)));
+            }
+
+            for (String language : supportedLanguages) {
+                Optional<PreferredLanguage> match = languageCatalogRepository.findLanguageIdByAlias(language)
+                        .map(optionByCatalogId::get);
+                if (match.isPresent()) {
+                    return match;
+                }
+            }
+            return Optional.empty();
+        } catch (DataAccessException e) {
+            log.warn("Supported languages of tenantId {} could not be matched to {} options: {}",
+                    tenantId, CONFIG_KEY, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /** The option's English label, else any non-blank label, as the chatbot names the option's language. */
+    private static String canonicalLabel(JsonNode option) {
+        JsonNode labels = option.path("label");
+        String english = labels.path("en").asText("");
+        if (!english.isBlank()) {
+            return english;
+        }
+        Iterator<JsonNode> it = labels.elements();
+        while (it.hasNext()) {
+            String label = it.next().asText("");
+            if (!label.isBlank()) {
+                return label;
+            }
+        }
+        return "";
+    }
+
+    /** OPTION_1 when its order is positive, else the option with the lowest positive order; null if none. */
+    private static JsonNode firstLanguageOption(JsonNode options) {
         JsonNode option1 = options.path("OPTION_1");
         if (option1.path("order").asInt(0) > 0) {
             return option1;

@@ -249,6 +249,22 @@ CREATE TABLE common_schema.language_alias (
     language_id INTEGER     NOT NULL REFERENCES common_schema.language_master (language_id)
 );
 
+-- ── V2: tenant's supported languages (SUPPORTED_LANGUAGES) ───────────────────
+
+CREATE TABLE tenant_mp.language_master_table (
+    id              SERIAL          PRIMARY KEY,
+    language_name   VARCHAR(255)    NOT NULL,
+    preference      INTEGER,
+    created_at      TIMESTAMP       NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP       NOT NULL DEFAULT NOW(),
+    status          INTEGER         NOT NULL,
+    created_by      INTEGER,
+    updated_by      INTEGER,
+    deleted_at      TIMESTAMP,
+    deleted_by      INTEGER,
+    CONSTRAINT uq_language_name UNIQUE (language_name)
+);
+
 -- ── V30: per-tenant report cache + data-version tracking ──────────────────
 
 CREATE TABLE tenant_mp.reports_table (
