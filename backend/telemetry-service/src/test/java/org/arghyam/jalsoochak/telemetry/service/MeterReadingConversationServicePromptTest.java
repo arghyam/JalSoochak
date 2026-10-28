@@ -859,43 +859,42 @@ class MeterReadingConversationServicePromptTest {
             return Stream.of(
                     step("meterChangeMessage", s -> s.meterChangeMessage(introRequest(CONTACT)),
                             ConversationMessageCode.METER_CHANGE_REASONS_NOT_PREPARED,
-                            "Meter change reasons could not be prepared."),
+                            "मीटर बदलने के कारण तैयार नहीं हो सके।"),
                     step("takeMeterReadingMessage", s -> s.takeMeterReadingMessage(meterChange),
                             ConversationMessageCode.TAKE_READING_PROMPT_NOT_PREPARED,
-                            "Take meter reading prompt could not be prepared."),
+                            "मीटर रीडिंग लेने का संदेश तैयार नहीं हो सका।"),
                     step("meterChangeSubmitMessage", s -> s.meterChangeSubmitMessage(meterChange),
                             ConversationMessageCode.METER_CHANGE_REASON_NOT_SAVED,
-                            "Meter change reason could not be saved."),
+                            "मीटर बदलने का कारण सेव नहीं हो सका।"),
                     step("issueReportPromptMessage", s -> s.issueReportPromptMessage(introRequest(CONTACT)),
                             ConversationMessageCode.ISSUE_PROMPT_NOT_PREPARED,
-                            "Issue report prompt could not be prepared."),
+                            "समस्या रिपोर्ट का संदेश तैयार नहीं हो सका।"),
                     step("issueReportTelemetryPromptMessage",
                             s -> s.issueReportTelemetryPromptMessage(introRequest(CONTACT)),
                             ConversationMessageCode.ISSUE_PROMPT_NOT_PREPARED,
-                            "Issue report prompt could not be prepared."),
+                            "समस्या रिपोर्ट का संदेश तैयार नहीं हो सका।"),
                     step("issueReasonTypesMessage", s -> s.issueReasonTypesMessage(introRequest(CONTACT)),
                             ConversationMessageCode.ISSUE_REASON_TYPES_NOT_PREPARED,
-                            "Issue reason types could not be prepared."),
+                            "समस्या के प्रकार तैयार नहीं हो सके।"),
                     step("othersPromptMessage", s -> s.othersPromptMessage(introRequest(CONTACT)),
                             ConversationMessageCode.OTHERS_PROMPT_NOT_PREPARED,
-                            "Others prompt could not be prepared."));
+                            "अन्य समस्या का संदेश तैयार नहीं हो सका।"));
         }
 
         private static Arguments step(String name, Function<MeterReadingConversationService, IntroResponse> call,
-                                      ConversationMessageCode code, String english) {
-            return Arguments.of(name, call, code, english);
+                                      ConversationMessageCode code, String hindi) {
+            return Arguments.of(name, call, code, hindi);
         }
 
         @ParameterizedTest(name = "{0}")
         @MethodSource("steps")
         void repliesWithTheStepsFailureCopyInTheOperatorsLanguage(
                 String name, Function<MeterReadingConversationService, IntroResponse> call,
-                ConversationMessageCode code, String english) {
+                ConversationMessageCode code, String hindi) {
             IntroResponse response = call.apply(service);
 
             assertThat(response.isSuccess()).isFalse();
-            // No Hindi translation yet, so the copy is the English fallback.
-            assertThat(response.getMessage()).isEqualTo(english);
+            assertThat(response.getMessage()).isEqualTo(hindi);
             verify(messageResolver).get(code, "hindi");
         }
     }

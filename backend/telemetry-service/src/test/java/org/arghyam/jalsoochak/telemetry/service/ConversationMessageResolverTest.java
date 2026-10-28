@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
@@ -94,20 +95,23 @@ class ConversationMessageResolverTest {
                     .isEqualTo("Issue reported. Thank you.");
         }
 
-        @Test
-        void rendersTheCopyInTheOperatorsLanguage() {
-            assertThat(resolver.get(ConversationMessageCode.ISSUE_REPORTED, "hindi"))
-                    .isEqualTo("समस्या रिपोर्ट हो गई है। धन्यवाद।");
+        @ParameterizedTest(name = "{0}")
+        @CsvSource({
+                "hindi, समस्या रिपोर्ट हो गई है। धन्यवाद।",
+                "punjabi, ਸਮੱਸਿਆ ਦੀ ਰਿਪੋਰਟ ਹੋ ਗਈ ਹੈ। ਧੰਨਵਾਦ।"
+        })
+        void rendersTheCopyInTheOperatorsLanguage(String languageKey, String expected) {
+            assertThat(resolver.get(ConversationMessageCode.ISSUE_REPORTED, languageKey)).isEqualTo(expected);
         }
 
         @Test
         void fallsBackToEnglishForAMessageTheLanguageDoesNotTranslate() {
-            assertThat(resolver.get(ConversationMessageCode.READING_REQUIRED, "hindi"))
+            assertThat(resolver.get(ConversationMessageCode.READING_REQUIRED, "assamese"))
                     .isEqualTo("Reading is required.");
         }
 
         @ParameterizedTest(name = "\"{0}\"")
-        @ValueSource(strings = {"punjabi", "klingon", "sign_language"})
+        @ValueSource(strings = {"tamil", "klingon", "sign_language"})
         void fallsBackToEnglishForALanguageWithNoBundle(String languageKey) {
             assertThat(resolver.get(ConversationMessageCode.ISSUE_REPORTED, languageKey))
                     .isEqualTo("Issue reported. Thank you.");
@@ -164,8 +168,8 @@ class ConversationMessageResolverTest {
 
         @Test
         void isEmptyRatherThanEnglishWhenTheLanguageDoesNotTranslateIt() {
-            assertThat(resolver.translation(ConversationMessageCode.READING_REQUIRED, "hindi")).isEmpty();
-            assertThat(resolver.translation(ConversationMessageCode.ISSUE_REPORTED, "punjabi")).isEmpty();
+            assertThat(resolver.translation(ConversationMessageCode.READING_REQUIRED, "assamese")).isEmpty();
+            assertThat(resolver.translation(ConversationMessageCode.ISSUE_REPORTED, "tamil")).isEmpty();
         }
     }
 
@@ -205,23 +209,23 @@ class ConversationMessageResolverTest {
             ConversationMessageResolver fresh = ConversationMessageResolverFixtures.real();
 
             List<ILoggingEvent> events = captureLogs(() -> {
-                fresh.get(ConversationMessageCode.READING_REQUIRED, "hindi");
-                fresh.get(ConversationMessageCode.READING_REQUIRED, "hindi");
-                fresh.get(ConversationMessageCode.READING_REQUIRED, "punjabi");
-                fresh.get(ConversationMessageCode.SCHEME_NOT_FOUND, "hindi");
+                fresh.get(ConversationMessageCode.READING_REQUIRED, "assamese");
+                fresh.get(ConversationMessageCode.READING_REQUIRED, "assamese");
+                fresh.get(ConversationMessageCode.READING_REQUIRED, "tamil");
+                fresh.get(ConversationMessageCode.SCHEME_NOT_FOUND, "assamese");
             });
 
             assertThat(events)
                     .filteredOn(event -> event.getLevel() == Level.WARN)
                     .extracting(ILoggingEvent::getFormattedMessage)
                     .containsExactly(
-                            "chatbot_translation_missing language=hi code=error.readingRequired fallback=en",
-                            "chatbot_translation_missing language=pa code=error.readingRequired fallback=en",
-                            "chatbot_translation_missing language=hi code=error.schemeNotFound fallback=en");
+                            "chatbot_translation_missing language=as code=error.readingRequired fallback=en",
+                            "chatbot_translation_missing language=ta code=error.readingRequired fallback=en",
+                            "chatbot_translation_missing language=as code=error.schemeNotFound fallback=en");
             assertThat(events)
                     .filteredOn(event -> event.getLevel() == Level.DEBUG)
                     .extracting(ILoggingEvent::getFormattedMessage)
-                    .containsExactly("chatbot_translation_missing language=hi code=error.readingRequired");
+                    .containsExactly("chatbot_translation_missing language=as code=error.readingRequired");
         }
 
         @Test

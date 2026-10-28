@@ -33,7 +33,7 @@ import static org.mockito.Mockito.when;
 /**
  * The one-time welcome message sent when an operator is first registered. Copy comes from a
  * tenant-configured template when one exists (so a new language needs no code change) and otherwise
- * from the built-in English/Hindi/Assamese bodies.
+ * from the welcome body in the operator's message bundle.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -188,7 +188,7 @@ class WelcomeMessageServiceTest {
             assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage()).isEqualTo("""
                     प्रिय Asha,
 
-                    आपको जलसूचक में your state के लिए पंप ऑपरेटर के रूप में पंजीकृत किया गया है।
+                    आपको जलसूचक में आपके राज्य के लिए पंप ऑपरेटर के रूप में पंजीकृत किया गया है।
 
                     आप इस नंबर का उपयोग इन कार्यों के लिए कर सकते हैं:
                     - बल्क फ्लो मीटर की फोटो साझा करना
@@ -213,6 +213,23 @@ class WelcomeMessageServiceTest {
                     - পানী যোগানৰ সমস্যা জনাব পাৰে
 
                     আৰম্ভ কৰিবলৈ START লিখক।
+                    """);
+        }
+
+        @Test
+        void rendersThePunjabiBody() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("punjabi");
+
+            assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage()).isEqualTo("""
+                    ਸਤਿਕਾਰਯੋਗ Asha,
+
+                    ਤੁਹਾਨੂੰ ਜਲਸੂਚਕ ਵਿੱਚ ਤੁਹਾਡੇ ਰਾਜ ਲਈ ਪੰਪ ਆਪਰੇਟਰ ਵਜੋਂ ਰਜਿਸਟਰ ਕੀਤਾ ਗਿਆ ਹੈ।
+
+                    ਤੁਸੀਂ ਇਸ ਨੰਬਰ ਦੀ ਵਰਤੋਂ ਇਨ੍ਹਾਂ ਕੰਮਾਂ ਲਈ ਕਰ ਸਕਦੇ ਹੋ:
+                    - ਬਲਕ ਫਲੋ ਮੀਟਰ ਦੀਆਂ ਫੋਟੋਆਂ ਸਾਂਝੀਆਂ ਕਰਨਾ
+                    - ਪਾਣੀ ਦੀ ਸਪਲਾਈ ਨਾਲ ਜੁੜੀਆਂ ਸਮੱਸਿਆਵਾਂ ਦੀ ਰਿਪੋਰਟ ਕਰਨਾ
+
+                    ਸ਼ੁਰੂ ਕਰਨ ਲਈ START ਲਿਖੋ।
                     """);
         }
 

@@ -141,10 +141,7 @@ class ConversationLocalizationServiceTest {
                     .isEqualTo(FALLBACK_TEXT);
         }
 
-        /**
-         * Pins the operator's reply for every allowlist rule, in English and in Hindi. A rule whose
-         * copy has no Hindi translation replies in English to a Hindi operator too.
-         */
+        /** Pins the operator's reply for every allowlist rule, in English and in Hindi. */
         @ParameterizedTest(name = "{0} -> {1}")
         @MethodSource("technicalToUserFacing")
         void rewritesTechnicalMessagesIntoOperatorFacingCopy(String technical, String english, String hindi) {
@@ -158,9 +155,11 @@ class ConversationLocalizationServiceTest {
 
         static Stream<Arguments> technicalToUserFacing() {
             String location = "Location could not be saved. Please share a valid location.";
+            String locationHindi = "लोकेशन सेव नहीं हो सकी। कृपया सही लोकेशन भेजें।";
             String operator = "Operator could not be resolved for this contact.";
             String operatorHindi = "इस संपर्क के लिए ऑपरेटर नहीं मिला।";
             String contact = "Contact could not be identified. Please restart the process.";
+            String contactHindi = "संपर्क की पहचान नहीं हो सकी। कृपया प्रक्रिया फिर से शुरू करें।";
             return Stream.of(
                     Arguments.of("Duplicate image detected for hash abc123",
                             "Duplicate image submission detected. Please submit a new image.",
@@ -176,19 +175,19 @@ class ConversationLocalizationServiceTest {
                             "manualReading शून्य से बड़ा होना चाहिए।"),
                     Arguments.of("Reading is required",
                             "Reading is required.",
-                            "Reading is required."),
+                            "रीडिंग आवश्यक है।"),
                     Arguments.of("Reading must be numeric",
                             "Reading must be a numeric value.",
-                            "Reading must be a numeric value."),
+                            "रीडिंग केवल संख्या होनी चाहिए।"),
                     Arguments.of("Reading must be greater than zero",
                             "Reading must be greater than zero.",
-                            "Reading must be greater than zero."),
+                            "रीडिंग शून्य से बड़ी होनी चाहिए।"),
                     Arguments.of("confirmedReading must be a non-negative number",
                             "Reading must be a non-negative number.",
-                            "Reading must be a non-negative number."),
+                            "रीडिंग शून्य या उससे बड़ी संख्या होनी चाहिए।"),
                     Arguments.of("Either readingValue or readingUrl must be provided",
                             "A meter image or a reading value is required.",
-                            "A meter image or a reading value is required."),
+                            "मीटर की इमेज या रीडिंग में से एक आवश्यक है।"),
                     Arguments.of("Language selection is required",
                             "Language selection is required. Please choose one of the listed options.",
                             "भाषा चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
@@ -221,58 +220,58 @@ class ConversationLocalizationServiceTest {
                             "इस टेनेंट के लिए विकल्प कॉन्फ़िगर नहीं हैं।"),
                     Arguments.of("scheme selection is required",
                             "Scheme selection is required. Please choose one of the listed options.",
-                            "Scheme selection is required. Please choose one of the listed options."),
+                            "स्कीम चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
                     Arguments.of("Invalid scheme selection: 9",
                             "Invalid scheme selection. Please choose a valid option from the list.",
-                            "Invalid scheme selection. Please choose a valid option from the list."),
+                            "अमान्य स्कीम चयन। कृपया सूची से सही विकल्प चुनें।"),
                     Arguments.of("Meter change reason selection is required",
                             "Meter change reason is required. Please choose one of the listed options.",
-                            "Meter change reason is required. Please choose one of the listed options."),
+                            "मीटर बदलने का कारण आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
                     Arguments.of("Invalid meter change reason selection",
                             "Invalid meter change reason. Please choose a valid option from the list.",
-                            "Invalid meter change reason. Please choose a valid option from the list."),
+                            "मीटर बदलने का कारण अमान्य है। कृपया सूची से सही विकल्प चुनें।"),
                     Arguments.of("METER_CHANGE_REASONS config is not valid JSON",
                             "Meter change reasons are not configured for this tenant.",
-                            "Meter change reasons are not configured for this tenant."),
+                            "इस टेनेंट के लिए मीटर बदलने के कारण कॉन्फ़िगर नहीं हैं।"),
                     Arguments.of("SUPPLY_OUTAGE_REASONS config has no reasons",
                             "Submission reasons are not configured for this tenant.",
-                            "Submission reasons are not configured for this tenant."),
+                            "इस टेनेंट के लिए सबमिशन न होने के कारण कॉन्फ़िगर नहीं हैं।"),
                     Arguments.of("Scheme not found for the provided state or centre scheme id",
                             "Scheme not found for the provided state or centre scheme id",
-                            "Scheme not found for the provided state or centre scheme id"),
+                            "दी गई राज्य या केंद्र स्कीम आईडी के लिए स्कीम नहीं मिली।"),
                     Arguments.of("No operator is mapped to the submitted scheme and no phone number was provided",
                             "No operator is mapped to the submitted scheme and no phone number was provided",
-                            "No operator is mapped to the submitted scheme and no phone number was provided"),
+                            "जमा की गई स्कीम से कोई ऑपरेटर मैप नहीं है और कोई फ़ोन नंबर नहीं दिया गया।"),
                     Arguments.of("Operator is not mapped to any scheme",
                             "No scheme is mapped to this operator.",
                             "इस ऑपरेटर के लिए कोई स्कीम मैप नहीं है।"),
                     Arguments.of("Operator is not mapped to the provided state or centre scheme",
                             "Operator is not mapped to the provided state or centre scheme",
-                            "Operator is not mapped to the provided state or centre scheme"),
+                            "ऑपरेटर दी गई राज्य या केंद्र स्कीम से मैप नहीं है।"),
                     Arguments.of("Operator does not belong to the specified scheme",
                             "Operator is not mapped to the selected scheme.",
-                            "Operator is not mapped to the selected scheme."),
+                            "ऑपरेटर चुनी गई स्कीम से मैप नहीं है।"),
                     Arguments.of("State scheme not found",
                             "Scheme not found.",
-                            "Scheme not found."),
+                            "स्कीम नहीं मिली।"),
                     Arguments.of("Not authorized for this scheme",
                             "Not authorized for this scheme.",
-                            "Not authorized for this scheme."),
+                            "आपको इस स्कीम के लिए अधिकार नहीं है।"),
                     Arguments.of("schemeId must be a positive integer",
                             "Scheme id must be a positive integer.",
-                            "Scheme id must be a positive integer."),
+                            "स्कीम आईडी शून्य से बड़ी पूर्ण संख्या होनी चाहिए।"),
                     Arguments.of("No operator found for contactId", operator, operatorHindi),
                     Arguments.of("Operator not found", operator, operatorHindi),
                     Arguments.of("Operator could not be resolved for contact", operator, operatorHindi),
                     Arguments.of("User not found", operator, operatorHindi),
                     Arguments.of("Operator tenant could not be resolved", operator, operatorHindi),
-                    Arguments.of("contactId is required", contact, contact),
-                    Arguments.of("contactId must be provided", contact, contact),
-                    Arguments.of("phoneNumber is required", "Phone number is required.", "Phone number is required."),
-                    Arguments.of("phoneNumber must be provided", "Phone number is required.", "Phone number is required."),
+                    Arguments.of("contactId is required", contact, contactHindi),
+                    Arguments.of("contactId must be provided", contact, contactHindi),
+                    Arguments.of("phoneNumber is required", "Phone number is required.", "फ़ोन नंबर आवश्यक है।"),
+                    Arguments.of("phoneNumber must be provided", "Phone number is required.", "फ़ोन नंबर आवश्यक है।"),
                     Arguments.of("correlationId must be provided",
                             "Request reference is missing. Please restart the process.",
-                            "Request reference is missing. Please restart the process."),
+                            "अनुरोध का संदर्भ नहीं मिला। कृपया प्रक्रिया फिर से शुरू करें।"),
                     Arguments.of("Invalid media id supplied",
                             "Invalid media. Please submit a clear meter image.",
                             "मीडिया अमान्य है। कृपया स्पष्ट मीटर इमेज भेजें।"),
@@ -284,24 +283,24 @@ class ConversationLocalizationServiceTest {
                             "समस्या का विवरण केवल अक्षर, अंक और स्पेस में ही दें।"),
                     Arguments.of("issueReason is required",
                             "Issue reason is required.",
-                            "Issue reason is required."),
-                    Arguments.of("latitude is required", location, location),
-                    Arguments.of("longitude is required", location, location),
-                    Arguments.of("latitude must be between -90 and 90", location, location),
-                    Arguments.of("longitude must be between -180 and 180", location, location),
-                    Arguments.of("geolocation.type must be Point", location, location),
+                            "समस्या का विवरण आवश्यक है।"),
+                    Arguments.of("latitude is required", location, locationHindi),
+                    Arguments.of("longitude is required", location, locationHindi),
+                    Arguments.of("latitude must be between -90 and 90", location, locationHindi),
+                    Arguments.of("longitude must be between -180 and 180", location, locationHindi),
+                    Arguments.of("geolocation.type must be Point", location, locationHindi),
                     Arguments.of("No reading found for operator",
                             "No reading found for operator",
-                            "No reading found for operator"),
+                            "ऑपरेटर के लिए कोई रीडिंग नहीं मिली।"),
                     Arguments.of("Reading not found",
                             "Reading not found.",
-                            "Reading not found."),
+                            "रीडिंग नहीं मिली।"),
                     Arguments.of("Target reading date is missing",
                             "Target reading date is missing.",
-                            "Target reading date is missing."),
+                            "रीडिंग की तारीख नहीं दी गई है।"),
                     Arguments.of("Invalid API key",
                             "Invalid API key",
-                            "Invalid API key")
+                            "अमान्य API कुंजी।")
             );
         }
 
@@ -430,7 +429,7 @@ class ConversationLocalizationServiceTest {
 
         @ParameterizedTest(name = "languageKey={0} leaves English copy untouched")
         @ValueSource(strings = {"english", "assamese", "bodo", ""})
-        void leavesCopyUntouchedForEveryNonHindiLanguage(String languageKey) {
+        void leavesCopyUntouchedForALanguageThatDoesNotTranslateIt(String languageKey) {
             assertThat(service.localizeMessage("Reading updated successfully", languageKey))
                     .isEqualTo("Reading updated successfully");
         }
