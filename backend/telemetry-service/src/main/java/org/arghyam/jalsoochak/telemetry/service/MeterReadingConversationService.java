@@ -225,7 +225,8 @@ public class MeterReadingConversationService {
             logFailure("Error building meter change reasons", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Meter change reasons could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.METER_CHANGE_REASONS_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -268,7 +269,7 @@ public class MeterReadingConversationService {
             );
 
             String prompt = tenantConfigRepository.findTakeMeterReadingPrompt(tenantId, languageKey)
-                    .orElse("Please type your meter reading manually (numbers only).");
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.TAKE_READING_PROMPT, languageKey));
 
             return IntroResponse.builder()
                     .success(true)
@@ -279,7 +280,8 @@ public class MeterReadingConversationService {
             logFailure("Error preparing take meter reading prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Take meter reading prompt could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.TAKE_READING_PROMPT_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -330,7 +332,8 @@ public class MeterReadingConversationService {
             logFailure("Error preparing issue report prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Issue report prompt could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.ISSUE_PROMPT_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -379,7 +382,8 @@ public class MeterReadingConversationService {
             logFailure("Error preparing issue reason types", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Issue reason types could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.ISSUE_REASON_TYPES_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -578,7 +582,7 @@ public class MeterReadingConversationService {
             if (selectedIndex == null || selectedIndex < 1 || selectedIndex > reasons.size()) {
                 return IntroResponse.builder()
                         .success(false)
-                        .message("invalid choice, please restart the flow")
+                        .message(messageResolver.get(ConversationMessageCode.INVALID_CHOICE, languageKey))
                         .build();
             }
 
@@ -621,7 +625,8 @@ public class MeterReadingConversationService {
             logFailure("Error saving meter change reason", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Meter change reason could not be saved.")
+                    .message(messageResolver.get(ConversationMessageCode.METER_CHANGE_REASON_NOT_SAVED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -664,7 +669,8 @@ public class MeterReadingConversationService {
             if (rawIssueReason.matches("^\\d+$") && parseSelectionIndex(rawIssueReason, reasons.size()) == null) {
                 return IntroResponse.builder()
                         .success(false)
-                        .message("Please choose a number between 1 and " + reasons.size() + ".")
+                        .message(messageResolver.get(ConversationMessageCode.CHOOSE_NUMBER_IN_RANGE, languageKey,
+                                reasons.size()))
                         .build();
             }
             String resolvedIssueReason = rawIssueReason;
@@ -769,7 +775,7 @@ public class MeterReadingConversationService {
                     || "meterReplaced".equalsIgnoreCase(responseSelectedKey)
                     || "noWaterSupply".equalsIgnoreCase(responseSelectedKey)
                     || "noReadingSubmission".equalsIgnoreCase(responseSelectedKey)) {
-                message = "please wait a second...";
+                message = messageResolver.get(ConversationMessageCode.PLEASE_WAIT, languageKey);
             } else {
                 message = templatesService
                         .resolveScreenConfirmationTemplate(tenantId, "ISSUE_REPORT", languageKey)
@@ -821,7 +827,8 @@ public class MeterReadingConversationService {
             logFailure("Error preparing others prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Others prompt could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.OTHERS_PROMPT_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -861,7 +868,8 @@ public class MeterReadingConversationService {
             logFailure("Error preparing telemetry issue report prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Issue report prompt could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.ISSUE_PROMPT_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -910,7 +918,7 @@ public class MeterReadingConversationService {
                 if (selectedIndex == null || selectedIndex < 1 || selectedIndex > reasons.size()) {
                     return IntroResponse.builder()
                             .success(false)
-                            .message("invalid choice, please restart the flow")
+                            .message(messageResolver.get(ConversationMessageCode.INVALID_CHOICE, languageKey))
                             .build();
                 }
 
@@ -1672,9 +1680,11 @@ public class MeterReadingConversationService {
                     .qualityStatus("CONFIRMED")
                     .build();
 
-            String template = tenantConfigRepository.findManualReadingConfirmationTemplate(tenantId, languageKey)
-                    .orElse("Manual reading {reading} saved successfully.");
-            response.setMessage(template.replace("{reading}", manualReadingValue.stripTrailingZeros().toPlainString()));
+            String reading = manualReadingValue.stripTrailingZeros().toPlainString();
+            response.setMessage(tenantConfigRepository.findManualReadingConfirmationTemplate(tenantId, languageKey)
+                    .map(template -> template.replace("{reading}", reading))
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.MANUAL_READING_SAVED, languageKey,
+                            reading)));
 
             if (response.getCorrelationId() == null || response.getCorrelationId().isBlank()) {
                 response.setCorrelationId(UUID.randomUUID().toString());
@@ -1939,7 +1949,7 @@ public class MeterReadingConversationService {
 
             return CreateReadingResponse.builder()
                     .success(true)
-                    .message("Previous reading updated successfully.")
+                    .message(messageResolver.get(ConversationMessageCode.PREVIOUS_READING_UPDATED, languageKey))
                     .qualityStatus("CONFIRMED")
                     .correlationId(correlationId)
                     .meterReading(correctedReading)

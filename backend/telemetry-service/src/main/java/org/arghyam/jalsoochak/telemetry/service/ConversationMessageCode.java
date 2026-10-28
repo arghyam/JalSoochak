@@ -58,19 +58,29 @@ public enum ConversationMessageCode {
     TARGET_READING_DATE_MISSING("error.targetReadingDateMissing"),
     INVALID_API_KEY("error.invalidApiKey"),
 
-    // ── A caller's own fallback, for an error the allowlist does not recognise ─────────────────────
+    // ── A caller's own reply when its step fails: the fallback for an error the allowlist does not
+    // recognise, or the whole reply ─────────────────────────────────────────────────────────────────
+    CHANNEL_SELECTION_NOT_PREPARED("failure.channelSelectionNotPrepared"),
     CHANNEL_SELECTION_NOT_SAVED("failure.channelSelectionNotSaved"),
     IMAGE_NOT_PROCESSED("failure.imageNotProcessed"),
+    ISSUE_PROMPT_NOT_PREPARED("failure.issuePromptNotPrepared"),
+    ISSUE_REASON_TYPES_NOT_PREPARED("failure.issueReasonTypesNotPrepared"),
     ISSUE_REPORT_NOT_SAVED("failure.issueReportNotSaved"),
     ITEM_SELECTION_NOT_PREPARED("failure.itemSelectionNotPrepared"),
     ITEM_SELECTION_NOT_SAVED("failure.itemSelectionNotSaved"),
+    LANGUAGE_SELECTION_NOT_PREPARED("failure.languageSelectionNotPrepared"),
     LANGUAGE_SELECTION_NOT_SAVED("failure.languageSelectionNotSaved"),
     LOCATION_NOT_SAVED("failure.locationNotSaved"),
     MANUAL_READING_NOT_SAVED("failure.manualReadingNotSaved"),
+    METER_CHANGE_REASON_NOT_SAVED("failure.meterChangeReasonNotSaved"),
+    METER_CHANGE_REASONS_NOT_PREPARED("failure.meterChangeReasonsNotPrepared"),
+    OTHERS_PROMPT_NOT_PREPARED("failure.othersPromptNotPrepared"),
     PREVIOUS_READING_NOT_UPDATED("failure.previousReadingNotUpdated"),
     READING_NOT_PROCESSED("failure.readingNotProcessed"),
     SCHEME_SELECTION_NOT_PREPARED("failure.schemeSelectionNotPrepared"),
     SCHEME_SELECTION_NOT_SAVED("failure.schemeSelectionNotSaved"),
+    SOMETHING_WENT_WRONG("failure.somethingWentWrong"),
+    TAKE_READING_PROMPT_NOT_PREPARED("failure.takeReadingPromptNotPrepared"),
 
     // ── Conversation copy ───────────────────────────────────────────────────────────────────────────
     WELCOME("conversation.welcome"),
@@ -87,6 +97,22 @@ public enum ConversationMessageCode {
     READING_REJECTED("conversation.readingRejected"),
     NOTHING_TO_REJECT("conversation.nothingToReject"),
     REJECTION_FAILED("conversation.rejectionFailed"),
+    CHANNEL_PROMPT("conversation.channelPrompt"),
+    CHANNEL_SELECTED("conversation.channelSelected"),
+    ITEM_PROMPT("conversation.itemPrompt"),
+    ITEM_SELECTED("conversation.itemSelected"),
+    SCHEME_PROMPT("conversation.schemePrompt"),
+    SCHEME_SELECTED("conversation.schemeSelected"),
+    UNNAMED_SCHEME("conversation.unnamedScheme"),
+    TAKE_READING_PROMPT("conversation.takeReadingPrompt"),
+    MANUAL_READING_SAVED("conversation.manualReadingSaved"),
+    PREVIOUS_READING_UPDATED("conversation.previousReadingUpdated"),
+    PLEASE_WAIT("conversation.pleaseWait"),
+    INVALID_CHOICE("conversation.invalidChoice"),
+    CHOOSE_NUMBER_IN_RANGE("conversation.chooseNumberInRange"),
+    DEFAULT_OPERATOR_NAME("conversation.defaultOperatorName"),
+    DEFAULT_STATE_NAME("conversation.defaultStateName"),
+    DEFAULT_GREETING_NAME("conversation.defaultGreetingName"),
 
     // ── Built-in issue reasons, and the default reason names recognised in tenant config ───────────
     ISSUE_REASON_METER_REPLACED("reason.meterReplaced"),

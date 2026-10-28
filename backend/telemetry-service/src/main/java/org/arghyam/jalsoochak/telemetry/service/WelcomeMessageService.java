@@ -35,18 +35,18 @@ public class WelcomeMessageService {
             throw new IllegalStateException("Tenant could not be resolved for contact");
         }
 
-        String name = safeName(operatorWithSchema.operator().title());
-        String state = tenantConfigRepository.findConfigValue(tenantId, "state_name")
-                .filter(v -> !v.isBlank())
-                .or(() -> tenantConfigRepository.findTenantTitleById(tenantId))
-                .orElse("");
         String language = operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId);
         String languageKey = localizationService.normalizeLanguageKey(language);
+        String name = safeName(operatorWithSchema.operator().title(), languageKey);
+        String state = safeState(tenantConfigRepository.findConfigValue(tenantId, "state_name")
+                .filter(v -> !v.isBlank())
+                .or(() -> tenantConfigRepository.findTenantTitleById(tenantId))
+                .orElse(""), languageKey);
 
         String message = resolveWelcomeTemplate(tenantId, languageKey, language)
                 .map(tpl -> tpl
                         .replace("{name}", name)
-                        .replace("{state}", safeState(state))
+                        .replace("{state}", state)
                         .replace("{start_keyword}", resolveStartKeyword(isSingleTenant)))
                 .orElseGet(() -> buildWelcomeMessage(languageKey, name, state, isSingleTenant));
         return IntroResponse.builder()
@@ -56,16 +56,16 @@ public class WelcomeMessageService {
                 .build();
     }
 
-    private String safeName(String name) {
+    private String safeName(String name, String languageKey) {
         if (name == null || name.isBlank()) {
-            return "Operator";
+            return messageResolver.get(ConversationMessageCode.DEFAULT_OPERATOR_NAME, languageKey);
         }
         return name.trim();
     }
 
     private String buildWelcomeMessage(String languageKey, String name, String state, boolean isSingleTenant) {
         return messageResolver.get(ConversationMessageCode.WELCOME, languageKey,
-                name, safeState(state), resolveStartKeyword(isSingleTenant));
+                name, state, resolveStartKeyword(isSingleTenant));
     }
 
     private String resolveStartKeyword(boolean isSingleTenant) {
@@ -117,9 +117,9 @@ public class WelcomeMessageService {
         return NON_ALNUM.matcher(lower).replaceAll("_").replaceAll("^_+|_+$", "");
     }
 
-    private String safeState(String state) {
+    private String safeState(String state, String languageKey) {
         if (state == null || state.isBlank()) {
-            return "your state";
+            return messageResolver.get(ConversationMessageCode.DEFAULT_STATE_NAME, languageKey);
         }
         return state.trim();
     }

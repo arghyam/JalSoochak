@@ -129,6 +129,16 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
     }
 
     @Test
+    void confirmsTheCorrectionInTheOperatorsLanguage() {
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("hindi");
+        targetRow(ReadingChannel.BFM, "1100");
+
+        update("1000");
+
+        verify(messageResolver).get(ConversationMessageCode.PREVIOUS_READING_UPDATED, "hindi");
+    }
+
+    @Test
     void restatingTheStoredValueKeepsItsProvenance() {
         targetRow(ReadingChannel.BFM, "1100");
 

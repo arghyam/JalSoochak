@@ -164,11 +164,42 @@ class MeterReadingConversationServiceManualReadingTest {
         assertEquals("CONFIRMED", resp.getQualityStatus());
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         assertEquals("bfm-1", resp.getCorrelationId());
+        assertEquals("Manual reading 123 saved successfully.", resp.getMessage());
 
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("123"), 1L,
                 RolloverResolutionService.SOURCE_MANUAL, "m3", ReportingChannel.WHATSAPP);
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
+    }
+
+    @Test
+    void manualReadingConfirmsInTheOperatorsLanguage() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("hi");
+        when(localizationService.normalizeLanguageKey("hi")).thenReturn("hindi");
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
+                "tenant_test", 10L, ReadingChannel.BFM, MeterRegister.STANDARD, 99L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L, "bfm-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO, null)));
+        when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
+        when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(List.of());
+        when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
+
+        service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("123")
+                .build());
+
+        verify(messageResolver).get(ConversationMessageCode.MANUAL_READING_SAVED, "hindi", "123");
     }
 
     @Test

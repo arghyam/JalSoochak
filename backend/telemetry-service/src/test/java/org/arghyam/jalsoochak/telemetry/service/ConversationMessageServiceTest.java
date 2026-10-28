@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -23,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -47,6 +49,8 @@ class ConversationMessageServiceTest {
     private TenantConfigRepository tenantConfigRepository;
     @Mock
     private ConversationTemplateService templatesService;
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
 
     @InjectMocks
     private ConversationMessageService service;
@@ -106,6 +110,19 @@ class ConversationMessageServiceTest {
                     .thenReturn(Optional.of("Hello {name}."));
 
             assertThat(service.introMessage(introRequest(CONTACT)).getMessage()).isEqualTo("Hello there.");
+        }
+
+        @Test
+        void substitutesTheStandInNameInTheOperatorsLanguage() {
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(3, null));
+            when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("Hindi");
+            when(localizationService.normalizeLanguageKey("Hindi")).thenReturn("hindi");
+            when(templatesService.resolveScreenMessage(anyInt(), anyString(), anyString()))
+                    .thenReturn(Optional.of("Hello {name}."));
+
+            service.introMessage(introRequest(CONTACT));
+
+            verify(messageResolver).get(ConversationMessageCode.DEFAULT_GREETING_NAME, "hindi");
         }
 
         @Test
@@ -193,6 +210,16 @@ class ConversationMessageServiceTest {
                     .thenThrow(new IllegalStateException("No operator found"));
 
             assertThat(service.introMessage(introRequest(CONTACT)).getMessage()).isEqualTo(FALLBACK);
+        }
+
+        @Test
+        void returnsTheGenericFallbackInTheOperatorsLanguage() {
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(null, "Asha"));
+            when(localizationService.resolveLanguageKeyForContact(CONTACT)).thenReturn("hindi");
+
+            service.introMessage(introRequest(CONTACT));
+
+            verify(messageResolver).get(ConversationMessageCode.SOMETHING_WENT_WRONG, "hindi");
         }
     }
 
@@ -294,6 +321,16 @@ class ConversationMessageServiceTest {
                     .thenThrow(new IllegalStateException("boom"));
 
             assertThat(service.closingMessage(closingRequest(CONTACT)).getMessage()).isEqualTo(FALLBACK);
+        }
+
+        @Test
+        void returnsTheGenericFallbackInTheOperatorsLanguage() {
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(null, "Asha"));
+            when(localizationService.resolveLanguageKeyForContact(CONTACT)).thenReturn("hindi");
+
+            service.closingMessage(closingRequest(CONTACT));
+
+            verify(messageResolver).get(ConversationMessageCode.SOMETHING_WENT_WRONG, "hindi");
         }
     }
 }

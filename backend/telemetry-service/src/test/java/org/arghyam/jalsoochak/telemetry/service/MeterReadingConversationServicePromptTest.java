@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
+import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
@@ -15,6 +16,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -26,6 +29,8 @@ import org.mockito.quality.Strictness;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -208,6 +213,16 @@ class MeterReadingConversationServicePromptTest {
 
             assertThat(service.takeMeterReadingMessage(request(CONTACT, "1")).getMessage())
                     .isEqualTo("Please type your meter reading manually (numbers only).");
+        }
+
+        @Test
+        void asksForTheDefaultPromptInTheOperatorsLanguage() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+            when(tenantConfigRepository.findMeterChangeReasons(TENANT, "hindi")).thenReturn(List.of("Meter replaced"));
+
+            service.takeMeterReadingMessage(request(CONTACT, "1"));
+
+            verify(messageResolver).get(ConversationMessageCode.TAKE_READING_PROMPT, "hindi");
         }
 
         @Test
@@ -686,6 +701,97 @@ class MeterReadingConversationServicePromptTest {
 
             assertThat(messageOf(service.issueReportTelemetryReasons(introRequest(CONTACT))))
                     .isEqualTo("कृपया अपनी समस्या चुनें।\n1. Meter replaced");
+        }
+    }
+
+    @Nested
+    @DisplayName("meterChangeSubmitMessage")
+    class MeterChangeSubmission {
+
+        @BeforeEach
+        void stubConfig() {
+            when(tenantConfigRepository.findConfigValue(TENANT, "METER_CHANGE_REASONS")).thenReturn(Optional.of(
+                    "{\"reasons\":[{\"id\":\"meterDamaged\",\"name\":\"Meter damaged\",\"sequenceOrder\":1}]}"));
+        }
+
+        private MeterChangeRequest request(String reason) {
+            return MeterChangeRequest.builder().contactId(CONTACT).reason(reason).build();
+        }
+
+        @Test
+        void rejectsAnOutOfRangeChoice() {
+            var response = service.meterChangeSubmitMessage(request("2"));
+
+            assertThat(response.isSuccess()).isFalse();
+            assertThat(response.getMessage()).isEqualTo("invalid choice, please restart the flow");
+            verify(telemetryTenantRepository, never()).upsertPendingMeterChangeRecord(
+                    anyString(), anyLong(), anyLong(), any(LocalDateTime.class), anyString(), any());
+        }
+
+        @Test
+        void rejectsAnOutOfRangeChoiceInTheOperatorsLanguage() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+
+            service.meterChangeSubmitMessage(request("2"));
+
+            verify(messageResolver).get(ConversationMessageCode.INVALID_CHOICE, "hindi");
+        }
+    }
+
+    /** Each step's fixed reply when it cannot be built, in the language of the contact who asked. */
+    @Nested
+    @DisplayName("failure replies")
+    class FailureReplies {
+
+        @BeforeEach
+        void operatorWithNoTenantWhoReadsHindi() {
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(null));
+            when(localizationService.resolveLanguageKeyForContact(CONTACT)).thenReturn("hindi");
+        }
+
+        static Stream<Arguments> steps() {
+            MeterChangeRequest meterChange = MeterChangeRequest.builder().contactId(CONTACT).reason("1").build();
+            return Stream.of(
+                    step("meterChangeMessage", s -> s.meterChangeMessage(introRequest(CONTACT)),
+                            ConversationMessageCode.METER_CHANGE_REASONS_NOT_PREPARED,
+                            "Meter change reasons could not be prepared."),
+                    step("takeMeterReadingMessage", s -> s.takeMeterReadingMessage(meterChange),
+                            ConversationMessageCode.TAKE_READING_PROMPT_NOT_PREPARED,
+                            "Take meter reading prompt could not be prepared."),
+                    step("meterChangeSubmitMessage", s -> s.meterChangeSubmitMessage(meterChange),
+                            ConversationMessageCode.METER_CHANGE_REASON_NOT_SAVED,
+                            "Meter change reason could not be saved."),
+                    step("issueReportPromptMessage", s -> s.issueReportPromptMessage(introRequest(CONTACT)),
+                            ConversationMessageCode.ISSUE_PROMPT_NOT_PREPARED,
+                            "Issue report prompt could not be prepared."),
+                    step("issueReportTelemetryPromptMessage",
+                            s -> s.issueReportTelemetryPromptMessage(introRequest(CONTACT)),
+                            ConversationMessageCode.ISSUE_PROMPT_NOT_PREPARED,
+                            "Issue report prompt could not be prepared."),
+                    step("issueReasonTypesMessage", s -> s.issueReasonTypesMessage(introRequest(CONTACT)),
+                            ConversationMessageCode.ISSUE_REASON_TYPES_NOT_PREPARED,
+                            "Issue reason types could not be prepared."),
+                    step("othersPromptMessage", s -> s.othersPromptMessage(introRequest(CONTACT)),
+                            ConversationMessageCode.OTHERS_PROMPT_NOT_PREPARED,
+                            "Others prompt could not be prepared."));
+        }
+
+        private static Arguments step(String name, Function<MeterReadingConversationService, IntroResponse> call,
+                                      ConversationMessageCode code, String english) {
+            return Arguments.of(name, call, code, english);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @MethodSource("steps")
+        void repliesWithTheStepsFailureCopyInTheOperatorsLanguage(
+                String name, Function<MeterReadingConversationService, IntroResponse> call,
+                ConversationMessageCode code, String english) {
+            IntroResponse response = call.apply(service);
+
+            assertThat(response.isSuccess()).isFalse();
+            // No Hindi translation yet, so the copy is the English fallback.
+            assertThat(response.getMessage()).isEqualTo(english);
+            verify(messageResolver).get(code, "hindi");
         }
     }
 }

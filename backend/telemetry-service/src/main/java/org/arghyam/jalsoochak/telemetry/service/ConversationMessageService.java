@@ -19,15 +19,18 @@ public class ConversationMessageService {
     private final ConversationLocalizationService localizationService;
     private final TenantConfigRepository tenantConfigRepository;
     private final ConversationTemplateService templatesService;
+    private final ConversationMessageResolver messageResolver;
 
     public ConversationMessageService(OperatorContextService operatorContextService,
                                       ConversationLocalizationService localizationService,
                                       TenantConfigRepository tenantConfigRepository,
-                                      ConversationTemplateService templatesService) {
+                                      ConversationTemplateService templatesService,
+                                      ConversationMessageResolver messageResolver) {
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
         this.tenantConfigRepository = tenantConfigRepository;
         this.templatesService = templatesService;
+        this.messageResolver = messageResolver;
     }
 
     public IntroResponse introMessage(IntroRequest introRequest) {
@@ -42,12 +45,11 @@ public class ConversationMessageService {
             if (tenantId == null) {
                 throw new IllegalStateException("Operator tenant could not be resolved");
             }
-            String name = operatorWithSchema.operator().title() != null && !operatorWithSchema.operator().title().isBlank()
-                    ? operatorWithSchema.operator().title()
-                    : "there";
-
             String languageKey = localizationService.normalizeLanguageKey(
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
+            String name = operatorWithSchema.operator().title() != null && !operatorWithSchema.operator().title().isBlank()
+                    ? operatorWithSchema.operator().title()
+                    : messageResolver.get(ConversationMessageCode.DEFAULT_GREETING_NAME, languageKey);
 
             String template = templatesService
                     .resolveScreenMessage(tenantId, "INTRO_MESSAGE", languageKey)
@@ -65,7 +67,8 @@ public class ConversationMessageService {
             log.debug("Error sending intro message for contactId {}: {}", introRequest.getContactId(), e.getMessage());
             return IntroResponse.builder()
                     .success(false)
-                    .message("Something went wrong. Please try again.")
+                    .message(messageResolver.get(ConversationMessageCode.SOMETHING_WENT_WRONG,
+                            localizationService.resolveLanguageKeyForContact(introRequest.getContactId())))
                     .build();
         }
     }
@@ -101,7 +104,8 @@ public class ConversationMessageService {
             log.debug("Error sending closing message for contactId {}: {}", closingRequest.getContactId(), e.getMessage());
             return ClosingResponse.builder()
                     .success(false)
-                    .message("Something went wrong. Please try again.")
+                    .message(messageResolver.get(ConversationMessageCode.SOMETHING_WENT_WRONG,
+                            localizationService.resolveLanguageKeyForContact(closingRequest.getContactId())))
                     .build();
         }
     }

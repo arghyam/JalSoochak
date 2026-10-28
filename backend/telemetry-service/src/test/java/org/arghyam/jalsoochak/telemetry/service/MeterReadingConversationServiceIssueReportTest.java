@@ -491,6 +491,61 @@ class MeterReadingConversationServiceIssueReportTest {
     }
 
     @Test
+    void issueReportSubmitAsksForANumberInRangeInHindi() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("hi");
+        when(localizationService.normalizeLanguageKey("hi")).thenReturn("hindi");
+
+        service.issueReportSubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("7")
+                .build());
+
+        verify(messageResolver).get(ConversationMessageCode.CHOOSE_NUMBER_IN_RANGE, "hindi", 6);
+    }
+
+    @Test
+    void issueReportSubmitAsksTheOperatorToWaitInHindi() {
+        stubHindiOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "hindi")).thenReturn(List.of());
+
+        IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("1")
+                .build());
+
+        assertEquals("meterReplaced", resp.getSelected());
+        verify(messageResolver).get(ConversationMessageCode.PLEASE_WAIT, "hindi");
+    }
+
+    @Test
+    void telemetryIssueReportSubmitRejectsAnOutOfRangeChoiceInHindi() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("hi");
+        when(localizationService.normalizeLanguageKey("hi")).thenReturn("hindi");
+        when(tenantConfigRepository.findConfigValue(1, "SUPPLY_OUTAGE_REASONS")).thenReturn(
+                Optional.of("{\"reasons\":[{\"id\":\"r1\",\"name\":\"No water\",\"sequenceOrder\":1}]}")
+        );
+
+        IntroResponse resp = service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("9")
+                .build());
+
+        assertEquals(false, resp.isSuccess());
+        verify(messageResolver).get(ConversationMessageCode.INVALID_CHOICE, "hindi");
+    }
+
+    @Test
     void othersSubmittedConfirmsInHindi() {
         stubHindiOperator();
 

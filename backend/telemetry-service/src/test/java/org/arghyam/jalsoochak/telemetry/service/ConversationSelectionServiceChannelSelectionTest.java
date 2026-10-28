@@ -55,7 +55,8 @@ class ConversationSelectionServiceChannelSelectionTest {
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
                 whatsAppContactDirectory,
-                new ObjectMapper()
+                new ObjectMapper(),
+                ConversationMessageResolverFixtures.real()
         );
 
         String contactId = "917815816856";

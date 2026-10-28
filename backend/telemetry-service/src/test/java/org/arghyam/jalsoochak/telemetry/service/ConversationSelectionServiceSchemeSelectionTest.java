@@ -54,7 +54,8 @@ class ConversationSelectionServiceSchemeSelectionTest {
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
                 whatsAppContactDirectory,
-                new ObjectMapper()
+                new ObjectMapper(),
+                ConversationMessageResolverFixtures.real()
         );
 
         String contactId = "919999999999";
@@ -83,7 +84,8 @@ class ConversationSelectionServiceSchemeSelectionTest {
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
                 whatsAppContactDirectory,
-                new ObjectMapper()
+                new ObjectMapper(),
+                ConversationMessageResolverFixtures.real()
         );
 
         String contactId = "919999999999";

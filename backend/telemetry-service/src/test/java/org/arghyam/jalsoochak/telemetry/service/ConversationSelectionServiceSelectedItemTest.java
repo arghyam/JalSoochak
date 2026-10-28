@@ -54,7 +54,8 @@ class ConversationSelectionServiceSelectedItemTest {
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
                 whatsAppContactDirectory,
-                new ObjectMapper()
+                new ObjectMapper(),
+                ConversationMessageResolverFixtures.real()
         );
 
         String contactId = "919999999999";
@@ -111,7 +112,8 @@ class ConversationSelectionServiceSelectedItemTest {
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
                 whatsAppContactDirectory,
-                new ObjectMapper()
+                new ObjectMapper(),
+                ConversationMessageResolverFixtures.real()
         );
 
         String contactId = "919999999999";
@@ -204,7 +206,7 @@ class ConversationSelectionServiceSelectedItemTest {
         ConversationSelectionService service = new ConversationSelectionService(
                 operatorContextService, localizationService, tenantConfigRepository, templatesService,
                 telemetryTenantRepository, userChannelPreferenceRepository, userLanguagePreferenceRepository,
-                whatsAppContactDirectory, new ObjectMapper()
+                whatsAppContactDirectory, new ObjectMapper(), ConversationMessageResolverFixtures.real()
         );
         Integer tenantId = 1;
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(

@@ -27,6 +27,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -290,6 +291,17 @@ class WelcomeMessageServiceTest {
         void substitutesYourStateWhenNeitherIsConfigured() {
             assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage())
                     .contains("Pump Operator for your state in Jalsoochak");
+        }
+
+        @Test
+        void substitutesTheStandInsInTheOperatorsLanguage() {
+            when(operatorContextService.resolveOperatorWithSchema(PHONE)).thenReturn(operator(3, null));
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+
+            service.triggerWelcomeMessage(PHONE, false);
+
+            verify(messageResolver).get(ConversationMessageCode.DEFAULT_OPERATOR_NAME, "hindi");
+            verify(messageResolver).get(ConversationMessageCode.DEFAULT_STATE_NAME, "hindi");
         }
     }
 }
