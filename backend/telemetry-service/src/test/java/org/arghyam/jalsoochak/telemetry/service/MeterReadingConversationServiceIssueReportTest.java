@@ -81,6 +81,7 @@ class MeterReadingConversationServiceIssueReportTest {
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("meterNotWorking", resp.getSelected());
+        assertEquals("Issue reported. Thank you.", resp.getMessage());
 
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 eq("tenant_test"),
@@ -337,6 +338,7 @@ class MeterReadingConversationServiceIssueReportTest {
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("others", resp.getSelected());
+        assertEquals("Issue reported. Thank you.", resp.getMessage());
 
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 eq("tenant_test"),
@@ -394,6 +396,7 @@ class MeterReadingConversationServiceIssueReportTest {
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("noWaterSupplied", resp.getSelected());
+        assertEquals("Issue reported. Thank you.", resp.getMessage());
 
         verify(telemetryEventPublisher).publishEscalationCreated(
                 eq(1),
@@ -425,6 +428,75 @@ class MeterReadingConversationServiceIssueReportTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(), any()
         );
+    }
+
+    // ── Built-in Hindi copy: the reason stored and the confirmation shown when nothing is configured ──
+
+    private TelemetryOperatorWithSchema stubHindiOperator() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("hi");
+        when(localizationService.normalizeLanguageKey("hi")).thenReturn("hindi");
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
+        return operatorWithSchema;
+    }
+
+    @Test
+    void issueReportSubmitStoresTheBuiltInHindiReasonAndConfirmsInHindi() {
+        stubHindiOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "hindi")).thenReturn(List.of());
+
+        IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("2")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        assertEquals("meterNotWorking", resp.getSelected());
+        assertEquals("समस्या रिपोर्ट हो गई है। धन्यवाद।", resp.getMessage());
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+                eq("tenant_test"),
+                argThat(anomaly -> "मीटर काम नहीं कर रहा".equals(anomaly.reason()))
+        );
+    }
+
+    @Test
+    void telemetryIssueReportSubmitStoresTheBuiltInHindiReasonAndConfirmsInHindi() {
+        stubHindiOperator();
+        when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "hindi")).thenReturn(Optional.empty());
+
+        IntroResponse resp = service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("4")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        assertEquals("noWaterSupplied", resp.getSelected());
+        assertEquals("समस्या रिपोर्ट हो गई है। धन्यवाद।", resp.getMessage());
+        verify(telemetryTenantRepository).upsertPendingIssueReportRecord(
+                eq("tenant_test"),
+                eq(10L),
+                eq(1L),
+                any(),
+                eq("पानी की आपूर्ति नहीं"), any()
+        );
+    }
+
+    @Test
+    void othersSubmittedConfirmsInHindi() {
+        stubHindiOperator();
+
+        IntroResponse resp = service.othersSubmittedMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("pipe leakage")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        assertEquals("समस्या रिपोर्ट हो गई है। धन्यवाद।", resp.getMessage());
     }
 
     // ── Free-text character allowlist (CWE-20 remediation) ──────────────────────────────────────

@@ -555,4 +555,132 @@ class MeterReadingConversationServicePromptTest {
                     .isInstanceOf(IllegalStateException.class);
         }
     }
+
+    /**
+     * The built-in English and Hindi copy a tenant gets when it configures none. The localizer is
+     * stubbed to pass text through, so these pin which built-in text each language starts from.
+     */
+    @Nested
+    @DisplayName("built-in copy")
+    class BuiltInCopy {
+
+        private static final String REASONS_JSON = """
+                {"reasons":[{"name":"Meter replaced","sequenceOrder":1}]}
+                """;
+
+        @BeforeEach
+        void stubNothingConfigured() {
+            when(tenantConfigRepository.findIssueReportPrompt(anyInt(), anyString())).thenReturn(Optional.empty());
+            when(tenantConfigRepository.findIssueReportReasons(anyInt(), anyString())).thenReturn(List.of());
+            when(tenantConfigRepository.findConfigValue(TENANT, "METER_CHANGE_REASONS"))
+                    .thenReturn(Optional.of(REASONS_JSON));
+            when(tenantConfigRepository.findConfigValue(TENANT, "SUPPLY_OUTAGE_REASONS"))
+                    .thenReturn(Optional.of(REASONS_JSON));
+        }
+
+        private void operatorReadsHindi() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+        }
+
+        private String messageOf(String json) throws Exception {
+            return objectMapper.readTree(json).path("message").asText();
+        }
+
+        @Test
+        void issueReportPromptListsTheBuiltInReasonsInEnglish() {
+            assertThat(service.issueReportPromptMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("Please select your issue by typing any of the number"
+                            + "\n1. Meter Replaced\n2. Meter not working\n3. Meter damage"
+                            + "\n4. Incorrect Reading Entered Previously\n5. No Water Supply\n6. Others");
+        }
+
+        @Test
+        void issueReportPromptListsTheBuiltInReasonsInHindi() {
+            operatorReadsHindi();
+
+            assertThat(service.issueReportPromptMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("कृपया नंबर टाइप करके अपनी समस्या चुनें"
+                            + "\n1. मीटर बदला गया\n2. मीटर काम नहीं कर रहा\n3. मीटर खराब है"
+                            + "\n4. पहले गलत रीडिंग दर्ज हुई थी\n5. पानी की आपूर्ति नहीं\n6. अन्य");
+        }
+
+        @Test
+        void issueReportPromptReplacesTheLegacyEnglishPromptWithTheBuiltInOne() {
+            when(tenantConfigRepository.findIssueReportPrompt(anyInt(), anyString()))
+                    .thenReturn(Optional.of("Please type your issue in a few words."));
+
+            assertThat(service.issueReportPromptMessage(introRequest(CONTACT)).getMessage())
+                    .startsWith("Please select your issue by typing any of the number\n1. ");
+        }
+
+        @Test
+        void issueReportPromptReplacesTheLegacyHindiPromptWithTheBuiltInOne() {
+            operatorReadsHindi();
+            when(tenantConfigRepository.findIssueReportPrompt(anyInt(), anyString()))
+                    .thenReturn(Optional.of("कृपया अपनी समस्या संक्षेप में लिखें।"));
+
+            assertThat(service.issueReportPromptMessage(introRequest(CONTACT)).getMessage())
+                    .startsWith("कृपया नंबर टाइप करके अपनी समस्या चुनें\n1. ");
+        }
+
+        @Test
+        void telemetryIssueReportPromptListsTheBuiltInReasonsInEnglish() {
+            assertThat(service.issueReportTelemetryPromptMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("Please select your issue by typing any of the number"
+                            + "\n1. Meter Replaced\n2. Meter not working\n3. Meter Damaged"
+                            + "\n4. No Water Supply\n5. Others");
+        }
+
+        @Test
+        void telemetryIssueReportPromptListsTheBuiltInReasonsInHindi() {
+            operatorReadsHindi();
+
+            assertThat(service.issueReportTelemetryPromptMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("कृपया नंबर टाइप करके अपनी समस्या चुनें"
+                            + "\n1. मीटर बदला गया\n2. मीटर काम नहीं कर रहा\n3. मीटर खराब है"
+                            + "\n4. पानी की आपूर्ति नहीं\n5. अन्य");
+        }
+
+        @Test
+        void othersPromptInEnglish() {
+            assertThat(service.othersPromptMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("Please report your issue.");
+        }
+
+        @Test
+        void othersPromptInHindi() {
+            operatorReadsHindi();
+
+            assertThat(service.othersPromptMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("कृपया अपनी समस्या बताएं।");
+        }
+
+        @Test
+        void meterChangeReasonsStartFromTheBuiltInEnglishPrompt() throws Exception {
+            assertThat(messageOf(service.meterChangeReasons(introRequest(CONTACT))))
+                    .isEqualTo("Please select the no submission reasons by typing any of the number\n1. Meter replaced");
+        }
+
+        @Test
+        void meterChangeReasonsStartFromTheBuiltInHindiPrompt() throws Exception {
+            operatorReadsHindi();
+
+            assertThat(messageOf(service.meterChangeReasons(introRequest(CONTACT))))
+                    .isEqualTo("कृपया नंबर टाइप करके सबमिशन न होने के कारण चुनें\n1. Meter replaced");
+        }
+
+        @Test
+        void supplyOutageReasonsStartFromTheBuiltInEnglishPrompt() throws Exception {
+            assertThat(messageOf(service.issueReportTelemetryReasons(introRequest(CONTACT))))
+                    .isEqualTo("Please select your issue.\n1. Meter replaced");
+        }
+
+        @Test
+        void supplyOutageReasonsStartFromTheBuiltInHindiPrompt() throws Exception {
+            operatorReadsHindi();
+
+            assertThat(messageOf(service.issueReportTelemetryReasons(introRequest(CONTACT))))
+                    .isEqualTo("कृपया अपनी समस्या चुनें।\n1. Meter replaced");
+        }
+    }
 }

@@ -113,6 +113,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         CreateReadingResponse resp = update("1000");
 
         assertEquals(true, resp.isSuccess());
+        assertEquals("Previous reading updated successfully.", resp.getMessage());
         assertEquals("CONFIRMED", resp.getQualityStatus());
         assertEquals(new BigDecimal("1000"), resp.getMeterReading());
         assertEquals("corr-2", resp.getCorrelationId());
