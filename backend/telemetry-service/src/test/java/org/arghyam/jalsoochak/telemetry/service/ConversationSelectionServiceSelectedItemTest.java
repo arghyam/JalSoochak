@@ -50,6 +50,7 @@ class ConversationSelectionServiceSelectedItemTest {
                 localizationService,
                 tenantConfigRepository,
                 templatesService,
+                LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
@@ -108,6 +109,7 @@ class ConversationSelectionServiceSelectedItemTest {
                 localizationService,
                 tenantConfigRepository,
                 templatesService,
+                LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
@@ -205,6 +207,7 @@ class ConversationSelectionServiceSelectedItemTest {
     private ConversationSelectionService stubbedServiceWithMenu(boolean confirmationStubs) {
         ConversationSelectionService service = new ConversationSelectionService(
                 operatorContextService, localizationService, tenantConfigRepository, templatesService,
+                LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository, userChannelPreferenceRepository, userLanguagePreferenceRepository,
                 whatsAppContactDirectory, new ObjectMapper(), ConversationMessageResolverFixtures.real()
         );

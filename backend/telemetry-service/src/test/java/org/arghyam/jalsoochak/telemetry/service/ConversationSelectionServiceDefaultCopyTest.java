@@ -71,6 +71,7 @@ class ConversationSelectionServiceDefaultCopyTest {
     void setUp() {
         service = new ConversationSelectionService(
                 operatorContextService, localizationService, tenantConfigRepository, templatesService,
+                LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository, userChannelPreferenceRepository, userLanguagePreferenceRepository,
                 whatsAppContactDirectory, new ObjectMapper(), messageResolver);
 

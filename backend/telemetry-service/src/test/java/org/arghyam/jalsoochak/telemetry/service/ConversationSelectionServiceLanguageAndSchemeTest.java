@@ -6,6 +6,8 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
+import org.arghyam.jalsoochak.telemetry.repository.LanguageCatalogRepository;
+import org.arghyam.jalsoochak.telemetry.repository.SupportedLanguageRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeOption;
@@ -67,6 +69,10 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
     @Mock
     private ConversationTemplateService templatesService;
     @Mock
+    private SupportedLanguageRepository supportedLanguageRepository;
+    @Mock
+    private LanguageCatalogRepository languageCatalogRepository;
+    @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
     @Mock
     private UserChannelPreferenceRepository userChannelPreferenceRepository;
@@ -83,6 +89,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
     void setUp() {
         service = new ConversationSelectionService(
                 operatorContextService, localizationService, tenantConfigRepository, templatesService,
+                new LanguageMenuService(templatesService, supportedLanguageRepository, languageCatalogRepository),
                 telemetryTenantRepository, userChannelPreferenceRepository, userLanguagePreferenceRepository,
                 whatsAppContactDirectory, new ObjectMapper(), messageResolver);
 
@@ -340,6 +347,72 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
 
             assertThat(response.isSuccess()).isFalse();
             verify(whatsAppContactDirectory, never()).syncContactLanguageAsync(anyString(), anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("menu from the tenant's SUPPORTED_LANGUAGES")
+    class SupportedLanguages {
+
+        @BeforeEach
+        void stubTemplateCatalogAndSupportedLanguages() {
+            when(templatesService.resolveScreenPrompt(TENANT, "LANGUAGE_SELECTION", "english"))
+                    .thenReturn(Optional.of("Pick a language:"));
+            when(templatesService.resolveScreenOptions(TENANT, "LANGUAGE_SELECTION")).thenReturn(List.of(
+                    new ConversationTemplateService.TemplateOption("OPTION_1", 1, Map.of("en", "English")),
+                    new ConversationTemplateService.TemplateOption("OPTION_2", 2, Map.of("en", "Hindi")),
+                    new ConversationTemplateService.TemplateOption("OPTION_3", 3, Map.of("en", "Punjabi"))));
+            when(languageCatalogRepository.findLanguageIdByAlias("English")).thenReturn(Optional.of(1));
+            when(languageCatalogRepository.findLanguageIdByAlias("Hindi")).thenReturn(Optional.of(2));
+            when(languageCatalogRepository.findLanguageIdByAlias("Punjabi")).thenReturn(Optional.of(11));
+            when(supportedLanguageRepository.findLanguageNames(SCHEMA)).thenReturn(List.of("Punjabi", "English"));
+        }
+
+        @Test
+        void offersOnlyTheTenantsLanguagesInItsPreferenceOrder() {
+            var response = service.languageSelectionMessage(introRequest(CONTACT));
+
+            assertThat(response.getMessage()).isEqualTo("Pick a language:\n1. Punjabi\n2. English");
+            assertThat(response.getCorrelationId()).isEqualTo("two");
+        }
+
+        @Test
+        void resolvesTheReplyAgainstTheShownMenuAndStoresTheOptionsOrder() {
+            service.selectedLanguageMessage(languageRequest(CONTACT, "1"));
+
+            verify(telemetryTenantRepository).updateUserLanguageId(SCHEMA, 11L, 3);
+            verify(userLanguagePreferenceRepository).upsert(SCHEMA, CONTACT, "Punjabi");
+        }
+
+        @Test
+        void rejectsALanguageTheTenantDoesNotSupport() {
+            assertThat(service.selectedLanguageMessage(languageRequest(CONTACT, "Hindi")).getMessage())
+                    .isEqualTo("Invalid language selection");
+
+            verify(telemetryTenantRepository, never()).updateUserLanguageId(anyString(), anyLong(), anyInt());
+        }
+
+        @Test
+        void showsTheChangeLanguageItemWhenTheTenantSupportsSeveralLanguages() {
+            stubItemMenu();
+
+            assertThat(service.itemSelectionMessage(introRequest(CONTACT)).getMessage())
+                    .endsWith("\n1. Submit Reading\n2. Change Language");
+        }
+
+        @Test
+        void hidesTheChangeLanguageItemWhenTheTenantSupportsOneLanguage() {
+            when(supportedLanguageRepository.findLanguageNames(SCHEMA)).thenReturn(List.of("English"));
+            stubItemMenu();
+
+            assertThat(service.itemSelectionMessage(introRequest(CONTACT)).getMessage())
+                    .endsWith("\n1. Submit Reading");
+        }
+
+        private void stubItemMenu() {
+            when(templatesService.resolveScreenOptions(TENANT, "ITEM_SELECTION")).thenReturn(List.of(
+                    new ConversationTemplateService.TemplateOption("OPTION_1", 1, Map.of("en", "Submit Reading")),
+                    new ConversationTemplateService.TemplateOption("OPTION_2", 2, Map.of("en", "Change Language"))));
         }
     }
 

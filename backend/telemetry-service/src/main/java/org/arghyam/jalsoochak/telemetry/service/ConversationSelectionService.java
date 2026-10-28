@@ -44,6 +44,7 @@ public class ConversationSelectionService {
     private final ConversationLocalizationService localizationService;
     private final TenantConfigRepository tenantConfigRepository;
     private final ConversationTemplateService templatesService;
+    private final LanguageMenuService languageMenuService;
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final UserLanguagePreferenceRepository userLanguagePreferenceRepository;
@@ -55,6 +56,7 @@ public class ConversationSelectionService {
                                         ConversationLocalizationService localizationService,
                                         TenantConfigRepository tenantConfigRepository,
                                         ConversationTemplateService templatesService,
+                                        LanguageMenuService languageMenuService,
                                         TelemetryTenantRepository telemetryTenantRepository,
                                         UserChannelPreferenceRepository userChannelPreferenceRepository,
                                         UserLanguagePreferenceRepository userLanguagePreferenceRepository,
@@ -65,6 +67,7 @@ public class ConversationSelectionService {
         this.localizationService = localizationService;
         this.tenantConfigRepository = tenantConfigRepository;
         this.templatesService = templatesService;
+        this.languageMenuService = languageMenuService;
         this.telemetryTenantRepository = telemetryTenantRepository;
         this.userChannelPreferenceRepository = userChannelPreferenceRepository;
         this.userLanguagePreferenceRepository = userLanguagePreferenceRepository;
@@ -92,13 +95,13 @@ public class ConversationSelectionService {
                     .or(() -> tenantConfigRepository.findLanguageSelectionPrompt(tenantId, languageKey))
                     .orElseThrow(() -> new IllegalStateException("language_selection_prompt is not configured"));
 
-            List<ConversationTemplateService.TemplateOption> languageTemplateOptions =
-                    templatesService.resolveScreenOptions(tenantId, "LANGUAGE_SELECTION");
+            List<LanguageMenuService.MenuOption> languageMenu =
+                    languageMenuService.resolveOptions(tenantId, operatorWithSchema.schemaName());
             List<String> languageOptions;
-            if (!languageTemplateOptions.isEmpty()) {
+            if (!languageMenu.isEmpty()) {
                 String languageCode = templatesService.toTemplateLanguageCode(languageKey);
-                languageOptions = languageTemplateOptions.stream()
-                        .map(opt -> opt.labelFor(languageCode))
+                languageOptions = languageMenu.stream()
+                        .map(entry -> entry.option().labelFor(languageCode))
                         .toList();
             } else {
                 languageOptions = tenantConfigRepository.findLanguageOptions(tenantId);
@@ -150,17 +153,20 @@ public class ConversationSelectionService {
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
 
-            List<ConversationTemplateService.TemplateOption> languageTemplateOptions =
-                    templatesService.resolveScreenOptions(tenantId, "LANGUAGE_SELECTION");
+            List<LanguageMenuService.MenuOption> languageMenu =
+                    languageMenuService.resolveOptions(tenantId, operatorWithSchema.schemaName());
             String selectedLanguage;
             int selectedLanguageId;
             String selectedLanguageKey;
             String selectedLanguageDisplayLabel;
-            if (!languageTemplateOptions.isEmpty()) {
+            if (!languageMenu.isEmpty()) {
+                List<ConversationTemplateService.TemplateOption> languageTemplateOptions = languageMenu.stream()
+                        .map(LanguageMenuService.MenuOption::option)
+                        .toList();
                 int selectedIndex = resolveTemplateSelectionIndex(request.getLanguage(), languageTemplateOptions, currentLanguageKey)
                         .orElseThrow(() -> new IllegalStateException("Invalid language selection"));
                 ConversationTemplateService.TemplateOption selectedOpt = languageTemplateOptions.get(selectedIndex);
-                selectedLanguageId = selectedOpt.order() > 0 ? selectedOpt.order() : (selectedIndex + 1);
+                selectedLanguageId = languageMenu.get(selectedIndex).languageId();
                 // Persist a canonical label (prefer English) so downstream normalization/sync keeps working.
                 selectedLanguage = selectedOpt.canonicalLabel();
                 selectedLanguageKey = localizationService.normalizeLanguageKey(selectedLanguage);
@@ -446,7 +452,8 @@ public class ConversationSelectionService {
                     templatesService.resolveScreenOptions(tenantId, "ITEM_SELECTION");
             List<VisibleItemOption> visibleItemOptions;
             if (!itemTemplateOptions.isEmpty()) {
-                visibleItemOptions = buildVisibleItemOptionsFromTemplates(tenantId, languageKey, itemTemplateOptions);
+                visibleItemOptions = buildVisibleItemOptionsFromTemplates(
+                        tenantId, operatorWithSchema.schemaName(), languageKey, itemTemplateOptions);
             } else {
                 List<String> itemOptions = tenantConfigRepository.findItemOptions(tenantId, languageKey);
                 if (itemOptions.isEmpty()) {
@@ -503,7 +510,8 @@ public class ConversationSelectionService {
                     templatesService.resolveScreenOptions(tenantId, "ITEM_SELECTION");
             List<VisibleItemOption> visibleItemOptions;
             if (!itemTemplateOptions.isEmpty()) {
-                visibleItemOptions = buildVisibleItemOptionsFromTemplates(tenantId, languageKey, itemTemplateOptions);
+                visibleItemOptions = buildVisibleItemOptionsFromTemplates(
+                        tenantId, operatorWithSchema.schemaName(), languageKey, itemTemplateOptions);
             } else {
                 List<String> itemOptions = tenantConfigRepository.findItemOptions(tenantId, languageKey);
                 if (itemOptions.isEmpty()) {
@@ -853,6 +861,7 @@ public class ConversationSelectionService {
     }
 
     private List<VisibleItemOption> buildVisibleItemOptionsFromTemplates(Integer tenantId,
+                                                                         String schemaName,
                                                                          String languageKey,
                                                                          List<ConversationTemplateService.TemplateOption> itemOptions) {
         List<ConversationTemplateService.TemplateOption> channelTemplateOptions =
@@ -865,10 +874,9 @@ public class ConversationSelectionService {
         }
         boolean showChannelChange = channelCount > 1;
 
-        List<ConversationTemplateService.TemplateOption> languageOptions =
-                templatesService.resolveScreenOptions(tenantId, "LANGUAGE_SELECTION");
-        int languageCount = !languageOptions.isEmpty()
-                ? languageOptions.size()
+        List<LanguageMenuService.MenuOption> languageMenu = languageMenuService.resolveOptions(tenantId, schemaName);
+        int languageCount = !languageMenu.isEmpty()
+                ? languageMenu.size()
                 : tenantConfigRepository.findLanguageOptions(tenantId).size();
         boolean showLanguageChange = languageCount > 1;
 

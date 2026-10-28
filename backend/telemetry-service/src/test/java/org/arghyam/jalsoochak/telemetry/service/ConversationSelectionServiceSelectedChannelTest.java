@@ -52,6 +52,7 @@ class ConversationSelectionServiceSelectedChannelTest {
                 localizationService,
                 tenantConfigRepository,
                 templatesService,
+                LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
