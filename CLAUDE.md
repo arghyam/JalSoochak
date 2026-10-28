@@ -158,6 +158,10 @@ report HSMs carry only names, dates and links, and their wording is the provider
   telemetry's `ConversationLocalizationService` uses it for the chatbot's own replies
 - `whatsappLanguageId` — the language's `common_schema.language_master` id (the provider's language id);
   user-service puts it on `UPDATE_USER_LANGUAGE`, and message-service sets it as the contact's language
+- The chatbot's language menu is the `LANGUAGE_SELECTION` options for the tenant's `SUPPORTED_LANGUAGES`,
+  matched through the catalog (`LanguageMenuService`). A pump-operator upload resets each operator to its
+  first option in `user_table.language_id`, `user_language_preference` and the provider
+  (`WhatsAppPreferredLanguageService`)
 
 ### Object storage + WhatsApp provider
 

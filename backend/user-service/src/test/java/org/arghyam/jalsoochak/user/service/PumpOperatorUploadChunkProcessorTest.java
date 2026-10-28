@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserEventPublisher;
 import org.arghyam.jalsoochak.user.repository.DataVersionRepository;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
+import org.arghyam.jalsoochak.user.repository.UserLanguagePreferenceRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.UserUploadRepository;
 import org.arghyam.jalsoochak.user.service.WhatsAppPreferredLanguageService.PreferredLanguage;
@@ -44,12 +45,13 @@ class PumpOperatorUploadChunkProcessorTest {
     @Mock private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     @Mock private StaffKeycloakService staffKeycloakService;
     @Mock private DataVersionRepository dataVersionRepository;
+    @Mock private UserLanguagePreferenceRepository userLanguagePreferenceRepository;
 
     private PumpOperatorUploadChunkProcessor processor;
 
     private static final String SCHEMA = "tenant_mp";
     private static final String TENANT_CODE = "MP";
-    private static final PreferredLanguage LANGUAGE = new PreferredLanguage(1, 1);
+    private static final PreferredLanguage LANGUAGE = new PreferredLanguage(1, 1, "English");
 
     private static final TenantUserRecord ACTOR = new TenantUserRecord(
             1L, 10, "919000000001", "admin@test.com", 2L, "STATE_ADMIN", "Admin", null, 1, null);
@@ -58,7 +60,8 @@ class PumpOperatorUploadChunkProcessorTest {
     void setUp() {
         processor = new PumpOperatorUploadChunkProcessor(
                 userTenantRepository, userUploadRepository,
-                userEventPublisher, userAnalyticsEventPublisher, staffKeycloakService, dataVersionRepository);
+                userEventPublisher, userAnalyticsEventPublisher, staffKeycloakService, dataVersionRepository,
+                userLanguagePreferenceRepository);
     }
 
     private Map<String, Integer> userTypeIds() {
@@ -158,7 +161,7 @@ class PumpOperatorUploadChunkProcessorTest {
                     .thenReturn(0);
 
             // Punjabi listed first: position 1, catalog id 11.
-            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), new PreferredLanguage(1, 11), 1,
+            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), new PreferredLanguage(1, 11, "Punjabi"), 1,
                     List.of(uploadRow), schemeCache, new HashSet<>());
 
             verify(userTenantRepository).updateUserLanguageId(SCHEMA, 42L, 1);
@@ -439,6 +442,76 @@ class PumpOperatorUploadChunkProcessorTest {
             verify(userTenantRepository).createUser(eq(SCHEMA), anyString(), eq(10), anyString(),
                     anyString(), eq(3), eq("919876543219"), anyString(), eq(1L));
             verify(dataVersionRepository).bump(SCHEMA, ResourceType.STAFF_USERS);
+        }
+    }
+
+    // ── chatbot language preference ───────────────────────────────────────────
+
+    @Nested
+    @DisplayName("chatbot language preference")
+    class ChatbotLanguagePreference {
+
+        private void givenNewUser(String phone, int userTypeId, long userId) {
+            when(userTenantRepository.findUserByPhone(SCHEMA, phone)).thenReturn(Optional.empty());
+            when(userTenantRepository.findUserByEmail(eq(SCHEMA), anyString())).thenReturn(Optional.empty());
+            when(userTenantRepository.createUser(eq(SCHEMA), anyString(), eq(10), anyString(),
+                    anyString(), eq(userTypeId), eq(phone), anyString(), eq(1L))).thenReturn(userId);
+            when(userUploadRepository.insertUserSchemeMappings(eq(SCHEMA), anyList(), anyInt()))
+                    .thenReturn(new int[]{1});
+        }
+
+        @Test
+        @DisplayName("sets a new pump operator's chatbot language to the default")
+        void setsNewPumpOperatorsLanguage() {
+            givenNewUser("919876543210", 4, 42L);
+
+            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), new PreferredLanguage(1, 11, "Punjabi"), 1,
+                    List.of(row(1, "Ram", "", "", "9876543210", "pump_operator", "SS-1")),
+                    schemeCache("SS-1", 100), new HashSet<>());
+
+            verify(userLanguagePreferenceRepository).upsertAll(SCHEMA, Set.of("919876543210"), "Punjabi");
+        }
+
+        @Test
+        @DisplayName("resets an existing pump operator's chatbot language to the default")
+        void resetsExistingPumpOperatorsLanguage() {
+            TenantUserRecord existingUser = new TenantUserRecord(
+                    55L, 10, "919876543214", "po@test.com", 4L, "PUMP_OPERATOR",
+                    "Old Name", "kc-uuid-123", 1, null);
+            when(userTenantRepository.findUserByPhone(SCHEMA, "919876543214")).thenReturn(Optional.of(existingUser));
+            when(userUploadRepository.insertUserSchemeMappings(eq(SCHEMA), anyList(), anyInt()))
+                    .thenReturn(new int[]{1});
+
+            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), LANGUAGE, 1,
+                    List.of(row(1, "New", "Name", "", "9876543214", "pump_operator", "SS-1")),
+                    schemeCache("SS-1", 100), new HashSet<>());
+
+            verify(userLanguagePreferenceRepository).upsertAll(SCHEMA, Set.of("919876543214"), "English");
+        }
+
+        @Test
+        @DisplayName("leaves a section officer's chatbot language alone")
+        void leavesSectionOfficerAlone() {
+            givenNewUser("919876543219", 3, 77L);
+
+            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), LANGUAGE, 1,
+                    List.of(row(1, "Suresh", "", "", "9876543219", "section_officer", "SS-1")),
+                    schemeCache("SS-1", 100), new HashSet<>());
+
+            verify(userLanguagePreferenceRepository, never()).upsertAll(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("writes no chatbot language when the tenant has no language option")
+        void writesNothingWithoutALanguageValue() {
+            givenNewUser("919876543210", 4, 42L);
+
+            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), new PreferredLanguage(1, 1, null), 1,
+                    List.of(row(1, "Ram", "", "", "9876543210", "pump_operator", "SS-1")),
+                    schemeCache("SS-1", 100), new HashSet<>());
+
+            verify(userTenantRepository).updateUserLanguageId(SCHEMA, 42L, 1);
+            verify(userLanguagePreferenceRepository, never()).upsertAll(anyString(), any(), any());
         }
     }
 

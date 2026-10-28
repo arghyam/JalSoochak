@@ -29,7 +29,7 @@ import static org.mockito.Mockito.when;
 @DisplayName("WhatsAppPreferredLanguageService")
 class WhatsAppPreferredLanguageServiceTest {
 
-    private static final PreferredLanguage FALLBACK = new PreferredLanguage(1, 1);
+    private static final PreferredLanguage FALLBACK = new PreferredLanguage(1, 1, null);
     private static final String SCHEMA = "tenant_as";
 
     @Mock
@@ -144,7 +144,7 @@ class WhatsAppPreferredLanguageServiceTest {
                     "OPTION_2":{"order":2,"label":{"en":"English"}}"""));
             when(languageCatalogRepository.findLanguageIdByAlias("Punjabi")).thenReturn(Optional.of(11));
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(1, 11));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(1, 11, "Punjabi"));
         }
 
         @Test
@@ -155,7 +155,7 @@ class WhatsAppPreferredLanguageServiceTest {
                     "OPTION_2":{"order":1,"label":{"en":"English"}}"""));
             when(languageCatalogRepository.findLanguageIdByAlias("Hindi")).thenReturn(Optional.of(2));
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 2));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 2, "Hindi"));
         }
 
         @Test
@@ -167,7 +167,7 @@ class WhatsAppPreferredLanguageServiceTest {
                     "OPTION_3":{"order":2,"label":{"en":"Assamese"}}"""));
             when(languageCatalogRepository.findLanguageIdByAlias("Assamese")).thenReturn(Optional.of(8));
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 8));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 8, "Assamese"));
         }
 
         @Test
@@ -202,7 +202,7 @@ class WhatsAppPreferredLanguageServiceTest {
             givenSupported("Hindi", "English");
             givenCatalog();
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 2));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 2, "Hindi"));
         }
 
         @Test
@@ -212,7 +212,7 @@ class WhatsAppPreferredLanguageServiceTest {
             givenSupported("Oriya");
             givenCatalog();
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(3, 9));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(3, 9, "Odia"));
         }
 
         @Test
@@ -222,7 +222,7 @@ class WhatsAppPreferredLanguageServiceTest {
             givenSupported("Assamese", "Klingon", "Odia");
             givenCatalog();
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(3, 9));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(3, 9, "Odia"));
         }
 
         @Test
@@ -232,7 +232,7 @@ class WhatsAppPreferredLanguageServiceTest {
             givenSupported("Assamese");
             givenCatalog();
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(1, 1));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(1, 1, "English"));
         }
 
         @Test
@@ -243,7 +243,7 @@ class WhatsAppPreferredLanguageServiceTest {
                     .thenThrow(new DataAccessResourceFailureException("db down"));
             givenCatalog();
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(1, 1));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(1, 1, "English"));
         }
 
         @Test
@@ -254,7 +254,7 @@ class WhatsAppPreferredLanguageServiceTest {
             when(languageCatalogRepository.findLanguageIdByAlias(anyString()))
                     .thenThrow(new DataAccessResourceFailureException("db down"));
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(1, 1));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(1, 1, "English"));
         }
 
         @Test
@@ -267,7 +267,7 @@ class WhatsAppPreferredLanguageServiceTest {
             givenSupported("Assamese");
             givenCatalog();
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(1, 8));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(1, 8, "Assamese"));
         }
 
         @Test
@@ -279,7 +279,7 @@ class WhatsAppPreferredLanguageServiceTest {
             givenSupported("Hindi");
             givenCatalog();
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 2));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 2, "Hindi"));
         }
 
         @Test
@@ -291,7 +291,7 @@ class WhatsAppPreferredLanguageServiceTest {
             givenSupported("Assamese");
             givenCatalog();
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 8));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 8, "Assamese"));
         }
     }
 
@@ -305,7 +305,7 @@ class WhatsAppPreferredLanguageServiceTest {
             givenTemplates(options("\"OPTION_1\":{\"order\":2,\"label\":{\"en\":\"Klingon\"}}"));
             when(languageCatalogRepository.findLanguageIdByAlias("Klingon")).thenReturn(Optional.empty());
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 1));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 1, "Klingon"));
         }
 
         @Test
@@ -313,7 +313,16 @@ class WhatsAppPreferredLanguageServiceTest {
         void noEnglishLabel() {
             givenTemplates(options("\"OPTION_1\":{\"order\":2,\"label\":{\"hi\":\"हिंदी\"}}"));
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 1));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 1, "हिंदी"));
+            verifyNoInteractions(languageCatalogRepository);
+        }
+
+        @Test
+        @DisplayName("keeps the position, sends 1 and has no language value when the option has no label")
+        void noLabel() {
+            givenTemplates(options("\"OPTION_1\":{\"order\":2}"));
+
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 1, null));
             verifyNoInteractions(languageCatalogRepository);
         }
 
@@ -324,7 +333,7 @@ class WhatsAppPreferredLanguageServiceTest {
             when(languageCatalogRepository.findLanguageIdByAlias("Hindi"))
                     .thenThrow(new DataAccessResourceFailureException("db down"));
 
-            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 1));
+            assertThat(service.resolvePreferredLanguage(1, SCHEMA)).isEqualTo(new PreferredLanguage(2, 1, "Hindi"));
         }
     }
 }

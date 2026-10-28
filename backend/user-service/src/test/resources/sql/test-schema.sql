@@ -265,6 +265,17 @@ CREATE TABLE tenant_mp.language_master_table (
     CONSTRAINT uq_language_name UNIQUE (language_name)
 );
 
+-- ── V47: the chatbot's per-contact language ───────────────────────────────────
+
+CREATE TABLE tenant_mp.user_language_preference (
+    id              BIGSERIAL       PRIMARY KEY,
+    contact_id      TEXT            NOT NULL,
+    language_value  TEXT,
+    created_at      TIMESTAMP       NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP       NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_user_language_pref_contact UNIQUE (contact_id)
+);
+
 -- ── V30: per-tenant report cache + data-version tracking ──────────────────
 
 CREATE TABLE tenant_mp.reports_table (

@@ -45,7 +45,7 @@ import org.springframework.mock.web.MockMultipartFile;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class PumpOperatorUploadServiceImplTest {
 
-    private static final PreferredLanguage LANGUAGE = new PreferredLanguage(1, 1);
+    private static final PreferredLanguage LANGUAGE = new PreferredLanguage(1, 1, "English");
 
     @Mock
     private UploadAuthService uploadAuthService;

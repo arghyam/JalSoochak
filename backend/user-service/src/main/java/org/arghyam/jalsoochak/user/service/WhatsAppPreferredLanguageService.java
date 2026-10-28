@@ -27,7 +27,7 @@ import java.util.Optional;
  * through the language catalog. When no supported language has an option, or they cannot be read, the
  * default is {@code OPTION_1}, else the option with the lowest positive order.</p>
  *
- * <p>Fallback: {@code 1} for either id that cannot be resolved.</p>
+ * <p>Fallback: {@code 1} for either id that cannot be resolved, and no language value.</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -37,7 +37,7 @@ public class WhatsAppPreferredLanguageService {
     public static final String CONFIG_KEY = "WHATSAPP_MESSAGE_TEMPLATES";
     private static final int FALLBACK_LANGUAGE_ID = 1;
     private static final PreferredLanguage FALLBACK =
-            new PreferredLanguage(FALLBACK_LANGUAGE_ID, FALLBACK_LANGUAGE_ID);
+            new PreferredLanguage(FALLBACK_LANGUAGE_ID, FALLBACK_LANGUAGE_ID, null);
 
     private final TenantConfigRepository tenantConfigRepository;
     private final LanguageCatalogRepository languageCatalogRepository;
@@ -48,8 +48,10 @@ public class WhatsAppPreferredLanguageService {
      * @param languageId         the value stored in {@code user_table.language_id}: the option's order, or for
      *                           an option without a positive order, its position in the whole template list
      * @param whatsappLanguageId the language's catalog id, which the WhatsApp provider expects
+     * @param languageValue      the option's canonical label, as the chatbot stores a chosen language in
+     *                           {@code user_language_preference}; null when the tenant has no usable option
      */
-    public record PreferredLanguage(int languageId, int whatsappLanguageId) {
+    public record PreferredLanguage(int languageId, int whatsappLanguageId, String languageValue) {
     }
 
     public PreferredLanguage resolvePreferredLanguage(Integer tenantId, String schemaName) {
@@ -81,7 +83,9 @@ public class WhatsAppPreferredLanguageService {
         if (option == null) {
             return FALLBACK;
         }
-        return new PreferredLanguage(option.path("order").asInt(), resolveWhatsAppLanguageId(tenantId, option));
+        String languageValue = canonicalLabel(option);
+        return new PreferredLanguage(option.path("order").asInt(), resolveWhatsAppLanguageId(tenantId, option),
+                languageValue.isBlank() ? null : languageValue);
     }
 
     /** The {@code LANGUAGE_SELECTION} options object; null if absent. */
@@ -118,8 +122,9 @@ public class WhatsAppPreferredLanguageService {
                 JsonNode option = ordered.get(i).getValue();
                 int order = option.path("order").asInt(0);
                 int languageId = order > 0 ? order : i + 1;
-                languageCatalogRepository.findLanguageIdByAlias(canonicalLabel(option)).ifPresent(catalogId ->
-                        optionByCatalogId.putIfAbsent(catalogId, new PreferredLanguage(languageId, catalogId)));
+                String label = canonicalLabel(option);
+                languageCatalogRepository.findLanguageIdByAlias(label).ifPresent(catalogId ->
+                        optionByCatalogId.putIfAbsent(catalogId, new PreferredLanguage(languageId, catalogId, label)));
             }
 
             for (String language : supportedLanguages) {
