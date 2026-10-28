@@ -154,8 +154,11 @@ happens once per tenant per period across pods and is never retried. The jobs pu
 No notification text comes from `tenant_config_master_table`: the nudge flow and the escalation and
 report HSMs carry only names, dates and links, and their wording is the provider's approved template.
 
-- `user_table.language_id` — the language's position in the tenant's list (`language_N` → name → key);
-  telemetry's `ConversationLocalizationService` uses it for the chatbot's own replies
+- `user_table.language_id` — the chosen `LANGUAGE_SELECTION` option's `order` (for an option without a
+  positive order, its position in the options sorted by `order`), or for a tenant without template options,
+  the language's position in its `language_N` list. The chatbot reads `user_language_preference` first
+  (`OperatorContextService.resolveOperatorLanguage`) and uses `language_id`, as a `language_N` position, only
+  when the operator has no row
 - `whatsappLanguageId` — the language's `common_schema.language_master` id (the provider's language id);
   user-service puts it on `UPDATE_USER_LANGUAGE`, and message-service sets it as the contact's language
 - The chatbot's language menu is the `LANGUAGE_SELECTION` options for the tenant's `SUPPORTED_LANGUAGES`,
