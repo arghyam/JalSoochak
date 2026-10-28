@@ -28,8 +28,8 @@ import java.util.Map;
  *
  * <p>Scheduled nudges go through {@link #sendNudgeViaFlow} (a provider flow start). The plain nudge HSM
  * ({@code {{1}}} = operator name, {@code {{2}}} = date) is only used by the REST notification API.</p>
- * <p>Escalations use a document HSM template with {@code {{1}}} = the PDF's public URL
- * and {@code {{2}}} = localized body text.</p>
+ * <p>Escalations use a document HSM template: the PDF is the document header, and the body takes
+ * no parameters.</p>
  *
  * <p>Configure the WhatsApp provider's credentials and template IDs via environment variables:
  * {@code WHATSAPP_API_URL}, {@code WHATSAPP_USERNAME}, {@code WHATSAPP_PASSWORD},

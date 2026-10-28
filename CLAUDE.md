@@ -176,8 +176,9 @@ report HSMs carry only names, dates and links, and their wording is the provider
   Retried only when the start certainly did not happen (`NudgeSendOutcome`) — a retry re-sends the HSM.
 - WhatsApp template for escalation (two-step):
   1. `createMessageMedia(url, source_url)` → `mediaId`
-  2. `createAndSendMessage(templateId, mediaId, receiverId, params=[])` — the document header
-     attachment is provided via `mediaId`; the template body takes no parameters
+  2. `createAndSendMessage(input: {templateId, receiverId, isHsm: true, params: [], mediaId})` — the
+     document header attachment is provided via `mediaId`, set only when the upload returned one; the
+     template body takes no parameters
 - Required env vars: `WHATSAPP_API_URL`, `WHATSAPP_USERNAME`, `WHATSAPP_PASSWORD`,
   `WHATSAPP_NUDGE_TEMPLATE_ID`, `WHATSAPP_ESCALATION_TEMPLATE_ID`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`,
   `STORAGE_SECRET_KEY`, `STORAGE_BUCKET`, `STORAGE_PUBLIC_BASE_URL`
