@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,15 +29,19 @@ public class ConversationTemplateService {
 
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
+    private final LanguageLocaleResolver languageLocaleResolver;
     @Value("${telemetry.cache.templates.enabled:true}")
     private boolean templatesCacheEnabled = true;
     @Value("${telemetry.cache.templates.ttl-ms:120000}")
     private long templatesCacheTtlMs = 120_000L;
     private final Map<Integer, TimedCacheValue<Optional<JsonNode>>> templatesCache = new ConcurrentHashMap<>();
 
-    public ConversationTemplateService(TenantConfigRepository tenantConfigRepository, ObjectMapper objectMapper) {
+    public ConversationTemplateService(TenantConfigRepository tenantConfigRepository,
+                                       ObjectMapper objectMapper,
+                                       LanguageLocaleResolver languageLocaleResolver) {
         this.tenantConfigRepository = tenantConfigRepository;
         this.objectMapper = objectMapper;
+        this.languageLocaleResolver = languageLocaleResolver;
     }
 
     public Optional<JsonNode> loadTemplates(Integer tenantId) {
@@ -194,25 +197,18 @@ public class ConversationTemplateService {
         return Optional.empty();
     }
 
-    public static String toTemplateLanguageCode(String normalizedLanguageKey) {
-        if (normalizedLanguageKey == null) {
-            return "en";
-        }
-        String k = normalizedLanguageKey.trim().toLowerCase(Locale.ROOT);
-        if ("hindi".equals(k) || "hi".equals(k)) {
-            return "hi";
-        }
-        if ("english".equals(k) || "en".equals(k)) {
-            return "en";
-        }
-        // Most tenants today use "en"/"hi" in the JSON; default to "en".
-        return "en";
+    /** The code that keys {@code languageKey}'s copy in the templates JSON (e.g. "hindi" -> "hi"). */
+    public String toTemplateLanguageCode(String languageKey) {
+        return languageLocaleResolver.localeCodeFor(languageKey);
     }
 
     public record TemplateOption(String key, int order, Map<String, String> labelByLang) {
-        public String labelForLanguageKey(String normalizedLanguageKey) {
-            String langCode = toTemplateLanguageCode(normalizedLanguageKey);
-            String label = labelByLang.get(langCode);
+        /**
+         * The label in {@code languageCode} (see {@link ConversationTemplateService#toTemplateLanguageCode}),
+         * else English, else any non-blank translation.
+         */
+        public String labelFor(String languageCode) {
+            String label = labelByLang.get(languageCode);
             if (label == null || label.isBlank()) {
                 label = labelByLang.get("en");
             }
@@ -225,7 +221,7 @@ public class ConversationTemplateService {
         public String canonicalLabel() {
             String label = labelByLang.get("en");
             if (label == null || label.isBlank()) {
-                return labelForLanguageKey("en");
+                return labelFor("en");
             }
             return label;
         }

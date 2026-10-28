@@ -235,6 +235,7 @@ class MeterReadingConversationServiceIssueReportTest {
         );
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(templateReasons);
+        when(templatesService.toTemplateLanguageCode("english")).thenReturn("en");
         when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()

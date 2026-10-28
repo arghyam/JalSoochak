@@ -2,10 +2,8 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
-import org.arghyam.jalsoochak.telemetry.repository.LanguageCatalogRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -22,13 +20,8 @@ public class WelcomeMessageService {
     private final OperatorContextService operatorContextService;
     private final ConversationLocalizationService localizationService;
     private final TenantConfigRepository tenantConfigRepository;
+    private final LanguageLocaleResolver languageLocaleResolver;
     private static final Pattern NON_ALNUM = Pattern.compile("[^a-z0-9]+");
-
-    // Optional data-driven catalog (V36). When present it supplies locale codes for languages not in
-    // the hardcoded switch below, so a new language needs only a DB row. Non-constructor field so the
-    // Lombok @RequiredArgsConstructor signature (and its callers/tests) stay unchanged.
-    @Autowired(required = false)
-    private LanguageCatalogRepository languageCatalogRepository;
 
     public IntroResponse triggerWelcomeMessage(String phoneNumber, boolean isSingleTenant) {
         if (phoneNumber == null || phoneNumber.isBlank()) {
@@ -144,7 +137,7 @@ public class WelcomeMessageService {
     private Set<String> languageCandidates(String languageKey, String rawLanguage) {
         String norm = normalizeToken(languageKey);
         String rawNorm = normalizeToken(rawLanguage);
-        String locale = mapToLocaleCode(norm, rawNorm);
+        String locale = languageLocaleResolver.localeCodeFor(!norm.isBlank() ? norm : rawNorm);
         LinkedHashSet<String> out = new LinkedHashSet<>();
         if (!norm.isBlank()) out.add(norm);
         if (!rawNorm.isBlank()) out.add(rawNorm);
@@ -156,41 +149,6 @@ public class WelcomeMessageService {
         if (value == null) return "";
         String lower = value.trim().toLowerCase(Locale.ROOT);
         return NON_ALNUM.matcher(lower).replaceAll("_").replaceAll("^_+|_+$", "");
-    }
-
-    // Package-private for unit testing of the resolution/fallback logic.
-    String mapToLocaleCode(String normalizedKey, String normalizedRaw) {
-        String key = !normalizedKey.isBlank() ? normalizedKey : normalizedRaw;
-        if (languageCatalogRepository != null) {
-            String fromCatalog = languageCatalogRepository.findLocaleCodeByAlias(key).orElse(null);
-            if (fromCatalog != null && !fromCatalog.isBlank()) {
-                return fromCatalog;
-            }
-        }
-        return switch (key) {
-            case "english", "en" -> "en";
-            case "hindi", "hi" -> "hi";
-            case "tamil", "ta" -> "ta";
-            case "kannada", "kn" -> "kn";
-            case "malayalam", "ml" -> "ml";
-            case "telugu", "te" -> "te";
-            case "odia", "oriya", "or" -> "or";
-            case "assamese", "as", "as_in" -> "as";
-            case "gujarati", "gu" -> "gu";
-            case "bengali", "bn" -> "bn";
-            case "punjabi", "pa" -> "pa";
-            case "marathi", "mr" -> "mr";
-            case "urdu", "ur" -> "ur";
-            case "spanish", "es" -> "es";
-            case "french", "fr" -> "fr";
-            case "swahili", "sw" -> "sw";
-            case "indonesian", "id" -> "id";
-            case "kinyarwanda", "rw", "rw_rw" -> "rw";
-            case "sign_language", "isl" -> "isl";
-            case "gondi", "gon", "koitur" -> "gon";
-            case "malay", "ms" -> "ms";
-            default -> key.isBlank() ? "en" : key;
-        };
     }
 
     private String safeState(String state) {

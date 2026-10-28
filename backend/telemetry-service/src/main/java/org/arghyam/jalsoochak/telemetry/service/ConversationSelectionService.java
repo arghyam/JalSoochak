@@ -93,8 +93,9 @@ public class ConversationSelectionService {
                     templatesService.resolveScreenOptions(tenantId, "LANGUAGE_SELECTION");
             List<String> languageOptions;
             if (!languageTemplateOptions.isEmpty()) {
+                String languageCode = templatesService.toTemplateLanguageCode(languageKey);
                 languageOptions = languageTemplateOptions.stream()
-                        .map(opt -> opt.labelForLanguageKey(languageKey))
+                        .map(opt -> opt.labelFor(languageCode))
                         .toList();
             } else {
                 languageOptions = tenantConfigRepository.findLanguageOptions(tenantId);
@@ -159,7 +160,7 @@ public class ConversationSelectionService {
                 // Persist a canonical label (prefer English) so downstream normalization/sync keeps working.
                 selectedLanguage = selectedOpt.canonicalLabel();
                 selectedLanguageKey = localizationService.normalizeLanguageKey(selectedLanguage);
-                selectedLanguageDisplayLabel = selectedOpt.labelForLanguageKey(selectedLanguageKey);
+                selectedLanguageDisplayLabel = selectedOpt.labelFor(templatesService.toTemplateLanguageCode(selectedLanguageKey));
             } else {
                 List<String> languageOptions = tenantConfigRepository.findLanguageOptions(tenantId);
                 if (languageOptions.isEmpty()) {
@@ -764,8 +765,9 @@ public class ConversationSelectionService {
         }
 
         // Try display labels first.
+        String displayLanguageCode = templatesService.toTemplateLanguageCode(languageKeyForDisplay);
         for (int i = 0; i < options.size(); i++) {
-            String display = options.get(i).labelForLanguageKey(languageKeyForDisplay);
+            String display = options.get(i).labelFor(displayLanguageCode);
             if (display != null && display.equalsIgnoreCase(value)) {
                 return Optional.of(i);
             }
@@ -787,8 +789,9 @@ public class ConversationSelectionService {
             return supportedChannels;
         }
         if (!channelTemplateOptions.isEmpty()) {
+            String languageCode = templatesService.toTemplateLanguageCode(languageKey);
             return channelTemplateOptions.stream()
-                    .map(opt -> opt.labelForLanguageKey(languageKey))
+                    .map(opt -> opt.labelFor(languageCode))
                     .toList();
         }
         return tenantConfigRepository.findChannelOptions(tenantId, languageKey);
@@ -856,6 +859,7 @@ public class ConversationSelectionService {
                 : tenantConfigRepository.findLanguageOptions(tenantId).size();
         boolean showLanguageChange = languageCount > 1;
 
+        String languageCode = templatesService.toTemplateLanguageCode(languageKey);
         List<VisibleItemOption> filtered = new ArrayList<>();
         for (int i = 0; i < itemOptions.size(); i++) {
             ConversationTemplateService.TemplateOption opt = itemOptions.get(i);
@@ -866,7 +870,7 @@ public class ConversationSelectionService {
             if ("languageChange".equals(itemCode) && !showLanguageChange) {
                 continue;
             }
-            String displayLabel = opt.labelForLanguageKey(languageKey);
+            String displayLabel = opt.labelFor(languageCode);
             if ("reportIssue".equals(itemCode)) {
                 displayLabel = normalizeIssueReportLabel(displayLabel, languageKey);
             }
@@ -876,7 +880,7 @@ public class ConversationSelectionService {
             List<VisibleItemOption> fallback = new ArrayList<>();
             for (int i = 0; i < itemOptions.size(); i++) {
                 ConversationTemplateService.TemplateOption opt = itemOptions.get(i);
-                fallback.add(new VisibleItemOption(opt.labelForLanguageKey(languageKey), toItemCode(opt, itemOptions, i)));
+                fallback.add(new VisibleItemOption(opt.labelFor(languageCode), toItemCode(opt, itemOptions, i)));
             }
             return fallback;
         }

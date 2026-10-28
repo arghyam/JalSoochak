@@ -90,6 +90,8 @@ class MeterReadingConversationServicePromptTest {
         when(localizationService.resolveLanguageKeyForContact(any())).thenReturn("english");
         when(localizationService.localizeMessage(anyString(), anyString()))
                 .thenAnswer(inv -> inv.getArgument(0));
+        when(templatesService.toTemplateLanguageCode("english")).thenReturn("en");
+        when(templatesService.toTemplateLanguageCode("hindi")).thenReturn("hi");
         when(templatesService.resolveScreenOptions(anyInt(), anyString())).thenReturn(List.of());
         when(templatesService.resolveScreenReasons(anyInt(), anyString())).thenReturn(List.of());
         when(templatesService.resolveScreenPrompt(anyInt(), anyString(), anyString())).thenReturn(Optional.empty());

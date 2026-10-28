@@ -345,7 +345,8 @@ public class MeterReadingConversationService {
                     templatesService.resolveScreenReasons(tenantId, "ISSUE_REPORT");
             List<String> reasons;
             if (!templateReasons.isEmpty()) {
-                reasons = templateReasons.stream().map(r -> r.labelForLanguageKey(languageKey)).toList();
+                String languageCode = templatesService.toTemplateLanguageCode(languageKey);
+                reasons = templateReasons.stream().map(r -> r.labelFor(languageCode)).toList();
             } else {
                 reasons = tenantConfigRepository.findIssueReportReasons(tenantId, languageKey);
                 if (reasons.isEmpty()) {
@@ -426,10 +427,11 @@ public class MeterReadingConversationService {
     private Optional<String> issueReasonLabel(List<ConversationTemplateService.TemplateOption> templateReasons,
                                               Set<String> keys,
                                               String languageKey) {
+        String languageCode = templatesService.toTemplateLanguageCode(languageKey);
         return templateReasons.stream()
                 .filter(option -> option.key() != null
                         && keys.contains(normalizeIssueReportSelectedKey(option.key()).trim()))
-                .map(option -> option.labelForLanguageKey(languageKey))
+                .map(option -> option.labelFor(languageCode))
                 .filter(label -> label != null && !label.isBlank())
                 .map(String::trim)
                 .findFirst();
@@ -686,7 +688,8 @@ public class MeterReadingConversationService {
             List<String> reasons;
             List<String> selectionKeys;
             if (!templateReasons.isEmpty()) {
-                reasons = templateReasons.stream().map(r -> r.labelForLanguageKey(languageKey)).toList();
+                String languageCode = templatesService.toTemplateLanguageCode(languageKey);
+                reasons = templateReasons.stream().map(r -> r.labelFor(languageCode)).toList();
                 selectionKeys = templateReasons.stream().map(ConversationTemplateService.TemplateOption::key).toList();
             } else {
                 reasons = tenantConfigRepository.findIssueReportReasons(tenantId, languageKey);
@@ -718,7 +721,7 @@ public class MeterReadingConversationService {
                     }
                 }
                 if (matched != null) {
-                    String label = matched.labelForLanguageKey(languageKey);
+                    String label = matched.labelFor(templatesService.toTemplateLanguageCode(languageKey));
                     resolvedIssueReason = (label == null || label.isBlank()) ? matched.canonicalLabel() : label;
                     selectedKey = matched.key();
                     matchedConfiguredReason = true;

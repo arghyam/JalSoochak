@@ -87,6 +87,8 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
         when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("English");
         when(localizationService.normalizeLanguageKey(anyString())).thenReturn("english");
         when(localizationService.resolveLanguageKeyForContact(any())).thenReturn("english");
+        when(templatesService.toTemplateLanguageCode("english")).thenReturn("en");
+        when(templatesService.toTemplateLanguageCode("hindi")).thenReturn("hi");
         when(localizationService.localizeMessage(anyString(), anyString()))
                 .thenAnswer(inv -> inv.getArgument(0));
         when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))

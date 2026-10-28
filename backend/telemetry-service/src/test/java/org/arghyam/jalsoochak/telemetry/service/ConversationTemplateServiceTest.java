@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.repository.LanguageCatalogRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,7 +47,7 @@ class ConversationTemplateServiceTest {
             {
               "screens": {
                 "INTRO_MESSAGE": {
-                  "message": { "en": "Hello {name}", "hi": "नमस्ते {name}" },
+                  "message": { "en": "Hello {name}", "hi": "नमस्ते {name}", "pa": "ਸਤ ਸ੍ਰੀ ਅਕਾਲ {name}" },
                   "prompt": { "en": "Pick one" },
                   "confirmationTemplate": { "en": "Confirmed {reading}" }
                 },
@@ -73,12 +74,15 @@ class ConversationTemplateServiceTest {
 
     @Mock
     private TenantConfigRepository tenantConfigRepository;
+    @Mock
+    private LanguageCatalogRepository languageCatalogRepository;
 
     private ConversationTemplateService service;
 
     @BeforeEach
     void setUp() {
-        service = new ConversationTemplateService(tenantConfigRepository, new ObjectMapper());
+        service = new ConversationTemplateService(tenantConfigRepository, new ObjectMapper(),
+                new LanguageLocaleResolver(languageCatalogRepository));
         ReflectionTestUtils.setField(service, "templatesCacheEnabled", true);
         ReflectionTestUtils.setField(service, "templatesCacheTtlMs", 120_000L);
         when(tenantConfigRepository.findConfigValue(TENANT, ConversationTemplateService.CONFIG_KEY))
@@ -215,7 +219,13 @@ class ConversationTemplateServiceTest {
         }
 
         @Test
-        void fallsBackToEnglishForAnUnmappedLanguage() {
+        void resolvesALanguageBeyondHindiAndEnglish() {
+            assertThat(service.resolveScreenMessage(TENANT, "INTRO_MESSAGE", "punjabi"))
+                    .contains("ਸਤ ਸ੍ਰੀ ਅਕਾਲ {name}");
+        }
+
+        @Test
+        void fallsBackToEnglishWhenTheLanguageHasNoTranslation() {
             assertThat(service.resolveScreenMessage(TENANT, "INTRO_MESSAGE", "assamese"))
                     .contains("Hello {name}");
         }
@@ -313,25 +323,24 @@ class ConversationTemplateServiceTest {
         }
 
         @Test
-        void labelForLanguageKeyPrefersTheRequestedLanguage() {
-            assertThat(option(Map.of("en", "Submit", "hi", "भेजें")).labelForLanguageKey("hindi"))
-                    .isEqualTo("भेजें");
+        void labelForPrefersTheRequestedLanguage() {
+            assertThat(option(Map.of("en", "Submit", "hi", "भेजें")).labelFor("hi")).isEqualTo("भेजें");
         }
 
         @Test
-        void labelForLanguageKeyFallsBackToEnglish() {
-            assertThat(option(Map.of("en", "Submit")).labelForLanguageKey("hindi")).isEqualTo("Submit");
+        void labelForFallsBackToEnglish() {
+            assertThat(option(Map.of("en", "Submit")).labelFor("hi")).isEqualTo("Submit");
         }
 
         @Test
-        void labelForLanguageKeyFallsBackToAnyNonBlankTranslation() {
-            assertThat(option(Map.of("as", "জমা")).labelForLanguageKey("hindi")).isEqualTo("জমা");
+        void labelForFallsBackToAnyNonBlankTranslation() {
+            assertThat(option(Map.of("as", "জমা")).labelFor("hi")).isEqualTo("জমা");
         }
 
         @Test
-        void labelForLanguageKeyIsNullWhenNoTranslationIsUsable() {
-            assertThat(option(Map.of()).labelForLanguageKey("hindi")).isNull();
-            assertThat(option(Map.of("en", "   ")).labelForLanguageKey("hindi")).isNull();
+        void labelForIsNullWhenNoTranslationIsUsable() {
+            assertThat(option(Map.of()).labelFor("hi")).isNull();
+            assertThat(option(Map.of("en", "   ")).labelFor("hi")).isNull();
         }
 
         @Test
@@ -374,16 +383,24 @@ class ConversationTemplateServiceTest {
                 "english,en",
                 "en,en",
                 "ENGLISH,en",
-                "assamese,en",
+                "assamese,as",
+                "punjabi,pa",
                 "'',en"
         })
         void mapsNormalizedLanguageKeysToTemplateCodes(String languageKey, String expected) {
-            assertThat(ConversationTemplateService.toTemplateLanguageCode(languageKey)).isEqualTo(expected);
+            assertThat(service.toTemplateLanguageCode(languageKey)).isEqualTo(expected);
         }
 
         @Test
         void defaultsToEnglishForANullKey() {
-            assertThat(ConversationTemplateService.toTemplateLanguageCode(null)).isEqualTo("en");
+            assertThat(service.toTemplateLanguageCode(null)).isEqualTo("en");
+        }
+
+        @Test
+        void takesTheCodeFromTheLanguageCatalog() {
+            when(languageCatalogRepository.findLocaleCodeByAlias("klingon")).thenReturn(Optional.of("tlh"));
+
+            assertThat(service.toTemplateLanguageCode("klingon")).isEqualTo("tlh");
         }
     }
 }
