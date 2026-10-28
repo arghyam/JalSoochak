@@ -236,6 +236,19 @@ CREATE TABLE common_schema.tenant_config_master_table (
     deleted_by   INTEGER
 );
 
+-- ── V38: language catalog ─────────────────────────────────────────────────────
+
+CREATE TABLE common_schema.language_master (
+    language_id    INTEGER     NOT NULL PRIMARY KEY,
+    canonical_name VARCHAR(64) NOT NULL,
+    locale_code    VARCHAR(16) NOT NULL
+);
+
+CREATE TABLE common_schema.language_alias (
+    alias       VARCHAR(64) NOT NULL PRIMARY KEY,
+    language_id INTEGER     NOT NULL REFERENCES common_schema.language_master (language_id)
+);
+
 -- ── V30: per-tenant report cache + data-version tracking ──────────────────
 
 CREATE TABLE tenant_mp.reports_table (

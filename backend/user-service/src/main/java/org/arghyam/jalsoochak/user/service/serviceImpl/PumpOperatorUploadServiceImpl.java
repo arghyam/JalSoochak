@@ -22,6 +22,7 @@ import org.arghyam.jalsoochak.user.repository.UserUploadRepository;
 import org.arghyam.jalsoochak.user.service.PumpOperatorUploadService;
 import org.arghyam.jalsoochak.user.service.PumpOperatorUploadChunkProcessor;
 import org.arghyam.jalsoochak.user.service.WhatsAppPreferredLanguageService;
+import org.arghyam.jalsoochak.user.service.WhatsAppPreferredLanguageService.PreferredLanguage;
 import org.arghyam.jalsoochak.user.util.PhoneNumberUtil;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -104,7 +105,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
 
         TenantUserRecord actor = userTenantRepository.findUserById(schemaName, (long) actorUserId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found for token"));
-        int preferredLanguageId = preferredLanguageService.resolvePreferredLanguageId(actor.tenantId());
+        PreferredLanguage preferredLanguage = preferredLanguageService.resolvePreferredLanguage(actor.tenantId());
 
         Map<String, Integer> userTypeIds = resolveUserTypeIds();
 
@@ -112,7 +113,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
         Map<String, Integer> schemeIdCache = new HashMap<>();
 
         int totalRows = validateUpload(schemaName, file, extension, schemeIdCache, allowDuplicatePhonesInFile);
-        ProcessResult processed = processUpload(schemaName, tenantCode, actor, actorUserId, userTypeIds, preferredLanguageId, file, extension, schemeIdCache);
+        ProcessResult processed = processUpload(schemaName, tenantCode, actor, actorUserId, userTypeIds, preferredLanguage, file, extension, schemeIdCache);
         if (processed.uploadedRows() == 0 && processed.unchangedRows() == totalRows) {
             throw new BadRequestException("Duplicate upload", List.of(
                     err(0, "file", "No changes detected; uploaded file matches existing records")
@@ -181,14 +182,14 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             TenantUserRecord actor,
             int actorUserId,
             Map<String, Integer> userTypeIds,
-            int preferredLanguageId,
+            PreferredLanguage preferredLanguage,
             MultipartFile file,
             String extension,
             Map<String, Integer> schemeIdCache
     ) {
         return "csv".equals(extension)
-                ? processCsv(schemaName, tenantCode, actor, actorUserId, userTypeIds, preferredLanguageId, file, schemeIdCache)
-                : processXlsx(schemaName, tenantCode, actor, actorUserId, userTypeIds, preferredLanguageId, file, schemeIdCache);
+                ? processCsv(schemaName, tenantCode, actor, actorUserId, userTypeIds, preferredLanguage, file, schemeIdCache)
+                : processXlsx(schemaName, tenantCode, actor, actorUserId, userTypeIds, preferredLanguage, file, schemeIdCache);
     }
 
     private int validateCsv(
@@ -298,7 +299,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             TenantUserRecord actor,
             int actorUserId,
             Map<String, Integer> userTypeIds,
-            int preferredLanguageId,
+            PreferredLanguage preferredLanguage,
             MultipartFile file,
             Map<String, Integer> schemeIdCache
     ) {
@@ -328,7 +329,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 }
                 chunk.add(toUploadRow((int) record.getRecordNumber(), map));
                 if (chunk.size() >= CHUNK_SIZE) {
-                    var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache, mappingsClearedInUpload);
+                    var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguage, actorUserId, chunk, schemeIdCache, mappingsClearedInUpload);
                     uploaded += res.uploadedRows();
                     skipped += res.skippedRows();
                     unchanged += res.unchangedRows();
@@ -337,7 +338,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             }
 
             if (!chunk.isEmpty()) {
-                var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache, mappingsClearedInUpload);
+                var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguage, actorUserId, chunk, schemeIdCache, mappingsClearedInUpload);
                 uploaded += res.uploadedRows();
                 skipped += res.skippedRows();
                 unchanged += res.unchangedRows();
@@ -359,7 +360,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             TenantUserRecord actor,
             int actorUserId,
             Map<String, Integer> userTypeIds,
-            int preferredLanguageId,
+            PreferredLanguage preferredLanguage,
             MultipartFile file,
             Map<String, Integer> schemeIdCache
     ) {
@@ -395,7 +396,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 }
                 chunk.add(toUploadRow(i + 1, map));
                 if (chunk.size() >= CHUNK_SIZE) {
-                    var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache, mappingsClearedInUpload);
+                    var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguage, actorUserId, chunk, schemeIdCache, mappingsClearedInUpload);
                     uploaded += res.uploadedRows();
                     skipped += res.skippedRows();
                     unchanged += res.unchangedRows();
@@ -403,7 +404,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 }
             }
             if (!chunk.isEmpty()) {
-                var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache, mappingsClearedInUpload);
+                var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguage, actorUserId, chunk, schemeIdCache, mappingsClearedInUpload);
                 uploaded += res.uploadedRows();
                 skipped += res.skippedRows();
                 unchanged += res.unchangedRows();

@@ -11,6 +11,7 @@ import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserSchemeMappingCreateRow;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.UserUploadRepository;
+import org.arghyam.jalsoochak.user.service.WhatsAppPreferredLanguageService.PreferredLanguage;
 import org.arghyam.jalsoochak.user.util.PhoneNumberUtil;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -66,7 +67,7 @@ public class PumpOperatorUploadChunkProcessor {
             String tenantCode,
             TenantUserRecord actor,
             Map<String, Integer> userTypeIds,
-            int preferredLanguageId,
+            PreferredLanguage preferredLanguage,
             int actorUserId,
             List<UploadRow> rows,
             Map<String, Integer> schemeIdCache,
@@ -125,7 +126,7 @@ public class PumpOperatorUploadChunkProcessor {
                         skipped++;
                         continue;
                     }
-                    userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguageId);
+                    userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguage.languageId());
                     userUuid = UUID.fromString(newUuid);
                     userEmail = newEmail;
                 } else {
@@ -143,7 +144,7 @@ public class PumpOperatorUploadChunkProcessor {
                         staffKeycloakService.revokeKeycloakAccount(user, schemaName, actor.id());
                     }
                     userTenantRepository.updateUserProfile(schemaName, userId, title, normalizedPhone);
-                    userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguageId);
+                    userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguage.languageId());
                     userUuid = null;
                     if (user.keycloakUuid() != null && !user.keycloakUuid().isBlank()) {
                         try {
@@ -229,7 +230,7 @@ public class PumpOperatorUploadChunkProcessor {
             userEventPublisher.publishPumpOperatorOnboardedAfterCommit(
                     tenantCode,
                     actor.tenantId(),
-                    String.valueOf(preferredLanguageId),
+                    String.valueOf(preferredLanguage.whatsappLanguageId()),
                     new ArrayList<>(phonesToNotify)
             );
         }
