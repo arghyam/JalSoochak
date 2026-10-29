@@ -50,11 +50,13 @@ class ConversationSelectionServiceSchemeSelectionTest {
                 localizationService,
                 tenantConfigRepository,
                 templatesService,
+                LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
                 whatsAppContactDirectory,
-                new ObjectMapper()
+                new ObjectMapper(),
+                ConversationMessageResolverFixtures.real()
         );
 
         String contactId = "919999999999";
@@ -79,11 +81,13 @@ class ConversationSelectionServiceSchemeSelectionTest {
                 localizationService,
                 tenantConfigRepository,
                 templatesService,
+                LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
                 whatsAppContactDirectory,
-                new ObjectMapper()
+                new ObjectMapper(),
+                ConversationMessageResolverFixtures.real()
         );
 
         String contactId = "919999999999";

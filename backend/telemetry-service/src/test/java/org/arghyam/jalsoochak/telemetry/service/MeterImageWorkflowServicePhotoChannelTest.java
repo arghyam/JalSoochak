@@ -60,7 +60,7 @@ class MeterImageWorkflowServicePhotoChannelTest {
                 bfmReadingService,
                 telemetryTenantRepository,
                 operatorContextService,
-                new ConversationLocalizationService(operatorContextService),
+                new ConversationLocalizationService(operatorContextService, ConversationMessageResolverFixtures.real()),
                 tenantConfigRepository,
                 userChannelPreferenceRepository,
                 new ObjectMapper(),

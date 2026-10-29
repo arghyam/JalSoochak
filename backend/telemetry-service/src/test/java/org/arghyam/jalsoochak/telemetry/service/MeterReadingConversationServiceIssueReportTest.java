@@ -56,6 +56,9 @@ class MeterReadingConversationServiceIssueReportTest {
     @Mock
     private ConversationSchemeResolver conversationSchemeResolver;
 
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
+
     @InjectMocks
     private MeterReadingConversationService service;
 
@@ -81,6 +84,7 @@ class MeterReadingConversationServiceIssueReportTest {
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("meterNotWorking", resp.getSelected());
+        assertEquals("Issue reported. Thank you.", resp.getMessage());
 
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 eq("tenant_test"),
@@ -234,6 +238,7 @@ class MeterReadingConversationServiceIssueReportTest {
         );
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(templateReasons);
+        when(templatesService.toTemplateLanguageCode("english")).thenReturn("en");
         when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
 
         IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
@@ -337,6 +342,7 @@ class MeterReadingConversationServiceIssueReportTest {
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("others", resp.getSelected());
+        assertEquals("Issue reported. Thank you.", resp.getMessage());
 
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 eq("tenant_test"),
@@ -394,6 +400,7 @@ class MeterReadingConversationServiceIssueReportTest {
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("noWaterSupplied", resp.getSelected());
+        assertEquals("Issue reported. Thank you.", resp.getMessage());
 
         verify(telemetryEventPublisher).publishEscalationCreated(
                 eq(1),
@@ -427,6 +434,130 @@ class MeterReadingConversationServiceIssueReportTest {
         );
     }
 
+    // ── Built-in Hindi copy: the reason stored and the confirmation shown when nothing is configured ──
+
+    private TelemetryOperatorWithSchema stubHindiOperator() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("hi");
+        when(localizationService.normalizeLanguageKey("hi")).thenReturn("hindi");
+        when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
+        return operatorWithSchema;
+    }
+
+    @Test
+    void issueReportSubmitStoresTheBuiltInHindiReasonAndConfirmsInHindi() {
+        stubHindiOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "hindi")).thenReturn(List.of());
+
+        IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("2")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        assertEquals("meterNotWorking", resp.getSelected());
+        assertEquals("समस्या रिपोर्ट हो गई है। धन्यवाद।", resp.getMessage());
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+                eq("tenant_test"),
+                argThat(anomaly -> "मीटर काम नहीं कर रहा".equals(anomaly.reason()))
+        );
+    }
+
+    @Test
+    void telemetryIssueReportSubmitStoresTheBuiltInHindiReasonAndConfirmsInHindi() {
+        stubHindiOperator();
+        when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "hindi")).thenReturn(Optional.empty());
+
+        IntroResponse resp = service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("4")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        assertEquals("noWaterSupplied", resp.getSelected());
+        assertEquals("समस्या रिपोर्ट हो गई है। धन्यवाद।", resp.getMessage());
+        verify(telemetryTenantRepository).upsertPendingIssueReportRecord(
+                eq("tenant_test"),
+                eq(10L),
+                eq(1L),
+                any(),
+                eq("पानी की आपूर्ति नहीं"), any()
+        );
+    }
+
+    @Test
+    void issueReportSubmitAsksForANumberInRangeInHindi() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("hi");
+        when(localizationService.normalizeLanguageKey("hi")).thenReturn("hindi");
+
+        service.issueReportSubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("7")
+                .build());
+
+        verify(messageResolver).get(ConversationMessageCode.CHOOSE_NUMBER_IN_RANGE, "hindi", 6);
+    }
+
+    @Test
+    void issueReportSubmitAsksTheOperatorToWaitInHindi() {
+        stubHindiOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "hindi")).thenReturn(List.of());
+
+        IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("1")
+                .build());
+
+        assertEquals("meterReplaced", resp.getSelected());
+        verify(messageResolver).get(ConversationMessageCode.PLEASE_WAIT, "hindi");
+    }
+
+    @Test
+    void telemetryIssueReportSubmitRejectsAnOutOfRangeChoiceInHindi() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("hi");
+        when(localizationService.normalizeLanguageKey("hi")).thenReturn("hindi");
+        when(tenantConfigRepository.findConfigValue(1, "SUPPLY_OUTAGE_REASONS")).thenReturn(
+                Optional.of("{\"reasons\":[{\"id\":\"r1\",\"name\":\"No water\",\"sequenceOrder\":1}]}")
+        );
+
+        IntroResponse resp = service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("9")
+                .build());
+
+        assertEquals(false, resp.isSuccess());
+        verify(messageResolver).get(ConversationMessageCode.INVALID_CHOICE, "hindi");
+    }
+
+    @Test
+    void othersSubmittedConfirmsInHindi() {
+        stubHindiOperator();
+
+        IntroResponse resp = service.othersSubmittedMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("pipe leakage")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        assertEquals("समस्या रिपोर्ट हो गई है। धन्यवाद।", resp.getMessage());
+    }
+
     // ── Free-text character allowlist (CWE-20 remediation) ──────────────────────────────────────
     //
     // ISSUE_REASON_ALLOWED guards only input that matched no configured reason. The rejection is a
@@ -444,7 +575,7 @@ class MeterReadingConversationServiceIssueReportTest {
         return operatorWithSchema;
     }
 
-    private void stubLocalisedRejection(String defaultMessage) {
+    private void stubLocalisedRejection(ConversationMessageCode defaultMessage) {
         when(localizationService.resolveLanguageKeyForContact("919999999999")).thenReturn("english");
         when(localizationService.resolveUserFacingErrorMessage(
                 org.mockito.ArgumentMatchers.any(),
@@ -465,7 +596,7 @@ class MeterReadingConversationServiceIssueReportTest {
         stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        stubLocalisedRejection("Issue report could not be saved.");
+        stubLocalisedRejection(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED);
 
         IntroResponse resp = submitFreeText("<script>alert(1)</script>");
 
@@ -487,7 +618,7 @@ class MeterReadingConversationServiceIssueReportTest {
         stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        stubLocalisedRejection("Issue report could not be saved.");
+        stubLocalisedRejection(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED);
 
         IntroResponse resp = submitFreeText("Motor burnt out, 3 days");
 
@@ -525,7 +656,7 @@ class MeterReadingConversationServiceIssueReportTest {
         stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        stubLocalisedRejection("Issue report could not be saved.");
+        stubLocalisedRejection(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED);
 
         IntroResponse resp = submitFreeText("water‮reversed​hidden");
 
@@ -541,7 +672,7 @@ class MeterReadingConversationServiceIssueReportTest {
         stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        stubLocalisedRejection("Issue report could not be saved.");
+        stubLocalisedRejection(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED);
 
         // U+093E DEVANAGARI VOWEL SIGN AA (Mc) and U+094D VIRAMA (Mn), with no consonant to attach
         // to. Written as escapes because a bare mark renders onto its neighbour in a diff.
@@ -560,7 +691,7 @@ class MeterReadingConversationServiceIssueReportTest {
         stubOperator();
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        stubLocalisedRejection("Issue report could not be saved.");
+        stubLocalisedRejection(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED);
 
         IntroResponse resp = submitFreeText("water \u094Dhidden");
 
@@ -607,7 +738,7 @@ class MeterReadingConversationServiceIssueReportTest {
         // to fix the label, so the operator sees the caller's generic reply.
         when(localizationService.resolveUserFacingErrorMessage(
                 org.mockito.ArgumentMatchers.any(),
-                eq("Issue report could not be saved."),
+                eq(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED),
                 eq("english")
         )).thenReturn("Issue report could not be saved.");
 
@@ -662,7 +793,7 @@ class MeterReadingConversationServiceIssueReportTest {
         when(localizationService.resolveLanguageKeyForContact("919999999999")).thenReturn("english");
         when(localizationService.resolveUserFacingErrorMessage(
                 org.mockito.ArgumentMatchers.any(),
-                eq("Issue report could not be saved."),
+                eq(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED),
                 eq("english")
         )).thenReturn("Issue report could not be saved.");
 
@@ -763,7 +894,7 @@ class MeterReadingConversationServiceIssueReportTest {
     @Test
     void telemetryIssueReportSubmitRejectsHtmlTagsInFreeTextAndStoresNothing() {
         stubOperator();
-        stubLocalisedRejection("Issue report could not be saved.");
+        stubLocalisedRejection(ConversationMessageCode.ISSUE_REPORT_NOT_SAVED);
 
         IntroResponse resp = service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")

@@ -151,12 +151,20 @@ happens once per tenant per period across pods and is never retried. The jobs pu
 
 ### Language resolution
 
-Message text is fetched from `common_schema.tenant_config_master_table` using the pattern from
-`telemetry-service/ConversationLocalizationService`:
+No notification text comes from `tenant_config_master_table`: the nudge flow and the escalation and
+report HSMs carry only names, dates and links, and their wording is the provider's approved template.
 
-- `user_table.language_id` (int) → `language_N` config key → language name → normalized key
-- Template keys: `nudge_message_{langKey}`, `escalation_message_{langKey}` (fallback: `_english` → generic)
-- Add per-tenant rows in `tenant_config_master_table` with these keys before running.
+- `user_table.language_id` — the chosen `LANGUAGE_SELECTION` option's `order` (for an option without a
+  positive order, its position in the options sorted by `order`), or for a tenant without template options,
+  the language's position in its `language_N` list. The chatbot reads `user_language_preference` first
+  (`OperatorContextService.resolveOperatorLanguage`) and uses `language_id`, as a `language_N` position, only
+  when the operator has no row
+- `whatsappLanguageId` — the language's `common_schema.language_master` id (the provider's language id);
+  user-service puts it on `UPDATE_USER_LANGUAGE`, and message-service sets it as the contact's language
+- The chatbot's language menu is the `LANGUAGE_SELECTION` options for the tenant's `SUPPORTED_LANGUAGES`,
+  matched through the catalog (`LanguageMenuService`). A pump-operator upload resets each operator to its
+  first option in `user_table.language_id`, `user_language_preference` and the provider
+  (`WhatsAppPreferredLanguageService`)
 
 ### Object storage + WhatsApp provider
 
@@ -168,8 +176,9 @@ Message text is fetched from `common_schema.tenant_config_master_table` using th
   Retried only when the start certainly did not happen (`NudgeSendOutcome`) — a retry re-sends the HSM.
 - WhatsApp template for escalation (two-step):
   1. `createMessageMedia(url, source_url)` → `mediaId`
-  2. `createAndSendMessage(templateId, mediaId, receiverId, parameters=[bodyText])` — the document
-     header attachment is provided via `mediaId`; the body parameter is the localized text
+  2. `createAndSendMessage(input: {templateId, receiverId, isHsm: true, params: [], mediaId})` — the
+     document header attachment is provided via `mediaId`, set only when the upload returned one; the
+     template body takes no parameters
 - Required env vars: `WHATSAPP_API_URL`, `WHATSAPP_USERNAME`, `WHATSAPP_PASSWORD`,
   `WHATSAPP_NUDGE_TEMPLATE_ID`, `WHATSAPP_ESCALATION_TEMPLATE_ID`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`,
   `STORAGE_SECRET_KEY`, `STORAGE_BUCKET`, `STORAGE_PUBLIC_BASE_URL`

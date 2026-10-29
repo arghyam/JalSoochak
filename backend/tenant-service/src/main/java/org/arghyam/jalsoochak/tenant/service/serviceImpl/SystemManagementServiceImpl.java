@@ -76,7 +76,7 @@ public class SystemManagementServiceImpl implements SystemManagementService {
 
         for (ConfigDTO cfg : configs) {
             // The system tenant's rows share tenant_config_master_table with the runtime keys other
-            // services read directly (ocr_*, language_N, nudge_message_*, channel_*), so a key outside
+            // services read directly (ocr_*, language_N, channel_*), so a key outside
             // SystemConfigKeyEnum is expected data and is skipped — it must not fail the whole request.
             SystemConfigKeyEnum key = parseUiConfigKey(cfg.getConfigKey());
             if (key == null || !effectiveKeys.contains(key)) {

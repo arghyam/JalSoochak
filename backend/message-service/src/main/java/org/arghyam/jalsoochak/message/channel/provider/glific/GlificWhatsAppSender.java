@@ -28,7 +28,7 @@ import java.util.Map;
  * <ol>
  *   <li>Upload the stored PDF's public URL via {@code createMessageMedia} → receive {@code mediaId}.</li>
  *   <li>Send via {@code createAndSendMessage} with {@code mediaId} (document header)
- *       and {@code parameters[0]} = localized body text.</li>
+ *       and an empty {@code params} list — the template body takes no parameters.</li>
  * </ol>
  * </p>
  * <p>Daily report: either shape, chosen by {@code notifications.daily-report.delivery-mode} — see
@@ -735,7 +735,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * <ol>
      *   <li>Upload {@code documentUrl} via {@code createMessageMedia} → {@code mediaId}</li>
      *   <li>Send {@code createAndSendMessage} with the {@code mediaId} as the document
-     *       header attachment and {@code bodyText} as the body template parameter.</li>
+     *       header attachment and an empty {@code params} list — the template body takes no
+     *       parameters.</li>
      * </ol>
      *
      * @param contactId   Glific contact ID of the officer

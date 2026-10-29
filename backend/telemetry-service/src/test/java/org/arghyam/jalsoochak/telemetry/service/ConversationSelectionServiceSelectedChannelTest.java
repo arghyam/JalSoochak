@@ -52,11 +52,13 @@ class ConversationSelectionServiceSelectedChannelTest {
                 localizationService,
                 tenantConfigRepository,
                 templatesService,
+                LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
                 whatsAppContactDirectory,
-                new ObjectMapper()
+                new ObjectMapper(),
+                ConversationMessageResolverFixtures.real()
         );
 
         String contactId = "917815816856";

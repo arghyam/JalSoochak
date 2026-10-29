@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -48,6 +49,8 @@ class ReadingRejectionServiceTest {
     private BfmReadingService bfmReadingService;
     @Mock
     private ConversationLocalizationService localizationService;
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
 
     @InjectMocks
     private ReadingRejectionService service;
@@ -59,8 +62,6 @@ class ReadingRejectionServiceTest {
         when(operatorContextService.resolveOperatorWithSchema(PHONE)).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, TENANT)).thenReturn("English");
         when(localizationService.normalizeLanguageKey(anyString())).thenReturn("english");
-        when(localizationService.localizeMessage(anyString(), anyString()))
-                .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     private void latestReadingOn(LocalDate date) {
@@ -82,7 +83,7 @@ class ReadingRejectionServiceTest {
         IntroResponse response = reject();
 
         assertThat(response.isSuccess()).isTrue();
-        assertThat(response.getMessage()).isEqualTo(ReadingRejectionService.REJECTED_MESSAGE);
+        assertThat(response.getMessage()).isEqualTo("Please enter the correct meter reading.");
         verify(bfmReadingService).resetLatestConfirmedReadingByPhone(PHONE, TENANT, ReportingChannel.WHATSAPP);
     }
 
@@ -94,7 +95,7 @@ class ReadingRejectionServiceTest {
         IntroResponse response = reject();
 
         assertThat(response.isSuccess()).isFalse();
-        assertThat(response.getMessage()).isEqualTo(ReadingRejectionService.NOTHING_TO_REJECT_MESSAGE);
+        assertThat(response.getMessage()).isEqualTo("No reading from today was found to correct. Please send a new meter image.");
         verify(bfmReadingService, never()).resetLatestConfirmedReadingByPhone(anyString(), any(), any());
     }
 
@@ -107,7 +108,7 @@ class ReadingRejectionServiceTest {
         IntroResponse response = reject();
 
         assertThat(response.isSuccess()).isFalse();
-        assertThat(response.getMessage()).isEqualTo(ReadingRejectionService.FAILURE_MESSAGE);
+        assertThat(response.getMessage()).isEqualTo("The reading could not be corrected. Please try again.");
     }
 
     @Test

@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.repository.LanguageCatalogRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,12 +23,15 @@ class ConversationTemplateServiceCacheTest {
 
     @Mock
     private TenantConfigRepository tenantConfigRepository;
+    @Mock
+    private LanguageCatalogRepository languageCatalogRepository;
 
     private ConversationTemplateService service;
 
     @BeforeEach
     void setUp() {
-        service = new ConversationTemplateService(tenantConfigRepository, new ObjectMapper());
+        service = new ConversationTemplateService(tenantConfigRepository, new ObjectMapper(),
+                new LanguageLocaleResolver(languageCatalogRepository));
         ReflectionTestUtils.setField(service, "templatesCacheEnabled", true);
         ReflectionTestUtils.setField(service, "templatesCacheTtlMs", 120_000L);
     }

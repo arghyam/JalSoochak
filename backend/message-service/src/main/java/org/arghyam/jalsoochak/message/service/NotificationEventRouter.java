@@ -1033,7 +1033,6 @@ public class NotificationEventRouter {
         String officerUserType = root.path("officerUserType").asText("");
         int level = root.path("escalationLevel").asInt(1);
         int tenantId = root.path("tenantId").asInt(0);
-        int officerLanguageId = root.path("officerLanguageId").asInt(0);
         String tenantSchema = root.path("tenantSchema").asText("");
         long officerId = root.path("officerId").asLong(0);
         long storedId = root.path("officerWhatsappConnectionId").asLong(0);

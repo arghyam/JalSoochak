@@ -50,11 +50,13 @@ class ConversationSelectionServiceSelectedItemTest {
                 localizationService,
                 tenantConfigRepository,
                 templatesService,
+                LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
                 whatsAppContactDirectory,
-                new ObjectMapper()
+                new ObjectMapper(),
+                ConversationMessageResolverFixtures.real()
         );
 
         String contactId = "919999999999";
@@ -107,11 +109,13 @@ class ConversationSelectionServiceSelectedItemTest {
                 localizationService,
                 tenantConfigRepository,
                 templatesService,
+                LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
                 whatsAppContactDirectory,
-                new ObjectMapper()
+                new ObjectMapper(),
+                ConversationMessageResolverFixtures.real()
         );
 
         String contactId = "919999999999";
@@ -189,7 +193,8 @@ class ConversationSelectionServiceSelectedItemTest {
     void selectedItemStillRejectsAnUnknownSelection() {
         ConversationSelectionService service = stubbedServiceWithMenu(false);
         org.mockito.Mockito.lenient().when(localizationService.resolveUserFacingErrorMessage(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
                 .thenReturn("Item selection could not be saved.");
 
         SelectionResponse resp = service.selectedItemMessage(
@@ -202,8 +207,9 @@ class ConversationSelectionServiceSelectedItemTest {
     private ConversationSelectionService stubbedServiceWithMenu(boolean confirmationStubs) {
         ConversationSelectionService service = new ConversationSelectionService(
                 operatorContextService, localizationService, tenantConfigRepository, templatesService,
+                LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository, userChannelPreferenceRepository, userLanguagePreferenceRepository,
-                whatsAppContactDirectory, new ObjectMapper()
+                whatsAppContactDirectory, new ObjectMapper(), ConversationMessageResolverFixtures.real()
         );
         Integer tenantId = 1;
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(

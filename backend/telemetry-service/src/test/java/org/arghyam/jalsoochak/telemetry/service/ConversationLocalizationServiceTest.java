@@ -13,6 +13,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -26,8 +27,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 /**
- * Language-key normalisation and the English→Hindi message table used to localise every operator
- * reply. The tables are matched on substrings of the English source text, so these tests pin both
+ * Language-key normalisation, the error allowlist, and the recognition of English written outside
+ * the chatbot. Recognition matches substrings of the English source text, so these tests pin both
  * the mapping and the "leave anything unrecognised untouched" contract.
  */
 @ExtendWith(MockitoExtension.class)
@@ -37,9 +38,14 @@ class ConversationLocalizationServiceTest {
 
     private static final String CONTACT = "919999900001";
     private static final String HINDI = "hindi";
+    private static final ConversationMessageCode FALLBACK = ConversationMessageCode.READING_NOT_PROCESSED;
+    private static final String FALLBACK_TEXT = "Reading could not be processed.";
 
     @Mock
     private OperatorContextService operatorContextService;
+
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
 
     @InjectMocks
     private ConversationLocalizationService service;
@@ -123,90 +129,178 @@ class ConversationLocalizationServiceTest {
 
         @Test
         void usesTheFallbackForAMissingException() {
-            assertThat(service.resolveUserFacingErrorMessage(null, "Fallback.", "english"))
-                    .isEqualTo("Fallback.");
+            assertThat(service.resolveUserFacingErrorMessage(null, FALLBACK, "english"))
+                    .isEqualTo(FALLBACK_TEXT);
         }
 
         @Test
         void usesTheFallbackWhenTheExceptionHasNoMessage() {
-            assertThat(service.resolveUserFacingErrorMessage(new IllegalStateException(), "Fallback.", "english"))
-                    .isEqualTo("Fallback.");
-            assertThat(service.resolveUserFacingErrorMessage(new IllegalStateException("  "), "Fallback.", "english"))
-                    .isEqualTo("Fallback.");
+            assertThat(service.resolveUserFacingErrorMessage(new IllegalStateException(), FALLBACK, "english"))
+                    .isEqualTo(FALLBACK_TEXT);
+            assertThat(service.resolveUserFacingErrorMessage(new IllegalStateException("  "), FALLBACK, "english"))
+                    .isEqualTo(FALLBACK_TEXT);
         }
 
+        /** Pins the operator's reply for every allowlist rule, in English and in Hindi. */
         @ParameterizedTest(name = "{0} -> {1}")
         @MethodSource("technicalToUserFacing")
-        void rewritesTechnicalMessagesIntoOperatorFacingCopy(String technical, String expected) {
+        void rewritesTechnicalMessagesIntoOperatorFacingCopy(String technical, String english, String hindi) {
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException(technical), "Fallback.", "english"))
-                    .isEqualTo(expected);
+                    new IllegalStateException(technical), FALLBACK, "english"))
+                    .isEqualTo(english);
+            assertThat(service.resolveUserFacingErrorMessage(
+                    new IllegalStateException(technical), FALLBACK, HINDI))
+                    .isEqualTo(hindi);
         }
 
         static Stream<Arguments> technicalToUserFacing() {
+            String location = "Location could not be saved. Please share a valid location.";
+            String locationHindi = "लोकेशन सेव नहीं हो सकी। कृपया सही लोकेशन भेजें।";
+            String operator = "Operator could not be resolved for this contact.";
+            String operatorHindi = "इस संपर्क के लिए ऑपरेटर नहीं मिला।";
+            String contact = "Contact could not be identified. Please restart the process.";
+            String contactHindi = "संपर्क की पहचान नहीं हो सकी। कृपया प्रक्रिया फिर से शुरू करें।";
             return Stream.of(
                     Arguments.of("Duplicate image detected for hash abc123",
-                            "Duplicate image submission detected. Please submit a new image."),
+                            "Duplicate image submission detected. Please submit a new image.",
+                            "डुप्लिकेट इमेज मिली है। कृपया नई इमेज सबमिट करें।"),
                     Arguments.of("manualReading is required",
-                            "manualReading is required."),
+                            "manualReading is required.",
+                            "manualReading अनिवार्य है।"),
                     Arguments.of("manualReading must be numeric",
-                            "Manual Reading must be numeric value"),
+                            "Manual Reading must be numeric value",
+                            "manualReading केवल संख्या होना चाहिए।"),
                     Arguments.of("manualReading must be greater than zero",
-                            "manualReading must be greater than zero."),
+                            "manualReading must be greater than zero.",
+                            "manualReading शून्य से बड़ा होना चाहिए।"),
+                    Arguments.of("Reading is required",
+                            "Reading is required.",
+                            "रीडिंग आवश्यक है।"),
+                    Arguments.of("Reading must be numeric",
+                            "Reading must be a numeric value.",
+                            "रीडिंग केवल संख्या होनी चाहिए।"),
+                    Arguments.of("Reading must be greater than zero",
+                            "Reading must be greater than zero.",
+                            "रीडिंग शून्य से बड़ी होनी चाहिए।"),
+                    Arguments.of("confirmedReading must be a non-negative number",
+                            "Reading must be a non-negative number.",
+                            "रीडिंग शून्य या उससे बड़ी संख्या होनी चाहिए।"),
+                    Arguments.of("Either readingValue or readingUrl must be provided",
+                            "A meter image or a reading value is required.",
+                            "मीटर की इमेज या रीडिंग में से एक आवश्यक है।"),
                     Arguments.of("Language selection is required",
-                            "Language selection is required. Please choose one of the listed options."),
+                            "Language selection is required. Please choose one of the listed options.",
+                            "भाषा चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
                     Arguments.of("Invalid language selection: 9",
-                            "Invalid language selection. Please restart the process"),
+                            "Invalid language selection. Please restart the process",
+                            "अमान्य भाषा चयन। कृपया सूची से सही संख्या या भाषा चुनें।"),
                     Arguments.of("No language options configured for tenant 3",
-                            "Language options are not configured for this tenant."),
+                            "Language options are not configured for this tenant.",
+                            "इस टेनेंट के लिए भाषा विकल्प कॉन्फ़िगर नहीं हैं।"),
                     Arguments.of("Channel selection is required",
-                            "Channel selection is required. Please choose one of the listed options."),
+                            "Channel selection is required. Please choose one of the listed options.",
+                            "चैनल चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
                     Arguments.of("Invalid channel selection: 9",
-                            "Invalid channel selection. Please restart the process"),
+                            "Invalid channel selection. Please restart the process",
+                            "अमान्य चैनल चयन। कृपया सूची से सही संख्या या चैनल चुनें।"),
                     Arguments.of("No channel options configured",
-                            "Channel options are not configured for this tenant."),
+                            "Channel options are not configured for this tenant.",
+                            "इस टेनेंट के लिए चैनल विकल्प कॉन्फ़िगर नहीं हैं।"),
                     Arguments.of("Selected channel is no longer available",
-                            "Selected channel is no longer available. Please make sure you have a channel selected."),
+                            "Selected channel is no longer available. Please make sure you have a channel selected.",
+                            "चयनित चैनल अब उपलब्ध नहीं है। कृपया सुनिश्चित करें कि आपने एक चैनल चुना है।"),
                     Arguments.of("Item selection is required",
-                            "Item selection is required. Please choose one of the listed options."),
+                            "Item selection is required. Please choose one of the listed options.",
+                            "विकल्प चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
                     Arguments.of("Invalid item selection: 9",
-                            "Invalid item selection. Please choose a valid option from the list."),
+                            "Invalid item selection. Please choose a valid option from the list.",
+                            "अमान्य विकल्प चयन। कृपया सूची से सही विकल्प चुनें।"),
                     Arguments.of("No item options configured",
-                            "Item options are not configured for this tenant."),
-                    Arguments.of("Operator is not mapped to any scheme",
-                            "No scheme is mapped to this operator."),
-                    Arguments.of("Operator could not be resolved for contact",
-                            "Operator could not be resolved for this contact."),
-                    Arguments.of("Invalid media id supplied",
-                            "Invalid media. Please submit a clear meter image."),
-                    Arguments.of("Failed to download image from the WhatsApp provider",
-                            "Image could not be processed. Please try again"),
-                    Arguments.of("issueReason contains invalid characters",
-                            "Issue reason can only contain letters, numbers, and spaces."),
-                    Arguments.of("issueReason is required",
-                            "Issue reason is required."),
-                    Arguments.of("contactId is required",
-                            "Contact could not be identified. Please restart the process."),
-                    Arguments.of("Invalid scheme selection: 9",
-                            "Invalid scheme selection. Please choose a valid option from the list."),
+                            "Item options are not configured for this tenant.",
+                            "इस टेनेंट के लिए विकल्प कॉन्फ़िगर नहीं हैं।"),
                     Arguments.of("scheme selection is required",
-                            "Scheme selection is required. Please choose one of the listed options."),
+                            "Scheme selection is required. Please choose one of the listed options.",
+                            "स्कीम चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
+                    Arguments.of("Invalid scheme selection: 9",
+                            "Invalid scheme selection. Please choose a valid option from the list.",
+                            "अमान्य स्कीम चयन। कृपया सूची से सही विकल्प चुनें।"),
+                    Arguments.of("Meter change reason selection is required",
+                            "Meter change reason is required. Please choose one of the listed options.",
+                            "मीटर बदलने का कारण आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
                     Arguments.of("Invalid meter change reason selection",
-                            "Invalid meter change reason. Please choose a valid option from the list."),
+                            "Invalid meter change reason. Please choose a valid option from the list.",
+                            "मीटर बदलने का कारण अमान्य है। कृपया सूची से सही विकल्प चुनें।"),
                     Arguments.of("METER_CHANGE_REASONS config is not valid JSON",
-                            "Meter change reasons are not configured for this tenant."),
+                            "Meter change reasons are not configured for this tenant.",
+                            "इस टेनेंट के लिए मीटर बदलने के कारण कॉन्फ़िगर नहीं हैं।"),
                     Arguments.of("SUPPLY_OUTAGE_REASONS config has no reasons",
-                            "Submission reasons are not configured for this tenant."),
-                    Arguments.of("latitude must be between -90 and 90",
-                            "Location could not be saved. Please share a valid location."),
-                    Arguments.of("geolocation.type must be Point",
-                            "Location could not be saved. Please share a valid location."),
-                    Arguments.of("Operator tenant could not be resolved",
-                            "Operator could not be resolved for this contact."),
+                            "Submission reasons are not configured for this tenant.",
+                            "इस टेनेंट के लिए सबमिशन न होने के कारण कॉन्फ़िगर नहीं हैं।"),
                     Arguments.of("Scheme not found for the provided state or centre scheme id",
-                            "Scheme not found for the provided state or centre scheme id"),
+                            "Scheme not found for the provided state or centre scheme id",
+                            "दी गई राज्य या केंद्र स्कीम आईडी के लिए स्कीम नहीं मिली।"),
+                    Arguments.of("No operator is mapped to the submitted scheme and no phone number was provided",
+                            "No operator is mapped to the submitted scheme and no phone number was provided",
+                            "जमा की गई स्कीम से कोई ऑपरेटर मैप नहीं है और कोई फ़ोन नंबर नहीं दिया गया।"),
+                    Arguments.of("Operator is not mapped to any scheme",
+                            "No scheme is mapped to this operator.",
+                            "इस ऑपरेटर के लिए कोई स्कीम मैप नहीं है।"),
+                    Arguments.of("Operator is not mapped to the provided state or centre scheme",
+                            "Operator is not mapped to the provided state or centre scheme",
+                            "ऑपरेटर दी गई राज्य या केंद्र स्कीम से मैप नहीं है।"),
+                    Arguments.of("Operator does not belong to the specified scheme",
+                            "Operator is not mapped to the selected scheme.",
+                            "ऑपरेटर चुनी गई स्कीम से मैप नहीं है।"),
                     Arguments.of("State scheme not found",
-                            "Scheme not found.")
+                            "Scheme not found.",
+                            "स्कीम नहीं मिली।"),
+                    Arguments.of("Not authorized for this scheme",
+                            "Not authorized for this scheme.",
+                            "आपको इस स्कीम के लिए अधिकार नहीं है।"),
+                    Arguments.of("schemeId must be a positive integer",
+                            "Scheme id must be a positive integer.",
+                            "स्कीम आईडी शून्य से बड़ी पूर्ण संख्या होनी चाहिए।"),
+                    Arguments.of("No operator found for contactId", operator, operatorHindi),
+                    Arguments.of("Operator not found", operator, operatorHindi),
+                    Arguments.of("Operator could not be resolved for contact", operator, operatorHindi),
+                    Arguments.of("User not found", operator, operatorHindi),
+                    Arguments.of("Operator tenant could not be resolved", operator, operatorHindi),
+                    Arguments.of("contactId is required", contact, contactHindi),
+                    Arguments.of("contactId must be provided", contact, contactHindi),
+                    Arguments.of("phoneNumber is required", "Phone number is required.", "फ़ोन नंबर आवश्यक है।"),
+                    Arguments.of("phoneNumber must be provided", "Phone number is required.", "फ़ोन नंबर आवश्यक है।"),
+                    Arguments.of("correlationId must be provided",
+                            "Request reference is missing. Please restart the process.",
+                            "अनुरोध का संदर्भ नहीं मिला। कृपया प्रक्रिया फिर से शुरू करें।"),
+                    Arguments.of("Invalid media id supplied",
+                            "Invalid media. Please submit a clear meter image.",
+                            "मीडिया अमान्य है। कृपया स्पष्ट मीटर इमेज भेजें।"),
+                    Arguments.of("Failed to download image from the WhatsApp provider",
+                            "Image could not be processed. Please try again",
+                            "इमेज प्रोसेस नहीं हो सकी। कृपया दोबारा प्रयास करें।"),
+                    Arguments.of("issueReason contains invalid characters",
+                            "Issue reason can only contain letters, numbers, and spaces.",
+                            "समस्या का विवरण केवल अक्षर, अंक और स्पेस में ही दें।"),
+                    Arguments.of("issueReason is required",
+                            "Issue reason is required.",
+                            "समस्या का विवरण आवश्यक है।"),
+                    Arguments.of("latitude is required", location, locationHindi),
+                    Arguments.of("longitude is required", location, locationHindi),
+                    Arguments.of("latitude must be between -90 and 90", location, locationHindi),
+                    Arguments.of("longitude must be between -180 and 180", location, locationHindi),
+                    Arguments.of("geolocation.type must be Point", location, locationHindi),
+                    Arguments.of("No reading found for operator",
+                            "No reading found for operator",
+                            "ऑपरेटर के लिए कोई रीडिंग नहीं मिली।"),
+                    Arguments.of("Reading not found",
+                            "Reading not found.",
+                            "रीडिंग नहीं मिली।"),
+                    Arguments.of("Target reading date is missing",
+                            "Target reading date is missing.",
+                            "रीडिंग की तारीख नहीं दी गई है।"),
+                    Arguments.of("Invalid API key",
+                            "Invalid API key",
+                            "अमान्य API कुंजी।")
             );
         }
 
@@ -215,8 +309,12 @@ class ConversationLocalizationServiceTest {
             String message = "Reading cannot be less than previous. Submitted reading: 100. Previous reading: 200.";
 
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException(message), "Fallback.", "english"))
+                    new IllegalStateException(message), FALLBACK, "english"))
                     .isEqualTo(message);
+            assertThat(service.resolveUserFacingErrorMessage(
+                    new IllegalStateException(message), FALLBACK, HINDI))
+                    .isEqualTo("रीडिंग पिछली पुष्टि की गई रीडिंग से कम नहीं हो सकती। "
+                            + "जमा की गई रीडिंग: 100। पिछली रीडिंग: 200।");
         }
 
         @Test
@@ -225,17 +323,17 @@ class ConversationLocalizationServiceTest {
             // never echoed — the caller's fallback is already context-specific ("Manual reading could
             // not be saved.", "Image could not be processed.", …).
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException("  Something unusual happened  "), "Fallback.", "english"))
-                    .isEqualTo("Fallback.");
+                    new IllegalStateException("  Something unusual happened  "), FALLBACK, "english"))
+                    .isEqualTo(FALLBACK_TEXT);
         }
 
         @ParameterizedTest(name = "withholds: {0}")
         @MethodSource("internalDetailThatMustNotReachTheUser")
         void neverDisclosesInternalDetail(String internal) {
             String result = service.resolveUserFacingErrorMessage(
-                    new IllegalStateException(internal), "Fallback.", "english");
+                    new IllegalStateException(internal), FALLBACK, "english");
 
-            assertThat(result).isEqualTo("Fallback.");
+            assertThat(result).isEqualTo(FALLBACK_TEXT);
         }
 
         static Stream<Arguments> internalDetailThatMustNotReachTheUser() {
@@ -269,7 +367,7 @@ class ConversationLocalizationServiceTest {
             // caller — a PII echo that also confirmed which numbers are registered.
             String result = service.resolveUserFacingErrorMessage(
                     new IllegalStateException("No operator found for contactId 919999900001"),
-                    "Fallback.", "english");
+                    FALLBACK, "english");
 
             assertThat(result)
                     .isEqualTo("Operator could not be resolved for this contact.")
@@ -284,7 +382,7 @@ class ConversationLocalizationServiceTest {
                     new org.springframework.web.server.ResponseStatusException(
                             org.springframework.http.HttpStatus.BAD_REQUEST,
                             "Operator does not belong to the specified scheme"),
-                    "Fallback.", "english");
+                    FALLBACK, "english");
 
             assertThat(result)
                     .isEqualTo("Operator is not mapped to the selected scheme.")
@@ -296,10 +394,10 @@ class ConversationLocalizationServiceTest {
             // "manualreading is required" contains "reading is required": order in the allowlist decides
             // which reply the operator gets.
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException("manualReading is required"), "Fallback.", "english"))
+                    new IllegalStateException("manualReading is required"), FALLBACK, "english"))
                     .isEqualTo("manualReading is required.");
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException("reading is required"), "Fallback.", "english"))
+                    new IllegalStateException("reading is required"), FALLBACK, "english"))
                     .isEqualTo("Reading is required.");
         }
 
@@ -307,14 +405,14 @@ class ConversationLocalizationServiceTest {
         void stillLocalisesTheFallbackForAHindiOperator() {
             assertThat(service.resolveUserFacingErrorMessage(
                     new IllegalStateException("bad SQL grammar [SELECT 1]"),
-                    "Manual reading could not be saved.", HINDI))
+                    ConversationMessageCode.MANUAL_READING_NOT_SAVED, HINDI))
                     .isEqualTo("मैनुअल रीडिंग सेव नहीं हो सकी। कृपया दोबारा प्रयास करें।");
         }
 
         @Test
         void localisesTheRewrittenMessageWhenTheOperatorReadsHindi() {
             assertThat(service.resolveUserFacingErrorMessage(
-                    new IllegalStateException("Duplicate image detected"), "Fallback.", HINDI))
+                    new IllegalStateException("Duplicate image detected"), FALLBACK, HINDI))
                     .isEqualTo("डुप्लिकेट इमेज मिली है। कृपया नई इमेज सबमिट करें।");
         }
     }
@@ -331,13 +429,15 @@ class ConversationLocalizationServiceTest {
 
         @ParameterizedTest(name = "languageKey={0} leaves English copy untouched")
         @ValueSource(strings = {"english", "assamese", "bodo", ""})
-        void leavesCopyUntouchedForEveryNonHindiLanguage(String languageKey) {
-            assertThat(service.localizeMessage("Meter replaced", languageKey)).isEqualTo("Meter replaced");
+        void leavesCopyUntouchedForALanguageThatDoesNotTranslateIt(String languageKey) {
+            assertThat(service.localizeMessage("Reading updated successfully", languageKey))
+                    .isEqualTo("Reading updated successfully");
         }
 
         @Test
         void leavesCopyUntouchedForANullLanguageKey() {
-            assertThat(service.localizeMessage("Meter replaced", null)).isEqualTo("Meter replaced");
+            assertThat(service.localizeMessage("Reading updated successfully", null))
+                    .isEqualTo("Reading updated successfully");
         }
 
         @ParameterizedTest(name = "\"{0}\" -> \"{1}\"")
@@ -346,64 +446,16 @@ class ConversationLocalizationServiceTest {
             assertThat(service.localizeMessage(english, HINDI)).isEqualTo(hindi);
         }
 
+        @ParameterizedTest(name = "\"{0}\" stays English")
+        @MethodSource("englishToHindi")
+        void leavesEveryKnownPhraseUntouchedForAnEnglishOperator(String english, String ignoredHindi) {
+            assertThat(service.localizeMessage(english, "english")).isEqualTo(english);
+        }
+
         static Stream<Arguments> englishToHindi() {
             return Stream.of(
                     Arguments.of("Duplicate image submission detected. Please submit a new image.",
                             "डुप्लिकेट इमेज मिली है। कृपया नई इमेज सबमिट करें।"),
-                    Arguments.of("manualReading is required.", "manualReading अनिवार्य है।"),
-                    Arguments.of("Manual Reading must be numeric value", "manualReading केवल संख्या होना चाहिए।"),
-                    Arguments.of("manualReading must be greater than zero.", "manualReading शून्य से बड़ा होना चाहिए।"),
-                    Arguments.of("Language selection is required. Please choose one of the listed options.",
-                            "भाषा चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
-                    Arguments.of("Invalid language selection. Please restart the process",
-                            "अमान्य भाषा चयन। कृपया सूची से सही संख्या या भाषा चुनें।"),
-                    Arguments.of("Language options are not configured for this tenant.",
-                            "इस टेनेंट के लिए भाषा विकल्प कॉन्फ़िगर नहीं हैं।"),
-                    Arguments.of("Channel selection is required. Please choose one of the listed options.",
-                            "चैनल चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
-                    Arguments.of("Invalid channel selection. Please restart the process",
-                            "अमान्य चैनल चयन। कृपया सूची से सही संख्या या चैनल चुनें।"),
-                    Arguments.of("Channel options are not configured for this tenant.",
-                            "इस टेनेंट के लिए चैनल विकल्प कॉन्फ़िगर नहीं हैं।"),
-                    Arguments.of("Selected channel is no longer available.",
-                            "चयनित चैनल अब उपलब्ध नहीं है। कृपया सुनिश्चित करें कि आपने एक चैनल चुना है।"),
-                    Arguments.of("Item selection is required. Please choose one of the listed options.",
-                            "विकल्प चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।"),
-                    Arguments.of("Invalid item selection. Please choose a valid option from the list.",
-                            "अमान्य विकल्प चयन। कृपया सूची से सही विकल्प चुनें।"),
-                    Arguments.of("Item options are not configured for this tenant.",
-                            "इस टेनेंट के लिए विकल्प कॉन्फ़िगर नहीं हैं।"),
-                    Arguments.of("No scheme is mapped to this operator.",
-                            "इस ऑपरेटर के लिए कोई स्कीम मैप नहीं है।"),
-                    Arguments.of("Operator could not be resolved for this contact.",
-                            "इस संपर्क के लिए ऑपरेटर नहीं मिला।"),
-                    Arguments.of("Invalid media. Please submit a clear meter image.",
-                            "मीडिया अमान्य है। कृपया स्पष्ट मीटर इमेज भेजें।"),
-                    Arguments.of("Issue reason can only contain letters, numbers, and spaces.",
-                            "समस्या का विवरण केवल अक्षर, अंक और स्पेस में ही दें।"),
-                    Arguments.of("Successfully selected.", "सफलतापूर्वक चयनित।"),
-                    Arguments.of("Image could not be processed. Please try again",
-                            "इमेज प्रोसेस नहीं हो सकी। कृपया दोबारा प्रयास करें।"),
-                    Arguments.of("Manual reading could not be saved.",
-                            "मैनुअल रीडिंग सेव नहीं हो सकी। कृपया दोबारा प्रयास करें।"),
-                    Arguments.of("Please type your issue in a few words",
-                            "कृपया अपनी समस्या संक्षेप में लिखें।"),
-                    Arguments.of("Please select your issue by typing any of the number",
-                            "कृपया नंबर टाइप करके अपनी समस्या चुनें"),
-                    Arguments.of("Please select the no submission reasons by typing any of the number",
-                            "कृपया नंबर टाइप करके सबमिशन न होने के कारण चुनें"),
-                    Arguments.of("Electricity supply disconnected", "बिजली आपूर्ति बंद है"),
-                    Arguments.of("No electricity supply today", "आज बिजली की आपूर्ति नहीं है"),
-                    Arguments.of("Pump failure", "पंप खराब है"),
-                    Arguments.of("Pipeline break", "पाइपलाइन टूटी है"),
-                    Arguments.of("Water quality issues", "पानी की गुणवत्ता में समस्या है"),
-                    Arguments.of("Source drying", "स्रोत सूख रहा है"),
-                    Arguments.of("Natural calamity", "प्राकृतिक आपदा"),
-                    Arguments.of("Others", "अन्य"),
-                    Arguments.of("Meter replaced", "मीटर बदला गया"),
-                    Arguments.of("Meter not working", "मीटर काम नहीं कर रहा"),
-                    Arguments.of("Meter damaged", "मीटर खराब है"),
-                    Arguments.of("Meter damage", "मीटर खराब है"),
                     Arguments.of("Invalid reading value", "रीडिंग मान्य नहीं है।"),
                     Arguments.of("Could not read meter value from image",
                             "इमेज से मीटर रीडिंग नहीं पढ़ी जा सकी। कृपया स्पष्ट फोटो भेजें।"),
@@ -424,7 +476,6 @@ class ConversationLocalizationServiceTest {
                     Arguments.of("Reading can't be more than 12.5.",
                             "रीडिंग 12.5 से अधिक नहीं हो सकती।"),
                     Arguments.of("OCR failed", "मीटर रीडिंग पढ़ने में त्रुटि हुई। कृपया स्पष्ट फोटो भेजें।"),
-                    Arguments.of("Location saved successfully", "लोकेशन सफलतापूर्वक सेव हो गई।"),
                     Arguments.of("Reading updated successfully", "रीडिंग सफलतापूर्वक अपडेट हुई।")
             );
         }
@@ -470,9 +521,33 @@ class ConversationLocalizationServiceTest {
         }
 
         @Test
+        void fallsBackToTheGenericHindiCeilingMessageWhenTheMaximumIsAbsent() {
+            assertThat(service.localizeMessage("Reading can't be more than the allowed limit.", HINDI))
+                    .isEqualTo("रीडिंग तय सीमा से अधिक नहीं हो सकती।");
+        }
+
+        @ParameterizedTest(name = "\"{0}\" stays English")
+        @ValueSource(strings = {
+                "Reading cannot be less than previous confirmed reading. Submitted reading: 100. Previous reading: 200.",
+                "Reading captured successfully. Extracted reading: 1234",
+                "Low OCR confidence. Extracted reading: 987",
+                "Language selected: Hindi",
+                "Reading can't be more than the allowed limit."
+        })
+        void leavesTheParameterisedPhrasesUntouchedForAnEnglishOperator(String english) {
+            assertThat(service.localizeMessage(english, "english")).isEqualTo(english);
+        }
+
+        @Test
         void translatesOnlyTheLabelOfALanguageConfirmation() {
             assertThat(service.localizeMessage("Language selected: Hindi", HINDI))
                     .isEqualTo("भाषा चुनी गई: Hindi");
+        }
+
+        /** Reason names are translated by id where they are listed, so text containing one is left alone. */
+        @Test
+        void leavesAReasonNameUntouched() {
+            assertThat(service.localizeMessage("Pump failure", HINDI)).isEqualTo("Pump failure");
         }
 
         @Test

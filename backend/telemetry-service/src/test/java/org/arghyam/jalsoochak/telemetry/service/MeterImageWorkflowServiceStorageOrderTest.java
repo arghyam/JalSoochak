@@ -84,7 +84,7 @@ class MeterImageWorkflowServiceStorageOrderTest {
     private void imageDownloads() throws Exception {
         when(inboundMediaService.downloadImage(null, "https://media.glific.example/meter.jpg")).thenReturn(IMAGE);
         when(localizationService.resolveLanguageKeyForContact(anyString())).thenReturn("english");
-        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
+        when(localizationService.resolveUserFacingErrorMessage(any(), any(), anyString()))
                 .thenReturn("Image could not be processed.");
     }
 
