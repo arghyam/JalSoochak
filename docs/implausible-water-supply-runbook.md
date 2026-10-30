@@ -148,6 +148,10 @@ corrected. An operations route: it takes the operations token in `X-Internal-Tok
   reading before its day, with the scheme's master data and the configured limit as they are now.
   One that passes, or that the check cannot assess, has its marker cleared and is published; one that
   is still implausible stays quarantined. The mode does not change this.
+- **A reading with no confirmed value is left quarantined and not counted in the answer.** Releasing
+  it would publish a reading without a value. Each one is logged as `quarantine_release_skipped` with
+  its `readingId`, and the run's summary line carries `noValue=N`. Correct it through `PUT`, or
+  investigate how it lost its value.
 - **Oldest first, one at a time.** A released reading becomes the baseline its scheme's next reading
   is judged against, exactly as if it had never been quarantined. For the same reason, release ranges
   in date order: the earliest month first.

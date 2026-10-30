@@ -71,7 +71,7 @@ class QuarantineReleaseControllerTest {
     void releasesAndReturnsTheCounts() throws Exception {
         knownTenant();
         when(releaseService.release(TENANT_ID, FROM, TO, "S-1", null, false))
-                .thenReturn(new QuarantinedReadingReleaseService.Outcome(3, 1, 0));
+                .thenReturn(new QuarantinedReadingReleaseService.Outcome(3, 1, 0, 0));
 
         perform("""
                 {"fromDate": "2026-09-01", "toDate": "2026-09-30", "stateSchemeId": "S-1"}
@@ -89,7 +89,7 @@ class QuarantineReleaseControllerTest {
     void passesADryRunThroughAndSaysSo() throws Exception {
         knownTenant();
         when(releaseService.release(TENANT_ID, FROM, TO, null, null, true))
-                .thenReturn(new QuarantinedReadingReleaseService.Outcome(5, 2, 0));
+                .thenReturn(new QuarantinedReadingReleaseService.Outcome(5, 2, 0, 0));
 
         perform("""
                 {"fromDate": "2026-09-01", "toDate": "2026-09-30", "dryRun": true}
@@ -105,7 +105,7 @@ class QuarantineReleaseControllerTest {
     void acceptsSnakeCaseFields() throws Exception {
         knownTenant();
         when(releaseService.release(TENANT_ID, FROM, TO, null, "C-9", true))
-                .thenReturn(new QuarantinedReadingReleaseService.Outcome(0, 0, 0));
+                .thenReturn(new QuarantinedReadingReleaseService.Outcome(0, 0, 0, 0));
 
         perform("""
                 {"from_date": "2026-09-01", "to_date": "2026-09-30", "centre_scheme_id": "C-9", "dry_run": true}
@@ -118,7 +118,7 @@ class QuarantineReleaseControllerTest {
     void looksTheTenantUpByTheTrimmedHeader() throws Exception {
         when(releaseService.findTenantId("as")).thenReturn(Optional.of(TENANT_ID));
         when(releaseService.release(TENANT_ID, FROM, TO, null, null, false))
-                .thenReturn(new QuarantinedReadingReleaseService.Outcome(1, 0, 0));
+                .thenReturn(new QuarantinedReadingReleaseService.Outcome(1, 0, 0, 0));
 
         perform("  as ", """
                 {"fromDate": "2026-09-01", "toDate": "2026-09-30"}
@@ -170,7 +170,7 @@ class QuarantineReleaseControllerTest {
     void acceptsARangeOfThirtyOneDays() throws Exception {
         knownTenant();
         when(releaseService.release(TENANT_ID, FROM, LocalDate.of(2026, 10, 1), null, null, false))
-                .thenReturn(new QuarantinedReadingReleaseService.Outcome(0, 0, 0));
+                .thenReturn(new QuarantinedReadingReleaseService.Outcome(0, 0, 0, 0));
 
         perform("""
                 {"fromDate": "2026-09-01", "toDate": "2026-10-01"}
@@ -240,7 +240,7 @@ class QuarantineReleaseControllerTest {
     void answersARunThatStoppedPartWayWithItsCounts() throws Exception {
         knownTenant();
         when(releaseService.release(TENANT_ID, FROM, TO, null, null, false))
-                .thenReturn(new QuarantinedReadingReleaseService.Outcome(4, 1, 7));
+                .thenReturn(new QuarantinedReadingReleaseService.Outcome(4, 1, 0, 7));
 
         perform("""
                 {"fromDate": "2026-09-01", "toDate": "2026-09-30"}
