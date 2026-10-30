@@ -108,7 +108,7 @@ class BfmReadingServiceLocationMismatchTest {
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findLatestConfirmedReadingSnapshot(
                 SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT, BASELINE_AT)));
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
         lenient().when(tenantConfigRepository.findConfigValue(anyInt(), anyString()))
                 .thenReturn(Optional.empty());
@@ -259,7 +259,7 @@ class BfmReadingServiceLocationMismatchTest {
         when(repo.findLatestConfirmedReadingSnapshotBeforeDate(
                 eq(SCHEMA), eq(SCHEME_ID), eq(ReadingChannel.BFM), eq(MeterRegister.STANDARD),
                 any(LocalDate.class), isNull()))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT)));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT, BASELINE_AT)));
         when(repo.findSchemeSupplyCounts(SCHEMA, SCHEME_ID))
                 .thenReturn(Optional.of(new TelemetrySchemeSupplyCounts(1, 0, 0)));
 

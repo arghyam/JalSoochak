@@ -103,7 +103,7 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 schemaName, 10L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1), null)));
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.createFlowReading(
@@ -182,7 +182,7 @@ class BfmReadingServiceMeterReplacedTest {
 
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 schemaName, 10L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("800"), ReadingTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("800"), ReadingTime.now().minusDays(1), null)));
 
         when(tenantConfigRepository.findConfigValue(1, "TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD"))
                 .thenReturn(Optional.empty());
@@ -250,7 +250,7 @@ class BfmReadingServiceMeterReplacedTest {
 
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 schemaName, 10L, ReadingChannel.BFM, MeterRegister.STANDARD, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1), null)));
 
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.from(readingAt)))
                 .thenReturn(Optional.empty());

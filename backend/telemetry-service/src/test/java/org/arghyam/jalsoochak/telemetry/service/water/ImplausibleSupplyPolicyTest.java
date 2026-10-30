@@ -19,6 +19,7 @@ class ImplausibleSupplyPolicyTest {
 
     private static final BigDecimal LIMIT_150 = new BigDecimal("150");
     private static final BigDecimal FIVE_MEMBERS = new BigDecimal("5");
+    private static final long ONE_DAY = 1L;
 
     /**
      * 100 connections x 5 persons = 500 people; 500 x 150 = 75,000 L/day, which is 75 m&sup3;.
@@ -26,7 +27,7 @@ class ImplausibleSupplyPolicyTest {
      */
     private static SupplyPlausibilityInputs standardScheme(String baseline, String confirmed) {
         return new SupplyPlausibilityInputs(
-                new BigDecimal(confirmed), baseline == null ? null : new BigDecimal(baseline),
+                new BigDecimal(confirmed), baseline == null ? null : new BigDecimal(baseline), ONE_DAY,
                 100, 0, 0, FIVE_MEMBERS, LIMIT_150);
     }
 
@@ -84,7 +85,7 @@ class ImplausibleSupplyPolicyTest {
             // 100 x 4.5 = 450 people; 450 x 150 = 67,500 L. The 50 m3 accepted above still passes,
             // but a 70 m3 day that a 5.0 household size would have allowed no longer does.
             SupplyPlausibilityInputs inputs = new SupplyPlausibilityInputs(
-                    new BigDecimal("970"), new BigDecimal("900"),
+                    new BigDecimal("970"), new BigDecimal("900"), ONE_DAY,
                     100, 0, 0, new BigDecimal("4.5"), LIMIT_150);
 
             Verdict verdict = ImplausibleSupplyPolicy.evaluate(inputs);
@@ -98,7 +99,7 @@ class ImplausibleSupplyPolicyTest {
         @DisplayName("honours a limit other than the 150 L default")
         void honoursAConfiguredLimit() {
             SupplyPlausibilityInputs inputs = new SupplyPlausibilityInputs(
-                    new BigDecimal("950"), new BigDecimal("900"),
+                    new BigDecimal("950"), new BigDecimal("900"), ONE_DAY,
                     100, 0, 0, FIVE_MEMBERS, new BigDecimal("55"));
 
             Verdict verdict = ImplausibleSupplyPolicy.evaluate(inputs);
@@ -106,6 +107,58 @@ class ImplausibleSupplyPolicyTest {
             // 500 people x 55 LPCD = 27,500 L, well under the 50,000 L submitted.
             assertThat(verdict).isInstanceOf(Verdict.Quarantined.class);
             assertThat(((Verdict.Quarantined) verdict).ceiling()).isEqualByComparingTo("27500");
+        }
+    }
+
+    @Nested
+    @DisplayName("days since the baseline")
+    class DaysSinceBaseline {
+
+        private SupplyPlausibilityInputs standardSchemeOver(long days, String confirmed) {
+            return new SupplyPlausibilityInputs(
+                    new BigDecimal(confirmed), new BigDecimal("900"), days,
+                    100, 0, 0, FIVE_MEMBERS, LIMIT_150);
+        }
+
+        @Test
+        @DisplayName("allows a day's ceiling for every day the delta was supplied over")
+        void scalesTheCeilingWithTheDays() {
+            // 200 m3 over 3 days: implausible as one day's supply, plausible as three (225,000 L).
+            Verdict verdict = ImplausibleSupplyPolicy.evaluate(standardSchemeOver(3, "1100"));
+
+            assertThat(verdict).isInstanceOf(Verdict.Accepted.class);
+            assertThat(((Verdict.Accepted) verdict).ceiling()).isEqualByComparingTo("225000");
+            assertThat(((Verdict.Accepted) verdict).litres()).isEqualByComparingTo("200000");
+        }
+
+        @Test
+        @DisplayName("still quarantines a delta beyond the ceiling for its days")
+        void quarantinesBeyondTheScaledCeiling() {
+            // 300 m3 over 3 days is 100 m3 a day, past the 75 m3 a day the population allows.
+            Verdict verdict = ImplausibleSupplyPolicy.evaluate(standardSchemeOver(3, "1200"));
+
+            assertThat(verdict).isInstanceOf(Verdict.Quarantined.class);
+            assertThat(((Verdict.Quarantined) verdict).ceiling()).isEqualByComparingTo("225000");
+        }
+
+        @Test
+        @DisplayName("lets a scheme supplying plausibly pass however long ago its last accepted reading was")
+        void passesAPlausibleSchemeAfterALongGap() {
+            // The reading a quarantine left stuck: 60 m3 a day for 30 days, measured against the last
+            // reading accepted before the quarantine. One day's ceiling would quarantine it again.
+            Verdict verdict = ImplausibleSupplyPolicy.evaluate(standardSchemeOver(30, "2700"));
+
+            assertThat(verdict).isInstanceOf(Verdict.Accepted.class);
+        }
+
+        @ParameterizedTest
+        @ValueSource(longs = {0, -3})
+        @DisplayName("reads fewer than one day as one, never as a ceiling of zero")
+        void floorsTheDaysAtOne(long days) {
+            Verdict verdict = ImplausibleSupplyPolicy.evaluate(standardSchemeOver(days, "950"));
+
+            assertThat(verdict).isInstanceOf(Verdict.Accepted.class);
+            assertThat(((Verdict.Accepted) verdict).ceiling()).isEqualByComparingTo("75000");
         }
     }
 
@@ -153,7 +206,7 @@ class ImplausibleSupplyPolicyTest {
             // No achieved connections; 400 planned x 5 = 2,000 people, ceiling 300,000 L. The 200
             // m3 day that the 100-connection scheme quarantined is plausible for this one.
             SupplyPlausibilityInputs inputs = new SupplyPlausibilityInputs(
-                    new BigDecimal("1100"), new BigDecimal("900"),
+                    new BigDecimal("1100"), new BigDecimal("900"), ONE_DAY,
                     0, 400, 900, FIVE_MEMBERS, LIMIT_150);
 
             Verdict verdict = ImplausibleSupplyPolicy.evaluate(inputs);
@@ -223,7 +276,7 @@ class ImplausibleSupplyPolicyTest {
         @DisplayName("skips when the per-person limit is non-positive")
         void skipsOnNonPositiveLimit(String limit) {
             SupplyPlausibilityInputs inputs = new SupplyPlausibilityInputs(
-                    new BigDecimal("1100"), new BigDecimal("900"),
+                    new BigDecimal("1100"), new BigDecimal("900"), ONE_DAY,
                     100, 0, 0, FIVE_MEMBERS, new BigDecimal(limit));
 
             assertThat(ImplausibleSupplyPolicy.evaluate(inputs))
@@ -234,7 +287,7 @@ class ImplausibleSupplyPolicyTest {
         @DisplayName("skips when no per-person limit resolved")
         void skipsOnAbsentLimit() {
             SupplyPlausibilityInputs inputs = new SupplyPlausibilityInputs(
-                    new BigDecimal("1100"), new BigDecimal("900"), 100, 0, 0, FIVE_MEMBERS, null);
+                    new BigDecimal("1100"), new BigDecimal("900"), ONE_DAY, 100, 0, 0, FIVE_MEMBERS, null);
 
             assertThat(ImplausibleSupplyPolicy.evaluate(inputs))
                     .isEqualTo(new Verdict.Skipped(Verdict.SkipReason.NO_LIMIT));
@@ -244,7 +297,7 @@ class ImplausibleSupplyPolicyTest {
         @DisplayName("skips when neither the tenant config nor a default gave a household size")
         void skipsOnAbsentHouseholdSize() {
             SupplyPlausibilityInputs inputs = new SupplyPlausibilityInputs(
-                    new BigDecimal("1100"), new BigDecimal("900"), 100, 0, 0, null, LIMIT_150);
+                    new BigDecimal("1100"), new BigDecimal("900"), ONE_DAY, 100, 0, 0, null, LIMIT_150);
 
             assertThat(ImplausibleSupplyPolicy.evaluate(inputs))
                     .isEqualTo(new Verdict.Skipped(Verdict.SkipReason.NO_MEMBERS_PER_HOUSEHOLD));
@@ -254,7 +307,7 @@ class ImplausibleSupplyPolicyTest {
         @DisplayName("skips when all three connection counts are zero")
         void skipsWithoutPopulation() {
             SupplyPlausibilityInputs inputs = new SupplyPlausibilityInputs(
-                    new BigDecimal("1100"), new BigDecimal("900"), 0, 0, 0, FIVE_MEMBERS, LIMIT_150);
+                    new BigDecimal("1100"), new BigDecimal("900"), ONE_DAY, 0, 0, 0, FIVE_MEMBERS, LIMIT_150);
 
             assertThat(ImplausibleSupplyPolicy.evaluate(inputs))
                     .isEqualTo(new Verdict.Skipped(Verdict.SkipReason.NO_POPULATION));
@@ -267,7 +320,7 @@ class ImplausibleSupplyPolicyTest {
             // Missing counts AND a non-positive delta: the reading was a non-event anyway, so
             // counting it as a master-data gap would inflate the figure the rollout gates on.
             SupplyPlausibilityInputs inputs = new SupplyPlausibilityInputs(
-                    new BigDecimal("900"), new BigDecimal("900"), 0, 0, 0, FIVE_MEMBERS, LIMIT_150);
+                    new BigDecimal("900"), new BigDecimal("900"), ONE_DAY, 0, 0, 0, FIVE_MEMBERS, LIMIT_150);
 
             assertThat(ImplausibleSupplyPolicy.evaluate(inputs))
                     .isEqualTo(new Verdict.Skipped(Verdict.SkipReason.NON_POSITIVE_DELTA));
@@ -287,7 +340,7 @@ class ImplausibleSupplyPolicyTest {
         @DisplayName("a missing reading is a caller bug, not a skip")
         void missingReadingThrows() {
             SupplyPlausibilityInputs inputs = new SupplyPlausibilityInputs(
-                    null, new BigDecimal("900"), 100, 0, 0, FIVE_MEMBERS, LIMIT_150);
+                    null, new BigDecimal("900"), ONE_DAY, 100, 0, 0, FIVE_MEMBERS, LIMIT_150);
 
             assertThatThrownBy(() -> ImplausibleSupplyPolicy.evaluate(inputs))
                     .isInstanceOf(NullPointerException.class)
@@ -322,7 +375,7 @@ class ImplausibleSupplyPolicyTest {
             // here. Nothing is stored on this path - the value is only compared - so a garbage
             // reading this large must be quarantined, not turned into a 500 on the submission API.
             SupplyPlausibilityInputs inputs = new SupplyPlausibilityInputs(
-                    new BigDecimal("999999999999999999999"), BigDecimal.ZERO,
+                    new BigDecimal("999999999999999999999"), BigDecimal.ZERO, ONE_DAY,
                     100, 0, 0, FIVE_MEMBERS, LIMIT_150);
 
             assertThat(ImplausibleSupplyPolicy.evaluate(inputs)).isInstanceOf(Verdict.Quarantined.class);

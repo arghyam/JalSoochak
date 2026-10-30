@@ -5361,7 +5361,8 @@ public class SchemeRegularityRepository {
                     SELECT
                         f.tenant_id,
                         f.scheme_id,
-                        {{SWS}} AS total_water_supplied_liters
+                        {{SWS}} AS total_water_supplied_liters,
+                        COUNT(DISTINCT f.date) FILTER (WHERE {{SWD}})::int AS supply_days
                     FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                     GROUP BY f.tenant_id, f.scheme_id
@@ -5374,6 +5375,7 @@ public class SchemeRegularityRepository {
                     COALESCE(SUM(COALESCE(s.fhtc_count, 0)), 0)::bigint AS total_fhtc_count,
                     COALESCE(SUM(COALESCE(s.planned_fhtc, 0)), 0)::bigint AS total_planned_fhtc,
                     COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
+                    COALESCE(SUM(COALESCE(s.fhtc_count, 0)::bigint * w.supply_days), 0)::bigint AS total_supplied_fhtc_days,
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     CASE
                         WHEN COUNT(DISTINCT s.scheme_id) > 0
@@ -5409,7 +5411,8 @@ public class SchemeRegularityRepository {
                         rs.getLong("total_planned_fhtc"),
                         rs.getLong("total_water_supplied_liters"),
                         rs.getInt("scheme_count"),
-                        rs.getBigDecimal("avg_water_supply_per_scheme")),
+                        rs.getBigDecimal("avg_water_supply_per_scheme"),
+                        rs.getLong("total_supplied_fhtc_days")),
                 startDate,
                 endDate);
     }
@@ -5711,7 +5714,8 @@ public class SchemeRegularityRepository {
                     SELECT
                         f.tenant_id,
                         f.scheme_id,
-                        {{SWS}} AS total_water_supplied_liters
+                        {{SWS}} AS total_water_supplied_liters,
+                        COUNT(DISTINCT f.date) FILTER (WHERE {{SWD}})::int AS supply_days
                     FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                     GROUP BY f.tenant_id, f.scheme_id
@@ -5727,6 +5731,7 @@ public class SchemeRegularityRepository {
                     COALESCE(SUM(COALESCE(s.fhtc_count, 0)), 0)::bigint AS total_fhtc_count,
                     COALESCE(SUM(COALESCE(s.planned_fhtc, 0)), 0)::bigint AS total_planned_fhtc,
                     COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
+                    COALESCE(SUM(COALESCE(s.fhtc_count, 0)::bigint * w.supply_days), 0)::bigint AS total_supplied_fhtc_days,
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     CASE
                         WHEN COUNT(DISTINCT s.scheme_id) > 0
@@ -5775,7 +5780,8 @@ public class SchemeRegularityRepository {
                         rs.getLong("total_planned_fhtc"),
                         rs.getLong("total_water_supplied_liters"),
                         rs.getInt("scheme_count"),
-                        rs.getBigDecimal("avg_water_supply_per_scheme")),
+                        rs.getBigDecimal("avg_water_supply_per_scheme"),
+                        rs.getLong("total_supplied_fhtc_days")),
                 startDate,
                 endDate);
     }
@@ -6025,7 +6031,8 @@ public class SchemeRegularityRepository {
                     SELECT
                         f.scheme_id,
                         {{SWS}}
-                            AS total_water_supplied_liters
+                            AS total_water_supplied_liters,
+                        COUNT(DISTINCT f.date) FILTER (WHERE {{SWD}})::int AS supply_days
                     FROM {{LWQ}} f
                     WHERE f.tenant_id = ?
                       AND f.date BETWEEN ? AND ?
@@ -6039,6 +6046,7 @@ public class SchemeRegularityRepository {
                     COALESCE(SUM(s.fhtc_count), 0)::bigint AS total_fhtc_count,
                     COALESCE(SUM(s.planned_fhtc), 0)::bigint AS total_planned_fhtc,
                     COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
+                    COALESCE(SUM(s.fhtc_count::bigint * w.supply_days), 0)::bigint AS total_supplied_fhtc_days,
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     CASE
                         WHEN COUNT(DISTINCT s.scheme_id) > 0
@@ -6067,7 +6075,8 @@ public class SchemeRegularityRepository {
                         rs.getLong("total_planned_fhtc"),
                         rs.getLong("total_water_supplied_liters"),
                         rs.getInt("scheme_count"),
-                        rs.getBigDecimal("avg_water_supply_per_scheme")),
+                        rs.getBigDecimal("avg_water_supply_per_scheme"),
+                        rs.getLong("total_supplied_fhtc_days")),
                 tenantId,
                 childLevel,
                 lgdId,
@@ -6120,7 +6129,8 @@ public class SchemeRegularityRepository {
                     SELECT
                         f.scheme_id,
                         {{SWS}}
-                            AS total_water_supplied_liters
+                            AS total_water_supplied_liters,
+                        COUNT(DISTINCT f.date) FILTER (WHERE {{SWD}})::int AS supply_days
                     FROM {{LWQ}} f
                     WHERE f.tenant_id = ?
                       AND f.date BETWEEN ? AND ?
@@ -6134,6 +6144,7 @@ public class SchemeRegularityRepository {
                     COALESCE(SUM(s.fhtc_count), 0)::bigint AS total_fhtc_count,
                     COALESCE(SUM(s.planned_fhtc), 0)::bigint AS total_planned_fhtc,
                     COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
+                    COALESCE(SUM(s.fhtc_count::bigint * w.supply_days), 0)::bigint AS total_supplied_fhtc_days,
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     CASE
                         WHEN COUNT(DISTINCT s.scheme_id) > 0
@@ -6162,7 +6173,8 @@ public class SchemeRegularityRepository {
                         rs.getLong("total_planned_fhtc"),
                         rs.getLong("total_water_supplied_liters"),
                         rs.getInt("scheme_count"),
-                        rs.getBigDecimal("avg_water_supply_per_scheme")),
+                        rs.getBigDecimal("avg_water_supply_per_scheme"),
+                        rs.getLong("total_supplied_fhtc_days")),
                 tenantId,
                 childLevel,
                 parentDepartmentId,
@@ -6228,7 +6240,8 @@ public class SchemeRegularityRepository {
                     SELECT
                         f.scheme_id,
                         {{SWS}}
-                            AS total_water_supplied_liters
+                            AS total_water_supplied_liters,
+                        COUNT(DISTINCT f.date) FILTER (WHERE {{SWD}})::int AS supply_days
                     FROM {{LWQ}} f
                     WHERE f.tenant_id = ?
                       AND f.date BETWEEN ? AND ?
@@ -6240,6 +6253,7 @@ public class SchemeRegularityRepository {
                     COALESCE(SUM(s.fhtc_count), 0)::bigint AS total_fhtc_count,
                     COALESCE(SUM(s.planned_fhtc), 0)::bigint AS total_planned_fhtc,
                     COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
+                    COALESCE(SUM(s.fhtc_count::bigint * w.supply_days), 0)::bigint AS total_supplied_fhtc_days,
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     CASE
                         WHEN COUNT(DISTINCT s.scheme_id) > 0
@@ -6264,7 +6278,8 @@ public class SchemeRegularityRepository {
                         rs.getLong("total_planned_fhtc"),
                         rs.getLong("total_water_supplied_liters"),
                         rs.getInt("scheme_count"),
-                        rs.getBigDecimal("avg_water_supply_per_scheme")),
+                        rs.getBigDecimal("avg_water_supply_per_scheme"),
+                        rs.getLong("total_supplied_fhtc_days")),
                 tenantId,
                 regionId,
                 tenantId,
@@ -6806,15 +6821,16 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE TRUE{{NWS}}
                 ),
+                scheme_fhtc AS (
+                    SELECT DISTINCT ON (s.tenant_id, s.scheme_id) s.tenant_id, s.scheme_id, COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE TRUE{{NWS}}
+                    ORDER BY s.tenant_id, s.scheme_id, COALESCE(s.fhtc_count, 0) DESC
+                ),
                 scheme_fhtc_totals AS (
                     SELECT
-                        COALESCE(SUM(s.fhtc_count), 0)::bigint AS total_achieved_fhtc_count
-                    FROM (
-                        SELECT DISTINCT ON (s.tenant_id, s.scheme_id) s.tenant_id, s.scheme_id, COALESCE(s.fhtc_count, 0) AS fhtc_count
-                        FROM analytics_schema.dim_scheme_table s
-                        WHERE TRUE{{NWS}}
-                        ORDER BY s.tenant_id, s.scheme_id, COALESCE(s.fhtc_count, 0) DESC
-                    ) s
+                        COALESCE(SUM(fhtc_count), 0)::bigint AS total_achieved_fhtc_count
+                    FROM scheme_fhtc
                 ),
                 periods AS (
                     SELECT DISTINCT
@@ -6852,13 +6868,19 @@ public class SchemeRegularityRepository {
                     GROUP BY %5$s
                 ),
                 period_supply AS (
+                    -- total_supplied_fhtc_days (the LPCD denominator) reads FHTC from the same row as
+                    -- total_achieved_fhtc_count; the join is one-to-one, so the counts are unaffected.
                     SELECT
                         ssd.period_start_date,
                         COALESCE(SUM(ssd.supply_days)::int, 0) AS total_supply_days,
+                        COALESCE(SUM(sf.fhtc_count * ssd.supply_days), 0)::bigint AS total_supplied_fhtc_days,
                         %6$s AS regular_scheme_count
                     FROM scheme_supply_days ssd
                     JOIN periods p
                         ON p.period_start_date = ssd.period_start_date
+                    LEFT JOIN scheme_fhtc sf
+                        ON sf.tenant_id = ssd.tenant_id
+                        AND sf.scheme_id = ssd.scheme_id
                     CROSS JOIN params pm
                     GROUP BY ssd.period_start_date
                 )
@@ -6869,7 +6891,8 @@ public class SchemeRegularityRepository {
                     COALESCE((SELECT total_achieved_fhtc_count FROM scheme_fhtc_totals), 0)::bigint AS total_achieved_fhtc_count,
                     COALESCE(ps.total_supply_days, 0) AS total_supply_days,
                     COALESCE(ps.regular_scheme_count, 0) AS regular_scheme_count,
-                    COALESCE(pw.total_water_quantity, 0)::bigint AS total_water_quantity
+                    COALESCE(pw.total_water_quantity, 0)::bigint AS total_water_quantity,
+                    COALESCE(ps.total_supplied_fhtc_days, 0)::bigint AS total_supplied_fhtc_days
                 FROM periods p
                 LEFT JOIN period_supply ps
                     ON ps.period_start_date = p.period_start_date
@@ -6893,7 +6916,8 @@ public class SchemeRegularityRepository {
                         rs.getLong("total_achieved_fhtc_count"),
                         rs.getInt("total_supply_days"),
                         rs.getInt("regular_scheme_count"),
-                        rs.getLong("total_water_quantity")),
+                        rs.getLong("total_water_quantity"),
+                        rs.getLong("total_supplied_fhtc_days")),
                 startDate,
                 endDate,
                 startDate,
@@ -7543,9 +7567,13 @@ public class SchemeRegularityRepository {
                     -- predicate over the de-duplicated latest-row source), so this series uses the
                     -- same water figure as every other water KPI (national, region-wise, periodic
                     -- regularity) instead of a raw average that also counted NOT_SUBMITTED rows.
+                    -- The latest-row source holds one row per scheme-day, so summing FHTC over the
+                    -- qualifying rows counts each scheme's FHTC once per day it supplied water (the
+                    -- LPCD denominator).
                     SELECT
                         %5$s AS period_start_date,
-                        AVG(f.water_quantity::numeric) FILTER (WHERE {{SWD}}) AS avg_water_quantity
+                        AVG(f.water_quantity::numeric) FILTER (WHERE {{SWD}}) AS avg_water_quantity,
+                        SUM(s.fhtc_count) FILTER (WHERE {{SWD}}) AS supplied_fhtc_days
                     FROM params,
                          {{LWQ}} f
                     JOIN schemes_in_scope s
@@ -7567,7 +7595,8 @@ public class SchemeRegularityRepository {
                     COALESCE(w.avg_water_quantity, 0)::numeric AS average_water_quantity,
                     h.household_count,
                     h.fhtc_count,
-                    h.planned_fhtc
+                    h.planned_fhtc,
+                    COALESCE(w.supplied_fhtc_days, 0)::bigint AS supplied_fhtc_days
                 FROM periods p
                 LEFT JOIN water_by_period w
                     ON w.period_start_date = p.period_start_date
@@ -7589,7 +7618,8 @@ public class SchemeRegularityRepository {
                         rs.getBigDecimal("average_water_quantity").setScale(4, RoundingMode.HALF_UP),
                         rs.getLong("household_count"),
                         rs.getLong("fhtc_count"),
-                        rs.getLong("planned_fhtc")),
+                        rs.getLong("planned_fhtc"),
+                        rs.getLong("supplied_fhtc_days")),
                 startDate,
                 tenantId,
                 locationId,
@@ -7832,6 +7862,11 @@ public class SchemeRegularityRepository {
             BigDecimal averageLitersPerHousehold) {
     }
 
+    /**
+     * @param totalSuppliedFhtcDays the LPCD denominator: each scheme's achieved FHTC summed over the days
+     *                              it supplied water ({@code {{SWD}}}), read from the same de-duplicated
+     *                              row as {@code totalAchievedFhtcCount}
+     */
     public record ChildRegionWaterSupplyMetrics(
             Integer tenantId,
             String stateCode,
@@ -7843,7 +7878,8 @@ public class SchemeRegularityRepository {
             Long totalPlannedFhtcCount,
             Long totalWaterSuppliedLiters,
             Integer schemeCount,
-            BigDecimal avgWaterSupplyPerScheme) {
+            BigDecimal avgWaterSupplyPerScheme,
+            Long totalSuppliedFhtcDays) {
     }
 
     public record ChildRegionWaterQuantityMetrics(
@@ -7858,9 +7894,12 @@ public class SchemeRegularityRepository {
     }
 
     /**
-     * @param regularSchemeCount schemes regular <em>within this bucket</em>, classified against the bucket's
-     *                           days capped to the request window (a partial month bucket is judged on its
-     *                           partial length, matching the response's {@code periodStartDate}/{@code periodEndDate})
+     * @param regularSchemeCount    schemes regular <em>within this bucket</em>, classified against the bucket's
+     *                              days capped to the request window (a partial month bucket is judged on its
+     *                              partial length, matching the response's {@code periodStartDate}/{@code periodEndDate})
+     * @param totalSuppliedFhtcDays the bucket's LPCD denominator, as in {@link ChildRegionWaterSupplyMetrics};
+     *                              only the national series computes it, the regional series leave it
+     *                              {@code null} through the seven-argument constructor
      */
     public record PeriodicSchemeRegularityMetrics(
             LocalDate periodStartDate,
@@ -7869,7 +7908,18 @@ public class SchemeRegularityRepository {
             Long totalAchievedFhtcCount,
             Integer totalSupplyDays,
             Integer regularSchemeCount,
-            Long totalWaterQuantity) {}
+            Long totalWaterQuantity,
+            Long totalSuppliedFhtcDays) {
+
+        /** For the regional series, whose LPCD denominator comes from the periodic water-quantity series. */
+        public PeriodicSchemeRegularityMetrics(LocalDate periodStartDate, LocalDate periodEndDate,
+                                               Integer schemeCount, Long totalAchievedFhtcCount,
+                                               Integer totalSupplyDays, Integer regularSchemeCount,
+                                               Long totalWaterQuantity) {
+            this(periodStartDate, periodEndDate, schemeCount, totalAchievedFhtcCount,
+                    totalSupplyDays, regularSchemeCount, totalWaterQuantity, null);
+        }
+    }
 
     /**
      * @param regularSchemeCount schemes in this child region classified regular
@@ -7947,6 +7997,9 @@ public class SchemeRegularityRepository {
             Integer totalSubmissionDays) {
     }
 
+    /**
+     * @param totalSuppliedFhtcDays the LPCD denominator, as in {@link ChildRegionWaterSupplyMetrics}
+     */
     public record Level2WaterSupplyMetrics(
             Integer tenantId,
             Integer tenantStatus,
@@ -7959,7 +8012,8 @@ public class SchemeRegularityRepository {
             Long totalPlannedFhtcCount,
             Long totalWaterSuppliedLiters,
             Integer schemeCount,
-            BigDecimal avgWaterSupplyPerScheme) {
+            BigDecimal avgWaterSupplyPerScheme,
+            Long totalSuppliedFhtcDays) {
     }
 
     public record Level2SupplyDaysInEfficientRange(
@@ -8118,6 +8172,9 @@ public class SchemeRegularityRepository {
             Integer submittedSchemeCount) {
     }
 
+    /**
+     * @param totalSuppliedFhtcDays the bucket's LPCD denominator, as in {@link ChildRegionWaterSupplyMetrics}
+     */
     public record PeriodicWaterQuantityMetrics(
             LocalDate periodStartDate,
             LocalDate periodEndDate,
@@ -8125,6 +8182,7 @@ public class SchemeRegularityRepository {
             BigDecimal averageWaterQuantity,
             Long householdCount,
             Long achievedFhtcCount,
-            Long plannedFhtcCount) {
+            Long plannedFhtcCount,
+            Long totalSuppliedFhtcDays) {
     }
 }

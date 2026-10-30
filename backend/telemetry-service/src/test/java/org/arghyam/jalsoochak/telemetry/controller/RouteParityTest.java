@@ -67,7 +67,8 @@ class RouteParityTest {
             // SO/SDO web UI
             "PATCH /api/v1/telemetry/staff/schemes/{schemeId}/yesterday-final-reading",
             // Operations
-            "POST /api/v1/telemetry/internal/readings/republish"
+            "POST /api/v1/telemetry/internal/readings/republish",
+            "POST /api/v1/telemetry/internal/readings/quarantine/release"
     );
 
     @Test

@@ -48,6 +48,7 @@ public class NationalDashboardLevel2MetricsResponse {
         private Long totalWaterSuppliedLiters;
         private BigDecimal avgWaterSupplyPerScheme;
         private Long supplyDaysInEfficientRange;
+        private Long totalSuppliedFhtcDays;
 
         // Regularity (same fields as NationalDashboardResponse.StateRegularity)
         private Integer totalSupplyDays;

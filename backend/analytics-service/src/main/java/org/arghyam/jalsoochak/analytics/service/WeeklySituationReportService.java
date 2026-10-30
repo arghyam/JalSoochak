@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.util.List;
 
-import static org.arghyam.jalsoochak.analytics.service.ReportMaths.perDayRatio;
+import static org.arghyam.jalsoochak.analytics.service.ReportMaths.ratio;
 
 /**
  * Builds the {@link WeeklyReportKpiDTO} for one officer over the week carried by the request,
@@ -28,7 +28,6 @@ import static org.arghyam.jalsoochak.analytics.service.ReportMaths.perDayRatio;
 @Slf4j
 public class WeeklySituationReportService {
 
-    private static final int DAYS_IN_WEEK = 7;
     private static final String SDO_ROLE = "SUB_DIVISIONAL_OFFICER";
 
     private final WeeklySituationReportRepository reportRepository;
@@ -124,7 +123,10 @@ public class WeeklySituationReportService {
     private WeeklyReportKpiDTO.WeekKpis summarise(
             List<SchemeWeekSnapshot> schemes, int minSupplyDays, int personsPerHousehold) {
         long litres = schemes.stream().mapToLong(SchemeWeekSnapshot::litres).sum();
-        long households = schemes.stream().mapToLong(SchemeWeekSnapshot::fhtc).sum();
+        // Each scheme's households count only on the days it supplied water — the same denominator as
+        // the dashboards' LPCD, so a scheme that ran on two days does not dilute the figure with five
+        // days nobody was served.
+        long suppliedFhtcDays = schemes.stream().mapToLong(s -> s.fhtc() * s.supplyDays()).sum();
 
         return WeeklyReportKpiDTO.WeekKpis.builder()
                 .totalSchemes(schemes.size())
@@ -133,12 +135,16 @@ public class WeeklySituationReportService {
                 .schemesLowLpcd((int) schemes.stream().filter(s -> isLowLpcd(s, personsPerHousehold)).count())
                 // Summed before dividing, not an average of per-scheme LPCDs: the latter would weight a
                 // 10-connection scheme the same as a 10,000-connection one.
-                .avgLpcd(perDayRatio(litres, households * personsPerHousehold, DAYS_IN_WEEK))
+                .avgLpcd(ratio(litres, suppliedFhtcDays * personsPerHousehold))
                 .build();
     }
 
     /**
-     * Whether a scheme averaged at or below the low-LPCD bar across the week.
+     * Whether a scheme averaged at or below the low-LPCD bar on the days it supplied water.
+     *
+     * <p>Divided by the scheme's supply days, not the 7 days of the week: the days it did not supply are
+     * already reported as low supply days, so counting them here would flag a scheme that ran well on
+     * the days it ran. This matches the denominator of the report's Average LPCD.</p>
      *
      * <p>Two exclusions, both deliberate. A scheme with no connections has an <em>undefined</em> LPCD,
      * not a zero one, so it is not under-supplying. A scheme that supplied on no day is already listed
@@ -149,7 +155,7 @@ public class WeeklySituationReportService {
         if (scheme.fhtc() <= 0 || scheme.supplyDays() == 0) {
             return false;
         }
-        return perDayRatio(scheme.litres(), scheme.fhtc() * personsPerHousehold, DAYS_IN_WEEK) <= lowLpcdThreshold;
+        return ratio(scheme.litres(), scheme.fhtc() * scheme.supplyDays() * personsPerHousehold) <= lowLpcdThreshold;
     }
 
     private static List<Integer> schemeIds(

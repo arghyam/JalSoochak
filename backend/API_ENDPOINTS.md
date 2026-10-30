@@ -206,7 +206,7 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/v1/analytics/water-quantity/region-wise` | Water quantity by region |
-| GET | `/api/v1/analytics/water-quantity/periodic` | Periodic water quantity |
+| GET | `/api/v1/analytics/water-quantity/periodic` | Periodic water quantity; each bucket carries `totalSuppliedFhtcDays`¹ |
 | GET | `/api/v1/analytics/outage-reasons` | Outage reasons summary |
 | GET | `/api/v1/analytics/outage-reasons/periodic` | Periodic outage reasons |
 | GET | `/api/v1/analytics/outage-reasons/user` | Outage reasons by user |
@@ -214,12 +214,12 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 | GET | `/api/v1/analytics/non-submission-reasons/user` | Non-submission reasons by user |
 | GET | `/api/v1/analytics/submission-status/user` | Submission status by user |
 | GET | `/api/v1/analytics/submission-status` | Submission status summary |
-| GET | `/api/v1/analytics/water-supply/average-per-region` | Average water supply per region |
-| GET | `/api/v1/analytics/national/dashboard` | National dashboard data |
-| GET | `/api/v1/analytics/national/dashboard/district` | National dashboard at district level |
+| GET | `/api/v1/analytics/water-supply/average-per-region` | Average water supply per region; `childRegions[]` and `currentRegion` carry `totalSuppliedFhtcDays`¹ |
+| GET | `/api/v1/analytics/national/dashboard` | National dashboard data; `stateWiseQuantityPerformance[]` carries `totalSuppliedFhtcDays`¹ |
+| GET | `/api/v1/analytics/national/dashboard/district` | National dashboard at district level; `districts[]` carries `totalSuppliedFhtcDays`¹ |
 | GET | `/api/v1/analytics/national/dashboard/boundary` | State boundaries (GeoJSON) for the national map |
 | GET | `/api/v1/analytics/national/dashboard/boundary/district` | National outline + district boundaries (GeoJSON) |
-| GET | `/api/v1/analytics/scheme-regularity/periodic/national` | National periodic scheme regularity |
+| GET | `/api/v1/analytics/scheme-regularity/periodic/national` | National periodic scheme regularity; each bucket carries `totalSuppliedFhtcDays`¹ |
 | GET | `/api/v1/analytics/schemes/status-count` | Scheme status counts |
 | GET | `/api/v1/analytics/schemes/dashboard` | Scheme dashboard |
 | GET | `/api/v1/analytics/schemes/dashboard/download` | Scheme dashboard as CSV |
@@ -246,6 +246,10 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 | GET | `/api/v1/analytics/anomalies/statuses` | Anomaly statuses list |
 | GET | `/api/v1/analytics/escalations/statuses` | Escalation statuses list |
 
+¹ `totalSuppliedFhtcDays` is the LPCD denominator: each scheme's achieved FHTC summed over the days it
+supplied water. LPCD = litres ÷ (`totalSuppliedFhtcDays` × persons per household), so schemes that did not
+supply add no households. `totalAchievedFhtcCount` is still the region's household total.
+
 ---
 
 ## Telemetry (`telemetry-service` · port 8084)
@@ -263,6 +267,7 @@ they reject the value read from their photo.
 | POST | `/api/v1/telemetry/readings/reset-latest` | Reset the operator's latest reading, whatever its date (`X-Api-Key`) |
 | PATCH | `/api/v1/telemetry/staff/schemes/{schemeId}/yesterday-final-reading` | SO/SDO correction of a scheme's latest BFM reading (officer's JWT; see *Telemetry service — SO/SDO Fix-readings save*) |
 | POST | `/api/v1/telemetry/internal/readings/republish` | Re-send stored ELM/PDU readings to analytics (`X-Internal-Token` + `X-Tenant-Code`; see below) |
+| POST | `/api/v1/telemetry/internal/readings/quarantine/release` | Assess quarantined readings again and release the ones that now pass (`X-Internal-Token` + `X-Tenant-Code`; see below) |
 
 ---
 
@@ -503,6 +508,39 @@ Failures return `success: false` with a code in `data.errorCode`:
   `republishedCount` and `withheldCount` count the readings before it stopped, and `notSentCount`
   the ones not sent. Send the same range again.
 - `500 PROCESSING_FAILED`: safe to retry.
+
+---
+
+### Telemetry service — releasing quarantined readings (operations)
+
+`POST /api/v1/telemetry/internal/readings/quarantine/release` assesses a tenant's quarantined BFM
+readings again with the implausible-supply check as it stands, and releases the ones it accepts:
+their quarantine marker is cleared and they are sent to analytics for the first time. Readings it
+still finds implausible stay quarantined. Use it for readings quarantined under an earlier rule, or
+after correcting a scheme's connection counts. Details and caveats:
+[`docs/implausible-water-supply-runbook.md`](../docs/implausible-water-supply-runbook.md) §4.
+
+Same headers as the republish route. The body:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `fromDate`, `toDate` | yes | Reading dates (`yyyy-MM-dd`), both included, at most 31 days |
+| `stateSchemeId`, `centreSchemeId` | no | One scheme, found as on `POST /readings`. Left out, every scheme |
+| `dryRun` | no | `true` to get the counts a release would give, with nothing changed or sent. Default `false` |
+
+`from_date`, `to_date`, `state_scheme_id`, `centre_scheme_id` and `dry_run` are accepted too.
+
+```json
+{"success": true, "data": {"dryRun": false, "releasedCount": 42, "stillQuarantinedCount": 3}}
+```
+
+Readings go oldest first, each released before the next is assessed, so release ranges in date
+order. Releasing the same range again is safe: released readings are no longer quarantined. With
+`ANALYTICS_READ_FROM_AGGREGATES` on, re-aggregate older dates afterwards, as after a republish.
+
+Failures are those of the republish route, without `CHANNEL_NOT_SUPPORTED`. On `503
+PROCESSING_FAILED`, `releasedCount` and `stillQuarantinedCount` count the readings before Kafka
+stopped acknowledging, and `notSentCount` the ones left quarantined. Release the same range again.
 
 #### Before the first run
 
