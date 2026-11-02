@@ -178,6 +178,18 @@ class TelemetryEventPublisherTest {
         }
 
         @Test
+        @DisplayName("stamps when the anomaly was raised, in UTC, so analytics dates it by that and not by receipt")
+        void stampsWhenTheAnomalyWasRaisedInUtc() {
+            LocalDateTime before = LocalDateTime.now(java.time.ZoneOffset.UTC);
+            publisher.publishAnomalyRecorded(17, 10, 11L, 7L, null, null, null, null, null, null,
+                    null, "Implausible supply", 1, "dedup-key", null);
+            LocalDateTime after = LocalDateTime.now(java.time.ZoneOffset.UTC);
+
+            LocalDateTime raisedAt = LocalDateTime.parse(publishedTo(TOPIC, AnomalyEvent.class).getRaisedAt());
+            assertThat(raisedAt).isBetween(before, after);
+        }
+
+        @Test
         @DisplayName("ANOMALY-SUBMISSION-LINK: the submission link is carried without touching the dedup key")
         void carriesTheSubmissionLinkSeparatelyFromTheDedupKey() {
             publisher.publishAnomalyRecorded(17, 10, 11L, 7L, null, null, null, null, null, null,

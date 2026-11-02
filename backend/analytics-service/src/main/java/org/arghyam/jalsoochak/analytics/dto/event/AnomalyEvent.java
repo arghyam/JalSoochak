@@ -36,4 +36,10 @@ public class AnomalyEvent {
      * telemetry-service still on the old contract — this service can be deployed first.
      */
     private String submissionCorrelationId;
+    /**
+     * When telemetry raised the anomaly, as a UTC {@code LocalDateTime} string; stored as
+     * {@code fact_anomaly_table.created_at}. Null on events from a telemetry-service still on the old
+     * contract, which are dated by receipt instead.
+     */
+    private String raisedAt;
 }

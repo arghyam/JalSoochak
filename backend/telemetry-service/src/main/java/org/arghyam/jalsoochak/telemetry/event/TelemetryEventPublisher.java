@@ -143,6 +143,8 @@ public class TelemetryEventPublisher {
                 // ANOMALY-SUBMISSION-LINK: carried separately from correlationId, which is the dedup
                 // key the event uuid above is derived from and must keep its meaning.
                 .submissionCorrelationId(submissionCorrelationId)
+                // UTC, like attemptedAt: analytics dates the anomaly by this, not by when it got the event.
+                .raisedAt(LocalDateTime.now(java.time.ZoneOffset.UTC).toString())
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);
