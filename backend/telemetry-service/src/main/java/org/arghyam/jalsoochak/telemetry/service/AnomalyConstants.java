@@ -62,7 +62,13 @@ public final class AnomalyConstants {
      * stops an appended number quietly making the column ungroupable again.
      */
 
-    /** Case A — a POST submission was stored, quarantined and withheld from the warehouse. */
+    /**
+     * Case A — a POST submission was stored, quarantined and withheld from the warehouse.
+     *
+     * <p>analytics-service matches this exact text (SchemeRegularityRepository.REPORTED_ANOMALY_PREDICATE)
+     * to count the day as reported on the continuous-schemes API, apart from the refused corrections
+     * below. Change both together, or quarantined days stop counting.
+     */
     public static final String REASON_IMPLAUSIBLE_SUPPLY_SUBMITTED =
             "Submitted reading implies an implausible daily water supply for this scheme.";
 
