@@ -585,6 +585,7 @@ public class BfmReadingService {
                     supplyBaseline != null ? supplyBaseline.createdAt() : null,
                     0,
                     buildSupplyAnomalyCorrelationId(
+                            tenantId,
                             AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY,
                             operatorInRequest.id(),
                             request.getSchemeId(),
@@ -1325,16 +1326,20 @@ public class BfmReadingService {
     }
 
     /**
-     * SUPPLY-PLAUSIBILITY: one anomaly per operator, per scheme, per day.
+     * SUPPLY-PLAUSIBILITY: one anomaly per tenant, per operator, per scheme, per day.
      *
      * <p>Analytics derives {@code fact_anomaly_table.uuid} deterministically from the correlationId, and
      * dedups on it — a repeat is touched, not inserted. The date is in the key because the keys
      * analytics builds for itself carry none: without it every type-10 anomaly for an operator and
      * scheme would collapse into a single row forever, and the second day's rejection would be
-     * invisible. Same construction as the unreadable-image id in {@code ImageReadingCapture}.
+     * invisible. The tenant is in the key because operator and scheme ids are per-tenant sequences
+     * while that uuid is unique across tenants: without it, a second tenant's anomaly for the same ids
+     * and day would be touched onto the first tenant's row and lost. Ids minted before the tenant was
+     * added are not matched, so a repeat across that change adds one row instead of touching.
      */
-    private String buildSupplyAnomalyCorrelationId(int anomalyType, Long userId, Long schemeId, LocalDate readingDate) {
-        String key = anomalyType + ":" + userId + ":" + schemeId + ":" + readingDate;
+    private String buildSupplyAnomalyCorrelationId(
+            Integer tenantId, int anomalyType, Long userId, Long schemeId, LocalDate readingDate) {
+        String key = tenantId + ":" + anomalyType + ":" + userId + ":" + schemeId + ":" + readingDate;
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
