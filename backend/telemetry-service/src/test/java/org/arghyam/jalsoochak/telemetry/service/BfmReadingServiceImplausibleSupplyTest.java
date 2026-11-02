@@ -294,6 +294,27 @@ class BfmReadingServiceImplausibleSupplyTest {
         }
 
         /**
+         * Analytics keeps an anomaly's created_at on a repeat and dates the reported day by it, so a
+         * backdated reading re-sent on a later day needs its own id, or that day goes uncounted.
+         */
+        @Test
+        @DisplayName("the anomaly id is per arrival day as well as per reading date")
+        void anomalyCorrelationIdIsPerArrivalDay() {
+            LocalDate readingDate = READING_AT.toLocalDate();
+            LocalDate arrivedOn = readingDate.plusDays(1);
+            String id = supplyId(readingDate, arrivedOn);
+
+            assertThat(supplyId(readingDate, arrivedOn)).isEqualTo(id);
+            assertThat(supplyId(readingDate, arrivedOn.plusDays(1))).isNotEqualTo(id);
+            assertThat(supplyId(readingDate.minusDays(1), arrivedOn)).isNotEqualTo(id);
+        }
+
+        private String supplyId(LocalDate readingDate, LocalDate arrivedOn) {
+            return BfmReadingService.buildSupplyAnomalyCorrelationId(TENANT_ID,
+                    AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY, OPERATOR_ID, SCHEME_ID, readingDate, arrivedOn);
+        }
+
+        /**
          * The tenant row has to carry the same numbers as the event. It did not once: the insert
          * wrote only the identifying columns, so staff querying the tenant schema saw the anomaly
          * with no way to tell what value had been refused or what it was measured against.

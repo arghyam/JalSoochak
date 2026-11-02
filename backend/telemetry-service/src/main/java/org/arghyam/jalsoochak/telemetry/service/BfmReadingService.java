@@ -589,7 +589,8 @@ public class BfmReadingService {
                             AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY,
                             operatorInRequest.id(),
                             request.getSchemeId(),
-                            LocalDate.from(readingAt)),
+                            LocalDate.from(readingAt),
+                            ReadingTime.today()),
                     // ANOMALY-SUBMISSION-LINK: the quarantined row IS the submission that caused
                     // this. Both were already in hand here and were previously dropped, which is
                     // what left the anomaly matched to its reading only by operator, scheme and day.
@@ -1326,7 +1327,8 @@ public class BfmReadingService {
     }
 
     /**
-     * SUPPLY-PLAUSIBILITY: one anomaly per tenant, per operator, per scheme, per day.
+     * SUPPLY-PLAUSIBILITY: one anomaly per tenant, per operator, per scheme, per reading date, per IST
+     * day the submission arrived.
      *
      * <p>Analytics derives {@code fact_anomaly_table.uuid} deterministically from the correlationId, and
      * dedups on it — a repeat is touched, not inserted. The date is in the key because the keys
@@ -1334,12 +1336,17 @@ public class BfmReadingService {
      * scheme would collapse into a single row forever, and the second day's rejection would be
      * invisible. The tenant is in the key because operator and scheme ids are per-tenant sequences
      * while that uuid is unique across tenants: without it, a second tenant's anomaly for the same ids
-     * and day would be touched onto the first tenant's row and lost. Ids minted before the tenant was
-     * added are not matched, so a repeat across that change adds one row instead of touching.
+     * and day would be touched onto the first tenant's row and lost. The arrival day is in the key
+     * because a touch keeps the row's {@code created_at}, which dates the continuous-schemes reported
+     * day: a backdated reading re-sent on a later day would otherwise leave that day uncounted. It is
+     * fixed once per submission, so a redelivered event keeps its id. Ids minted before the tenant and
+     * arrival day were added are not matched, so a repeat across that change adds one row instead of
+     * touching. Package-visible for tests.
      */
-    private String buildSupplyAnomalyCorrelationId(
-            Integer tenantId, int anomalyType, Long userId, Long schemeId, LocalDate readingDate) {
-        String key = tenantId + ":" + anomalyType + ":" + userId + ":" + schemeId + ":" + readingDate;
+    static String buildSupplyAnomalyCorrelationId(Integer tenantId, int anomalyType, Long userId,
+                                                  Long schemeId, LocalDate readingDate, LocalDate arrivalDate) {
+        String key = tenantId + ":" + anomalyType + ":" + userId + ":" + schemeId + ":" + readingDate
+                + ":" + arrivalDate;
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
