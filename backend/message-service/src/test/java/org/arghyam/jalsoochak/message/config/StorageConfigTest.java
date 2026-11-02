@@ -5,6 +5,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
+import org.arghyam.jalsoochak.message.storage.ReportPublisher;
 import org.arghyam.jalsoochak.message.storage.S3CompatibleStorageService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,14 @@ class StorageConfigTest {
             "storage.access-key=test-access",
             "storage.secret-key=test-secret"};
     private static final String PUBLIC_BASE_URL = "storage.public-base-url=https://storage.example.org";
+    private static final String[] DELIVERY_ENABLED = {
+            "storage.delivery.enabled=true",
+            "storage.delivery.endpoint=https://s3.ap-south-1.amazonaws.com",
+            "storage.delivery.region=ap-south-1",
+            "storage.delivery.access-key=delivery-access",
+            "storage.delivery.secret-key=delivery-secret",
+            "storage.delivery.bucket=jalsoochak-report-delivery",
+            "storage.delivery.public-base-url=https://s3.ap-south-1.amazonaws.com"};
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(StorageConfig.class);
@@ -59,7 +68,77 @@ class StorageConfigTest {
                             .hasSingleBean(ObjectStorageService.class);
                     assertThat(context.getBean(ObjectStorageService.class))
                             .isInstanceOf(S3CompatibleStorageService.class);
+                    assertThat(context).hasSingleBean(ReportPublisher.class);
                 });
+    }
+
+    /**
+     * The delivery store is a second client and adapter of the same types as the store of record's.
+     * Declared as beans they would make every injection of {@link S3Client} or
+     * {@link ObjectStorageService} by type ambiguous, and the consumer below would fail to start.
+     */
+    @Test
+    @DisplayName("an enabled delivery store adds no S3Client or ObjectStorageService bean")
+    void deliveryStoreAddsNoInjectableBean() {
+        enabled()
+                .withPropertyValues(DELIVERY_ENABLED)
+                .withBean(StorageConsumer.class)
+                .run(context -> assertThat(context).hasNotFailed()
+                        .hasSingleBean(S3Client.class)
+                        .hasSingleBean(ObjectStorageService.class)
+                        .hasSingleBean(ReportPublisher.class)
+                        .hasSingleBean(StorageConsumer.class));
+    }
+
+    @ParameterizedTest(name = "storage.delivery.{0} blank")
+    @ValueSource(strings = {"endpoint", "region", "access-key", "secret-key", "bucket", "public-base-url"})
+    @DisplayName("an enabled delivery store with a blank value fails startup, naming the property")
+    void deliveryStoreWithABlankValueFailsStartup(String key) {
+        enabled()
+                .withPropertyValues(DELIVERY_ENABLED)
+                .withPropertyValues("storage.delivery." + key + "=")
+                .run(context -> assertThat(context).hasFailed()
+                        .getFailure()
+                        .rootCause()
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("storage.delivery." + key)
+                        .hasMessageContaining("storage.delivery.enabled=true"));
+    }
+
+    @Test
+    @DisplayName("an unusable delivery public base URL fails startup, naming the property but not the value")
+    void unusableDeliveryPublicBaseUrlFailsStartup() {
+        enabled()
+                .withPropertyValues(DELIVERY_ENABLED)
+                .withPropertyValues("storage.delivery.public-base-url=https://reader:s3cr3t@reports.example.org")
+                .run(context -> assertThat(context).hasFailed()
+                        .getFailure()
+                        .rootCause()
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("storage.delivery.public-base-url")
+                        .hasMessageNotContaining("s3cr3t"));
+    }
+
+    @Test
+    @DisplayName("a delivery public base URL Meta could not fetch starts, with a warning naming the property")
+    void internalDeliveryPublicBaseUrlWarns() {
+        List<ILoggingEvent> events = capturingWarnings(() -> enabled()
+                .withPropertyValues(DELIVERY_ENABLED)
+                .withPropertyValues("storage.delivery.public-base-url=http://10.0.0.5:9000")
+                .run(context -> assertThat(context).hasNotFailed()));
+
+        assertThat(events).singleElement().satisfies(event -> assertThat(event.getFormattedMessage())
+                .contains("storage.delivery.public-base-url", "not publicly reachable",
+                        "STORAGE_DELIVERY_PUBLIC_BASE_URL"));
+    }
+
+    /** Nothing the delivery store needs is checked while it is off, so a half-filled block is harmless. */
+    @Test
+    @DisplayName("a disabled delivery store needs none of its values")
+    void disabledDeliveryStoreNeedsNoValues() {
+        enabled()
+                .withPropertyValues("storage.delivery.enabled=false", "storage.delivery.endpoint=")
+                .run(context -> assertThat(context).hasNotFailed().hasSingleBean(ReportPublisher.class));
     }
 
     @Test
@@ -166,7 +245,8 @@ class StorageConfigTest {
         withEnabled(enabled)
                 .run(context -> assertThat(context).hasNotFailed()
                         .doesNotHaveBean(ObjectStorageService.class)
-                        .doesNotHaveBean(S3Client.class));
+                        .doesNotHaveBean(S3Client.class)
+                        .doesNotHaveBean(ReportPublisher.class));
     }
 
     @ParameterizedTest(name = "storage.enabled={0}")
@@ -191,6 +271,7 @@ class StorageConfigTest {
             StorageProperties props = context.getBean(StorageProperties.class);
             assertThat(props.getBucket()).isEqualTo("escalation-reports");
             assertThat(props.getRegion()).isEqualTo("us-east-1");
+            assertThat(props.getDelivery().isEnabled()).isFalse();
         });
     }
 
@@ -217,6 +298,12 @@ class StorageConfigTest {
         assertThat(props.getPublicBaseUrl()).as("blank, so an unset base URL fails startup").isEmpty();
         assertThat(props.getAccessKey()).as("blank, so an unset credential fails startup").isEmpty();
         assertThat(props.getSecretKey()).as("blank, so an unset credential fails startup").isEmpty();
+        StorageProperties.Delivery delivery = props.getDelivery();
+        assertThat(delivery.isEnabled()).as("off, so a deployment that sets nothing is unchanged").isFalse();
+        assertThat(List.of(delivery.getEndpoint(), delivery.getRegion(), delivery.getAccessKey(),
+                delivery.getSecretKey(), delivery.getBucket(), delivery.getPublicBaseUrl()))
+                .as("blank, so turning the store on without them fails startup")
+                .allSatisfy(value -> assertThat(value).isEmpty());
     }
 
     private ApplicationContextRunner enabled() {

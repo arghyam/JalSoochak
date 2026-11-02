@@ -253,14 +253,15 @@ public class WhatsAppChannel implements NotificationChannel {
      * Sends the weekly report, mirroring {@link #sendDailyReport} — same outcome type, same failure
      * classification, so the router treats both reports identically.
      *
-     * @param weekStart the first day of the reported week, template variable {{2}}
+     * @param weekStart the first day of the reported week, template variable {{2}} in link mode
+     * @param weekEnd   the last day of the reported week; with {@code weekStart}, the document's name
      */
     public ReportSendOutcome sendWeeklyReport(long contactId, String documentUrl, String officerUserType,
-                                              LocalDate weekStart, String officerName) {
+                                              LocalDate weekStart, LocalDate weekEnd, String officerName) {
         String role = (officerUserType == null || officerUserType.isBlank()) ? "UNKNOWN" : officerUserType.trim();
         try {
             WhatsAppSendResult result = whatsAppSender.sendWeeklyReportHsm(
-                    contactId, documentUrl, role, weekStart, officerName);
+                    contactId, documentUrl, role, weekStart, weekEnd, officerName);
             log.info("[WHATSAPP] Weekly report HSM sent role={} providerMsgId={}", role, result.messageIdForLog());
             log.debug("[WHATSAPP] Weekly report HSM sent role={} contactId={}", role, contactId);
             return ReportSendOutcome.accepted(result);

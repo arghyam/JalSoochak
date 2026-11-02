@@ -1,11 +1,13 @@
 package org.arghyam.jalsoochak.message.service;
 
+import org.arghyam.jalsoochak.message.channel.provider.ReportDeliveryMode;
 import org.arghyam.jalsoochak.message.config.StorageConfig;
 import org.arghyam.jalsoochak.message.config.StorageProperties;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
+import org.arghyam.jalsoochak.message.storage.ReportPublisher;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,13 +24,11 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -41,14 +41,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *
  * <p>Covers the half of the contract a mocked S3 client cannot: that a missing bucket is detected
  * and created, that a folder-structured object key survives the round trip as a real path, and that
- * the URL handed onward addresses the object that was actually stored. The client is built by
- * {@link StorageConfig}, so the path-style wiring a non-AWS store needs is exercised too.</p>
+ * the URL handed onward addresses the object that was actually stored. The clients and the
+ * {@link ReportPublisher} are built by {@link StorageConfig}, so the path-style wiring a non-AWS store
+ * needs is exercised too. The external delivery store is a second bucket on the same server.</p>
  */
 @Testcontainers
 class ReportStorageUploadIT {
 
     /** The image's default root credentials. */
     private static final String CREDENTIAL = "minioadmin";
+    /** Pre-created, as the real one must be: the publisher never creates the delivery bucket. */
+    private static final String DELIVERY_BUCKET = "report-delivery";
 
     @Container
     static final GenericContainer<?> STORE =
@@ -62,6 +65,7 @@ class ReportStorageUploadIT {
 
     private S3Client s3Client;
     private ObjectStorageService storage;
+    private ReportPublisher publisher;
 
     @BeforeEach
     void setUp() {
@@ -71,13 +75,24 @@ class ReportStorageUploadIT {
         props.setAccessKey(CREDENTIAL);
         props.setSecretKey(CREDENTIAL);
         props.setPublicBaseUrl(endpoint());
+        StorageProperties.Delivery delivery = props.getDelivery();
+        delivery.setEnabled(true);
+        delivery.setEndpoint(endpoint());
+        delivery.setRegion("us-east-1");
+        delivery.setAccessKey(CREDENTIAL);
+        delivery.setSecretKey(CREDENTIAL);
+        delivery.setBucket(DELIVERY_BUCKET);
+        delivery.setPublicBaseUrl(endpoint());
         StorageConfig config = new StorageConfig();
         s3Client = config.s3Client(props);
         storage = config.objectStorageService(s3Client, props);
+        publisher = config.reportPublisher(storage, props);
+        storage.ensureBucket(DELIVERY_BUCKET);
     }
 
     @AfterEach
-    void tearDown() {
+    void tearDown() throws Exception {
+        publisher.close();
         s3Client.close();
     }
 
@@ -103,7 +118,7 @@ class ReportStorageUploadIT {
         assertThat(localPdf.toFile()).exists();
 
         String objectKey = ReportFileNaming.dailyObjectKey("SECTION_OFFICER", filename, reportDate);
-        String url = uploadReport(localPdf, ReportFileNaming.DAILY_BUCKET, objectKey);
+        String url = publisher.publish(localPdf, ReportFileNaming.DAILY_BUCKET, objectKey, ReportDeliveryMode.LINK);
 
         assertThat(objectKey).isEqualTo("SO/2026-07-19/" + filename);
         assertThat(url).isEqualTo(endpoint() + "/" + ReportFileNaming.DAILY_BUCKET + "/" + objectKey);
@@ -128,7 +143,7 @@ class ReportStorageUploadIT {
         assertThat(localPdf.toFile()).exists();
 
         String objectKey = ReportFileNaming.weeklyObjectKey("SUB_DIVISIONAL_OFFICER", filename, weekStart, weekEnd);
-        String url = uploadReport(localPdf, ReportFileNaming.WEEKLY_BUCKET, objectKey);
+        String url = publisher.publish(localPdf, ReportFileNaming.WEEKLY_BUCKET, objectKey, ReportDeliveryMode.LINK);
 
         assertThat(objectKey).isEqualTo("SDO/2026-07-13_to_2026-07-19/" + filename);
         assertThat(url).endsWith("/" + ReportFileNaming.WEEKLY_BUCKET + "/" + objectKey);
@@ -151,13 +166,28 @@ class ReportStorageUploadIT {
         assertThatCode(() -> storage.ensureBucket(freshBucket)).doesNotThrowAnyException();
     }
 
-    /** Uploads the way the router does: bucket first, then the PDF, then the URL it hands onward. */
-    private String uploadReport(Path pdf, String bucket, String objectKey) throws IOException {
-        storage.ensureBucket(bucket);
-        try (InputStream content = Files.newInputStream(pdf)) {
-            storage.upload(bucket, objectKey, content, Files.size(pdf), "application/pdf");
-        }
-        return storage.publicUrl(bucket, objectKey).toString();
+    @Test
+    void stagesADocumentInTheDeliveryBucket_andHandsOutThatCopysUrl() throws Exception {
+        DailyReportPdfService pdfService = new DailyReportPdfService();
+        ReflectionTestUtils.setField(pdfService, "reportDir", tempDir.toString() + "/");
+        ReflectionTestUtils.setField(pdfService, "dashboardUrl", "https://jalsoochak.jjmbrain.in/staff/");
+        ReflectionTestUtils.setField(pdfService, "supportPhone", "");
+
+        LocalDate reportDate = LocalDate.of(2026, 7, 19);
+        Path localPdf = pdfService.generate(dailyKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
+                List.of(), List.of());
+        String filename = localPdf.getFileName().toString();
+        String objectKey = ReportFileNaming.dailyObjectKey("SECTION_OFFICER", filename, reportDate);
+
+        String url = publisher.publish(localPdf, ReportFileNaming.DAILY_BUCKET, objectKey, ReportDeliveryMode.DOCUMENT);
+
+        // The store of record keeps its copy under the usual key: the SDC copy is the record.
+        assertStoredAt(ReportFileNaming.DAILY_BUCKET, objectKey);
+        String deliveryPrefix = endpoint() + "/" + DELIVERY_BUCKET + "/";
+        assertThat(url).startsWith(deliveryPrefix);
+        String deliveryKey = url.substring(deliveryPrefix.length());
+        assertThat(deliveryKey).matches(ReportFileNaming.DAILY_BUCKET + "/[0-9a-f-]{36}/" + Pattern.quote(filename));
+        assertStoredAt(DELIVERY_BUCKET, deliveryKey);
     }
 
     /** Fetches the object back, so the assertion is about what the store holds rather than what we sent. */

@@ -3,7 +3,9 @@ package org.arghyam.jalsoochak.message.channel.provider;
 import java.util.Locale;
 
 /**
- * How the Daily Water Service Situation Report PDF reaches the officer on WhatsApp.
+ * How a situation report PDF — daily or weekly — reaches the officer on WhatsApp. Each report has its
+ * own property ({@code notifications.daily-report.delivery-mode},
+ * {@code notifications.weekly-report.delivery-mode}) and its own approved templates per mode.
  *
  * <p>{@link #DOCUMENT} is the original path: the PDF is registered with the WhatsApp provider via
  * {@code createMessageMedia} and sent as a document HSM, which requires <em>Meta</em> to download the
@@ -26,25 +28,26 @@ public enum ReportDeliveryMode {
     LINK;
 
     /**
-     * Parses the configured value, tolerating case and surrounding whitespace so
-     * {@code NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE=link} works as well as {@code LINK}. A blank
-     * value means {@code DOCUMENT} — the mode this service has always used — so an unset property
-     * changes nothing.
+     * Parses a configured value, tolerating case and surrounding whitespace so
+     * {@code NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE=link} works as well as {@code LINK}.
      *
-     * @throws IllegalStateException on an unrecognised value, naming the valid ones. A typo would
-     *         otherwise be silently read as the wrong mode and only surface as a whole tenant's
-     *         reports arriving in the wrong shape after the next daily cron.
+     * @param value     the configured value
+     * @param whenBlank the mode a blank or absent value stands for: the mode that report sent before its
+     *                  property existed, so an unset property changes nothing
+     * @param property  the property the value came from, named in the error
+     * @throws IllegalStateException on an unrecognised value, naming the property and the valid values. A
+     *         typo would otherwise be silently read as the wrong mode and only surface as a whole tenant's
+     *         reports arriving in the wrong shape after the next scheduled run.
      */
-    public static ReportDeliveryMode from(String value) {
+    public static ReportDeliveryMode from(String value, ReportDeliveryMode whenBlank, String property) {
         if (value == null || value.isBlank()) {
-            return DOCUMENT;
+            return whenBlank;
         }
         try {
             return valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new IllegalStateException(
-                    "notifications.daily-report.delivery-mode must be DOCUMENT or LINK but was '"
-                            + value + "'", e);
+                    property + " must be DOCUMENT or LINK but was '" + value + "'", e);
         }
     }
 }

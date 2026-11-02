@@ -169,8 +169,12 @@ report HSMs carry only names, dates and links, and their wording is the provider
 ### Object storage + WhatsApp provider
 
 - Escalation PDFs are generated locally (PDFBox), uploaded to the S3-compatible store through
-  `ObjectStorageService`, then the PDF's public URL is registered with the WhatsApp provider via
-  `createMessageMedia` to get a `mediaId`
+  `ReportPublisher` (over `ObjectStorageService`), then the PDF's public URL is registered with the
+  WhatsApp provider via `createMessageMedia` to get a `mediaId`
+- External delivery store (`STORAGE_DELIVERY_*`, off by default), for a deployment Meta cannot download
+  from (a State Data Centre): a live document send (every escalation; daily or weekly in `DOCUMENT` mode) is also
+  copied to one pre-created external bucket as `<record bucket>/<random UUID>/<file>.pdf`, and that URL is sent.
+  The store of record keeps every report, and link sends keep its URL. Never auto-create that bucket
 - Nudge: `WhatsAppSender.startNudgeFlow` starts the provider's nudge flow (`WHATSAPP_NUDGE_FLOW_ID`) with `{name, date}`;
   the flow sends the HSM (`{{1}}` name, `{{2}}` date) and enters the main flow with `nudge_action`.
   Retried only when the start certainly did not happen (`NudgeSendOutcome`) — a retry re-sends the HSM.
@@ -183,19 +187,23 @@ report HSMs carry only names, dates and links, and their wording is the provider
   `WHATSAPP_NUDGE_TEMPLATE_ID`, `WHATSAPP_ESCALATION_TEMPLATE_ID`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`,
   `STORAGE_SECRET_KEY`, `STORAGE_BUCKET`, `STORAGE_PUBLIC_BASE_URL`
 
-### Daily report delivery mode (DOCUMENT | LINK)
+### Daily and weekly report delivery mode (DOCUMENT | LINK)
 
 `NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE` — both paths in
 `GlificWhatsAppSender.sendDailyReportHsm`, behind the `WhatsAppSender` port. `storage.public-base-url`
 must be public and anonymously readable either way.
 
 - `DOCUMENT` (the Java fallback; `application.yml` sets `LINK`) — two-step media send. Meta fetches `storage.public-base-url` itself, which
-  the India-only firewall in front of the production object store blocks.
+  the India-only firewall in front of the production object store blocks, unless the external delivery
+  store is enabled, in which case Meta fetches that store's copy.
 - `LINK` (the configured default) — one `sendHsmMessage` with a "View Report" button, no media step. `parameters =
 [officerName, reportDate (dd-MM-yyyy), urlSuffix]` — the URL suffix must come **last**. The
   button's prefix is frozen at Meta approval and must equal `storage.public-base-url` + `/`, so each
   environment needs its own approved template (`WHATSAPP_DAILY_REPORT_SO_LINK_TEMPLATE_ID`); set
   `DAILY_REPORT_LINK_BUTTON_BASE_URL` to have that checked at startup.
+- Weekly: the same two modes in `sendWeeklyReportHsm`, by `NOTIFICATIONS_WEEKLY_REPORT_DELIVERY_MODE` (default
+  `LINK`, also the Java fallback), with their own templates (`WHATSAPP_WEEKLY_REPORT_SO_TEMPLATE_ID` /
+  `_SO_LINK_TEMPLATE_ID`). LINK's `{{2}}` is the week start; the document is named `<caption> <weekStart> to <weekEnd>`.
 
 ### Delivery ledger
 
