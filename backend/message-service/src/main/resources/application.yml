@@ -347,11 +347,12 @@ notifications:
     # Rollback is this flag plus a restart — both paths stay in the code.
     delivery-mode: ${NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE:LINK}
   weekly-report:
-    # Defaults to SUPPRESSED: the weekly report needs its own Meta-approved templates (the body text
-    # says "Weekly", and SO and SDO get different wording), and until those exist there is nothing to
-    # send. While suppressed the PDFs are still generated and uploaded to storage, so the whole pipeline
-    # can be verified end to end before delivery goes live. Set to false once the template ids below
-    # are configured — startup then refuses to proceed if they are still blank.
+    # Defaults to LIVE (false) and, unlike the purpose flags above, does not follow
+    # NOTIFICATIONS_WHATSAPP_DRY_RUN. The weekly report needs its own Meta-approved templates (the body
+    # text says "Weekly", and SO and SDO get different wording), so while live, startup refuses to proceed
+    # if the SO template its delivery-mode sends is blank. Set to true to suppress delivery until they are
+    # approved: the PDFs are still generated and uploaded to storage, so the whole pipeline can be
+    # verified end to end.
     dry-run: ${NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN:false}
     # DOCUMENT | LINK, as for the daily report above; each mode needs its own approved weekly templates
     # (whatsapp.template.weekly-report-*). LINK is the weekly report's original shape. Choose DOCUMENT
