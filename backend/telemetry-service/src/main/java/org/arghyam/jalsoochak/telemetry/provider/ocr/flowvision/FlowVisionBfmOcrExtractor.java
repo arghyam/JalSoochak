@@ -185,7 +185,7 @@ public class FlowVisionBfmOcrExtractor implements MeterReadingExtractor {
         Map<String, Object> dataMap =
                 (Map<String, Object>) resultMap.get("data");
 
-        String meterReading = pointOldFormatRedReading(extractMeterReading(dataMap), dataMap.get("lastDigitColor"));
+        String meterReading = extractMeterReading(dataMap);
         BigDecimal adjustedReading = meterReading == null ? null : new BigDecimal(meterReading);
 
         String qualityStatus =
@@ -260,23 +260,6 @@ public class FlowVisionBfmOcrExtractor implements MeterReadingExtractor {
         }
         String meterReading = meterReadingObj.toString().trim();
         return meterReading.isEmpty() ? null : meterReading;
-    }
-
-    /**
-     * TRANSITIONAL — remove once FlowVision places the decimal point in every environment, and use the
-     * reading as returned. FlowVision's previous version returned digits only and marked a decimal last
-     * digit red; until then such a reading keeps telemetry's previous rule, whatever its length: its last
-     * digit goes after the point ({@code ".5"} for one digit, so the digits rollover positions count stay
-     * the same). A reading that already has a point is FlowVision's own and is left alone, so readings
-     * stay right whichever service is deployed or rolled back first.
-     */
-    private static String pointOldFormatRedReading(String meterReading, Object lastDigitColor) {
-        if (meterReading == null || meterReading.indexOf('.') >= 0
-                || lastDigitColor == null || !"red".equalsIgnoreCase(lastDigitColor.toString().trim())) {
-            return meterReading;
-        }
-        int last = meterReading.length() - 1;
-        return meterReading.substring(0, last) + "." + meterReading.substring(last);
     }
 
     /**
