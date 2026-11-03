@@ -185,7 +185,7 @@ public class FlowVisionBfmOcrExtractor implements MeterReadingExtractor {
         Map<String, Object> dataMap =
                 (Map<String, Object>) resultMap.get("data");
 
-        String meterReading = extractMeterReading(dataMap);
+        String meterReading = pointOldFormatRedReading(extractMeterReading(dataMap), dataMap.get("lastDigitColor"));
         BigDecimal adjustedReading = meterReading == null ? null : new BigDecimal(meterReading);
 
         String qualityStatus =
@@ -250,9 +250,8 @@ public class FlowVisionBfmOcrExtractor implements MeterReadingExtractor {
     /**
      * The {@code data.meterReading} string exactly as FlowVision returned it (built from its
      * {@code selectedDigit}s). FlowVision places the decimal point itself (a red last digit comes back
-     * as {@code "012644.8"}), so the reading is used as returned and {@code lastDigitColor} is ignored.
-     * Preserves digit count and leading zeros so rollover candidate enumeration can reason positionally.
-     * {@code null} when absent or blank.
+     * as {@code "012644.8"}), so the reading is used as returned. Preserves digit count and leading
+     * zeros so rollover candidate enumeration can reason positionally. {@code null} when absent or blank.
      */
     private String extractMeterReading(Map<String, Object> dataMap) {
         Object meterReadingObj = dataMap.get("meterReading");
@@ -261,6 +260,21 @@ public class FlowVisionBfmOcrExtractor implements MeterReadingExtractor {
         }
         String meterReading = meterReadingObj.toString().trim();
         return meterReading.isEmpty() ? null : meterReading;
+    }
+
+    /**
+     * TRANSITIONAL — remove once FlowVision places the decimal point in every environment, and use the
+     * reading as returned. FlowVision's previous version returned digits only and marked a decimal last
+     * digit red; such a reading gets the point FlowVision now places (before the last digit, for two or
+     * more digits), so readings stay right whichever service is deployed or rolled back first.
+     */
+    private static String pointOldFormatRedReading(String meterReading, Object lastDigitColor) {
+        if (meterReading == null || meterReading.indexOf('.') >= 0 || meterReading.length() < 2
+                || lastDigitColor == null || !"red".equalsIgnoreCase(lastDigitColor.toString().trim())) {
+            return meterReading;
+        }
+        int last = meterReading.length() - 1;
+        return meterReading.substring(0, last) + "." + meterReading.substring(last);
     }
 
     /**
