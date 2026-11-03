@@ -265,11 +265,13 @@ public class FlowVisionBfmOcrExtractor implements MeterReadingExtractor {
     /**
      * TRANSITIONAL — remove once FlowVision places the decimal point in every environment, and use the
      * reading as returned. FlowVision's previous version returned digits only and marked a decimal last
-     * digit red; such a reading gets the point FlowVision now places (before the last digit, for two or
-     * more digits), so readings stay right whichever service is deployed or rolled back first.
+     * digit red; until then such a reading keeps telemetry's previous rule, whatever its length: its last
+     * digit goes after the point ({@code ".5"} for one digit, so the digits rollover positions count stay
+     * the same). A reading that already has a point is FlowVision's own and is left alone, so readings
+     * stay right whichever service is deployed or rolled back first.
      */
     private static String pointOldFormatRedReading(String meterReading, Object lastDigitColor) {
-        if (meterReading == null || meterReading.indexOf('.') >= 0 || meterReading.length() < 2
+        if (meterReading == null || meterReading.indexOf('.') >= 0
                 || lastDigitColor == null || !"red".equalsIgnoreCase(lastDigitColor.toString().trim())) {
             return meterReading;
         }
