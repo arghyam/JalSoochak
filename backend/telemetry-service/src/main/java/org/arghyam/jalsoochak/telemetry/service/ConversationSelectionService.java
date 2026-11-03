@@ -44,30 +44,36 @@ public class ConversationSelectionService {
     private final ConversationLocalizationService localizationService;
     private final TenantConfigRepository tenantConfigRepository;
     private final ConversationTemplateService templatesService;
+    private final LanguageMenuService languageMenuService;
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     private final WhatsAppContactDirectory whatsAppContactDirectory;
     private final ObjectMapper objectMapper;
+    private final ConversationMessageResolver messageResolver;
 
     public ConversationSelectionService(OperatorContextService operatorContextService,
                                         ConversationLocalizationService localizationService,
                                         TenantConfigRepository tenantConfigRepository,
                                         ConversationTemplateService templatesService,
+                                        LanguageMenuService languageMenuService,
                                         TelemetryTenantRepository telemetryTenantRepository,
                                         UserChannelPreferenceRepository userChannelPreferenceRepository,
                                         UserLanguagePreferenceRepository userLanguagePreferenceRepository,
                                         WhatsAppContactDirectory whatsAppContactDirectory,
-                                        ObjectMapper objectMapper) {
+                                        ObjectMapper objectMapper,
+                                        ConversationMessageResolver messageResolver) {
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
         this.tenantConfigRepository = tenantConfigRepository;
         this.templatesService = templatesService;
+        this.languageMenuService = languageMenuService;
         this.telemetryTenantRepository = telemetryTenantRepository;
         this.userChannelPreferenceRepository = userChannelPreferenceRepository;
         this.userLanguagePreferenceRepository = userLanguagePreferenceRepository;
         this.whatsAppContactDirectory = whatsAppContactDirectory;
         this.objectMapper = objectMapper;
+        this.messageResolver = messageResolver;
     }
 
     public IntroResponse languageSelectionMessage(IntroRequest request) {
@@ -89,12 +95,13 @@ public class ConversationSelectionService {
                     .or(() -> tenantConfigRepository.findLanguageSelectionPrompt(tenantId, languageKey))
                     .orElseThrow(() -> new IllegalStateException("language_selection_prompt is not configured"));
 
-            List<ConversationTemplateService.TemplateOption> languageTemplateOptions =
-                    templatesService.resolveScreenOptions(tenantId, "LANGUAGE_SELECTION");
+            List<LanguageMenuService.MenuOption> languageMenu =
+                    languageMenuService.resolveOptions(tenantId, operatorWithSchema.schemaName());
             List<String> languageOptions;
-            if (!languageTemplateOptions.isEmpty()) {
-                languageOptions = languageTemplateOptions.stream()
-                        .map(opt -> opt.labelForLanguageKey(languageKey))
+            if (!languageMenu.isEmpty()) {
+                String languageCode = templatesService.toTemplateLanguageCode(languageKey);
+                languageOptions = languageMenu.stream()
+                        .map(entry -> entry.option().labelFor(languageCode))
                         .toList();
             } else {
                 languageOptions = tenantConfigRepository.findLanguageOptions(tenantId);
@@ -121,7 +128,8 @@ public class ConversationSelectionService {
             log.debug("Error building language selection message for contactId {}: {}", request.getContactId(), e.getMessage());
             return IntroResponse.builder()
                     .success(false)
-                    .message("Language selection could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.LANGUAGE_SELECTION_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -145,21 +153,24 @@ public class ConversationSelectionService {
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
 
-            List<ConversationTemplateService.TemplateOption> languageTemplateOptions =
-                    templatesService.resolveScreenOptions(tenantId, "LANGUAGE_SELECTION");
+            List<LanguageMenuService.MenuOption> languageMenu =
+                    languageMenuService.resolveOptions(tenantId, operatorWithSchema.schemaName());
             String selectedLanguage;
             int selectedLanguageId;
             String selectedLanguageKey;
             String selectedLanguageDisplayLabel;
-            if (!languageTemplateOptions.isEmpty()) {
+            if (!languageMenu.isEmpty()) {
+                List<ConversationTemplateService.TemplateOption> languageTemplateOptions = languageMenu.stream()
+                        .map(LanguageMenuService.MenuOption::option)
+                        .toList();
                 int selectedIndex = resolveTemplateSelectionIndex(request.getLanguage(), languageTemplateOptions, currentLanguageKey)
                         .orElseThrow(() -> new IllegalStateException("Invalid language selection"));
                 ConversationTemplateService.TemplateOption selectedOpt = languageTemplateOptions.get(selectedIndex);
-                selectedLanguageId = selectedOpt.order() > 0 ? selectedOpt.order() : (selectedIndex + 1);
+                selectedLanguageId = languageMenu.get(selectedIndex).languageId();
                 // Persist a canonical label (prefer English) so downstream normalization/sync keeps working.
                 selectedLanguage = selectedOpt.canonicalLabel();
                 selectedLanguageKey = localizationService.normalizeLanguageKey(selectedLanguage);
-                selectedLanguageDisplayLabel = selectedOpt.labelForLanguageKey(selectedLanguageKey);
+                selectedLanguageDisplayLabel = selectedOpt.labelFor(templatesService.toTemplateLanguageCode(selectedLanguageKey));
             } else {
                 List<String> languageOptions = tenantConfigRepository.findLanguageOptions(tenantId);
                 if (languageOptions.isEmpty()) {
@@ -180,20 +191,18 @@ public class ConversationSelectionService {
             userLanguagePreferenceRepository.upsert(operatorWithSchema.schemaName(), request.getContactId(), selectedLanguage);
             whatsAppContactDirectory.syncContactLanguageAsync(request.getContactId(), selectedLanguage);
 
-            String confirmationTemplate = templatesService
+            String confirmation = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "LANGUAGE_SELECTION", selectedLanguageKey)
                     .or(() -> tenantConfigRepository.findConfigValue(tenantId, "language_selection_confirmation_template_" + selectedLanguageKey))
                     .or(() -> tenantConfigRepository.findConfigValue(tenantId, "language_selection_confirmation_template"))
-                    .orElse("Language selected: {language}");
-
-            String localizedConfirmation = localizationService.localizeMessage(
-                    confirmationTemplate.replace("{language}", selectedLanguageDisplayLabel),
-                    selectedLanguageKey
-            );
+                    .map(template -> localizationService.localizeMessage(
+                            template.replace("{language}", selectedLanguageDisplayLabel), selectedLanguageKey))
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.LANGUAGE_SELECTED,
+                            selectedLanguageKey, selectedLanguageDisplayLabel));
 
             return IntroResponse.builder()
                     .success(true)
-                    .message(localizedConfirmation)
+                    .message(confirmation)
                     .build();
         } catch (Exception e) {
             log.error("Error saving selected language: {}", e.getMessage(), e);
@@ -201,7 +210,8 @@ public class ConversationSelectionService {
             String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             return IntroResponse.builder()
                     .success(false)
-                    .message(localizationService.resolveUserFacingErrorMessage(e, "Language selection could not be saved.", languageKey))
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e, ConversationMessageCode.LANGUAGE_SELECTION_NOT_SAVED, languageKey))
                     .build();
         }
     }
@@ -221,7 +231,7 @@ public class ConversationSelectionService {
             String languageKey = localizationService.normalizeLanguageKey(operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
             String prompt = templatesService.resolveScreenPrompt(tenantId, "CHANNEL_SELECTION", languageKey)
                     .or(() -> tenantConfigRepository.findChannelSelectionPrompt(tenantId, languageKey))
-                    .orElse("Please select your preferred channel by typing the corresponding number:");
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.CHANNEL_PROMPT, languageKey));
 
             List<String> channelOptions = resolveTenantSupportedChannels(tenantId);
             if (channelOptions.isEmpty()) {
@@ -252,7 +262,8 @@ public class ConversationSelectionService {
             log.debug("Error building channel selection message for contactId {}: {}", request.getContactId(), e.getMessage());
             return IntroResponse.builder()
                     .success(false)
-                    .message("Channel selection could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.CHANNEL_SELECTION_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -289,11 +300,13 @@ public class ConversationSelectionService {
                     ReadingChannel.fromChannelValue(selectedChannel));
             userChannelPreferenceRepository.upsert(operatorWithSchema.schemaName(), request.getContactId(), selectedChannel);
 
-            String confirmationTemplate = templatesService
+            String confirmation = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "CHANNEL_SELECTION", languageKey)
                     .or(() -> tenantConfigRepository.findConfigValue(tenantId, "channel_selection_confirmation_template_" + languageKey))
                     .or(() -> tenantConfigRepository.findConfigValue(tenantId, "channel_selection_confirmation_template"))
-                    .orElse("Channel selected: {channel}");
+                    .map(template -> template.replace("{channel}", selectedChannel))
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.CHANNEL_SELECTED, languageKey,
+                            selectedChannel));
 
             boolean isBfm = isBfmChannel(selectedChannel);
             boolean isElectrical = isElectricChannel(selectedChannel);
@@ -301,7 +314,7 @@ public class ConversationSelectionService {
 
             return IntroResponse.builder()
                     .success(true)
-                    .message(confirmationTemplate.replace("{channel}", selectedChannel))
+                    .message(confirmation)
                     .isBfmorIsElectrical(isBfmorIsElectrical)
                     .isBfm(isBfm)
                     .isElectrical(isElectrical)
@@ -312,7 +325,8 @@ public class ConversationSelectionService {
             String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             return IntroResponse.builder()
                     .success(false)
-                    .message(localizationService.resolveUserFacingErrorMessage(e, "Channel selection could not be saved.", languageKey))
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e, ConversationMessageCode.CHANNEL_SELECTION_NOT_SAVED, languageKey))
                     .build();
         }
     }
@@ -331,17 +345,15 @@ public class ConversationSelectionService {
             if (schemes.isEmpty()) {
                 throw new IllegalStateException("Operator is not mapped to any scheme");
             }
+            String languageKey = localizationService.normalizeLanguageKey(operatorContextService.resolveOperatorLanguage(
+                    operatorWithSchema, operatorWithSchema.operator().tenantId()));
 
-            StringBuilder message = new StringBuilder("Please select a scheme:");
+            StringBuilder message = new StringBuilder(messageResolver.get(ConversationMessageCode.SCHEME_PROMPT, languageKey));
             for (int i = 0; i < schemes.size(); i++) {
-                String schemeName = schemes.get(i).name();
-                if (schemeName == null || schemeName.isBlank()) {
-                    schemeName = "Scheme " + schemes.get(i).id();
-                }
                 message.append("\n")
                         .append(i + 1)
                         .append(". ")
-                        .append(schemeName);
+                        .append(schemeLabel(schemes.get(i), languageKey));
             }
 
             return IntroResponse.builder()
@@ -357,7 +369,7 @@ public class ConversationSelectionService {
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
                             e,
-                            "Scheme selection could not be prepared.",
+                            ConversationMessageCode.SCHEME_SELECTION_NOT_PREPARED,
                             languageKey
                     ))
                     .build();
@@ -393,14 +405,13 @@ public class ConversationSelectionService {
                     ReportingChannel.WHATSAPP
             );
 
-            String schemeName = selectedScheme.name();
-            if (schemeName == null || schemeName.isBlank()) {
-                schemeName = "Scheme " + selectedScheme.id();
-            }
+            String languageKey = localizationService.normalizeLanguageKey(operatorContextService.resolveOperatorLanguage(
+                    operatorWithSchema, operatorWithSchema.operator().tenantId()));
 
             return IntroResponse.builder()
                     .success(true)
-                    .message("Scheme selected: " + schemeName)
+                    .message(messageResolver.get(ConversationMessageCode.SCHEME_SELECTED, languageKey,
+                            schemeLabel(selectedScheme, languageKey)))
                     .correlationId(correlationId)
                     .selected(String.valueOf(selectedScheme.id()))
                     .build();
@@ -412,7 +423,7 @@ public class ConversationSelectionService {
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
                             e,
-                            "Scheme selection could not be saved.",
+                            ConversationMessageCode.SCHEME_SELECTION_NOT_SAVED,
                             languageKey
                     ))
                     .build();
@@ -435,13 +446,14 @@ public class ConversationSelectionService {
 
             String prompt = templatesService.resolveScreenPrompt(tenantId, "ITEM_SELECTION", languageKey)
                     .or(() -> tenantConfigRepository.findItemSelectionPrompt(tenantId, languageKey))
-                    .orElse("Please select what you want to do:");
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.ITEM_PROMPT, languageKey));
 
             List<ConversationTemplateService.TemplateOption> itemTemplateOptions =
                     templatesService.resolveScreenOptions(tenantId, "ITEM_SELECTION");
             List<VisibleItemOption> visibleItemOptions;
             if (!itemTemplateOptions.isEmpty()) {
-                visibleItemOptions = buildVisibleItemOptionsFromTemplates(tenantId, languageKey, itemTemplateOptions);
+                visibleItemOptions = buildVisibleItemOptionsFromTemplates(
+                        tenantId, operatorWithSchema.schemaName(), languageKey, itemTemplateOptions);
             } else {
                 List<String> itemOptions = tenantConfigRepository.findItemOptions(tenantId, languageKey);
                 if (itemOptions.isEmpty()) {
@@ -470,7 +482,7 @@ public class ConversationSelectionService {
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
                             e,
-                            "Item selection could not be prepared.",
+                            ConversationMessageCode.ITEM_SELECTION_NOT_PREPARED,
                             languageKey
                     ))
                     .build();
@@ -498,7 +510,8 @@ public class ConversationSelectionService {
                     templatesService.resolveScreenOptions(tenantId, "ITEM_SELECTION");
             List<VisibleItemOption> visibleItemOptions;
             if (!itemTemplateOptions.isEmpty()) {
-                visibleItemOptions = buildVisibleItemOptionsFromTemplates(tenantId, languageKey, itemTemplateOptions);
+                visibleItemOptions = buildVisibleItemOptionsFromTemplates(
+                        tenantId, operatorWithSchema.schemaName(), languageKey, itemTemplateOptions);
             } else {
                 List<String> itemOptions = tenantConfigRepository.findItemOptions(tenantId, languageKey);
                 if (itemOptions.isEmpty()) {
@@ -520,15 +533,15 @@ public class ConversationSelectionService {
             String selectedItemLabel = selectedItem.label();
             String selectedCode = selectedItem.code();
 
-            String template = templatesService
+            String message = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "ITEM_SELECTION", languageKey)
                     .or(() -> tenantConfigRepository.findConfigValue(tenantId, "item_selection_confirmation_template_" + languageKey))
                     .or(() -> tenantConfigRepository.findConfigValue(tenantId, "item_selection_confirmation_template"))
-                    .orElse("{item} selected");
-
-            String message = template
-                    .replace("{item}", selectedItemLabel)
-                    .replace("{selected}", selectedCode);
+                    .map(template -> template
+                            .replace("{item}", selectedItemLabel)
+                            .replace("{selected}", selectedCode))
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.ITEM_SELECTED, languageKey,
+                            selectedItemLabel));
 
             String responseSelectedCode = selectedCode;
             if ("readingSubmission".equals(selectedCode)) {
@@ -559,7 +572,8 @@ public class ConversationSelectionService {
             return SelectionResponse.builder()
                     .success(false)
                     .selected(null)
-                    .message(localizationService.resolveUserFacingErrorMessage(e, "Item selection could not be saved.", languageKey))
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e, ConversationMessageCode.ITEM_SELECTION_NOT_SAVED, languageKey))
                     .build();
         }
     }
@@ -627,6 +641,14 @@ public class ConversationSelectionService {
             }
         }
         return Optional.empty();
+    }
+
+    /** The scheme's name, or for a scheme with none, a label carrying its id. */
+    private String schemeLabel(TelemetrySchemeOption scheme, String languageKey) {
+        if (scheme.name() == null || scheme.name().isBlank()) {
+            return messageResolver.get(ConversationMessageCode.UNNAMED_SCHEME, languageKey, scheme.id());
+        }
+        return scheme.name();
     }
 
     private Optional<TelemetrySchemeOption> resolveSchemeSelection(String rawSelection, List<TelemetrySchemeOption> options) {
@@ -764,8 +786,9 @@ public class ConversationSelectionService {
         }
 
         // Try display labels first.
+        String displayLanguageCode = templatesService.toTemplateLanguageCode(languageKeyForDisplay);
         for (int i = 0; i < options.size(); i++) {
-            String display = options.get(i).labelForLanguageKey(languageKeyForDisplay);
+            String display = options.get(i).labelFor(displayLanguageCode);
             if (display != null && display.equalsIgnoreCase(value)) {
                 return Optional.of(i);
             }
@@ -787,8 +810,9 @@ public class ConversationSelectionService {
             return supportedChannels;
         }
         if (!channelTemplateOptions.isEmpty()) {
+            String languageCode = templatesService.toTemplateLanguageCode(languageKey);
             return channelTemplateOptions.stream()
-                    .map(opt -> opt.labelForLanguageKey(languageKey))
+                    .map(opt -> opt.labelFor(languageCode))
                     .toList();
         }
         return tenantConfigRepository.findChannelOptions(tenantId, languageKey);
@@ -837,6 +861,7 @@ public class ConversationSelectionService {
     }
 
     private List<VisibleItemOption> buildVisibleItemOptionsFromTemplates(Integer tenantId,
+                                                                         String schemaName,
                                                                          String languageKey,
                                                                          List<ConversationTemplateService.TemplateOption> itemOptions) {
         List<ConversationTemplateService.TemplateOption> channelTemplateOptions =
@@ -849,13 +874,13 @@ public class ConversationSelectionService {
         }
         boolean showChannelChange = channelCount > 1;
 
-        List<ConversationTemplateService.TemplateOption> languageOptions =
-                templatesService.resolveScreenOptions(tenantId, "LANGUAGE_SELECTION");
-        int languageCount = !languageOptions.isEmpty()
-                ? languageOptions.size()
+        List<LanguageMenuService.MenuOption> languageMenu = languageMenuService.resolveOptions(tenantId, schemaName);
+        int languageCount = !languageMenu.isEmpty()
+                ? languageMenu.size()
                 : tenantConfigRepository.findLanguageOptions(tenantId).size();
         boolean showLanguageChange = languageCount > 1;
 
+        String languageCode = templatesService.toTemplateLanguageCode(languageKey);
         List<VisibleItemOption> filtered = new ArrayList<>();
         for (int i = 0; i < itemOptions.size(); i++) {
             ConversationTemplateService.TemplateOption opt = itemOptions.get(i);
@@ -866,7 +891,7 @@ public class ConversationSelectionService {
             if ("languageChange".equals(itemCode) && !showLanguageChange) {
                 continue;
             }
-            String displayLabel = opt.labelForLanguageKey(languageKey);
+            String displayLabel = opt.labelFor(languageCode);
             if ("reportIssue".equals(itemCode)) {
                 displayLabel = normalizeIssueReportLabel(displayLabel, languageKey);
             }
@@ -876,7 +901,7 @@ public class ConversationSelectionService {
             List<VisibleItemOption> fallback = new ArrayList<>();
             for (int i = 0; i < itemOptions.size(); i++) {
                 ConversationTemplateService.TemplateOption opt = itemOptions.get(i);
-                fallback.add(new VisibleItemOption(opt.labelForLanguageKey(languageKey), toItemCode(opt, itemOptions, i)));
+                fallback.add(new VisibleItemOption(opt.labelFor(languageCode), toItemCode(opt, itemOptions, i)));
             }
             return fallback;
         }

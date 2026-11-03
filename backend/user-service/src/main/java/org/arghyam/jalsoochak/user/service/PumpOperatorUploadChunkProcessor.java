@@ -8,9 +8,11 @@ import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserEventPublisher;
 import org.arghyam.jalsoochak.user.repository.DataVersionRepository;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
+import org.arghyam.jalsoochak.user.repository.UserLanguagePreferenceRepository;
 import org.arghyam.jalsoochak.user.repository.UserSchemeMappingCreateRow;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.UserUploadRepository;
+import org.arghyam.jalsoochak.user.service.WhatsAppPreferredLanguageService.PreferredLanguage;
 import org.arghyam.jalsoochak.user.util.PhoneNumberUtil;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +39,7 @@ public class PumpOperatorUploadChunkProcessor {
     private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     private final StaffKeycloakService staffKeycloakService;
     private final DataVersionRepository dataVersionRepository;
+    private final UserLanguagePreferenceRepository userLanguagePreferenceRepository;
 
     public record UploadRow(
             int rowNumber,
@@ -66,7 +69,7 @@ public class PumpOperatorUploadChunkProcessor {
             String tenantCode,
             TenantUserRecord actor,
             Map<String, Integer> userTypeIds,
-            int preferredLanguageId,
+            PreferredLanguage preferredLanguage,
             int actorUserId,
             List<UploadRow> rows,
             Map<String, Integer> schemeIdCache,
@@ -81,6 +84,7 @@ public class PumpOperatorUploadChunkProcessor {
         List<String> phonesForInsertRows = new ArrayList<>(rows.size());
         List<String> typesForInsertRows = new ArrayList<>(rows.size());
         Set<Long> userIdsToReplace = new LinkedHashSet<>();
+        Set<String> pumpOperatorPhones = new LinkedHashSet<>();
         Map<Long, UploadUserSnapshot> userSnapshots = new java.util.LinkedHashMap<>();
         int uploaded = 0;
         int skipped = 0;
@@ -125,7 +129,7 @@ public class PumpOperatorUploadChunkProcessor {
                         skipped++;
                         continue;
                     }
-                    userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguageId);
+                    userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguage.languageId());
                     userUuid = UUID.fromString(newUuid);
                     userEmail = newEmail;
                 } else {
@@ -143,7 +147,7 @@ public class PumpOperatorUploadChunkProcessor {
                         staffKeycloakService.revokeKeycloakAccount(user, schemaName, actor.id());
                     }
                     userTenantRepository.updateUserProfile(schemaName, userId, title, normalizedPhone);
-                    userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguageId);
+                    userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguage.languageId());
                     userUuid = null;
                     if (user.keycloakUuid() != null && !user.keycloakUuid().isBlank()) {
                         try {
@@ -153,6 +157,9 @@ public class PumpOperatorUploadChunkProcessor {
                         }
                     }
                     userEmail = user.email();
+                }
+                if ("pump_operator".equals(typeKey)) {
+                    pumpOperatorPhones.add(normalizedPhone);
                 }
                 userSnapshots.put(userId, new UploadUserSnapshot(
                         userId,
@@ -183,6 +190,10 @@ public class PumpOperatorUploadChunkProcessor {
             }
         }
 
+        // The chatbot reads user_language_preference ahead of language_id, so it gets the same reset.
+        if (preferredLanguage.languageValue() != null && !pumpOperatorPhones.isEmpty()) {
+            userLanguagePreferenceRepository.upsertAll(schemaName, pumpOperatorPhones, preferredLanguage.languageValue());
+        }
         if (!userIdsToReplace.isEmpty()) {
             userUploadRepository.markUserSchemeMappingsDeleted(schemaName, new ArrayList<>(userIdsToReplace), actorUserId);
         }
@@ -229,7 +240,7 @@ public class PumpOperatorUploadChunkProcessor {
             userEventPublisher.publishPumpOperatorOnboardedAfterCommit(
                     tenantCode,
                     actor.tenantId(),
-                    String.valueOf(preferredLanguageId),
+                    String.valueOf(preferredLanguage.whatsappLanguageId()),
                     new ArrayList<>(phonesToNotify)
             );
         }

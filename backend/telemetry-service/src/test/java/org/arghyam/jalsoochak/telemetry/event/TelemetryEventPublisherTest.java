@@ -25,6 +25,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -52,6 +53,8 @@ class TelemetryEventPublisherTest {
     private static final String TOPIC = "telemetry-service-topic";
     private static final String ANOMALY_TOPIC = "anomaly-service-topic";
     private static final LocalDate DATE = LocalDate.of(2026, 3, 1);
+    /** One millisecond before IST midnight, where a clock read elsewhere would fall on the next day. */
+    private static final Instant RAISED_AT = Instant.parse("2026-03-01T18:29:59.999Z");
 
     @Mock
     private KafkaProducer kafkaProducer;
@@ -160,7 +163,7 @@ class TelemetryEventPublisherTest {
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L,
                     new BigDecimal("120.4"), new BigDecimal("0.85"), new BigDecimal("130"),
                     2, new BigDecimal("100"), LocalDateTime.of(2026, 2, 28, 6, 0),
-                    4, "Low confidence", 0, "corr-1", "submission-corr-1");
+                    4, "Low confidence", 0, "corr-1", "submission-corr-1", RAISED_AT);
 
             AnomalyEvent event = publishedTo(TOPIC, AnomalyEvent.class);
             assertThat(event.getEventType()).isEqualTo("ANOMALY_RECORDED");
@@ -177,11 +180,34 @@ class TelemetryEventPublisherTest {
             assertThat(event.getSubmissionCorrelationId()).isEqualTo("submission-corr-1");
         }
 
+        /**
+         * The caller's instant, not the worker's clock: the event is built on the publisher executor,
+         * which can run long after the submission, and the supply anomaly's key carries the arrival
+         * day taken from this same instant.
+         */
+        @Test
+        @DisplayName("carries the caller's raise instant as UTC, so analytics dates it by that and not by receipt")
+        void carriesTheCallersRaiseInstantAsUtc() {
+            publisher.publishAnomalyRecorded(17, 10, 11L, 7L, null, null, null, null, null, null,
+                    null, "Implausible supply", 1, "dedup-key", null, RAISED_AT);
+
+            assertThat(publishedTo(TOPIC, AnomalyEvent.class).getRaisedAt()).isEqualTo("2026-03-01T18:29:59.999");
+        }
+
+        @Test
+        @DisplayName("leaves raisedAt null when the caller has none, so analytics falls back to receipt time")
+        void leavesRaisedAtNullWhenAbsent() {
+            publisher.publishAnomalyRecorded(17, 10, 11L, 7L, null, null, null, null, null, null,
+                    null, "Implausible supply", 1, "dedup-key", null, null);
+
+            assertThat(publishedTo(TOPIC, AnomalyEvent.class).getRaisedAt()).isNull();
+        }
+
         @Test
         @DisplayName("ANOMALY-SUBMISSION-LINK: the submission link is carried without touching the dedup key")
         void carriesTheSubmissionLinkSeparatelyFromTheDedupKey() {
             publisher.publishAnomalyRecorded(17, 10, 11L, 7L, null, null, null, null, null, null,
-                    null, "Implausible supply", 1, "dedup-key", "flow-corr-9");
+                    null, "Implausible supply", 1, "dedup-key", "flow-corr-9", RAISED_AT);
             AnomalyEvent event = publishedTo(TOPIC, AnomalyEvent.class);
 
             assertThat(event.getSubmissionCorrelationId()).isEqualTo("flow-corr-9");
@@ -190,7 +216,7 @@ class TelemetryEventPublisherTest {
             assertThat(event.getCorrelationId()).isEqualTo("dedup-key");
             org.mockito.Mockito.reset(kafkaProducer);
             publisher.publishAnomalyRecorded(17, 10, 11L, 7L, null, null, null, null, null, null,
-                    null, "Implausible supply", 1, "dedup-key", "a-different-submission");
+                    null, "Implausible supply", 1, "dedup-key", "a-different-submission", RAISED_AT);
             assertThat(publishedTo(TOPIC, AnomalyEvent.class).getUuid()).isEqualTo(event.getUuid());
         }
 
@@ -198,7 +224,7 @@ class TelemetryEventPublisherTest {
         @DisplayName("ANOMALY-SUBMISSION-LINK: a type with no submission leaves the link null")
         void leavesTheSubmissionLinkNullWhenThereIsNoSubmission() {
             publisher.publishAnomalyRecorded(17, 9, 11L, 7L, null, null, null, null, null, null,
-                    null, "Meter not working", 1, "corr-1", null);
+                    null, "Meter not working", 1, "corr-1", null, RAISED_AT);
 
             assertThat(publishedTo(TOPIC, AnomalyEvent.class).getSubmissionCorrelationId()).isNull();
         }
@@ -206,12 +232,12 @@ class TelemetryEventPublisherTest {
         @Test
         void derivesAStableUuidFromTheCorrelationIdAndUser() {
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L, null, null, null, null, null, null,
-                    null, null, 0, "corr-1", null);
+                    null, null, 0, "corr-1", null, RAISED_AT);
             String first = publishedTo(TOPIC, AnomalyEvent.class).getUuid();
 
             org.mockito.Mockito.reset(kafkaProducer);
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L, null, null, null, null, null, null,
-                    null, null, 0, "corr-1", null);
+                    null, null, 0, "corr-1", null, RAISED_AT);
             String second = publishedTo(TOPIC, AnomalyEvent.class).getUuid();
 
             // Deduplication downstream depends on the same submission producing the same uuid.
@@ -221,12 +247,12 @@ class TelemetryEventPublisherTest {
         @Test
         void derivesDifferentUuidsForDifferentUsersOnTheSameCorrelationId() {
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L, null, null, null, null, null, null,
-                    null, null, 0, "corr-1", null);
+                    null, null, 0, "corr-1", null, RAISED_AT);
             String first = publishedTo(TOPIC, AnomalyEvent.class).getUuid();
 
             org.mockito.Mockito.reset(kafkaProducer);
             publisher.publishAnomalyRecorded(17, 3, 22L, 7L, null, null, null, null, null, null,
-                    null, null, 0, "corr-1", null);
+                    null, null, 0, "corr-1", null, RAISED_AT);
 
             assertThat(publishedTo(TOPIC, AnomalyEvent.class).getUuid()).isNotEqualTo(first);
         }
@@ -234,7 +260,7 @@ class TelemetryEventPublisherTest {
         @Test
         void usesTheCorrelationIdVerbatimWhenThereIsNoUser() {
             publisher.publishAnomalyRecorded(17, 3, null, 7L, null, null, null, null, null, null,
-                    null, null, 0, "corr-1", null);
+                    null, null, 0, "corr-1", null, RAISED_AT);
 
             assertThat(publishedTo(TOPIC, AnomalyEvent.class).getUuid()).isEqualTo("corr-1");
         }
@@ -242,12 +268,12 @@ class TelemetryEventPublisherTest {
         @Test
         void generatesARandomUuidWhenThereIsNoCorrelationId() {
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L, null, null, null, null, null, null,
-                    null, null, 0, null, null);
+                    null, null, 0, null, null, RAISED_AT);
             String first = publishedTo(TOPIC, AnomalyEvent.class).getUuid();
 
             org.mockito.Mockito.reset(kafkaProducer);
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L, null, null, null, null, null, null,
-                    null, null, 0, "  ", null);
+                    null, null, 0, "  ", null, RAISED_AT);
 
             assertThat(first).isNotBlank();
             assertThat(publishedTo(TOPIC, AnomalyEvent.class).getUuid()).isNotEqualTo(first);
@@ -256,7 +282,7 @@ class TelemetryEventPublisherTest {
         @Test
         void leavesThePreviousReadingDateNullWhenAbsent() {
             publisher.publishAnomalyRecorded(17, 3, 11L, 7L, null, null, null, null, null, null,
-                    null, null, 0, "corr-1", null);
+                    null, null, 0, "corr-1", null, RAISED_AT);
 
             assertThat(publishedTo(TOPIC, AnomalyEvent.class).getPreviousReadingDate()).isNull();
         }

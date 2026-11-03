@@ -149,6 +149,12 @@ public class WhatsAppDeliveryReconciliationService {
 
     // The weekly templates too. Without them a weekly report would be sent, accepted by the provider, and
     // then never reconciled — so a week of undelivered reports would look exactly like a quiet week.
+    @Value("${whatsapp.template.weekly-report-so-id:}")
+    private String weeklyReportSoTemplateId;
+
+    @Value("${whatsapp.template.weekly-report-sdo-id:}")
+    private String weeklyReportSdoTemplateId;
+
     @Value("${whatsapp.template.weekly-report-so-link-id:}")
     private String weeklyReportSoLinkTemplateId;
 
@@ -605,9 +611,9 @@ public class WhatsAppDeliveryReconciliationService {
 
     /**
      * The template ids that mark a message as one of our reports: the explicit override when set,
-     * otherwise every configured daily-report template across both delivery modes plus both weekly
-     * ones. Both daily modes are included deliberately — a window can straddle a DOCUMENT→LINK switch,
-     * and the SDO ids fall back to the SO ones at send time, so over-including costs nothing while
+     * otherwise every configured daily- and weekly-report template across both delivery modes. Both
+     * modes are included deliberately — a window can straddle a DOCUMENT→LINK switch, and the SDO
+     * ids fall back to the SO ones at send time, so over-including costs nothing while
      * under-including loses messages.
      */
     Set<String> resolveTemplateIds() {
@@ -631,8 +637,8 @@ public class WhatsAppDeliveryReconciliationService {
         Map<String, Set<ReportKind>> conflicts = new TreeMap<>();
         putTemplateIds(byTypedProperty, conflicts, ReportKind.DAILY, dailyReportSoTemplateId,
                 dailyReportSdoTemplateId, dailyReportSoLinkTemplateId, dailyReportSdoLinkTemplateId);
-        putTemplateIds(byTypedProperty, conflicts, ReportKind.WEEKLY, weeklyReportSoLinkTemplateId,
-                weeklyReportSdoLinkTemplateId);
+        putTemplateIds(byTypedProperty, conflicts, ReportKind.WEEKLY, weeklyReportSoTemplateId,
+                weeklyReportSdoTemplateId, weeklyReportSoLinkTemplateId, weeklyReportSdoLinkTemplateId);
         if (templateIdsCsv == null || templateIdsCsv.isBlank()) {
             return new TemplateKinds(byTypedProperty, conflicts);
         }

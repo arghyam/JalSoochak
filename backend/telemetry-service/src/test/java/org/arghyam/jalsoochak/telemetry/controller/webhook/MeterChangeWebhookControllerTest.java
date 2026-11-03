@@ -58,8 +58,9 @@ class MeterChangeWebhookControllerTest {
         assertThat(controller.meterChange(meterChangeRequest()).getBody()).isSameAs(okIntro);
 
         when(meterWorkflowService.meterChangeMessage(any(MeterChangeRequest.class))).thenThrow(BOOM);
-        assertThat(controller.meterChange(meterChangeRequest()).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.meterChange(meterChangeRequest());
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Meter change reasons could not be prepared.");
     }
 
     @Test
@@ -86,7 +87,8 @@ class MeterChangeWebhookControllerTest {
         assertThat(controller.meterChangeSubmit(meterChangeRequest()).getBody()).isSameAs(okIntro);
 
         when(meterWorkflowService.meterChangeSubmitMessage(any())).thenThrow(BOOM);
-        assertThat(controller.meterChangeSubmit(meterChangeRequest()).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.meterChangeSubmit(meterChangeRequest());
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Meter change reason could not be saved.");
     }
 }

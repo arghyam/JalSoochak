@@ -563,7 +563,9 @@ public class FactServiceImpl implements FactService {
                 // correlationId above there is no fallback to synthesise one — an anomaly with no
                 // submission behind it must keep this NULL rather than be linked to a guess.
                 .submissionCorrelationId(event.getSubmissionCorrelationId())
-                .createdAt(now)
+                // When telemetry raised it, so a consumer backlog across IST midnight keeps its day;
+                // receipt time for events published before raisedAt existed.
+                .createdAt(parseTimestampUtc(event.getRaisedAt()))
                 .updatedAt(now)
                 .build();
 

@@ -200,8 +200,9 @@ class ReadingWebhookControllerTest {
             assertThat(controller.takeMeterReading(request).getBody()).isSameAs(okIntro);
 
             when(meterWorkflowService.takeMeterReadingMessage(any())).thenThrow(BOOM);
-            assertThat(controller.takeMeterReading(request).getStatusCode())
-                    .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+            var fallback = controller.takeMeterReading(request);
+            assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+            assertThat(fallback.getBody().getMessage()).isEqualTo("Take meter reading prompt could not be prepared.");
         }
 
         @Test
@@ -235,6 +236,7 @@ class ReadingWebhookControllerTest {
             assertThat(response.getBody().isSuccess()).isFalse();
             assertThat(response.getBody().getQualityStatus()).isEqualTo("REJECTED");
             assertThat(response.getBody().getCorrelationId()).isEqualTo(CONTACT);
+            assertThat(response.getBody().getMessage()).isEqualTo("Manual reading could not be saved.");
         }
 
         @Test

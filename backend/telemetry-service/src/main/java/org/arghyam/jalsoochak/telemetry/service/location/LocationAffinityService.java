@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Optional;
 import java.util.UUID;
@@ -341,7 +342,8 @@ public class LocationAffinityService {
                     anomalyCorrelationId(operatorId, schemeId, readingDate),
                     // The warehouse cannot use flow_reading_id — it is schema-local — so it joins
                     // fact_meter_reading_table on the submission's correlation_id instead.
-                    submission != null ? submission.correlationId() : null);
+                    submission != null ? submission.correlationId() : null,
+                    Instant.now());
         } catch (Exception e) {
             // Never fail a reading over an anomaly. createReading is not transactional, so throwing
             // here would abandon a submission the operator has already been told was accepted.

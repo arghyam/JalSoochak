@@ -58,8 +58,9 @@ class IssueReportWebhookControllerTest {
         assertThat(controller.issueReportPrompt(introRequest()).getBody()).isSameAs(okIntro);
 
         when(meterWorkflowService.issueReportPromptMessage(any())).thenThrow(BOOM);
-        assertThat(controller.issueReportPrompt(introRequest()).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.issueReportPrompt(introRequest());
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Issue report prompt could not be prepared.");
     }
 
     @Test
@@ -71,6 +72,7 @@ class IssueReportWebhookControllerTest {
         var fallback = controller.issueReasonTypes(introRequest());
         assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         assertThat(fallback.getBody().isSuccess()).isFalse();
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Issue reason types could not be prepared.");
     }
 
     @Test
@@ -79,8 +81,9 @@ class IssueReportWebhookControllerTest {
         assertThat(controller.issueReportSubmit(issueReportRequest()).getBody()).isSameAs(okIntro);
 
         when(meterWorkflowService.issueReportSubmitMessage(any())).thenThrow(BOOM);
-        assertThat(controller.issueReportSubmit(issueReportRequest()).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.issueReportSubmit(issueReportRequest());
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Issue report could not be saved.");
     }
 
     @Test
@@ -89,8 +92,9 @@ class IssueReportWebhookControllerTest {
         assertThat(controller.issueReportTelemetryPrompt(introRequest()).getBody()).isSameAs(okIntro);
 
         when(meterWorkflowService.issueReportTelemetryPromptMessage(any())).thenThrow(BOOM);
-        assertThat(controller.issueReportTelemetryPrompt(introRequest()).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.issueReportTelemetryPrompt(introRequest());
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Issue report prompt could not be prepared.");
     }
 
     @Test
@@ -99,8 +103,9 @@ class IssueReportWebhookControllerTest {
         assertThat(controller.issueReportTelemetrySubmit(issueReportRequest()).getBody()).isSameAs(okIntro);
 
         when(meterWorkflowService.issueReportTelemetrySubmitMessage(any())).thenThrow(BOOM);
-        assertThat(controller.issueReportTelemetrySubmit(issueReportRequest()).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.issueReportTelemetrySubmit(issueReportRequest());
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Issue report could not be saved.");
     }
 
     @Test
@@ -130,8 +135,9 @@ class IssueReportWebhookControllerTest {
         assertThat(controller.othersPrompt(introRequest()).getBody()).isSameAs(okIntro);
 
         when(meterWorkflowService.othersPromptMessage(any())).thenThrow(BOOM);
-        assertThat(controller.othersPrompt(introRequest()).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.othersPrompt(introRequest());
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Others prompt could not be prepared.");
     }
 
     @Test
@@ -140,7 +146,8 @@ class IssueReportWebhookControllerTest {
         assertThat(controller.othersSubmitted(issueReportRequest()).getBody()).isSameAs(okIntro);
 
         when(meterWorkflowService.othersSubmittedMessage(any())).thenThrow(BOOM);
-        assertThat(controller.othersSubmitted(issueReportRequest()).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.othersSubmitted(issueReportRequest());
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Issue report could not be saved.");
     }
 }

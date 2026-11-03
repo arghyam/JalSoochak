@@ -32,7 +32,7 @@ public class AnomalyEvent {
     /**
      * The dedup key, NOT a pointer to anything. Built as
      * {@code UUID(type:userId:schemeId:readingUrl)} for image anomalies and
-     * {@code UUID(type:userId:schemeId:readingDate)} for supply anomalies, and
+     * {@code UUID(tenantId:type:userId:schemeId:readingDate:arrivalDate)} for supply anomalies, and
      * {@code anomaly_table.uuid} is derived from it — the UNIQUE constraint on that uuid is what
      * makes a repeat touch an existing row instead of inserting a new one. Do not repurpose it.
      */
@@ -49,4 +49,10 @@ public class AnomalyEvent {
      * the chatbot flows deliberately share one value across rows.
      */
     private String submissionCorrelationId;
+    /**
+     * When telemetry raised the anomaly, as a UTC {@code LocalDateTime} string. Analytics stores it
+     * as {@code fact_anomaly_table.created_at}, which every dashboard dates the anomaly by, so a
+     * consumer backlog across IST midnight does not move the anomaly to the next day.
+     */
+    private String raisedAt;
 }

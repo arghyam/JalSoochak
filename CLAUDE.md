@@ -151,42 +151,59 @@ happens once per tenant per period across pods and is never retried. The jobs pu
 
 ### Language resolution
 
-Message text is fetched from `common_schema.tenant_config_master_table` using the pattern from
-`telemetry-service/ConversationLocalizationService`:
+No notification text comes from `tenant_config_master_table`: the nudge flow and the escalation and
+report HSMs carry only names, dates and links, and their wording is the provider's approved template.
 
-- `user_table.language_id` (int) → `language_N` config key → language name → normalized key
-- Template keys: `nudge_message_{langKey}`, `escalation_message_{langKey}` (fallback: `_english` → generic)
-- Add per-tenant rows in `tenant_config_master_table` with these keys before running.
+- `user_table.language_id` — the chosen `LANGUAGE_SELECTION` option's `order` (for an option without a
+  positive order, its position in the options sorted by `order`), or for a tenant without template options,
+  the language's position in its `language_N` list. The chatbot reads `user_language_preference` first
+  (`OperatorContextService.resolveOperatorLanguage`) and uses `language_id`, as a `language_N` position, only
+  when the operator has no row
+- `whatsappLanguageId` — the language's `common_schema.language_master` id (the provider's language id);
+  user-service puts it on `UPDATE_USER_LANGUAGE`, and message-service sets it as the contact's language
+- The chatbot's language menu is the `LANGUAGE_SELECTION` options for the tenant's `SUPPORTED_LANGUAGES`,
+  matched through the catalog (`LanguageMenuService`). A pump-operator upload resets each operator to its
+  first option in `user_table.language_id`, `user_language_preference` and the provider
+  (`WhatsAppPreferredLanguageService`)
 
 ### Object storage + WhatsApp provider
 
 - Escalation PDFs are generated locally (PDFBox), uploaded to the S3-compatible store through
-  `ObjectStorageService`, then the PDF's public URL is registered with the WhatsApp provider via
-  `createMessageMedia` to get a `mediaId`
+  `ReportPublisher` (over `ObjectStorageService`), then the PDF's public URL is registered with the
+  WhatsApp provider via `createMessageMedia` to get a `mediaId`
+- External delivery store (`STORAGE_DELIVERY_*`, off by default), for a deployment Meta cannot download
+  from (a State Data Centre): a live document send (every escalation; daily or weekly in `DOCUMENT` mode) is also
+  copied to one pre-created external bucket as `<record bucket>/<random UUID>/<file>.pdf`, and that URL is sent.
+  The store of record keeps every report, and link sends keep its URL. Never auto-create that bucket
 - Nudge: `WhatsAppSender.startNudgeFlow` starts the provider's nudge flow (`WHATSAPP_NUDGE_FLOW_ID`) with `{name, date}`;
   the flow sends the HSM (`{{1}}` name, `{{2}}` date) and enters the main flow with `nudge_action`.
   Retried only when the start certainly did not happen (`NudgeSendOutcome`) — a retry re-sends the HSM.
 - WhatsApp template for escalation (two-step):
   1. `createMessageMedia(url, source_url)` → `mediaId`
-  2. `createAndSendMessage(templateId, mediaId, receiverId, parameters=[bodyText])` — the document
-     header attachment is provided via `mediaId`; the body parameter is the localized text
+  2. `createAndSendMessage(input: {templateId, receiverId, isHsm: true, params: [], mediaId})` — the
+     document header attachment is provided via `mediaId`, set only when the upload returned one; the
+     template body takes no parameters
 - Required env vars: `WHATSAPP_API_URL`, `WHATSAPP_USERNAME`, `WHATSAPP_PASSWORD`,
   `WHATSAPP_NUDGE_TEMPLATE_ID`, `WHATSAPP_ESCALATION_TEMPLATE_ID`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`,
   `STORAGE_SECRET_KEY`, `STORAGE_BUCKET`, `STORAGE_PUBLIC_BASE_URL`
 
-### Daily report delivery mode (DOCUMENT | LINK)
+### Daily and weekly report delivery mode (DOCUMENT | LINK)
 
 `NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE` — both paths in
 `GlificWhatsAppSender.sendDailyReportHsm`, behind the `WhatsAppSender` port. `storage.public-base-url`
 must be public and anonymously readable either way.
 
 - `DOCUMENT` (the Java fallback; `application.yml` sets `LINK`) — two-step media send. Meta fetches `storage.public-base-url` itself, which
-  the India-only firewall in front of the production object store blocks.
+  the India-only firewall in front of the production object store blocks, unless the external delivery
+  store is enabled, in which case Meta fetches that store's copy.
 - `LINK` (the configured default) — one `sendHsmMessage` with a "View Report" button, no media step. `parameters =
 [officerName, reportDate (dd-MM-yyyy), urlSuffix]` — the URL suffix must come **last**. The
   button's prefix is frozen at Meta approval and must equal `storage.public-base-url` + `/`, so each
   environment needs its own approved template (`WHATSAPP_DAILY_REPORT_SO_LINK_TEMPLATE_ID`); set
   `DAILY_REPORT_LINK_BUTTON_BASE_URL` to have that checked at startup.
+- Weekly: the same two modes in `sendWeeklyReportHsm`, by `NOTIFICATIONS_WEEKLY_REPORT_DELIVERY_MODE` (default
+  `LINK`, also the Java fallback), with their own templates (`WHATSAPP_WEEKLY_REPORT_SO_TEMPLATE_ID` /
+  `_SO_LINK_TEMPLATE_ID`). LINK's `{{2}}` is the week start; the document is named `<caption> <weekStart> to <weekEnd>`.
 
 ### Delivery ledger
 

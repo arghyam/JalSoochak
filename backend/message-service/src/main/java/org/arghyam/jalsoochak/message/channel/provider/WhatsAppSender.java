@@ -111,14 +111,16 @@ public interface WhatsAppSender {
                                           LocalDate reportDate, String officerName);
 
     /**
-     * Sends the Weekly Water Service Situation Report as a link-button template
-     * ({@link ReportDeliveryMode#LINK} only).
+     * Sends the Weekly Water Service Situation Report, in the shape the configured
+     * {@link ReportDeliveryMode} selects.
      *
      * @param weekStart the first day of the reported week
+     * @param weekEnd   the last day of the reported week; with {@code weekStart}, the name the recipient
+     *                  sees for the document
      * @return as {@link #sendDailyReportHsm}
      */
     WhatsAppSendResult sendWeeklyReportHsm(Long contactId, String documentUrl, String officerUserType,
-                                           LocalDate weekStart, String officerName);
+                                           LocalDate weekStart, LocalDate weekEnd, String officerName);
 
     /**
      * Whether daily reports are actually delivered rather than suppressed. Lets a caller tell an
@@ -128,6 +130,22 @@ public interface WhatsAppSender {
 
     /** Whether weekly reports are actually delivered rather than suppressed. */
     boolean isWeeklyReportDeliveryEnabled();
+
+    /**
+     * The shape {@link #sendDailyReportHsm} sends in, so the caller can store the report where that
+     * shape's URL has to point: a document must be reachable by Meta, while a link's prefix is frozen
+     * into its approved template.
+     *
+     * @return the configured mode, or {@code null} when a dry-run flag suppresses the send, in which
+     *         case no copy is needed beyond the store of record
+     */
+    ReportDeliveryMode dailyReportDeliveryMode();
+
+    /** As {@link #dailyReportDeliveryMode}, for {@link #sendWeeklyReportHsm}. */
+    ReportDeliveryMode weeklyReportDeliveryMode();
+
+    /** As {@link #dailyReportDeliveryMode}, for {@link #sendEscalationHsm}, which is always a document. */
+    ReportDeliveryMode escalationDeliveryMode();
 
     /**
      * The provider this adapter sends through, as recorded in the delivery ledger — a short lower-case

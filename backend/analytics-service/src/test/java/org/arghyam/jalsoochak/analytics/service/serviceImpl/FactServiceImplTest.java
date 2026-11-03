@@ -252,6 +252,48 @@ class FactServiceImplTest {
     }
 
     @Test
+    void ingestAnomalyRecorded_ingestedAfterIstMidnight_keepsTheDayItWasRaised() {
+        // Raised at 23:59 IST on 1 Jan (18:29 UTC) and ingested now, long after IST midnight. Every
+        // dashboard dates an anomaly by created_at + 5:30, so it must stay on 1 Jan.
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("anom-uuid-3");
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setType(10);
+        event.setStatus(1);
+        event.setRaisedAt("2026-01-01T18:29:00");
+        when(anomalyRepository.existsByUuid("anom-uuid-3")).thenReturn(false);
+
+        service.ingestAnomalyRecorded(event);
+
+        ArgumentCaptor<Anomaly> captor = ArgumentCaptor.forClass(Anomaly.class);
+        verify(anomalyRepository).save(captor.capture());
+        assertThat(captor.getValue().getCreatedAt()).isEqualTo(LocalDateTime.of(2026, 1, 1, 18, 29));
+    }
+
+    @Test
+    void ingestAnomalyRecorded_withoutRaisedAt_datesTheAnomalyByReceipt() {
+        // Events from a telemetry build that predates raisedAt.
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("anom-uuid-4");
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setType(10);
+        event.setStatus(1);
+        when(anomalyRepository.existsByUuid("anom-uuid-4")).thenReturn(false);
+        LocalDateTime before = LocalDateTime.now(java.time.ZoneOffset.UTC);
+
+        service.ingestAnomalyRecorded(event);
+
+        ArgumentCaptor<Anomaly> captor = ArgumentCaptor.forClass(Anomaly.class);
+        verify(anomalyRepository).save(captor.capture());
+        assertThat(captor.getValue().getCreatedAt())
+                .isBetween(before, LocalDateTime.now(java.time.ZoneOffset.UTC));
+    }
+
+    @Test
     void ingestMeterReading_mapsAndSavesFactEntity() {
         MeterReadingEvent event = new MeterReadingEvent();
         event.setTenantId(1);

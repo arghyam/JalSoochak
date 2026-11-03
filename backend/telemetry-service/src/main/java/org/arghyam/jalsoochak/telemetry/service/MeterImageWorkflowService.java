@@ -119,7 +119,8 @@ public class MeterImageWorkflowService {
                 log.debug("Unexpected error processing image rawContactId={}: {}", meterImageWebhookRequest.getContactId(), e.getMessage());
             }
             String languageKey = localizationService.resolveLanguageKeyForContact(meterImageWebhookRequest.getContactId());
-            String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Image could not be processed.", languageKey);
+            String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(
+                    e, ConversationMessageCode.IMAGE_NOT_PROCESSED, languageKey);
             return CreateReadingResponse.builder()
                     .success(false)
                     .message(descriptiveMessage)
@@ -247,7 +248,8 @@ public class MeterImageWorkflowService {
                 log.debug("Unexpected error processing reading rawContactId={}: {}", safeContactId, e.getMessage());
             }
             String languageKey = localizationService.resolveLanguageKeyForContact(safeContactId);
-            String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Reading could not be processed.", languageKey);
+            String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(
+                    e, ConversationMessageCode.READING_NOT_PROCESSED, languageKey);
             return CreateReadingResponse.builder()
                     .success(false)
                     .message(descriptiveMessage)

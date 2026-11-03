@@ -162,7 +162,7 @@ class QuarantinedReadingReleaseIntegrationTest {
         QuarantinedReadingReleaseService.Outcome outcome =
                 releaseService.release(TENANT_ID, FROM, TO, null, null, false);
 
-        assertThat(outcome).isEqualTo(new QuarantinedReadingReleaseService.Outcome(4, 2, 0));
+        assertThat(outcome).isEqualTo(new QuarantinedReadingReleaseService.Outcome(4, 2, 0, 0));
         assertThat(quarantinedIds()).containsExactly(22L, 33L, 41L, 42L, 43L);
         assertThat(publishedIds()).containsExactly(32L, 12L, 13L, 14L);
     }
@@ -174,7 +174,7 @@ class QuarantinedReadingReleaseIntegrationTest {
         QuarantinedReadingReleaseService.Outcome outcome =
                 releaseService.release(TENANT_ID, FROM, TO, "S-3", null, false);
 
-        assertThat(outcome).isEqualTo(new QuarantinedReadingReleaseService.Outcome(1, 1, 0));
+        assertThat(outcome).isEqualTo(new QuarantinedReadingReleaseService.Outcome(1, 1, 0, 0));
         assertThat(publishedIds()).containsExactly(32L);
     }
 
@@ -184,7 +184,7 @@ class QuarantinedReadingReleaseIntegrationTest {
         QuarantinedReadingReleaseService.Outcome outcome =
                 releaseService.release(TENANT_ID, FROM, TO, null, null, true);
 
-        assertThat(outcome).isEqualTo(new QuarantinedReadingReleaseService.Outcome(4, 2, 0));
+        assertThat(outcome).isEqualTo(new QuarantinedReadingReleaseService.Outcome(4, 2, 0, 0));
         assertThat(quarantinedIds()).containsExactly(12L, 13L, 14L, 22L, 32L, 33L, 41L, 42L, 43L);
         verify(telemetryEventPublisher, never()).publishMeterReadingRecordedAndAwait(any());
 
@@ -196,6 +196,6 @@ class QuarantinedReadingReleaseIntegrationTest {
         releaseService.release(TENANT_ID, FROM, TO, null, null, false);
 
         assertThat(releaseService.release(TENANT_ID, FROM, TO, null, null, false))
-                .isEqualTo(new QuarantinedReadingReleaseService.Outcome(0, 2, 0));
+                .isEqualTo(new QuarantinedReadingReleaseService.Outcome(0, 2, 0, 0));
     }
 }

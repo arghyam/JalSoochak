@@ -37,11 +37,13 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -85,60 +87,24 @@ public class MeterReadingConversationService {
      */
     private static final Pattern ISSUE_REASON_ALLOWED = Pattern.compile(
             "^[\\p{L}\\p{N}][\\p{L}\\p{N}\\p{M}]*(?: +[\\p{L}\\p{N}][\\p{L}\\p{N}\\p{M}]*)*$");
-    private static final String DEFAULT_ISSUE_PROMPT_ENGLISH =
-            "Please select your issue by typing any of the number";
-    private static final String DEFAULT_ISSUE_PROMPT_HINDI =
-            "कृपया नंबर टाइप करके अपनी समस्या चुनें";
-    private static final String DEFAULT_OTHERS_PROMPT_ENGLISH =
-            "Please report your issue.";
-    private static final String DEFAULT_OTHERS_PROMPT_HINDI =
-            "कृपया अपनी समस्या बताएं।";
+    /** A tenant's legacy issue-report prompt that is replaced by the built-in one. */
     private static final String LEGACY_ISSUE_PROMPT_ENGLISH =
             "Please type your issue in a few words.";
     private static final String LEGACY_ISSUE_PROMPT_HINDI =
             "कृपया अपनी समस्या संक्षेप में लिखें।";
-    /** Built-in labels of the nudge "Select reason" menu, for a tenant whose ISSUE_REPORT template lacks them. */
-    private static final String DEFAULT_NO_READING_SUBMISSION_ENGLISH = "No Reading Submission";
-    private static final String DEFAULT_NO_READING_SUBMISSION_HINDI = "रीडिंग जमा नहीं हुई";
-    private static final String DEFAULT_NO_WATER_SUPPLY_ENGLISH = "No Water Supply";
-    private static final String DEFAULT_NO_WATER_SUPPLY_HINDI = "पानी की आपूर्ति नहीं";
-    private static final String TELEMETRY_ISSUE_PROMPT_ENGLISH =
-            "Please select your issue.";
-    private static final String TELEMETRY_ISSUE_PROMPT_HINDI =
-            "कृपया अपनी समस्या चुनें।";
-    private static final String DEFAULT_METER_CHANGE_PROMPT_ENGLISH =
-            "Please select the no submission reasons by typing any of the number";
-    private static final String DEFAULT_METER_CHANGE_PROMPT_HINDI =
-            "कृपया नंबर टाइप करके सबमिशन न होने के कारण चुनें";
 
     /** LOCATION-AFFINITY: {@code WHATSAPP_MESSAGE_TEMPLATES} screen holding the boundary warning. */
     private static final String LOCATION_BOUNDARY_SCREEN = "LOCATION_BOUNDARY";
     /** Legacy per-language config key, suffixed with the normalized language name. */
     private static final String LOCATION_BOUNDARY_CONFIG_KEY = "location_boundary_warning";
-    /**
-     * The floor a tenant gets before configuring anything. Carries no {@code Yes | No} — those are
-     * quick-reply buttons rendered by the chatbot flow, not part of this sentence.
-     */
-    private static final String DEFAULT_LOCATION_BOUNDARY_WARNING =
-            "System detected that reading is being submitted outside the Scheme boundary. "
-                    + "Do you want to proceed?";
 
-    private static final List<String> DEFAULT_ISSUE_REASONS = List.of(
-            "Meter Replaced",
-            "Meter not working",
-            "Meter damage",
-            "Incorrect Reading Entered Previously",
-            "No Water Supply",
-            "Others"
-    );
-
-    private static final List<String> DEFAULT_ISSUE_REASONS_HINDI = List.of(
-            "मीटर बदला गया",
-            "मीटर काम नहीं कर रहा",
-            "मीटर खराब है",
-            "पहले गलत रीडिंग दर्ज हुई थी",
-            "पानी की आपूर्ति नहीं",
-            "अन्य"
+    private static final List<ConversationMessageCode> DEFAULT_ISSUE_REASONS = List.of(
+            ConversationMessageCode.ISSUE_REASON_METER_REPLACED,
+            ConversationMessageCode.ISSUE_REASON_METER_NOT_WORKING,
+            ConversationMessageCode.ISSUE_REASON_METER_DAMAGE,
+            ConversationMessageCode.ISSUE_REASON_INCORRECT_PREVIOUS_READING,
+            ConversationMessageCode.ISSUE_REASON_NO_WATER_SUPPLY,
+            ConversationMessageCode.ISSUE_REASON_OTHERS
     );
     private static final List<String> DEFAULT_ISSUE_REASON_SELECTION_KEYS = List.of(
             "meterReplaced",
@@ -148,19 +114,12 @@ public class MeterReadingConversationService {
             "noWaterSupplied",
             "others"
     );
-    private static final List<String> TELEMETRY_ISSUE_REASONS = List.of(
-            "Meter Replaced",
-            "Meter not working",
-            "Meter Damaged",
-            "No Water Supply",
-            "Others"
-    );
-    private static final List<String> TELEMETRY_ISSUE_REASONS_HINDI = List.of(
-            "मीटर बदला गया",
-            "मीटर काम नहीं कर रहा",
-            "मीटर खराब है",
-            "पानी की आपूर्ति नहीं",
-            "अन्य"
+    private static final List<ConversationMessageCode> TELEMETRY_ISSUE_REASONS = List.of(
+            ConversationMessageCode.ISSUE_REASON_METER_REPLACED,
+            ConversationMessageCode.ISSUE_REASON_METER_NOT_WORKING,
+            ConversationMessageCode.ISSUE_REASON_METER_DAMAGED,
+            ConversationMessageCode.ISSUE_REASON_NO_WATER_SUPPLY,
+            ConversationMessageCode.ISSUE_REASON_OTHERS
     );
     private static final List<String> TELEMETRY_ISSUE_REASON_SELECTION_KEYS = List.of(
             "meterReplaced",
@@ -178,6 +137,23 @@ public class MeterReadingConversationService {
             "noWaterSupplied",
             "others"
     );
+    /**
+     * The reasons tenant-service seeds into a tenant's {@code METER_CHANGE_REASONS} and
+     * {@code SUPPLY_OUTAGE_REASONS}, by id: its {@code tenant.defaults} in application.yml.
+     */
+    private static final Map<String, ConversationMessageCode> DEFAULT_REASON_CODES = Map.ofEntries(
+            Map.entry("METER_REPLACED", ConversationMessageCode.ISSUE_REASON_METER_REPLACED),
+            Map.entry("METER_NOT_WORKING", ConversationMessageCode.ISSUE_REASON_METER_NOT_WORKING),
+            Map.entry("METER_DAMAGED", ConversationMessageCode.ISSUE_REASON_METER_DAMAGED),
+            Map.entry("ELECTRICITY_SUPPLY_DISCONNECTED", ConversationMessageCode.SUPPLY_REASON_ELECTRICITY_DISCONNECTED),
+            Map.entry("NO_ELECTRICITY_SUPPLY_TODAY", ConversationMessageCode.SUPPLY_REASON_NO_ELECTRICITY_TODAY),
+            Map.entry("PUMP_FAILURE", ConversationMessageCode.SUPPLY_REASON_PUMP_FAILURE),
+            Map.entry("PIPELINE_BREAK", ConversationMessageCode.SUPPLY_REASON_PIPELINE_BREAK),
+            Map.entry("WATER_QUALITY_ISSUES", ConversationMessageCode.SUPPLY_REASON_WATER_QUALITY),
+            Map.entry("SOURCE_DRYING", ConversationMessageCode.SUPPLY_REASON_SOURCE_DRYING),
+            Map.entry("NATURAL_CALAMITY", ConversationMessageCode.SUPPLY_REASON_NATURAL_CALAMITY),
+            Map.entry("OTHERS", ConversationMessageCode.ISSUE_REASON_OTHERS)
+    );
 
     private final OperatorContextService operatorContextService;
     private final ConversationLocalizationService localizationService;
@@ -192,6 +168,7 @@ public class MeterReadingConversationService {
     private final SubmittedValueCapture submittedValueCapture;
     private final PduDayLimit pduDayLimit;
     private final ConversationSchemeResolver conversationSchemeResolver;
+    private final ConversationMessageResolver messageResolver;
 
     public MeterReadingConversationService(OperatorContextService operatorContextService,
                                            ConversationLocalizationService localizationService,
@@ -205,7 +182,8 @@ public class MeterReadingConversationService {
                                            ReadingRepublisher readingRepublisher,
                                            SubmittedValueCapture submittedValueCapture,
                                            PduDayLimit pduDayLimit,
-                                           ConversationSchemeResolver conversationSchemeResolver) {
+                                           ConversationSchemeResolver conversationSchemeResolver,
+                                           ConversationMessageResolver messageResolver) {
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
         this.tenantConfigRepository = tenantConfigRepository;
@@ -219,6 +197,7 @@ public class MeterReadingConversationService {
         this.submittedValueCapture = submittedValueCapture;
         this.pduDayLimit = pduDayLimit;
         this.conversationSchemeResolver = conversationSchemeResolver;
+        this.messageResolver = messageResolver;
     }
 
     public IntroResponse meterChangeMessage(IntroRequest request) {
@@ -265,7 +244,8 @@ public class MeterReadingConversationService {
             logFailure("Error building meter change reasons", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Meter change reasons could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.METER_CHANGE_REASONS_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -308,7 +288,7 @@ public class MeterReadingConversationService {
             );
 
             String prompt = tenantConfigRepository.findTakeMeterReadingPrompt(tenantId, languageKey)
-                    .orElse("Please type your meter reading manually (numbers only).");
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.TAKE_READING_PROMPT, languageKey));
 
             return IntroResponse.builder()
                     .success(true)
@@ -319,7 +299,8 @@ public class MeterReadingConversationService {
             logFailure("Error preparing take meter reading prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Take meter reading prompt could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.TAKE_READING_PROMPT_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -345,11 +326,12 @@ public class MeterReadingConversationService {
                     templatesService.resolveScreenReasons(tenantId, "ISSUE_REPORT");
             List<String> reasons;
             if (!templateReasons.isEmpty()) {
-                reasons = templateReasons.stream().map(r -> r.labelForLanguageKey(languageKey)).toList();
+                String languageCode = templatesService.toTemplateLanguageCode(languageKey);
+                reasons = templateReasons.stream().map(r -> r.labelFor(languageCode)).toList();
             } else {
                 reasons = tenantConfigRepository.findIssueReportReasons(tenantId, languageKey);
                 if (reasons.isEmpty()) {
-                    reasons = "hindi".equals(languageKey) ? DEFAULT_ISSUE_REASONS_HINDI : DEFAULT_ISSUE_REASONS;
+                    reasons = localized(DEFAULT_ISSUE_REASONS, languageKey);
                 }
             }
 
@@ -369,7 +351,8 @@ public class MeterReadingConversationService {
             logFailure("Error preparing issue report prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Issue report prompt could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.ISSUE_PROMPT_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -396,14 +379,15 @@ public class MeterReadingConversationService {
             }
 
             String languageKey = localizationService.normalizeLanguageKey(operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
-            boolean hindi = "hindi".equals(languageKey);
             List<ConversationTemplateService.TemplateOption> templateReasons =
                     templatesService.resolveScreenReasons(tenantId, "ISSUE_REPORT");
 
             String noReadingSubmission = issueReasonLabel(templateReasons, Set.of("noReadingSubmission"), languageKey)
-                    .orElse(hindi ? DEFAULT_NO_READING_SUBMISSION_HINDI : DEFAULT_NO_READING_SUBMISSION_ENGLISH);
+                    .orElseGet(() -> messageResolver.get(
+                            ConversationMessageCode.ISSUE_REASON_NO_READING_SUBMISSION, languageKey));
             String noWaterSupply = issueReasonLabel(templateReasons, Set.of("noWaterSupply", "noWaterSupplied"), languageKey)
-                    .orElse(hindi ? DEFAULT_NO_WATER_SUPPLY_HINDI : DEFAULT_NO_WATER_SUPPLY_ENGLISH);
+                    .orElseGet(() -> messageResolver.get(
+                            ConversationMessageCode.ISSUE_REASON_NO_WATER_SUPPLY, languageKey));
 
             String message = resolveIssueReportPrompt(tenantId, languageKey)
                     + "\n1. " + noReadingSubmission
@@ -417,7 +401,8 @@ public class MeterReadingConversationService {
             logFailure("Error preparing issue reason types", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Issue reason types could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.ISSUE_REASON_TYPES_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -426,17 +411,17 @@ public class MeterReadingConversationService {
     private Optional<String> issueReasonLabel(List<ConversationTemplateService.TemplateOption> templateReasons,
                                               Set<String> keys,
                                               String languageKey) {
+        String languageCode = templatesService.toTemplateLanguageCode(languageKey);
         return templateReasons.stream()
                 .filter(option -> option.key() != null
                         && keys.contains(normalizeIssueReportSelectedKey(option.key()).trim()))
-                .map(option -> option.labelForLanguageKey(languageKey))
+                .map(option -> option.labelFor(languageCode))
                 .filter(label -> label != null && !label.isBlank())
                 .map(String::trim)
                 .findFirst();
     }
 
     private String resolveIssueReportPrompt(Integer tenantId, String languageKey) {
-        String defaultPrompt = "hindi".equals(languageKey) ? DEFAULT_ISSUE_PROMPT_HINDI : DEFAULT_ISSUE_PROMPT_ENGLISH;
         Optional<String> promptFromTemplate = templatesService.resolveScreenPrompt(tenantId, "ISSUE_REPORT", languageKey);
         if (promptFromTemplate.isPresent()) {
             return promptFromTemplate.get().trim();
@@ -445,7 +430,26 @@ public class MeterReadingConversationService {
                 .map(String::trim)
                 .filter(p -> !p.equalsIgnoreCase(LEGACY_ISSUE_PROMPT_ENGLISH)
                         && !p.equals(LEGACY_ISSUE_PROMPT_HINDI))
-                .orElse(defaultPrompt);
+                .orElseGet(() -> messageResolver.get(ConversationMessageCode.ISSUE_PROMPT, languageKey));
+    }
+
+    private List<String> localized(List<ConversationMessageCode> reasons, String languageKey) {
+        return reasons.stream().map(reason -> messageResolver.get(reason, languageKey)).toList();
+    }
+
+    /**
+     * A configured reason's label in the operator's language. A default reason still under its
+     * seeded name takes the built-in translation; a renamed or custom one is the tenant's own copy,
+     * shown as written, as is a default in a language that does not translate it.
+     */
+    private String reasonLabel(JsonNode reason, String name, String languageKey) {
+        ConversationMessageCode code = DEFAULT_REASON_CODES.get(
+                reason.path("id").asText().trim().toUpperCase(Locale.ROOT));
+        if (code == null || messageResolver.isEnglish(languageKey)
+                || !name.equalsIgnoreCase(messageResolver.english(code))) {
+            return name;
+        }
+        return messageResolver.translation(code, languageKey).orElse(name);
     }
 
     public String issueReportTelemetryReasons(IntroRequest request) {
@@ -484,8 +488,8 @@ public class MeterReadingConversationService {
                 b.path("sequenceOrder").asInt(Integer.MAX_VALUE)
         ));
 
-        String prompt = "hindi".equals(languageKey) ? TELEMETRY_ISSUE_PROMPT_HINDI : TELEMETRY_ISSUE_PROMPT_ENGLISH;
-        StringBuilder message = new StringBuilder(localizationService.localizeMessage(prompt, languageKey));
+        StringBuilder message = new StringBuilder(messageResolver.get(
+                ConversationMessageCode.TELEMETRY_ISSUE_PROMPT, languageKey));
         for (int i = 0; i < reasons.size(); i++) {
             String name = reasons.get(i).path("name").asText();
             if (name == null || name.isBlank()) {
@@ -494,7 +498,7 @@ public class MeterReadingConversationService {
             message.append("\n")
                     .append(i + 1)
                     .append(". ")
-                    .append(localizationService.localizeMessage(name.trim(), languageKey));
+                    .append(reasonLabel(reasons.get(i), name.trim(), languageKey));
         }
 
         try {
@@ -543,8 +547,8 @@ public class MeterReadingConversationService {
                 b.path("sequenceOrder").asInt(Integer.MAX_VALUE)
         ));
 
-        String prompt = "hindi".equals(languageKey) ? DEFAULT_METER_CHANGE_PROMPT_HINDI : DEFAULT_METER_CHANGE_PROMPT_ENGLISH;
-        StringBuilder message = new StringBuilder(localizationService.localizeMessage(prompt, languageKey));
+        StringBuilder message = new StringBuilder(messageResolver.get(
+                ConversationMessageCode.METER_CHANGE_PROMPT, languageKey));
         for (int i = 0; i < reasons.size(); i++) {
             String name = reasons.get(i).path("name").asText();
             if (name == null || name.isBlank()) {
@@ -553,7 +557,7 @@ public class MeterReadingConversationService {
             message.append("\n")
                     .append(i + 1)
                     .append(". ")
-                    .append(localizationService.localizeMessage(name.trim(), languageKey));
+                    .append(reasonLabel(reasons.get(i), name.trim(), languageKey));
         }
 
         try {
@@ -612,7 +616,7 @@ public class MeterReadingConversationService {
             if (selectedIndex == null || selectedIndex < 1 || selectedIndex > reasons.size()) {
                 return IntroResponse.builder()
                         .success(false)
-                        .message("invalid choice, please restart the flow")
+                        .message(messageResolver.get(ConversationMessageCode.INVALID_CHOICE, languageKey))
                         .build();
             }
 
@@ -639,11 +643,10 @@ public class MeterReadingConversationService {
                     selectedReason
             );
 
-            String fallbackMessage = "Successfully selected.";
             String confirmationMessage = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "METER_CHANGE", languageKey)
                     .or(() -> tenantConfigRepository.findMeterChangeConfirmationTemplate(tenantId, languageKey))
-                    .orElse(localizationService.localizeMessage(fallbackMessage, languageKey));
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.METER_CHANGE_SELECTED, languageKey));
 
             return IntroResponse.builder()
                     .success(true)
@@ -656,7 +659,8 @@ public class MeterReadingConversationService {
             logFailure("Error saving meter change reason", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Meter change reason could not be saved.")
+                    .message(messageResolver.get(ConversationMessageCode.METER_CHANGE_REASON_NOT_SAVED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -686,19 +690,21 @@ public class MeterReadingConversationService {
             List<String> reasons;
             List<String> selectionKeys;
             if (!templateReasons.isEmpty()) {
-                reasons = templateReasons.stream().map(r -> r.labelForLanguageKey(languageKey)).toList();
+                String languageCode = templatesService.toTemplateLanguageCode(languageKey);
+                reasons = templateReasons.stream().map(r -> r.labelFor(languageCode)).toList();
                 selectionKeys = templateReasons.stream().map(ConversationTemplateService.TemplateOption::key).toList();
             } else {
                 reasons = tenantConfigRepository.findIssueReportReasons(tenantId, languageKey);
                 if (reasons.isEmpty()) {
-                    reasons = "hindi".equals(languageKey) ? DEFAULT_ISSUE_REASONS_HINDI : DEFAULT_ISSUE_REASONS;
+                    reasons = localized(DEFAULT_ISSUE_REASONS, languageKey);
                 }
                 selectionKeys = DEFAULT_ISSUE_REASON_SELECTION_KEYS;
             }
             if (rawIssueReason.matches("^\\d+$") && parseSelectionIndex(rawIssueReason, reasons.size()) == null) {
                 return IntroResponse.builder()
                         .success(false)
-                        .message("Please choose a number between 1 and " + reasons.size() + ".")
+                        .message(messageResolver.get(ConversationMessageCode.CHOOSE_NUMBER_IN_RANGE, languageKey,
+                                reasons.size()))
                         .build();
             }
             String resolvedIssueReason = rawIssueReason;
@@ -718,7 +724,7 @@ public class MeterReadingConversationService {
                     }
                 }
                 if (matched != null) {
-                    String label = matched.labelForLanguageKey(languageKey);
+                    String label = matched.labelFor(templatesService.toTemplateLanguageCode(languageKey));
                     resolvedIssueReason = (label == null || label.isBlank()) ? matched.canonicalLabel() : label;
                     selectedKey = matched.key();
                     matchedConfiguredReason = true;
@@ -776,7 +782,8 @@ public class MeterReadingConversationService {
                         // issue-report menu and mean nothing was submitted. createIssueReportRecord
                         // runs only in the else-branch below, for issues NOT stored as anomalies, so
                         // this branch writes no flow_reading_table row to link.
-                        null
+                        null,
+                        Instant.now()
                 );
                 telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                         tenantId,
@@ -803,16 +810,12 @@ public class MeterReadingConversationService {
                     || "meterReplaced".equalsIgnoreCase(responseSelectedKey)
                     || "noWaterSupply".equalsIgnoreCase(responseSelectedKey)
                     || "noReadingSubmission".equalsIgnoreCase(responseSelectedKey)) {
-                message = "please wait a second...";
+                message = messageResolver.get(ConversationMessageCode.PLEASE_WAIT, languageKey);
             } else {
-                String fallbackMessage = "Issue reported. Thank you.";
-                if ("hindi".equals(languageKey)) {
-                    fallbackMessage = "समस्या रिपोर्ट हो गई है। धन्यवाद।";
-                }
                 message = templatesService
                         .resolveScreenConfirmationTemplate(tenantId, "ISSUE_REPORT", languageKey)
                         .or(() -> tenantConfigRepository.findIssueReportConfirmationTemplate(tenantId, languageKey))
-                        .orElse(fallbackMessage);
+                        .orElseGet(() -> messageResolver.get(ConversationMessageCode.ISSUE_REPORTED, languageKey));
             }
 
             return IntroResponse.builder()
@@ -827,7 +830,7 @@ public class MeterReadingConversationService {
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
                             e,
-                            "Issue report could not be saved.",
+                            ConversationMessageCode.ISSUE_REPORT_NOT_SAVED,
                             localizationService.resolveLanguageKeyForContact(request.getContactId())
                     ))
                     .build();
@@ -849,7 +852,7 @@ public class MeterReadingConversationService {
             String languageKey = localizationService.normalizeLanguageKey(
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
-            String message = "hindi".equals(languageKey) ? DEFAULT_OTHERS_PROMPT_HINDI : DEFAULT_OTHERS_PROMPT_ENGLISH;
+            String message = messageResolver.get(ConversationMessageCode.OTHERS_PROMPT, languageKey);
 
             return IntroResponse.builder()
                     .success(true)
@@ -859,7 +862,8 @@ public class MeterReadingConversationService {
             logFailure("Error preparing others prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Others prompt could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.OTHERS_PROMPT_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -880,8 +884,8 @@ public class MeterReadingConversationService {
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
 
-            String prompt = "hindi".equals(languageKey) ? DEFAULT_ISSUE_PROMPT_HINDI : DEFAULT_ISSUE_PROMPT_ENGLISH;
-            List<String> reasons = "hindi".equals(languageKey) ? TELEMETRY_ISSUE_REASONS_HINDI : TELEMETRY_ISSUE_REASONS;
+            String prompt = messageResolver.get(ConversationMessageCode.ISSUE_PROMPT, languageKey);
+            List<String> reasons = localized(TELEMETRY_ISSUE_REASONS, languageKey);
 
             StringBuilder message = new StringBuilder(prompt.trim());
             for (int i = 0; i < reasons.size(); i++) {
@@ -899,7 +903,8 @@ public class MeterReadingConversationService {
             logFailure("Error preparing telemetry issue report prompt", request.getContactId(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Issue report prompt could not be prepared.")
+                    .message(messageResolver.get(ConversationMessageCode.ISSUE_PROMPT_NOT_PREPARED,
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())))
                     .build();
         }
     }
@@ -948,7 +953,7 @@ public class MeterReadingConversationService {
                 if (selectedIndex == null || selectedIndex < 1 || selectedIndex > reasons.size()) {
                     return IntroResponse.builder()
                             .success(false)
-                            .message("invalid choice, please restart the flow")
+                            .message(messageResolver.get(ConversationMessageCode.INVALID_CHOICE, languageKey))
                             .build();
                 }
 
@@ -959,7 +964,7 @@ public class MeterReadingConversationService {
                 // does: this name comes from tenant JSON and reaches analytics' VARCHAR(255).
                 requireStorableIssueReason(resolvedIssueReason, true);
             } else {
-                List<String> reasons = "hindi".equals(languageKey) ? TELEMETRY_ISSUE_REASONS_HINDI : TELEMETRY_ISSUE_REASONS;
+                List<String> reasons = localized(TELEMETRY_ISSUE_REASONS, languageKey);
                 Optional<String> matchedReason = resolveSelection(rawIssueReason, reasons);
                 resolvedIssueReason = matchedReason.orElse(rawIssueReason);
                 requireStorableIssueReason(resolvedIssueReason, matchedReason.isPresent());
@@ -1008,13 +1013,8 @@ public class MeterReadingConversationService {
                     resolvedIssueReason
             );
 
-            String fallbackMessage = "Issue reported. Thank you.";
-            if ("hindi".equals(languageKey)) {
-                fallbackMessage = "समस्या रिपोर्ट हो गई है। धन्यवाद।";
-            }
-
             String message = tenantConfigRepository.findIssueReportConfirmationTemplate(tenantId, languageKey)
-                    .orElse(fallbackMessage);
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.ISSUE_REPORTED, languageKey));
 
             return IntroResponse.builder()
                     .success(true)
@@ -1029,7 +1029,7 @@ public class MeterReadingConversationService {
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
                             e,
-                            "Issue report could not be saved.",
+                            ConversationMessageCode.ISSUE_REPORT_NOT_SAVED,
                             localizationService.resolveLanguageKeyForContact(request.getContactId())
                     ))
                     .build();
@@ -1091,7 +1091,8 @@ public class MeterReadingConversationService {
                     null,
                     // ANOMALY-SUBMISSION-LINK: /others/submitted is a free-text non-submission
                     // report — no reading was sent and no row is written.
-                    null
+                    null,
+                    Instant.now()
             );
             telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                     tenantId,
@@ -1105,14 +1106,10 @@ public class MeterReadingConversationService {
             String languageKey = localizationService.normalizeLanguageKey(
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
-            String fallbackMessage = "Issue reported. Thank you.";
-            if ("hindi".equals(languageKey)) {
-                fallbackMessage = "समस्या रिपोर्ट हो गई है। धन्यवाद।";
-            }
             String message = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "ISSUE_REPORT", languageKey)
                     .or(() -> tenantConfigRepository.findIssueReportConfirmationTemplate(tenantId, languageKey))
-                    .orElse(fallbackMessage);
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.ISSUE_REPORTED, languageKey));
 
             return IntroResponse.builder()
                     .success(true)
@@ -1126,7 +1123,7 @@ public class MeterReadingConversationService {
                     .success(false)
                     .message(localizationService.resolveUserFacingErrorMessage(
                             e,
-                            "Issue report could not be saved.",
+                            ConversationMessageCode.ISSUE_REPORT_NOT_SAVED,
                             localizationService.resolveLanguageKeyForContact(request.getContactId())
                     ))
                     .build();
@@ -1554,7 +1551,8 @@ public class MeterReadingConversationService {
                                 "Manual reading is above allowed maximum reading (" + toPlain(maxAllowedReading) + ").",
                                 AnomalyConstants.STATUS_OPEN,
                                 null,
-                                pendingOpt.map(TelemetryPendingMeterChangeRecord::correlationId).orElse(null)
+                                pendingOpt.map(TelemetryPendingMeterChangeRecord::correlationId).orElse(null),
+                                Instant.now()
                         );
                         // THRESHOLD-DISCLOSURE: the reply says the value was too high but not what the
                         // limit is. Echoing "Maximum allowed reading: N" let any caller read the tenant's
@@ -1566,11 +1564,8 @@ public class MeterReadingConversationService {
                                 toPlain(effectiveConfirmedReading), toPlain(maxAllowedReading));
                         return CreateReadingResponse.builder()
                                 .success(false)
-                                .message(localizationService.localizeMessage(
-                                        "Reading rejected because it is above the allowed maximum for this scheme. Submitted: "
-                                                + toPlain(effectiveConfirmedReading) + ".",
-                                        languageKey
-                                ))
+                                .message(messageResolver.get(ConversationMessageCode.READING_ABOVE_SCHEME_MAXIMUM,
+                                        languageKey, toPlain(effectiveConfirmedReading)))
                                 .qualityStatus("REJECTED")
                                 .correlationId(correlationId)
                                 .meterReading(effectiveConfirmedReading)
@@ -1672,7 +1667,8 @@ public class MeterReadingConversationService {
                     // ANOMALY-SUBMISSION-LINK: correlationId here is already the submission's own —
                     // reused from the pending row or today's row a few lines up, or minted for the
                     // row just created — so the warehouse gets the same value the fact row carries.
-                    correlationId
+                    correlationId,
+                    Instant.now()
             );
 
             int consecutiveOverrideDays = calculateConsecutiveDays(
@@ -1722,9 +1718,11 @@ public class MeterReadingConversationService {
                     .qualityStatus("CONFIRMED")
                     .build();
 
-            String template = tenantConfigRepository.findManualReadingConfirmationTemplate(tenantId, languageKey)
-                    .orElse("Manual reading {reading} saved successfully.");
-            response.setMessage(template.replace("{reading}", manualReadingValue.stripTrailingZeros().toPlainString()));
+            String reading = manualReadingValue.stripTrailingZeros().toPlainString();
+            response.setMessage(tenantConfigRepository.findManualReadingConfirmationTemplate(tenantId, languageKey)
+                    .map(template -> template.replace("{reading}", reading))
+                    .orElseGet(() -> messageResolver.get(ConversationMessageCode.MANUAL_READING_SAVED, languageKey,
+                            reading)));
 
             if (response.getCorrelationId() == null || response.getCorrelationId().isBlank()) {
                 response.setCorrelationId(UUID.randomUUID().toString());
@@ -1733,7 +1731,8 @@ public class MeterReadingConversationService {
         } catch (Exception e) {
             logFailure("Error processing manual reading", request.getContactId(), e);
             String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
-            String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Manual reading could not be saved.", languageKey);
+            String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(
+                    e, ConversationMessageCode.MANUAL_READING_NOT_SAVED, languageKey);
             return CreateReadingResponse.builder()
                     .success(false)
                     .message(descriptiveMessage)
@@ -1840,7 +1839,7 @@ public class MeterReadingConversationService {
                     .locationMismatch(outsideBoundary)
                     .message(outsideBoundary
                             ? resolveBoundaryWarning(operatorWithSchema.operator().tenantId(), languageKey)
-                            : localizationService.localizeMessage("Location saved successfully.", languageKey))
+                            : messageResolver.get(ConversationMessageCode.LOCATION_SAVED, languageKey))
                     // Unchanged on a mismatch: the coordinates WERE saved, and the flow in the
                     // chatbot may already route on this value. The new branch reads
                     // locationMismatch instead.
@@ -1850,7 +1849,8 @@ public class MeterReadingConversationService {
             String safeContactId = request != null ? request.resolveContactId() : null;
             logFailure("Error processing location", safeContactId, e);
             String languageKey = localizationService.resolveLanguageKeyForContact(safeContactId);
-            String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Location could not be saved.", languageKey);
+            String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(
+                    e, ConversationMessageCode.LOCATION_NOT_SAVED, languageKey);
             return CreateReadingResponse.builder()
                     .success(false)
                     .message(descriptiveMessage)
@@ -1883,8 +1883,7 @@ public class MeterReadingConversationService {
                         .filter(text -> !text.isBlank()))
                 .or(() -> tenantConfigRepository.findConfigValue(tenantId, LOCATION_BOUNDARY_CONFIG_KEY)
                         .filter(text -> !text.isBlank()))
-                .orElseGet(() -> localizationService.localizeMessage(
-                        DEFAULT_LOCATION_BOUNDARY_WARNING, languageKey));
+                .orElseGet(() -> messageResolver.get(ConversationMessageCode.LOCATION_BOUNDARY_WARNING, languageKey));
     }
 
     public CreateReadingResponse updatePreviousReadingMessage(UpdatedPreviousReadingRequest request) {
@@ -1924,10 +1923,7 @@ public class MeterReadingConversationService {
             if (targetDayRecordOpt.isEmpty()) {
                 return CreateReadingResponse.builder()
                         .success(false)
-                        .message(localizationService.localizeMessage(
-                                "No previous submitted reading found. Please submit a reading first.",
-                                languageKey
-                        ))
+                        .message(messageResolver.get(ConversationMessageCode.NO_PREVIOUS_READING, languageKey))
                         .qualityStatus("REJECTED")
                         .correlationId(request.getContactId())
                         .build();
@@ -1991,7 +1987,7 @@ public class MeterReadingConversationService {
 
             return CreateReadingResponse.builder()
                     .success(true)
-                    .message("Previous reading updated successfully.")
+                    .message(messageResolver.get(ConversationMessageCode.PREVIOUS_READING_UPDATED, languageKey))
                     .qualityStatus("CONFIRMED")
                     .correlationId(correlationId)
                     .meterReading(correctedReading)
@@ -2001,7 +1997,7 @@ public class MeterReadingConversationService {
             String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(
                     e,
-                    "Previous reading could not be updated.",
+                    ConversationMessageCode.PREVIOUS_READING_NOT_UPDATED,
                     languageKey
             );
             return CreateReadingResponse.builder()

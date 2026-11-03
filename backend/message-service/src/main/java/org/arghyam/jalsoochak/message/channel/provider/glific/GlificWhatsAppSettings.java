@@ -14,23 +14,26 @@ import java.util.Objects;
  * {@code toString} is safe to log. That service and {@link GlificGraphQLClient} read only
  * {@link #dryRun()}, to decide whether blank connection settings may be tolerated at startup.</p>
  *
- * @param dryRun                  which purposes are suppressed
- * @param templates               the approved HSM template ids
- * @param flows                   the flow ids
- * @param media                   the public media prefix and the document captions
- * @param dailyReportDeliveryMode {@code notifications.daily-report.delivery-mode}, unparsed — see
- *                                {@link org.arghyam.jalsoochak.message.channel.provider.ReportDeliveryMode}.
- *                                Parsed on use so an unrecognised value fails loudly with the valid
- *                                ones named, and so an unset property behaves exactly as before this
- *                                mode existed
- * @param linkButtonBaseUrl       optional mirror of the URL prefix frozen into the approved LINK
- *                                templates, e.g. {@code https://jalsoochak.jjmbrain.in/minio/}. When
- *                                set it must match the prefix the sender strips off the media URL to
- *                                build the button's variable, and a mismatch fails startup. It is the
- *                                only check that catches an environment deployed with another
- *                                environment's template id or base URL — the send still succeeds in
- *                                that case, and the officer is the one who discovers the button leads
- *                                nowhere
+ * @param dryRun                   which purposes are suppressed
+ * @param templates                the approved HSM template ids
+ * @param flows                    the flow ids
+ * @param media                    the public media prefixes and the document captions
+ * @param dailyReportDeliveryMode  {@code notifications.daily-report.delivery-mode}, unparsed — see
+ *                                 {@link org.arghyam.jalsoochak.message.channel.provider.ReportDeliveryMode}.
+ *                                 Parsed on use so an unrecognised value fails loudly with the valid
+ *                                 ones named, and so an unset property behaves exactly as before this
+ *                                 mode existed ({@code DOCUMENT})
+ * @param weeklyReportDeliveryMode {@code notifications.weekly-report.delivery-mode}, unparsed, as
+ *                                 {@code dailyReportDeliveryMode}; unset means {@code LINK}, the only
+ *                                 shape the weekly report had before this mode existed
+ * @param linkButtonBaseUrl        optional mirror of the URL prefix frozen into the approved LINK
+ *                                 templates, e.g. {@code https://jalsoochak.jjmbrain.in/minio/}. When
+ *                                 set it must match the prefix the sender strips off the media URL to
+ *                                 build the button's variable, and a mismatch fails startup. It is the
+ *                                 only check that catches an environment deployed with another
+ *                                 environment's template id or base URL — the send still succeeds in
+ *                                 that case, and the officer is the one who discovers the button leads
+ *                                 nowhere
  */
 public record GlificWhatsAppSettings(
         DryRun dryRun,
@@ -38,6 +41,7 @@ public record GlificWhatsAppSettings(
         Flows flows,
         Media media,
         String dailyReportDeliveryMode,
+        String weeklyReportDeliveryMode,
         String linkButtonBaseUrl) {
 
     public GlificWhatsAppSettings {
@@ -82,15 +86,18 @@ public record GlificWhatsAppSettings(
 
     /**
      * The approved HSM template ids. The document templates ({@code dailyReportSo},
-     * {@code dailyReportSdo}, {@code escalation}) are sent as integers and must be numeric; the text
-     * templates travel as a GraphQL {@code ID!}. Each SDO id is optional and falls back to its SO
-     * counterpart, so a deployment that has approved only one template still serves both roles.
+     * {@code dailyReportSdo}, {@code weeklyReportSo}, {@code weeklyReportSdo}, {@code escalation}) are
+     * sent as integers and must be numeric; the text templates travel as a GraphQL {@code ID!}. Each SDO
+     * id is optional and falls back to its SO counterpart, so a deployment that has approved only one
+     * template still serves both roles.
      *
      * @param dailyReportSo      document template, SECTION_OFFICER daily report
      * @param dailyReportSdo     document template, SUB_DIVISIONAL_OFFICER daily report
      * @param dailyReportSoLink  text template with a dynamic-URL button, SECTION_OFFICER daily report
      * @param dailyReportSdoLink text template with a dynamic-URL button, SUB_DIVISIONAL_OFFICER daily
      *                           report
+     * @param weeklyReportSo     document template, SECTION_OFFICER weekly report
+     * @param weeklyReportSdo    document template, SUB_DIVISIONAL_OFFICER weekly report
      * @param weeklyReportSoLink text template with a dynamic-URL button, SECTION_OFFICER weekly report
      * @param weeklyReportSdoLink text template with a dynamic-URL button, SUB_DIVISIONAL_OFFICER weekly
      *                            report
@@ -103,6 +110,8 @@ public record GlificWhatsAppSettings(
             String dailyReportSdo,
             String dailyReportSoLink,
             String dailyReportSdoLink,
+            String weeklyReportSo,
+            String weeklyReportSdo,
             String weeklyReportSoLink,
             String weeklyReportSdoLink) {
     }
@@ -116,17 +125,24 @@ public record GlificWhatsAppSettings(
     }
 
     /**
-     * @param baseUrl             the prefix of every media URL handed to Glific ({@code storage.public-base-url}).
-     *                            Read by the sender — not only by the storage service — because the
-     *                            sender owns the Glific contract and is the only class that knows
-     *                            whether a document-sending purpose is live. Meta downloads the URL from
-     *                            the public internet, so an internal address must stop the service from
-     *                            starting rather than reach officers as an unopenable attachment
+     * @param baseUrl             the store-of-record prefix ({@code storage.public-base-url}), which every
+     *                            link send hands out and its approved template is frozen to. Read by
+     *                            the sender, not only by the storage service, because the sender owns
+     *                            the Glific contract and is the only class that knows which purposes
+     *                            are live. An address the recipient cannot reach must stop the service
+     *                            from starting rather than reach officers as a dead link
+     * @param documentBaseUrl     the prefix of every document URL handed to Glific:
+     *                            {@code storage.delivery.public-base-url} while the external delivery
+     *                            store is enabled, otherwise {@link #baseUrl()}. Meta downloads these
+     *                            URLs from the public internet, so an internal address must stop the
+     *                            service from starting rather than reach officers as an unopenable
+     *                            attachment
      * @param escalationCaption   the escalation document's caption
      * @param escalationThumbnail the thumbnail registered with every document
      * @param dailyReportCaption  the daily report's document name, before the report date is appended
+     * @param weeklyReportCaption the weekly report's document name, before the week's range is appended
      */
-    public record Media(String baseUrl, String escalationCaption, String escalationThumbnail,
-                        String dailyReportCaption) {
+    public record Media(String baseUrl, String documentBaseUrl, String escalationCaption,
+                        String escalationThumbnail, String dailyReportCaption, String weeklyReportCaption) {
     }
 }

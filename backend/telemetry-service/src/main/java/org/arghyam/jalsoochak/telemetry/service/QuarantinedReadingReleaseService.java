@@ -31,6 +31,9 @@ import java.util.Optional;
  * for the first time, as a passing correction is. A reading it still finds implausible stays
  * quarantined. The mode does not change this: the release replays the check.
  *
+ * <p>A reading with no confirmed value is not assessed: releasing it would publish a reading without
+ * one. It stays quarantined, is logged and is counted apart, and the run carries on.
+ *
  * <p>Readings go oldest first, and each release is committed before the next reading is assessed, so a
  * released reading is the baseline its scheme's next reading is measured against, as it would have
  * been had it never been quarantined. For the same reason a range is released before the ranges after
@@ -61,11 +64,12 @@ public class QuarantinedReadingReleaseService {
      * @param releasedCount         readings released: marker cleared and, outside a dry run, their
      *                              event acknowledged by Kafka
      * @param stillQuarantinedCount readings the check still finds implausible
+     * @param noValueCount          readings left quarantined because they hold no confirmed value
      * @param notSentCount          readings left quarantined because Kafka stopped acknowledging: the
      *                              first it did not acknowledge and every one after it; 0 when the run
      *                              finished
      */
-    public record Outcome(int releasedCount, int stillQuarantinedCount, int notSentCount) {
+    public record Outcome(int releasedCount, int stillQuarantinedCount, int noValueCount, int notSentCount) {
     }
 
     /**
@@ -103,14 +107,15 @@ public class QuarantinedReadingReleaseService {
 
         if (outcome.notSentCount() > 0) {
             log.warn("quarantine_release_stopped reason=\"not acknowledged\" tenantId={} fromDate={} toDate={} "
-                            + "schemeId={} released={} stillQuarantined={} notSent={}",
+                            + "schemeId={} released={} stillQuarantined={} noValue={} notSent={}",
                     tenantId, fromDate, toDate, schemeId,
-                    outcome.releasedCount(), outcome.stillQuarantinedCount(), outcome.notSentCount());
+                    outcome.releasedCount(), outcome.stillQuarantinedCount(), outcome.noValueCount(),
+                    outcome.notSentCount());
         } else {
             log.info("quarantine_release tenantId={} fromDate={} toDate={} schemeId={} dryRun={} released={} "
-                            + "stillQuarantined={}",
+                            + "stillQuarantined={} noValue={}",
                     tenantId, fromDate, toDate, schemeId, dryRun,
-                    outcome.releasedCount(), outcome.stillQuarantinedCount());
+                    outcome.releasedCount(), outcome.stillQuarantinedCount(), outcome.noValueCount());
         }
         return outcome;
     }
@@ -125,7 +130,15 @@ public class QuarantinedReadingReleaseService {
                 telemetryTenantRepository.findQuarantinedReadings(schemaName, fromDate, toDate, schemeId);
         int released = 0;
         int stillQuarantined = 0;
+        int noValue = 0;
         for (TelemetryLatestFlowReadingRecord reading : readings) {
+            if (reading.confirmedReading() == null) {
+                log.warn("quarantine_release_skipped reason=\"no confirmed reading\" tenantId={} readingId={} "
+                                + "schemeId={} readingDate={}",
+                        tenantId, reading.id(), reading.schemeId(), reading.readingDate());
+                noValue++;
+                continue;
+            }
             if (isImplausible(schemaName, tenantId, reading)) {
                 stillQuarantined++;
                 continue;
@@ -160,7 +173,8 @@ public class QuarantinedReadingReleaseService {
                 stillQuarantined++;
             }
         }
-        return new Outcome(released, stillQuarantined, readings.size() - released - stillQuarantined);
+        return new Outcome(released, stillQuarantined, noValue,
+                readings.size() - released - stillQuarantined - noValue);
     }
 
     /** The submission path's assessment, made again for a stored reading. */

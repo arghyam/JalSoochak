@@ -25,10 +25,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * REPORTED-METRIC: validates the reported-days continuous SQL against a real Postgres for ALL THREE
  * scopes — LGD, department and user — which now share one "reported day" definition. A scheme is
  * continuous when it reported on AT LEAST ONE day in the range (reported_days &gt;= 1). Exercises the
- * three UNION branches (readings / image-reject anomalies / submission_attempt) each in isolation, the
- * IST day-boundary shift, lever A (any reading — even a 0-supply reading — counts as reported), a
- * scheme with no events (not continuous), that the count (list=false) agrees with the list (list=true),
- * and that LGD / department / user scopes return the same schemes.
+ * three UNION branches (readings / image-reject and quarantined-submission anomalies / submission_attempt)
+ * each in isolation, the IST day-boundary shift, lever A (any reading — even a 0-supply reading — counts
+ * as reported), that a refused correction is not a reported day, a scheme with no events (not continuous),
+ * that the count (list=false) agrees with the list (list=true), and that LGD / department / user scopes
+ * return the same schemes.
  */
 @JdbcTest
 @Testcontainers
@@ -70,6 +71,14 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
     private static final LocalDate D1 = LocalDate.of(2026, 1, 1);
     private static final LocalDate D3 = LocalDate.of(2026, 1, 3);
 
+    /** The anomaly reasons telemetry-service writes (AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_*). */
+    private static final String QUARANTINED_SUBMISSION =
+            "Submitted reading implies an implausible daily water supply for this scheme.";
+    private static final String CORRECTION_REFUSED_OVER_PUBLISHED =
+            "Correction rejected: implies an implausible daily water supply. The published reading is unchanged.";
+    private static final String CORRECTION_REFUSED_OVER_QUARANTINED =
+            "Correction rejected: implies an implausible daily water supply. The reading remains quarantined.";
+
     @BeforeEach
     void setUp() {
         jdbcTemplate.execute("""
@@ -87,8 +96,8 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
                 """);
         seedTenantAndLgd();
         seedDepartment();
-        seedSchemes(10, 20, 30, 40, 50);
-        seedUserAndMappings(10, 20, 30, 40, 50);
+        seedSchemes(10, 20, 30, 40, 50, 60, 70, 80);
+        seedUserAndMappings(10, 20, 30, 40, 50, 60, 70, 80);
 
         // New definition: continuous = reported on AT LEAST ONE day in the range. Each scheme qualifies
         // (or not) via exactly one lever so the branches stay independently covered.
@@ -103,14 +112,21 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
         // Scheme 40: no events at all -> reported 0 -> NOT continuous
         // Scheme 50: ONLY a 0-supply reading (branch A "any reading") -> continuous: reported even without supply
         reading(50, D1, 0);
+        // Scheme 60: ONLY a reading quarantined as an implausible supply (branch B). Telemetry stored it but
+        // never published it, so there is no reading row -> continuous via lever B
+        anomaly(60, "IMPLAUSIBLE_WATER_SUPPLY", QUARANTINED_SUBMISSION, "2026-01-02 06:00:00");
+        // Schemes 70 and 80: ONLY a refused correction, of the same anomaly type. A correction is not a
+        // submission -> NOT continuous
+        anomaly(70, "IMPLAUSIBLE_WATER_SUPPLY", CORRECTION_REFUSED_OVER_PUBLISHED, "2026-01-02 06:00:00");
+        anomaly(80, "IMPLAUSIBLE_WATER_SUPPLY", CORRECTION_REFUSED_OVER_QUARANTINED, "2026-01-02 06:00:00");
     }
 
     @Test
     void reportedContinuousCount_countsReadingsAndRejectsAndAttempts_atLeastOneDay() {
         long count = repository.getContinuousSchemeCountByLgd(TENANT, LGD, D1, D3);
-        // 10 (reading), 20 (reject on IST day 3), 30 (attempt day 3), 50 (0-supply reading still reports) => 4.
-        // 40 is excluded (no reported days).
-        assertThat(count).isEqualTo(4L);
+        // 10 (reading), 20 (reject on IST day 3), 30 (attempt day 3), 50 (0-supply reading still reports),
+        // 60 (quarantined reading) => 5. 40 (no reported days) and 70, 80 (refused corrections) are excluded.
+        assertThat(count).isEqualTo(5L);
     }
 
     @Test
@@ -120,14 +136,14 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
         List<Integer> ids = rows.stream()
                 .map(SchemeRegularityRepository.ContinuousSchemeRow::schemeId)
                 .collect(Collectors.toList());
-        assertThat(ids).containsExactlyInAnyOrder(10, 20, 30, 50);
+        assertThat(ids).containsExactlyInAnyOrder(10, 20, 30, 50, 60);
     }
 
     @Test
     void reportedContinuousCount_byDepartment_matchesLgdDefinition() {
-        // Department scope now uses the same reported_events levers A/B/C as LGD -> same 4 schemes.
+        // Department scope now uses the same reported_events levers A/B/C as LGD -> same 5 schemes.
         long count = repository.getContinuousSchemeCountByDepartment(TENANT, DEPARTMENT, D1, D3);
-        assertThat(count).isEqualTo(4L);
+        assertThat(count).isEqualTo(5L);
     }
 
     @Test
@@ -136,14 +152,14 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
                 .stream()
                 .map(SchemeRegularityRepository.ContinuousSchemeRow::schemeId)
                 .collect(Collectors.toList());
-        assertThat(ids).containsExactlyInAnyOrder(10, 20, 30, 50);
+        assertThat(ids).containsExactlyInAnyOrder(10, 20, 30, 50, 60);
     }
 
     @Test
     void reportedContinuousCount_byUser_matchesLgdDefinition() {
-        // User scope now uses the same reported_events levers A/B/C as LGD -> same 4 schemes.
+        // User scope now uses the same reported_events levers A/B/C as LGD -> same 5 schemes.
         long count = repository.getContinuousSchemeCountByUserSchemes(TENANT, USER, D1, D3);
-        assertThat(count).isEqualTo(4L);
+        assertThat(count).isEqualTo(5L);
     }
 
     @Test
@@ -152,7 +168,7 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
                 .stream()
                 .map(SchemeRegularityRepository.ContinuousSchemeRow::schemeId)
                 .collect(Collectors.toList());
-        assertThat(ids).containsExactlyInAnyOrder(10, 20, 30, 50);
+        assertThat(ids).containsExactlyInAnyOrder(10, 20, 30, 50, 60);
     }
 
     // ---- seed helpers ----
@@ -221,11 +237,15 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
     }
 
     private void anomaly(int schemeId, String type, String createdAtUtc) {
+        anomaly(schemeId, type, null, createdAtUtc);
+    }
+
+    private void anomaly(int schemeId, String type, String reason, String createdAtUtc) {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.fact_anomaly_table
-                (uuid, type, scheme_id, tenant_id, status, created_at)
-                VALUES (?, ?, ?, ?, 1, ?::timestamp)
-                """, "u-" + schemeId + "-" + type, type, schemeId, TENANT, createdAtUtc);
+                (uuid, type, scheme_id, tenant_id, status, reason, created_at)
+                VALUES (?, ?, ?, ?, 1, ?, ?::timestamp)
+                """, "u-" + schemeId + "-" + type, type, schemeId, TENANT, reason, createdAtUtc);
     }
 
     private void submissionAttempt(int schemeId, String attemptedAt) {

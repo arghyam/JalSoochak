@@ -58,6 +58,7 @@ class SelectionWebhookControllerTest {
         var response = controller.languageSelection(introRequest());
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         assertThat(response.getBody().isSuccess()).isFalse();
+        assertThat(response.getBody().getMessage()).isEqualTo("Language selection could not be prepared.");
     }
 
     @Test
@@ -69,8 +70,9 @@ class SelectionWebhookControllerTest {
         assertThat(controller.selectedLanguage(request).getBody()).isSameAs(okIntro);
 
         when(selectionService.selectedLanguageMessage(any())).thenThrow(BOOM);
-        assertThat(controller.selectedLanguage(request).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.selectedLanguage(request);
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Language selection could not be saved.");
     }
 
     @Test
@@ -79,8 +81,9 @@ class SelectionWebhookControllerTest {
         assertThat(controller.channelSelection(introRequest()).getBody()).isSameAs(okIntro);
 
         when(selectionService.channelSelectionMessage(any())).thenThrow(BOOM);
-        assertThat(controller.channelSelection(introRequest()).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.channelSelection(introRequest());
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Channel selection could not be prepared.");
     }
 
     @Test
@@ -95,6 +98,7 @@ class SelectionWebhookControllerTest {
         var response = controller.selectedChannel(request);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         assertThat(response.getBody().isSuccess()).isFalse();
+        assertThat(response.getBody().getMessage()).isEqualTo("Channel selection could not be saved.");
     }
 
     @Test
@@ -103,8 +107,9 @@ class SelectionWebhookControllerTest {
         assertThat(controller.schemes(introRequest()).getBody()).isSameAs(okIntro);
 
         when(selectionService.schemeSelectionMessage(any())).thenThrow(BOOM);
-        assertThat(controller.schemes(introRequest()).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.schemes(introRequest());
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Scheme selection could not be prepared.");
     }
 
     @Test
@@ -127,8 +132,9 @@ class SelectionWebhookControllerTest {
         assertThat(controller.itemSelection(introRequest()).getBody()).isSameAs(okIntro);
 
         when(selectionService.itemSelectionMessage(any())).thenThrow(BOOM);
-        assertThat(controller.itemSelection(introRequest()).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.itemSelection(introRequest());
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Item selection could not be prepared.");
     }
 
     @Test
@@ -141,8 +147,9 @@ class SelectionWebhookControllerTest {
         assertThat(controller.selectedItem(request).getBody()).isSameAs(ok);
 
         when(selectionService.selectedItemMessage(any())).thenThrow(BOOM);
-        assertThat(controller.selectedItem(request).getStatusCode())
-                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        var fallback = controller.selectedItem(request);
+        assertThat(fallback.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(fallback.getBody().getMessage()).isEqualTo("Item selection could not be saved.");
     }
 
     private static SelectedItemRequest itemRequest(String choice) {

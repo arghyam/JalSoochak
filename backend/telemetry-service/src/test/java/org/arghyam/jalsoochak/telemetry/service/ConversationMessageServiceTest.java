@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -23,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -47,6 +49,8 @@ class ConversationMessageServiceTest {
     private TenantConfigRepository tenantConfigRepository;
     @Mock
     private ConversationTemplateService templatesService;
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
 
     @InjectMocks
     private ConversationMessageService service;
@@ -109,6 +113,19 @@ class ConversationMessageServiceTest {
         }
 
         @Test
+        void substitutesTheStandInNameInTheOperatorsLanguage() {
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(3, null));
+            when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("Hindi");
+            when(localizationService.normalizeLanguageKey("Hindi")).thenReturn("hindi");
+            when(templatesService.resolveScreenMessage(anyInt(), anyString(), anyString()))
+                    .thenReturn(Optional.of("Hello {name}."));
+
+            service.introMessage(introRequest(CONTACT));
+
+            verify(messageResolver).get(ConversationMessageCode.DEFAULT_GREETING_NAME, "hindi");
+        }
+
+        @Test
         void fallsBackToTheLegacyLanguageScopedConfigKey() {
             when(templatesService.resolveScreenMessage(anyInt(), anyString(), anyString()))
                     .thenReturn(Optional.empty());
@@ -132,7 +149,7 @@ class ConversationMessageServiceTest {
         }
 
         @Test
-        void doesNotFallBackToTheUnscopedKeyForANonEnglishLanguage() {
+        void fallsBackToEnglishForALanguageWithNoLegacyCopy() {
             when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("Assamese");
             when(localizationService.normalizeLanguageKey("Assamese")).thenReturn("assamese");
             when(templatesService.resolveScreenMessage(anyInt(), anyString(), anyString()))
@@ -141,11 +158,25 @@ class ConversationMessageServiceTest {
             when(tenantConfigRepository.findConfigValue(3, "intro_message"))
                     .thenReturn(Optional.of("Generic hello {name}."));
 
-            // Silently serving English copy to an Assamese operator would be worse than the error path.
+            // A missing translation gets the English copy, with a WARN, not a failed reply.
             var response = service.introMessage(introRequest(CONTACT));
 
-            assertThat(response.isSuccess()).isFalse();
-            assertThat(response.getMessage()).isEqualTo(FALLBACK);
+            assertThat(response.isSuccess()).isTrue();
+            assertThat(response.getMessage()).isEqualTo("Generic hello Asha.");
+        }
+
+        @Test
+        void prefersTheOperatorsLanguageOverEnglish() {
+            when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("Assamese");
+            when(localizationService.normalizeLanguageKey("Assamese")).thenReturn("assamese");
+            when(templatesService.resolveScreenMessage(anyInt(), anyString(), anyString()))
+                    .thenReturn(Optional.empty());
+            when(tenantConfigRepository.findConfigValue(3, "intro_message_assamese"))
+                    .thenReturn(Optional.of("নমস্কাৰ {name}"));
+            when(tenantConfigRepository.findConfigValue(3, "intro_message_english"))
+                    .thenReturn(Optional.of("Legacy hello {name}."));
+
+            assertThat(service.introMessage(introRequest(CONTACT)).getMessage()).isEqualTo("নমস্কাৰ Asha");
         }
 
         @Test
@@ -179,6 +210,16 @@ class ConversationMessageServiceTest {
                     .thenThrow(new IllegalStateException("No operator found"));
 
             assertThat(service.introMessage(introRequest(CONTACT)).getMessage()).isEqualTo(FALLBACK);
+        }
+
+        @Test
+        void returnsTheGenericFallbackInTheOperatorsLanguage() {
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(null, "Asha"));
+            when(localizationService.resolveLanguageKeyForContact(CONTACT)).thenReturn("hindi");
+
+            service.introMessage(introRequest(CONTACT));
+
+            verify(messageResolver).get(ConversationMessageCode.SOMETHING_WENT_WRONG, "hindi");
         }
     }
 
@@ -232,14 +273,33 @@ class ConversationMessageServiceTest {
         }
 
         @Test
-        void doesNotFallBackToTheUnscopedKeyForANonEnglishLanguage() {
+        void fallsBackToEnglishForALanguageWithNoLegacyCopy() {
             when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("Hindi");
             when(localizationService.normalizeLanguageKey("Hindi")).thenReturn("hindi");
             when(templatesService.resolveScreenMessage(anyInt(), anyString(), anyString()))
                     .thenReturn(Optional.empty());
             when(tenantConfigRepository.findConfigValue(3, "closing_message_hindi")).thenReturn(Optional.empty());
+            when(tenantConfigRepository.findConfigValue(3, "closing_message_english"))
+                    .thenReturn(Optional.of("Legacy bye."));
 
-            assertThat(service.closingMessage(closingRequest(CONTACT)).isSuccess()).isFalse();
+            var response = service.closingMessage(closingRequest(CONTACT));
+
+            assertThat(response.isSuccess()).isTrue();
+            assertThat(response.getMessage()).isEqualTo("Legacy bye.");
+        }
+
+        @Test
+        void stillFailsWhenNoLanguageHasLegacyCopy() {
+            when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("Hindi");
+            when(localizationService.normalizeLanguageKey("Hindi")).thenReturn("hindi");
+            when(templatesService.resolveScreenMessage(anyInt(), anyString(), anyString()))
+                    .thenReturn(Optional.empty());
+            when(tenantConfigRepository.findConfigValue(anyInt(), anyString())).thenReturn(Optional.empty());
+
+            var response = service.closingMessage(closingRequest(CONTACT));
+
+            assertThat(response.isSuccess()).isFalse();
+            assertThat(response.getMessage()).isEqualTo(FALLBACK);
         }
 
         @Test
@@ -261,6 +321,16 @@ class ConversationMessageServiceTest {
                     .thenThrow(new IllegalStateException("boom"));
 
             assertThat(service.closingMessage(closingRequest(CONTACT)).getMessage()).isEqualTo(FALLBACK);
+        }
+
+        @Test
+        void returnsTheGenericFallbackInTheOperatorsLanguage() {
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(null, "Asha"));
+            when(localizationService.resolveLanguageKeyForContact(CONTACT)).thenReturn("hindi");
+
+            service.closingMessage(closingRequest(CONTACT));
+
+            verify(messageResolver).get(ConversationMessageCode.SOMETHING_WENT_WRONG, "hindi");
         }
     }
 }

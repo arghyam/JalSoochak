@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
+import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
@@ -15,6 +16,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -26,6 +29,8 @@ import org.mockito.quality.Strictness;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -68,6 +73,9 @@ class MeterReadingConversationServicePromptTest {
     @Mock
     private ConversationSchemeResolver conversationSchemeResolver;
 
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
+
     @InjectMocks
     private MeterReadingConversationService service;
 
@@ -90,6 +98,8 @@ class MeterReadingConversationServicePromptTest {
         when(localizationService.resolveLanguageKeyForContact(any())).thenReturn("english");
         when(localizationService.localizeMessage(anyString(), anyString()))
                 .thenAnswer(inv -> inv.getArgument(0));
+        when(templatesService.toTemplateLanguageCode("english")).thenReturn("en");
+        when(templatesService.toTemplateLanguageCode("hindi")).thenReturn("hi");
         when(templatesService.resolveScreenOptions(anyInt(), anyString())).thenReturn(List.of());
         when(templatesService.resolveScreenReasons(anyInt(), anyString())).thenReturn(List.of());
         when(templatesService.resolveScreenPrompt(anyInt(), anyString(), anyString())).thenReturn(Optional.empty());
@@ -203,6 +213,16 @@ class MeterReadingConversationServicePromptTest {
 
             assertThat(service.takeMeterReadingMessage(request(CONTACT, "1")).getMessage())
                     .isEqualTo("Please type your meter reading manually (numbers only).");
+        }
+
+        @Test
+        void asksForTheDefaultPromptInTheOperatorsLanguage() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+            when(tenantConfigRepository.findMeterChangeReasons(TENANT, "hindi")).thenReturn(List.of("Meter replaced"));
+
+            service.takeMeterReadingMessage(request(CONTACT, "1"));
+
+            verify(messageResolver).get(ConversationMessageCode.TAKE_READING_PROMPT, "hindi");
         }
 
         @Test
@@ -553,6 +573,329 @@ class MeterReadingConversationServicePromptTest {
             org.assertj.core.api.Assertions
                     .assertThatThrownBy(() -> service.issueReportTelemetryReasons(introRequest(CONTACT)))
                     .isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    /**
+     * The labels of a tenant's configured reasons: a default reason is recognised by its id, and
+     * translated only while it keeps the name tenant-service seeded it with.
+     */
+    @Nested
+    @DisplayName("configured reason labels")
+    class ConfiguredReasonLabels {
+
+        /** tenant-service's seeded {@code meter-change-reasons}. */
+        private static final String SEEDED_METER_CHANGE_JSON = """
+                {"reasons":[
+                  {"id":"METER_REPLACED","name":"Meter Replaced","sequenceOrder":1},
+                  {"id":"METER_NOT_WORKING","name":"Meter Not Working","sequenceOrder":2},
+                  {"id":"METER_DAMAGED","name":"Meter Damaged","sequenceOrder":3}
+                ]}
+                """;
+
+        /** tenant-service's seeded {@code supply-outage-reasons}. */
+        private static final String SEEDED_OUTAGE_JSON = """
+                {"reasons":[
+                  {"id":"ELECTRICITY_SUPPLY_DISCONNECTED","name":"Electricity Supply Disconnected","sequenceOrder":1},
+                  {"id":"NO_ELECTRICITY_SUPPLY_TODAY","name":"No Electricity Supply Today","sequenceOrder":2},
+                  {"id":"PUMP_FAILURE","name":"Pump Failure","sequenceOrder":3},
+                  {"id":"PIPELINE_BREAK","name":"Pipeline Break","sequenceOrder":4},
+                  {"id":"WATER_QUALITY_ISSUES","name":"Water Quality Issues","sequenceOrder":5},
+                  {"id":"SOURCE_DRYING","name":"Source Drying","sequenceOrder":6},
+                  {"id":"NATURAL_CALAMITY","name":"Natural Calamity","sequenceOrder":7},
+                  {"id":"OTHERS","name":"Others","sequenceOrder":8}
+                ]}
+                """;
+
+        private void operatorReads(String languageKey) {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn(languageKey);
+        }
+
+        private void outageReasonsAre(String json) {
+            when(tenantConfigRepository.findConfigValue(TENANT, "SUPPLY_OUTAGE_REASONS"))
+                    .thenReturn(Optional.of(json));
+        }
+
+        private String outageListing() throws Exception {
+            return objectMapper.readTree(service.issueReportTelemetryReasons(introRequest(CONTACT)))
+                    .path("message").asText();
+        }
+
+        @Test
+        void translatesTheSeededMeterChangeReasons() throws Exception {
+            operatorReads("hindi");
+            when(tenantConfigRepository.findConfigValue(TENANT, "METER_CHANGE_REASONS"))
+                    .thenReturn(Optional.of(SEEDED_METER_CHANGE_JSON));
+
+            assertThat(objectMapper.readTree(service.meterChangeReasons(introRequest(CONTACT)))
+                    .path("message").asText())
+                    .isEqualTo("कृपया नंबर टाइप करके सबमिशन न होने के कारण चुनें"
+                            + "\n1. मीटर बदला गया\n2. मीटर काम नहीं कर रहा\n3. मीटर खराब है");
+        }
+
+        @Test
+        void translatesTheSeededSupplyOutageReasons() throws Exception {
+            operatorReads("hindi");
+            outageReasonsAre(SEEDED_OUTAGE_JSON);
+
+            assertThat(outageListing())
+                    .isEqualTo("कृपया अपनी समस्या चुनें।"
+                            + "\n1. बिजली आपूर्ति बंद है\n2. आज बिजली की आपूर्ति नहीं है\n3. पंप खराब है"
+                            + "\n4. पाइपलाइन टूटी है\n5. पानी की गुणवत्ता में समस्या है\n6. स्रोत सूख रहा है"
+                            + "\n7. प्राकृतिक आपदा\n8. अन्य");
+        }
+
+        @Test
+        void showsTheSeededNamesAsConfiguredToAnEnglishOperator() throws Exception {
+            outageReasonsAre(SEEDED_OUTAGE_JSON);
+
+            assertThat(outageListing()).contains("\n2. No Electricity Supply Today\n3. Pump Failure\n");
+        }
+
+        @Test
+        void showsTheSeededNamesAsConfiguredInALanguageThatDoesNotTranslateThem() throws Exception {
+            operatorReads("assamese");
+            outageReasonsAre(SEEDED_OUTAGE_JSON);
+
+            assertThat(outageListing()).contains("\n2. No Electricity Supply Today\n3. Pump Failure\n");
+        }
+
+        @Test
+        void showsARenamedDefaultReasonAsTheTenantWroteIt() throws Exception {
+            operatorReads("hindi");
+            outageReasonsAre("""
+                    {"reasons":[{"id":"PUMP_FAILURE","name":"Motor burnt","sequenceOrder":1}]}
+                    """);
+
+            assertThat(outageListing()).endsWith("\n1. Motor burnt");
+        }
+
+        @Test
+        void showsACustomReasonAsTheTenantWroteItEvenWhenItContainsADefaultName() throws Exception {
+            operatorReads("hindi");
+            outageReasonsAre("""
+                    {"reasons":[{"id":"LOW_VOLTAGE","name":"Pump failure due to low voltage","sequenceOrder":1}]}
+                    """);
+
+            assertThat(outageListing()).endsWith("\n1. Pump failure due to low voltage");
+        }
+    }
+
+    /**
+     * The built-in English and Hindi copy a tenant gets when it configures none. The localizer is
+     * stubbed to pass text through, so these pin which built-in text each language starts from.
+     */
+    @Nested
+    @DisplayName("built-in copy")
+    class BuiltInCopy {
+
+        private static final String REASONS_JSON = """
+                {"reasons":[{"name":"Meter replaced","sequenceOrder":1}]}
+                """;
+
+        @BeforeEach
+        void stubNothingConfigured() {
+            when(tenantConfigRepository.findIssueReportPrompt(anyInt(), anyString())).thenReturn(Optional.empty());
+            when(tenantConfigRepository.findIssueReportReasons(anyInt(), anyString())).thenReturn(List.of());
+            when(tenantConfigRepository.findConfigValue(TENANT, "METER_CHANGE_REASONS"))
+                    .thenReturn(Optional.of(REASONS_JSON));
+            when(tenantConfigRepository.findConfigValue(TENANT, "SUPPLY_OUTAGE_REASONS"))
+                    .thenReturn(Optional.of(REASONS_JSON));
+        }
+
+        private void operatorReadsHindi() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+        }
+
+        private String messageOf(String json) throws Exception {
+            return objectMapper.readTree(json).path("message").asText();
+        }
+
+        @Test
+        void issueReportPromptListsTheBuiltInReasonsInEnglish() {
+            assertThat(service.issueReportPromptMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("Please select your issue by typing any of the number"
+                            + "\n1. Meter Replaced\n2. Meter not working\n3. Meter damage"
+                            + "\n4. Incorrect Reading Entered Previously\n5. No Water Supply\n6. Others");
+        }
+
+        @Test
+        void issueReportPromptListsTheBuiltInReasonsInHindi() {
+            operatorReadsHindi();
+
+            assertThat(service.issueReportPromptMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("कृपया नंबर टाइप करके अपनी समस्या चुनें"
+                            + "\n1. मीटर बदला गया\n2. मीटर काम नहीं कर रहा\n3. मीटर खराब है"
+                            + "\n4. पहले गलत रीडिंग दर्ज हुई थी\n5. पानी की आपूर्ति नहीं\n6. अन्य");
+        }
+
+        @Test
+        void issueReportPromptReplacesTheLegacyEnglishPromptWithTheBuiltInOne() {
+            when(tenantConfigRepository.findIssueReportPrompt(anyInt(), anyString()))
+                    .thenReturn(Optional.of("Please type your issue in a few words."));
+
+            assertThat(service.issueReportPromptMessage(introRequest(CONTACT)).getMessage())
+                    .startsWith("Please select your issue by typing any of the number\n1. ");
+        }
+
+        @Test
+        void issueReportPromptReplacesTheLegacyHindiPromptWithTheBuiltInOne() {
+            operatorReadsHindi();
+            when(tenantConfigRepository.findIssueReportPrompt(anyInt(), anyString()))
+                    .thenReturn(Optional.of("कृपया अपनी समस्या संक्षेप में लिखें।"));
+
+            assertThat(service.issueReportPromptMessage(introRequest(CONTACT)).getMessage())
+                    .startsWith("कृपया नंबर टाइप करके अपनी समस्या चुनें\n1. ");
+        }
+
+        @Test
+        void telemetryIssueReportPromptListsTheBuiltInReasonsInEnglish() {
+            assertThat(service.issueReportTelemetryPromptMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("Please select your issue by typing any of the number"
+                            + "\n1. Meter Replaced\n2. Meter not working\n3. Meter Damaged"
+                            + "\n4. No Water Supply\n5. Others");
+        }
+
+        @Test
+        void telemetryIssueReportPromptListsTheBuiltInReasonsInHindi() {
+            operatorReadsHindi();
+
+            assertThat(service.issueReportTelemetryPromptMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("कृपया नंबर टाइप करके अपनी समस्या चुनें"
+                            + "\n1. मीटर बदला गया\n2. मीटर काम नहीं कर रहा\n3. मीटर खराब है"
+                            + "\n4. पानी की आपूर्ति नहीं\n5. अन्य");
+        }
+
+        @Test
+        void othersPromptInEnglish() {
+            assertThat(service.othersPromptMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("Please report your issue.");
+        }
+
+        @Test
+        void othersPromptInHindi() {
+            operatorReadsHindi();
+
+            assertThat(service.othersPromptMessage(introRequest(CONTACT)).getMessage())
+                    .isEqualTo("कृपया अपनी समस्या बताएं।");
+        }
+
+        @Test
+        void meterChangeReasonsStartFromTheBuiltInEnglishPrompt() throws Exception {
+            assertThat(messageOf(service.meterChangeReasons(introRequest(CONTACT))))
+                    .isEqualTo("Please select the no submission reasons by typing any of the number\n1. Meter replaced");
+        }
+
+        @Test
+        void meterChangeReasonsStartFromTheBuiltInHindiPrompt() throws Exception {
+            operatorReadsHindi();
+
+            assertThat(messageOf(service.meterChangeReasons(introRequest(CONTACT))))
+                    .isEqualTo("कृपया नंबर टाइप करके सबमिशन न होने के कारण चुनें\n1. Meter replaced");
+        }
+
+        @Test
+        void supplyOutageReasonsStartFromTheBuiltInEnglishPrompt() throws Exception {
+            assertThat(messageOf(service.issueReportTelemetryReasons(introRequest(CONTACT))))
+                    .isEqualTo("Please select your issue.\n1. Meter replaced");
+        }
+
+        @Test
+        void supplyOutageReasonsStartFromTheBuiltInHindiPrompt() throws Exception {
+            operatorReadsHindi();
+
+            assertThat(messageOf(service.issueReportTelemetryReasons(introRequest(CONTACT))))
+                    .isEqualTo("कृपया अपनी समस्या चुनें।\n1. Meter replaced");
+        }
+    }
+
+    @Nested
+    @DisplayName("meterChangeSubmitMessage")
+    class MeterChangeSubmission {
+
+        @BeforeEach
+        void stubConfig() {
+            when(tenantConfigRepository.findConfigValue(TENANT, "METER_CHANGE_REASONS")).thenReturn(Optional.of(
+                    "{\"reasons\":[{\"id\":\"meterDamaged\",\"name\":\"Meter damaged\",\"sequenceOrder\":1}]}"));
+        }
+
+        private MeterChangeRequest request(String reason) {
+            return MeterChangeRequest.builder().contactId(CONTACT).reason(reason).build();
+        }
+
+        @Test
+        void rejectsAnOutOfRangeChoice() {
+            var response = service.meterChangeSubmitMessage(request("2"));
+
+            assertThat(response.isSuccess()).isFalse();
+            assertThat(response.getMessage()).isEqualTo("invalid choice, please restart the flow");
+            verify(telemetryTenantRepository, never()).upsertPendingMeterChangeRecord(
+                    anyString(), anyLong(), anyLong(), any(LocalDateTime.class), anyString(), any());
+        }
+
+        @Test
+        void rejectsAnOutOfRangeChoiceInTheOperatorsLanguage() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+
+            service.meterChangeSubmitMessage(request("2"));
+
+            verify(messageResolver).get(ConversationMessageCode.INVALID_CHOICE, "hindi");
+        }
+    }
+
+    /** Each step's fixed reply when it cannot be built, in the language of the contact who asked. */
+    @Nested
+    @DisplayName("failure replies")
+    class FailureReplies {
+
+        @BeforeEach
+        void operatorWithNoTenantWhoReadsHindi() {
+            when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(null));
+            when(localizationService.resolveLanguageKeyForContact(CONTACT)).thenReturn("hindi");
+        }
+
+        static Stream<Arguments> steps() {
+            MeterChangeRequest meterChange = MeterChangeRequest.builder().contactId(CONTACT).reason("1").build();
+            return Stream.of(
+                    step("meterChangeMessage", s -> s.meterChangeMessage(introRequest(CONTACT)),
+                            ConversationMessageCode.METER_CHANGE_REASONS_NOT_PREPARED,
+                            "मीटर बदलने के कारण तैयार नहीं हो सके।"),
+                    step("takeMeterReadingMessage", s -> s.takeMeterReadingMessage(meterChange),
+                            ConversationMessageCode.TAKE_READING_PROMPT_NOT_PREPARED,
+                            "मीटर रीडिंग लेने का संदेश तैयार नहीं हो सका।"),
+                    step("meterChangeSubmitMessage", s -> s.meterChangeSubmitMessage(meterChange),
+                            ConversationMessageCode.METER_CHANGE_REASON_NOT_SAVED,
+                            "मीटर बदलने का कारण सेव नहीं हो सका।"),
+                    step("issueReportPromptMessage", s -> s.issueReportPromptMessage(introRequest(CONTACT)),
+                            ConversationMessageCode.ISSUE_PROMPT_NOT_PREPARED,
+                            "समस्या रिपोर्ट का संदेश तैयार नहीं हो सका।"),
+                    step("issueReportTelemetryPromptMessage",
+                            s -> s.issueReportTelemetryPromptMessage(introRequest(CONTACT)),
+                            ConversationMessageCode.ISSUE_PROMPT_NOT_PREPARED,
+                            "समस्या रिपोर्ट का संदेश तैयार नहीं हो सका।"),
+                    step("issueReasonTypesMessage", s -> s.issueReasonTypesMessage(introRequest(CONTACT)),
+                            ConversationMessageCode.ISSUE_REASON_TYPES_NOT_PREPARED,
+                            "समस्या के प्रकार तैयार नहीं हो सके।"),
+                    step("othersPromptMessage", s -> s.othersPromptMessage(introRequest(CONTACT)),
+                            ConversationMessageCode.OTHERS_PROMPT_NOT_PREPARED,
+                            "अन्य समस्या का संदेश तैयार नहीं हो सका।"));
+        }
+
+        private static Arguments step(String name, Function<MeterReadingConversationService, IntroResponse> call,
+                                      ConversationMessageCode code, String hindi) {
+            return Arguments.of(name, call, code, hindi);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @MethodSource("steps")
+        void repliesWithTheStepsFailureCopyInTheOperatorsLanguage(
+                String name, Function<MeterReadingConversationService, IntroResponse> call,
+                ConversationMessageCode code, String hindi) {
+            IntroResponse response = call.apply(service);
+
+            assertThat(response.isSuccess()).isFalse();
+            assertThat(response.getMessage()).isEqualTo(hindi);
+            verify(messageResolver).get(code, "hindi");
         }
     }
 }

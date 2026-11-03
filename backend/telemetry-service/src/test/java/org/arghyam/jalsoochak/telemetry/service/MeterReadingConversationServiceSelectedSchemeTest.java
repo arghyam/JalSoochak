@@ -56,6 +56,9 @@ class MeterReadingConversationServiceSelectedSchemeTest {
     @Spy private com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
     @Mock private ConversationSchemeResolver conversationSchemeResolver;
 
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
+
     @InjectMocks
     private MeterReadingConversationService service;
 

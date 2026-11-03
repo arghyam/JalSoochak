@@ -28,8 +28,8 @@ import java.util.Map;
  *
  * <p>Scheduled nudges go through {@link #sendNudgeViaFlow} (a provider flow start). The plain nudge HSM
  * ({@code {{1}}} = operator name, {@code {{2}}} = date) is only used by the REST notification API.</p>
- * <p>Escalations use a document HSM template with {@code {{1}}} = the PDF's public URL
- * and {@code {{2}}} = localized body text.</p>
+ * <p>Escalations use a document HSM template: the PDF is the document header, and the body takes
+ * no parameters.</p>
  *
  * <p>Configure the WhatsApp provider's credentials and template IDs via environment variables:
  * {@code WHATSAPP_API_URL}, {@code WHATSAPP_USERNAME}, {@code WHATSAPP_PASSWORD},
@@ -253,14 +253,15 @@ public class WhatsAppChannel implements NotificationChannel {
      * Sends the weekly report, mirroring {@link #sendDailyReport} — same outcome type, same failure
      * classification, so the router treats both reports identically.
      *
-     * @param weekStart the first day of the reported week, template variable {{2}}
+     * @param weekStart the first day of the reported week, template variable {{2}} in link mode
+     * @param weekEnd   the last day of the reported week; with {@code weekStart}, the document's name
      */
     public ReportSendOutcome sendWeeklyReport(long contactId, String documentUrl, String officerUserType,
-                                              LocalDate weekStart, String officerName) {
+                                              LocalDate weekStart, LocalDate weekEnd, String officerName) {
         String role = (officerUserType == null || officerUserType.isBlank()) ? "UNKNOWN" : officerUserType.trim();
         try {
             WhatsAppSendResult result = whatsAppSender.sendWeeklyReportHsm(
-                    contactId, documentUrl, role, weekStart, officerName);
+                    contactId, documentUrl, role, weekStart, weekEnd, officerName);
             log.info("[WHATSAPP] Weekly report HSM sent role={} providerMsgId={}", role, result.messageIdForLog());
             log.debug("[WHATSAPP] Weekly report HSM sent role={} contactId={}", role, contactId);
             return ReportSendOutcome.accepted(result);

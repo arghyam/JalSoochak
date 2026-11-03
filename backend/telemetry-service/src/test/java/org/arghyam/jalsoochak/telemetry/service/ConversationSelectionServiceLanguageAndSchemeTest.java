@@ -6,6 +6,8 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
+import org.arghyam.jalsoochak.telemetry.repository.LanguageCatalogRepository;
+import org.arghyam.jalsoochak.telemetry.repository.SupportedLanguageRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeOption;
@@ -22,6 +24,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -66,6 +69,10 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
     @Mock
     private ConversationTemplateService templatesService;
     @Mock
+    private SupportedLanguageRepository supportedLanguageRepository;
+    @Mock
+    private LanguageCatalogRepository languageCatalogRepository;
+    @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
     @Mock
     private UserChannelPreferenceRepository userChannelPreferenceRepository;
@@ -73,6 +80,8 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
     private UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     @Mock
     private WhatsAppContactDirectory whatsAppContactDirectory;
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
 
     private ConversationSelectionService service;
 
@@ -80,16 +89,19 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
     void setUp() {
         service = new ConversationSelectionService(
                 operatorContextService, localizationService, tenantConfigRepository, templatesService,
+                new LanguageMenuService(templatesService, supportedLanguageRepository, languageCatalogRepository),
                 telemetryTenantRepository, userChannelPreferenceRepository, userLanguagePreferenceRepository,
-                whatsAppContactDirectory, new ObjectMapper());
+                whatsAppContactDirectory, new ObjectMapper(), messageResolver);
 
         when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(TENANT));
         when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("English");
         when(localizationService.normalizeLanguageKey(anyString())).thenReturn("english");
         when(localizationService.resolveLanguageKeyForContact(any())).thenReturn("english");
+        when(templatesService.toTemplateLanguageCode("english")).thenReturn("en");
+        when(templatesService.toTemplateLanguageCode("hindi")).thenReturn("hi");
         when(localizationService.localizeMessage(anyString(), anyString()))
                 .thenAnswer(inv -> inv.getArgument(0));
-        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
+        when(localizationService.resolveUserFacingErrorMessage(any(), any(), anyString()))
                 .thenAnswer(inv -> {
                     Exception e = inv.getArgument(0);
                     return e != null && e.getMessage() != null ? e.getMessage() : inv.getArgument(1);
@@ -182,6 +194,17 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
         }
 
         @Test
+        void failsGracefullyInTheOperatorsLanguage() {
+            when(localizationService.resolveLanguageKeyForContact(CONTACT)).thenReturn("hindi");
+            when(tenantConfigRepository.findLanguageSelectionPrompt(anyInt(), anyString()))
+                    .thenReturn(Optional.empty());
+
+            service.languageSelectionMessage(introRequest(CONTACT));
+
+            verify(messageResolver).get(ConversationMessageCode.LANGUAGE_SELECTION_NOT_PREPARED, "hindi");
+        }
+
+        @Test
         void failsGracefullyWhenNoPromptIsConfigured() {
             when(tenantConfigRepository.findLanguageSelectionPrompt(anyInt(), anyString()))
                     .thenReturn(Optional.empty());
@@ -229,6 +252,25 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
         void confirmsWithTheDefaultTemplateWhenNoneIsConfigured() {
             assertThat(service.selectedLanguageMessage(languageRequest(CONTACT, "2")).getMessage())
                     .isEqualTo("Language selected: Hindi");
+        }
+
+        @Test
+        void confirmsInTheChosenLanguageWithTheDefaultTemplate() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+
+            assertThat(service.selectedLanguageMessage(languageRequest(CONTACT, "2")).getMessage())
+                    .isEqualTo("भाषा चुनी गई: Hindi");
+            verify(messageResolver).get(ConversationMessageCode.LANGUAGE_SELECTED, "hindi", "Hindi");
+        }
+
+        @Test
+        void localizesATenantConfirmationTemplateInTheChosenLanguage() {
+            when(templatesService.resolveScreenConfirmationTemplate(anyInt(), eq("LANGUAGE_SELECTION"), anyString()))
+                    .thenReturn(Optional.of("Language selected: {language}"));
+
+            service.selectedLanguageMessage(languageRequest(CONTACT, "2"));
+
+            verify(localizationService).localizeMessage("Language selected: Hindi", "english");
         }
 
         @Test
@@ -309,6 +351,72 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
     }
 
     @Nested
+    @DisplayName("menu from the tenant's SUPPORTED_LANGUAGES")
+    class SupportedLanguages {
+
+        @BeforeEach
+        void stubTemplateCatalogAndSupportedLanguages() {
+            when(templatesService.resolveScreenPrompt(TENANT, "LANGUAGE_SELECTION", "english"))
+                    .thenReturn(Optional.of("Pick a language:"));
+            when(templatesService.resolveScreenOptions(TENANT, "LANGUAGE_SELECTION")).thenReturn(List.of(
+                    new ConversationTemplateService.TemplateOption("OPTION_1", 1, Map.of("en", "English")),
+                    new ConversationTemplateService.TemplateOption("OPTION_2", 2, Map.of("en", "Hindi")),
+                    new ConversationTemplateService.TemplateOption("OPTION_3", 3, Map.of("en", "Punjabi"))));
+            when(languageCatalogRepository.findLanguageIdByAlias("English")).thenReturn(Optional.of(1));
+            when(languageCatalogRepository.findLanguageIdByAlias("Hindi")).thenReturn(Optional.of(2));
+            when(languageCatalogRepository.findLanguageIdByAlias("Punjabi")).thenReturn(Optional.of(11));
+            when(supportedLanguageRepository.findLanguageNames(SCHEMA)).thenReturn(List.of("Punjabi", "English"));
+        }
+
+        @Test
+        void offersOnlyTheTenantsLanguagesInItsPreferenceOrder() {
+            var response = service.languageSelectionMessage(introRequest(CONTACT));
+
+            assertThat(response.getMessage()).isEqualTo("Pick a language:\n1. Punjabi\n2. English");
+            assertThat(response.getCorrelationId()).isEqualTo("two");
+        }
+
+        @Test
+        void resolvesTheReplyAgainstTheShownMenuAndStoresTheOptionsOrder() {
+            service.selectedLanguageMessage(languageRequest(CONTACT, "1"));
+
+            verify(telemetryTenantRepository).updateUserLanguageId(SCHEMA, 11L, 3);
+            verify(userLanguagePreferenceRepository).upsert(SCHEMA, CONTACT, "Punjabi");
+        }
+
+        @Test
+        void rejectsALanguageTheTenantDoesNotSupport() {
+            assertThat(service.selectedLanguageMessage(languageRequest(CONTACT, "Hindi")).getMessage())
+                    .isEqualTo("Invalid language selection");
+
+            verify(telemetryTenantRepository, never()).updateUserLanguageId(anyString(), anyLong(), anyInt());
+        }
+
+        @Test
+        void showsTheChangeLanguageItemWhenTheTenantSupportsSeveralLanguages() {
+            stubItemMenu();
+
+            assertThat(service.itemSelectionMessage(introRequest(CONTACT)).getMessage())
+                    .endsWith("\n1. Submit Reading\n2. Change Language");
+        }
+
+        @Test
+        void hidesTheChangeLanguageItemWhenTheTenantSupportsOneLanguage() {
+            when(supportedLanguageRepository.findLanguageNames(SCHEMA)).thenReturn(List.of("English"));
+            stubItemMenu();
+
+            assertThat(service.itemSelectionMessage(introRequest(CONTACT)).getMessage())
+                    .endsWith("\n1. Submit Reading");
+        }
+
+        private void stubItemMenu() {
+            when(templatesService.resolveScreenOptions(TENANT, "ITEM_SELECTION")).thenReturn(List.of(
+                    new ConversationTemplateService.TemplateOption("OPTION_1", 1, Map.of("en", "Submit Reading")),
+                    new ConversationTemplateService.TemplateOption("OPTION_2", 2, Map.of("en", "Change Language"))));
+        }
+    }
+
+    @Nested
     @DisplayName("schemeSelectionMessage")
     class SchemePrompt {
 
@@ -342,6 +450,19 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
 
             assertThat(service.schemeSelectionMessage(introRequest(CONTACT)).getMessage())
                     .isEqualTo("Please select a scheme:\n1. Scheme 5\n2. Scheme 6");
+        }
+
+        @Test
+        void asksInTheOperatorsLanguage() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+            when(telemetryTenantRepository.findSchemesForUser(SCHEMA, 11L)).thenReturn(List.of(
+                    new TelemetrySchemeOption(5L, null),
+                    new TelemetrySchemeOption(6L, "Scheme B")));
+
+            service.schemeSelectionMessage(introRequest(CONTACT));
+
+            verify(messageResolver).get(ConversationMessageCode.SCHEME_PROMPT, "hindi");
+            verify(messageResolver).get(ConversationMessageCode.UNNAMED_SCHEME, "hindi", 5L);
         }
 
         @Test
@@ -407,6 +528,15 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
 
             assertThat(service.selectedSchemeMessage(schemeRequest(CONTACT, "1")).getMessage())
                     .isEqualTo("Scheme selected: Scheme 5");
+        }
+
+        @Test
+        void confirmsInTheOperatorsLanguage() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+
+            service.selectedSchemeMessage(schemeRequest(CONTACT, "1"));
+
+            verify(messageResolver).get(ConversationMessageCode.SCHEME_SELECTED, "hindi", "Scheme A");
         }
 
         @Test

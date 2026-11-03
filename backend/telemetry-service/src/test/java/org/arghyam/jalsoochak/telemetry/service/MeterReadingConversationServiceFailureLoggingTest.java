@@ -56,6 +56,9 @@ class MeterReadingConversationServiceFailureLoggingTest {
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
+
     @InjectMocks
     private MeterReadingConversationService service;
 

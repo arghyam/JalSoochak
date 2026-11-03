@@ -124,7 +124,7 @@ class QuarantinedReadingReleaseServiceTest {
         assessedAs(reading, ACCEPTED);
         when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 5L)).thenReturn(Result.PUBLISHED);
 
-        assertEquals(new QuarantinedReadingReleaseService.Outcome(1, 0, 0), release(false));
+        assertEquals(new QuarantinedReadingReleaseService.Outcome(1, 0, 0, 0), release(false));
 
         InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
         order.verify(telemetryTenantRepository).applyQuarantineReason(SCHEMA, 5L, QuarantineReason.NONE);
@@ -139,7 +139,7 @@ class QuarantinedReadingReleaseServiceTest {
         quarantinedReadings(reading);
         assessedAs(reading, QUARANTINED);
 
-        assertEquals(new QuarantinedReadingReleaseService.Outcome(0, 1, 0), release(false));
+        assertEquals(new QuarantinedReadingReleaseService.Outcome(0, 1, 0, 0), release(false));
 
         verify(telemetryTenantRepository, never()).applyQuarantineReason(anyString(), anyLong(), anyInt());
         verifyNoInteractions(readingRepublisher);
@@ -154,7 +154,7 @@ class QuarantinedReadingReleaseServiceTest {
         assessedAs(reading, new Verdict.Skipped(Verdict.SkipReason.NO_POPULATION));
         when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 5L)).thenReturn(Result.PUBLISHED);
 
-        assertEquals(new QuarantinedReadingReleaseService.Outcome(1, 0, 0), release(false));
+        assertEquals(new QuarantinedReadingReleaseService.Outcome(1, 0, 0, 0), release(false));
 
         verify(telemetryTenantRepository).applyQuarantineReason(SCHEMA, 5L, QuarantineReason.NONE);
     }
@@ -170,7 +170,7 @@ class QuarantinedReadingReleaseServiceTest {
         assessedAs(second, ACCEPTED);
         when(readingRepublisher.republishAndAwait(eq(SCHEMA), eq(TENANT_ID), anyLong())).thenReturn(Result.PUBLISHED);
 
-        assertEquals(new QuarantinedReadingReleaseService.Outcome(2, 0, 0), release(false));
+        assertEquals(new QuarantinedReadingReleaseService.Outcome(2, 0, 0, 0), release(false));
 
         InOrder order = inOrder(telemetryTenantRepository, readingRepublisher);
         order.verify(telemetryTenantRepository).applyQuarantineReason(SCHEMA, 5L, QuarantineReason.NONE);
@@ -196,7 +196,7 @@ class QuarantinedReadingReleaseServiceTest {
         when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 5L)).thenReturn(Result.PUBLISHED);
         when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 6L)).thenReturn(Result.NOT_ACKNOWLEDGED);
 
-        assertEquals(new QuarantinedReadingReleaseService.Outcome(1, 0, 2), release(false));
+        assertEquals(new QuarantinedReadingReleaseService.Outcome(1, 0, 0, 2), release(false));
 
         InOrder order = inOrder(telemetryTenantRepository);
         order.verify(telemetryTenantRepository).applyQuarantineReason(SCHEMA, 6L, QuarantineReason.NONE);
@@ -245,6 +245,27 @@ class QuarantinedReadingReleaseServiceTest {
         verify(telemetryTenantRepository).applyQuarantineReason(SCHEMA, 5L, QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY);
     }
 
+    /** Releasing it would publish a reading with no value, so it is left quarantined and counted apart. */
+    @Test
+    void keepsAReadingWithNoConfirmedValueAndCarriesOn() {
+        tenantSchema();
+        TelemetryLatestFlowReadingRecord noValue = new TelemetryLatestFlowReadingRecord(
+                5L, SCHEME_ID, OPERATOR_ID, "corr-5", BigDecimal.ZERO, null, "",
+                LocalDate.of(2026, 9, 7), LocalDate.of(2026, 9, 7).atTime(9, 30), ReadingChannel.BFM.getCode(), "m3",
+                QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY, null);
+        TelemetryLatestFlowReadingRecord next = quarantined(6L, LocalDate.of(2026, 9, 8), "1050");
+        quarantinedReadings(noValue, next);
+        assessedAs(next, ACCEPTED);
+        when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 6L)).thenReturn(Result.PUBLISHED);
+
+        assertEquals(new QuarantinedReadingReleaseService.Outcome(1, 0, 1, 0), release(false));
+
+        verify(supplyPlausibilityGuard, never()).assess(any(), any(), any(), any(), eq(noValue.readingDate()),
+                any(), any(), any());
+        verify(telemetryTenantRepository, never()).applyQuarantineReason(eq(SCHEMA), eq(5L), anyInt());
+        verify(readingRepublisher, never()).republishAndAwait(SCHEMA, TENANT_ID, 5L);
+    }
+
     @Test
     void countsAReadingQuarantinedAgainBeforeItWasReadBackAsStillQuarantined() {
         tenantSchema();
@@ -253,7 +274,7 @@ class QuarantinedReadingReleaseServiceTest {
         assessedAs(reading, ACCEPTED);
         when(readingRepublisher.republishAndAwait(SCHEMA, TENANT_ID, 5L)).thenReturn(Result.WITHHELD);
 
-        assertEquals(new QuarantinedReadingReleaseService.Outcome(0, 1, 0), release(false));
+        assertEquals(new QuarantinedReadingReleaseService.Outcome(0, 1, 0, 0), release(false));
     }
 
     /** The same pass, so the counts are the release's own, inside a transaction that is rolled back. */
@@ -269,7 +290,7 @@ class QuarantinedReadingReleaseServiceTest {
         assessedAs(accepted, ACCEPTED);
         assessedAs(implausible, QUARANTINED);
 
-        assertEquals(new QuarantinedReadingReleaseService.Outcome(1, 1, 0), release(true));
+        assertEquals(new QuarantinedReadingReleaseService.Outcome(1, 1, 0, 0), release(true));
 
         verify(status).setRollbackOnly();
         verify(telemetryTenantRepository).applyQuarantineReason(SCHEMA, 5L, QuarantineReason.NONE);

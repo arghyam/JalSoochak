@@ -675,8 +675,8 @@ class TenantManagementServiceImplTest {
         @DisplayName("Should skip stored config keys that are not UI-managed instead of failing the request")
         void testGetTenantConfigs_UnknownStoredKeyIsSkipped() {
             // tenant_config_master_table is shared: alongside the UI-managed TenantConfigKeyEnum keys it
-            // also holds runtime keys other services read (ocr_provider/ocr_url/ocr_api_key, language_N,
-            // nudge_message_*). Those are not UI config and must not make this endpoint 400.
+            // also holds runtime keys other services read (ocr_provider/ocr_url/ocr_api_key, language_N).
+            // Those are not UI config and must not make this endpoint 400.
             Integer tenantId = 1;
             TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
             List<ConfigDTO> configsList = Arrays.asList(

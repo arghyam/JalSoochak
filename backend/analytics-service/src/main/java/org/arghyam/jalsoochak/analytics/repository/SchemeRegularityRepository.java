@@ -236,8 +236,25 @@ public class SchemeRegularityRepository {
                 continuousSchemesWorkStatusFilterEnabled ? workStatusFilter.andPredicate("s") : "";
         return withWaterFragments(sql
                 .replace("{{WS}}", workStatusPredicate)
-                .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s")));
+                .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s"))
+                .replace("{{RA}}", REPORTED_ANOMALY_PREDICATE));
     }
+
+    /**
+     * REPORTED-METRIC lever (B), rendered by the {@code {{RA}}} token over the anomaly alias {@code a}: the
+     * anomalies that make their day a reported day for the continuous-schemes count and list. Each is a
+     * submission that arrived but left no {@code fact_meter_reading_table} row — an image that was rejected,
+     * or a reading telemetry quarantined as an implausible supply (stored there, never published).
+     *
+     * <p>A refused correction raises the same {@code IMPLAUSIBLE_WATER_SUPPLY} type, so the quarantine is
+     * matched on its submission reason as well: a correction is not a submission, and its anomaly is dated
+     * when the correction was made, not for the day it corrects. The reason mirrors
+     * {@code AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_SUBMITTED} in telemetry-service.
+     */
+    private static final String REPORTED_ANOMALY_PREDICATE = """
+            (a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
+                           OR (a.type = 'IMPLAUSIBLE_WATER_SUPPLY'
+                               AND a.reason = 'Submitted reading implies an implausible daily water supply for this scheme.'))""";
 
     /**
      * Tie-break that reduces a scheme's {@code dim_scheme_table} rows to the one canonical row a dashboard
@@ -3363,7 +3380,8 @@ public class SchemeRegularityRepository {
         // Continuous = the scheme reported on AT LEAST ONE day in the range (reported_days >= 1).
         // Four levers, each independently revertible (grep REPORTED-METRIC):
         //   (A) supplied -> reported: drop the confirmed_reading>0 filter (re-add to revert)
-        //   (B) include image-quality rejects (duplicate/unreadable/less-than-previous) as reported days
+        //   (B) include image-quality rejects (duplicate/unreadable/no-meter/less-than-previous) and readings
+        //       quarantined as an implausible supply as reported days ({{RA}})
         //   (C) include pre-anomaly rejects (validation/auth) via submission_attempt_table
         //   (D) N/A for this region-scoped view: not-in-dim schemes have no region and cannot be "continuous"
         // Reject days use "+ 5:30" on the reject timestamps (anomaly.created_at / attempt.attempted_at)
@@ -3386,12 +3404,12 @@ public class SchemeRegularityRepository {
                       AND m.reading_date BETWEEN ? AND ?
                       -- AND m.confirmed_reading > 0            -- REVERT lever (A)
 
-                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    UNION ALL   -- (B) arrived-but-rejected image and quarantined submissions (no reading row)
                     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
                     FROM analytics_schema.fact_anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
-                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
+                      AND {{RA}}
                       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 
@@ -3466,12 +3484,12 @@ public class SchemeRegularityRepository {
                       AND m.reading_date BETWEEN ? AND ?
                       -- AND m.confirmed_reading > 0            -- REVERT lever (A)
 
-                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    UNION ALL   -- (B) arrived-but-rejected image and quarantined submissions (no reading row)
                     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
                     FROM analytics_schema.fact_anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
-                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
+                      AND {{RA}}
                       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 
@@ -3542,12 +3560,12 @@ public class SchemeRegularityRepository {
                       AND m.reading_date BETWEEN ? AND ?
                       -- AND m.confirmed_reading > 0            -- REVERT lever (A)
 
-                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    UNION ALL   -- (B) arrived-but-rejected image and quarantined submissions (no reading row)
                     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
                     FROM analytics_schema.fact_anomaly_table a
                     JOIN user_schemes us ON us.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
-                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
+                      AND {{RA}}
                       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 
@@ -3623,12 +3641,12 @@ public class SchemeRegularityRepository {
                       AND m.reading_date BETWEEN ? AND ?
                       -- AND m.confirmed_reading > 0            -- REVERT lever (A)
 
-                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    UNION ALL   -- (B) arrived-but-rejected image and quarantined submissions (no reading row)
                     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
                     FROM analytics_schema.fact_anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
-                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
+                      AND {{RA}}
                       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 
@@ -3718,12 +3736,12 @@ public class SchemeRegularityRepository {
                       AND m.reading_date BETWEEN ? AND ?
                       -- AND m.confirmed_reading > 0            -- REVERT lever (A)
 
-                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    UNION ALL   -- (B) arrived-but-rejected image and quarantined submissions (no reading row)
                     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
                     FROM analytics_schema.fact_anomaly_table a
                     JOIN user_schemes us ON us.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
-                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
+                      AND {{RA}}
                       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 
@@ -3809,12 +3827,12 @@ public class SchemeRegularityRepository {
                       AND m.reading_date BETWEEN ? AND ?
                       -- AND m.confirmed_reading > 0            -- REVERT lever (A)
 
-                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    UNION ALL   -- (B) arrived-but-rejected image and quarantined submissions (no reading row)
                     SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
                     FROM analytics_schema.fact_anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
-                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','NO_METER_DETECTED','READING_LESS_THAN_PREVIOUS')
+                      AND {{RA}}
                       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 

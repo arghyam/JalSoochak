@@ -850,7 +850,7 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
         when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "88888888"))
                 .thenReturn(Optional.empty());
         when(localizationService.resolveLanguageKeyForContact("919876543210")).thenReturn("english");
-        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
+        when(localizationService.resolveUserFacingErrorMessage(any(), any(), anyString()))
                 .thenReturn("Reading rejected");
 
         CreateReadingResponse response = service.processCanonicalReading(request, 22);
@@ -1102,7 +1102,7 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
         when(telemetryTenantRepository.findFirstPumpOperatorForScheme("tenant_assam", 30178236L))
                 .thenReturn(Optional.empty());
         when(localizationService.resolveLanguageKeyForContact(null)).thenReturn("english");
-        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
+        when(localizationService.resolveUserFacingErrorMessage(any(), any(), anyString()))
                 .thenReturn("Reading rejected");
 
         CreateReadingResponse response = service.processCanonicalReading(request, 22);
@@ -1112,7 +1112,8 @@ class MeterImageWorkflowServiceCanonicalReadingTest {
         assertEquals("REJECTED", response.getQualityStatus());
         assertEquals(TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME, response.getErrorCode());
         verify(telemetryTenantRepository, never()).getOrCreateUnknownOperatorUserId(anyString(), any());
-        verify(localizationService).resolveUserFacingErrorMessage(any(), eq("Reading could not be processed."), eq("english"));
+        verify(localizationService).resolveUserFacingErrorMessage(
+                any(), eq(ConversationMessageCode.READING_NOT_PROCESSED), eq("english"));
         verify(bfmReadingService, never()).createReading(any(), anyString(), any(), nullable(String.class), anyBoolean(), any(OcrRetryMode.class));
     }
 

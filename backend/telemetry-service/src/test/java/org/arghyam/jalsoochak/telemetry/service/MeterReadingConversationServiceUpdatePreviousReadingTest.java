@@ -90,6 +90,9 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
     @Mock
     private ConversationSchemeResolver conversationSchemeResolver;
 
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
+
     @InjectMocks
     private MeterReadingConversationService service;
 
@@ -113,6 +116,7 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         CreateReadingResponse resp = update("1000");
 
         assertEquals(true, resp.isSuccess());
+        assertEquals("Previous reading updated successfully.", resp.getMessage());
         assertEquals("CONFIRMED", resp.getQualityStatus());
         assertEquals(new BigDecimal("1000"), resp.getMeterReading());
         assertEquals("corr-2", resp.getCorrelationId());
@@ -122,6 +126,16 @@ class MeterReadingConversationServiceUpdatePreviousReadingTest {
         order.verify(readingRepublisher).republish("tenant_test", 1, 22L);
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verifyNoInteractions(telemetryEventPublisher);
+    }
+
+    @Test
+    void confirmsTheCorrectionInTheOperatorsLanguage() {
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("hindi");
+        targetRow(ReadingChannel.BFM, "1100");
+
+        update("1000");
+
+        verify(messageResolver).get(ConversationMessageCode.PREVIOUS_READING_UPDATED, "hindi");
     }
 
     @Test

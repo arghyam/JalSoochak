@@ -205,7 +205,7 @@ public class AnalyticsSchemeSegmentController {
     @GetMapping("/continuous-schemes")
     @Operation(
             summary = "Get continuous scheme count (and optionally list) for an LGD or department area",
-            description = "A scheme is continuous when it reported on at least one day in the given date range (start_date..end_date). A day counts as reported when the scheme has any meter reading (including a 0-supply reading), an image-rejected submission, or a submission attempt on that date. Applies identically to LGD and department scopes. When list=false (default), only the count is computed/returned. When list=true, a paginated list is also returned.",
+            description = "A scheme is continuous when it reported on at least one day in the given date range (start_date..end_date). A day counts as reported when the scheme has any meter reading (including a 0-supply reading), an image-rejected submission, a reading held back as an implausible supply, or a submission attempt on that date. Applies identically to LGD and department scopes. When list=false (default), only the count is computed/returned. When list=true, a paginated list is also returned.",
             responses = {
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "200",

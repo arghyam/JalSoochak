@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import org.arghyam.jalsoochak.telemetry.repository.LanguageCatalogRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
@@ -12,6 +13,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -24,12 +26,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * The one-time welcome message sent when an operator is first registered. Copy comes from a
  * tenant-configured template when one exists (so a new language needs no code change) and otherwise
- * from the built-in English/Hindi/Assamese bodies.
+ * from the welcome body in the operator's message bundle.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -45,6 +49,12 @@ class WelcomeMessageServiceTest {
     private ConversationLocalizationService localizationService;
     @Mock
     private TenantConfigRepository tenantConfigRepository;
+    @Spy
+    private LanguageLocaleResolver languageLocaleResolver =
+            new LanguageLocaleResolver(mock(LanguageCatalogRepository.class));
+
+    @Spy
+    private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
 
     @InjectMocks
     private WelcomeMessageService service;
@@ -158,19 +168,34 @@ class WelcomeMessageServiceTest {
         void rendersTheEnglishBodyByDefault() {
             var response = service.triggerWelcomeMessage(PHONE, false);
 
-            assertThat(response.getMessage())
-                    .contains("Dear Asha")
-                    .contains("You have been registered as Pump Operator")
-                    .contains("Reply START to begin.");
+            assertThat(response.getMessage()).isEqualTo("""
+                    Dear Asha,
+
+                    You have been registered as Pump Operator for your state in Jalsoochak.
+
+                    You can use this number to:
+                    - Share photos of the bulk flow meter
+                    - Report water supply issues
+
+                    Reply START to begin.
+                    """);
         }
 
         @Test
         void rendersTheHindiBody() {
             when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
 
-            assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage())
-                    .contains("प्रिय Asha")
-                    .contains("पंप ऑपरेटर");
+            assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage()).isEqualTo("""
+                    प्रिय Asha,
+
+                    आपको जलसूचक में आपके राज्य के लिए पंप ऑपरेटर के रूप में पंजीकृत किया गया है।
+
+                    आप इस नंबर का उपयोग इन कार्यों के लिए कर सकते हैं:
+                    - बल्क फ्लो मीटर की फोटो साझा करना
+                    - जल आपूर्ति से जुड़ी समस्याएं रिपोर्ट करना
+
+                    शुरू करने के लिए START लिखें।
+                    """);
         }
 
         @ParameterizedTest(name = "languageKey={0} renders the Assamese body")
@@ -178,9 +203,34 @@ class WelcomeMessageServiceTest {
         void rendersTheAssameseBodyForEveryAssameseKey(String languageKey) {
             when(localizationService.normalizeLanguageKey(anyString())).thenReturn(languageKey);
 
-            assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage())
-                    .contains("প্ৰিয় Asha")
-                    .contains("পাম্প অপাৰেটৰ");
+            assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage()).isEqualTo("""
+                    প্ৰিয় Asha,
+
+                    আপুনি জলোসূচকত your state ৰ পাম্প অপাৰেটৰ হিচাপে নথিভুক্ত হৈছে।
+
+                    এই নম্বৰ ব্যৱহাৰ কৰি আপুনি:
+                    - বাল্ক ফ্ল’ মিটাৰৰ ফটো পঠাব পাৰে
+                    - পানী যোগানৰ সমস্যা জনাব পাৰে
+
+                    আৰম্ভ কৰিবলৈ START লিখক।
+                    """);
+        }
+
+        @Test
+        void rendersThePunjabiBody() {
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("punjabi");
+
+            assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage()).isEqualTo("""
+                    ਸਤਿਕਾਰਯੋਗ Asha,
+
+                    ਤੁਹਾਨੂੰ ਜਲਸੂਚਕ ਵਿੱਚ ਤੁਹਾਡੇ ਰਾਜ ਲਈ ਪੰਪ ਆਪਰੇਟਰ ਵਜੋਂ ਰਜਿਸਟਰ ਕੀਤਾ ਗਿਆ ਹੈ।
+
+                    ਤੁਸੀਂ ਇਸ ਨੰਬਰ ਦੀ ਵਰਤੋਂ ਇਨ੍ਹਾਂ ਕੰਮਾਂ ਲਈ ਕਰ ਸਕਦੇ ਹੋ:
+                    - ਬਲਕ ਫਲੋ ਮੀਟਰ ਦੀਆਂ ਫੋਟੋਆਂ ਸਾਂਝੀਆਂ ਕਰਨਾ
+                    - ਪਾਣੀ ਦੀ ਸਪਲਾਈ ਨਾਲ ਜੁੜੀਆਂ ਸਮੱਸਿਆਵਾਂ ਦੀ ਰਿਪੋਰਟ ਕਰਨਾ
+
+                    ਸ਼ੁਰੂ ਕਰਨ ਲਈ START ਲਿਖੋ।
+                    """);
         }
 
         @Test
@@ -258,6 +308,17 @@ class WelcomeMessageServiceTest {
         void substitutesYourStateWhenNeitherIsConfigured() {
             assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage())
                     .contains("Pump Operator for your state in Jalsoochak");
+        }
+
+        @Test
+        void substitutesTheStandInsInTheOperatorsLanguage() {
+            when(operatorContextService.resolveOperatorWithSchema(PHONE)).thenReturn(operator(3, null));
+            when(localizationService.normalizeLanguageKey(anyString())).thenReturn("hindi");
+
+            service.triggerWelcomeMessage(PHONE, false);
+
+            verify(messageResolver).get(ConversationMessageCode.DEFAULT_OPERATOR_NAME, "hindi");
+            verify(messageResolver).get(ConversationMessageCode.DEFAULT_STATE_NAME, "hindi");
         }
     }
 }

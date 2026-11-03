@@ -44,6 +44,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
@@ -335,7 +336,8 @@ public class BfmReadingService {
                     // this submission has no row. The *previous* reading it duplicates is not the
                     // submission that caused the anomaly and must not be linked as if it were.
                     null,
-                    null
+                    null,
+                    Instant.now()
             );
             return CreateReadingResponse.builder()
                     .success(false)
@@ -567,6 +569,9 @@ public class BfmReadingService {
         // marks the operator absent and the scheme non-reporting for the day: intended, and called
         // out in the ops runbook so the daily-report gap is not chased as a pipeline fault.
         if (quarantined) {
+            // One instant for both the key's arrival day and the published raisedAt, so the anomaly
+            // analytics dates by created_at always lands on the day its own key names.
+            Instant raisedAt = Instant.now();
             recordAnomaly(
                     schemaName,
                     tenantId,
@@ -585,15 +590,18 @@ public class BfmReadingService {
                     supplyBaseline != null ? supplyBaseline.createdAt() : null,
                     0,
                     buildSupplyAnomalyCorrelationId(
+                            tenantId,
                             AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY,
                             operatorInRequest.id(),
                             request.getSchemeId(),
-                            LocalDate.from(readingAt)),
+                            LocalDate.from(readingAt),
+                            LocalDate.ofInstant(raisedAt, ReadingTime.ZONE)),
                     // ANOMALY-SUBMISSION-LINK: the quarantined row IS the submission that caused
                     // this. Both were already in hand here and were previously dropped, which is
                     // what left the anomaly matched to its reading only by operator, scheme and day.
                     readingId,
-                    storageCorrelationId);
+                    storageCorrelationId,
+                    raisedAt);
             return CreateReadingResponse.builder()
                     .success(false)
                     // THRESHOLD-DISCLOSURE: names no ceiling, population or FHTC figure. Echoing
@@ -1106,7 +1114,8 @@ public class BfmReadingService {
                 // — which is the submission this anomaly is about, whether it is published (case B)
                 // or itself quarantined (case C).
                 reading.id(),
-                reading.correlationId());
+                reading.correlationId(),
+                Instant.now());
 
         return CreateReadingResponse.builder()
                 .success(false)
@@ -1325,16 +1334,26 @@ public class BfmReadingService {
     }
 
     /**
-     * SUPPLY-PLAUSIBILITY: one anomaly per operator, per scheme, per day.
+     * SUPPLY-PLAUSIBILITY: one anomaly per tenant, per operator, per scheme, per reading date, per IST
+     * day the submission arrived.
      *
      * <p>Analytics derives {@code fact_anomaly_table.uuid} deterministically from the correlationId, and
      * dedups on it — a repeat is touched, not inserted. The date is in the key because the keys
      * analytics builds for itself carry none: without it every type-10 anomaly for an operator and
      * scheme would collapse into a single row forever, and the second day's rejection would be
-     * invisible. Same construction as the unreadable-image id in {@code ImageReadingCapture}.
+     * invisible. The tenant is in the key because operator and scheme ids are per-tenant sequences
+     * while that uuid is unique across tenants: without it, a second tenant's anomaly for the same ids
+     * and day would be touched onto the first tenant's row and lost. The arrival day is in the key
+     * because a touch keeps the row's {@code created_at}, which dates the continuous-schemes reported
+     * day: a backdated reading re-sent on a later day would otherwise leave that day uncounted. It is
+     * fixed once per submission, so a redelivered event keeps its id. Ids minted before the tenant and
+     * arrival day were added are not matched, so a repeat across that change adds one row instead of
+     * touching. Package-visible for tests.
      */
-    private String buildSupplyAnomalyCorrelationId(int anomalyType, Long userId, Long schemeId, LocalDate readingDate) {
-        String key = anomalyType + ":" + userId + ":" + schemeId + ":" + readingDate;
+    static String buildSupplyAnomalyCorrelationId(Integer tenantId, int anomalyType, Long userId,
+                                                  Long schemeId, LocalDate readingDate, LocalDate arrivalDate) {
+        String key = tenantId + ":" + anomalyType + ":" + userId + ":" + schemeId + ":" + readingDate
+                + ":" + arrivalDate;
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
@@ -1363,7 +1382,8 @@ public class BfmReadingService {
                                     Integer consecutiveDaysMissed,
                                     String correlationId,
                                     Long flowReadingId,
-                                    String submissionCorrelationId) {
+                                    String submissionCorrelationId,
+                                    Instant raisedAt) {
         telemetryTenantRepository.createTenantAnomalyRecord(
                 schemaName,
                 tenantAnomaly(userId, schemeId, anomalyType, reason, retries,
@@ -1385,7 +1405,8 @@ public class BfmReadingService {
                 reason,
                 AnomalyConstants.STATUS_OPEN,
                 correlationId,
-                submissionCorrelationId
+                submissionCorrelationId,
+                raisedAt
         );
     }
 
