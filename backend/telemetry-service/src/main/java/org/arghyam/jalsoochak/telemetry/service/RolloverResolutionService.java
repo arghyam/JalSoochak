@@ -11,7 +11,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -138,15 +137,25 @@ public class RolloverResolutionService {
             return asExtracted(modelValue);
         }
 
+        // The OCR provider places the decimal point itself (e.g. "012644.8") and counts rollover positions
+        // over the digits only, so reason on the digits and keep the number of decimal places apart.
         String rawReading = ocr.getRawMeterReading();
-        if (rawReading == null || !rawReading.chars().allMatch(Character::isDigit)) {
-            // Cannot reason positionally on a non-digit / missing raw reading.
+        if (rawReading == null) {
             return asExtracted(modelValue);
         }
-        int length = rawReading.length();
+        int point = rawReading.indexOf('.');
+        String rawDigits = point < 0
+                ? rawReading
+                : rawReading.substring(0, point) + rawReading.substring(point + 1);
+        if (!rawDigits.chars().allMatch(Character::isDigit)) {
+            // Cannot reason positionally on a second point or any other non-digit.
+            return asExtracted(modelValue);
+        }
+        int length = rawDigits.length();
+        int decimalPlaces = point < 0 ? 0 : length - point;
 
         // ── 0. Reject malformed rollover metadata before any enumeration ────────────────────────────
-        // Each in-range selected digit must match the raw string at its position, and no position may
+        // Each in-range selected digit must match the raw digits at its position, and no position may
         // repeat: a duplicate would let two choice bits write the same index, collapsing distinct
         // candidates and double-counting confidence. On any violation fall back to the model value
         // rather than resolve on inconsistent input (out-of-range positions are ignored, as below).
@@ -160,8 +169,8 @@ public class RolloverResolutionService {
                 return asExtracted(modelValue); // duplicate position → inconsistent metadata
             }
             seenPosition[p] = true;
-            if (rawReading.charAt(p - 1) != (char) ('0' + (pos.selectedValue() % 10))) {
-                return asExtracted(modelValue); // selected digit disagrees with the raw string
+            if (rawDigits.charAt(p - 1) != (char) ('0' + (pos.selectedValue() % 10))) {
+                return asExtracted(modelValue); // selected digit disagrees with the raw digits
             }
         }
 
@@ -180,14 +189,13 @@ public class RolloverResolutionService {
         BigDecimal anchor = robustAnchor(previousConfirmed, history);
 
         // ── 2. Significance filter: keep only positions whose flip meaningfully moves the reading ───
-        double scale = ocr.isRedLastDigit() ? 0.1 : 1.0;
         double swingThreshold = SIGNIFICANCE_FRACTION * mu;
         List<RolloverPosition> significant = new ArrayList<>();
         for (RolloverPosition pos : ocr.getRolloverPositions()) {
             if (pos.position() < 1 || pos.position() > length) {
-                continue; // position outside the raw string — ignore
+                continue; // position outside the raw digits — ignore
             }
-            double swing = Math.pow(10, length - pos.position()) * scale;
+            double swing = Math.pow(10, length - pos.position() - decimalPlaces);
             if (swing >= swingThreshold) {
                 significant.add(pos);
             }
@@ -206,7 +214,7 @@ public class RolloverResolutionService {
         List<Candidate> survivors = new ArrayList<>();
         Candidate modelCandidate = null;
         for (int mask = 0; mask < combos; mask++) {
-            Candidate candidate = buildCandidate(rawReading, significant, mask, ocr.isRedLastDigit());
+            Candidate candidate = buildCandidate(rawDigits, significant, mask, decimalPlaces);
             if (candidate.isModel) {
                 modelCandidate = candidate;
             }
@@ -326,13 +334,14 @@ public class RolloverResolutionService {
 
     /**
      * Builds one candidate reading from a choice mask over the significant positions. Bit {@code i}
-     * (LSB-first) chooses the selected (0) or alternate (1) digit for {@code significant.get(i)}.
+     * (LSB-first) chooses the selected (0) or alternate (1) digit for {@code significant.get(i)}; the
+     * last {@code decimalPlaces} digits go after the decimal point.
      */
-    private Candidate buildCandidate(String rawReading,
+    private Candidate buildCandidate(String rawDigits,
                                      List<RolloverPosition> significant,
                                      int mask,
-                                     boolean redLastDigit) {
-        char[] digits = rawReading.toCharArray();
+                                     int decimalPlaces) {
+        char[] digits = rawDigits.toCharArray();
         double confidenceLogSum = 0.0;
         boolean isModel = true;
         List<int[]> picks = new ArrayList<>(significant.size());
@@ -348,10 +357,7 @@ public class RolloverResolutionService {
             }
             picks.add(new int[]{pos.position(), pos.selectedValue(), chosenDigit});
         }
-        BigDecimal reading = new BigDecimal(new String(digits));
-        if (redLastDigit) {
-            reading = reading.movePointLeft(1).setScale(1, RoundingMode.UNNECESSARY);
-        }
+        BigDecimal reading = new BigDecimal(new String(digits)).movePointLeft(decimalPlaces);
         return new Candidate(reading, confidenceLogSum, isModel, picks);
     }
 
