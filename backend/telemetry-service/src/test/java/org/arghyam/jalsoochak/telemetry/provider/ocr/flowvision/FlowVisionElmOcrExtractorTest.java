@@ -169,8 +169,7 @@ class FlowVisionElmOcrExtractorTest {
         assertThat(result.getRequestId()).isEqualTo(restTemplate.lastPayload().get("id"));
         assertThat(result.getRejectionReason()).isNull();
         assertThat(result.isNoMeter()).isFalse();
-        // An ELM display shows its own decimal point, and its register has no rollover digits.
-        assertThat(result.isRedLastDigit()).isFalse();
+        // An ELM register has no rollover digits.
         assertThat(result.isHasRollover()).isFalse();
         assertThat(result.getRolloverPositions()).isEmpty();
     }

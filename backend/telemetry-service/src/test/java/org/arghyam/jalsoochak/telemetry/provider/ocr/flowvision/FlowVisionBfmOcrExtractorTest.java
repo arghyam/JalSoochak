@@ -59,7 +59,52 @@ class FlowVisionBfmOcrExtractorTest {
     }
 
     @Test
-    void extractReadingTreatsRedLastDigitAsDecimal() {
+    void extractReadingUsesRedReadingWithItsDecimalPointAsReturned() {
+        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
+        restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("012644.8", "red"), HttpStatus.OK));
+
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
+
+        OcrReadingResult result = service.extractReading("https://image-url", null);
+
+        assertNotNull(result);
+        assertEquals("12644.8", result.getAdjustedReading().toPlainString());
+        assertEquals("012644.8", result.getRawMeterReading());
+        assertEquals(1, restTemplate.getCallCount());
+    }
+
+    @Test
+    void extractReadingKeepsTheTrailingZeroOfARedReading() {
+        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
+        restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("023176.0", "red"), HttpStatus.OK));
+
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
+
+        OcrReadingResult result = service.extractReading("https://image-url", null);
+
+        assertNotNull(result);
+        assertEquals("23176.0", result.getAdjustedReading().toPlainString());
+        assertEquals(1, result.getAdjustedReading().scale());
+        assertEquals("023176.0", result.getRawMeterReading());
+    }
+
+    @Test
+    void extractReadingUsesBlackReadingAsReturned() {
+        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
+        restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("0268045", "black"), HttpStatus.OK));
+
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
+
+        OcrReadingResult result = service.extractReading("https://image-url", null);
+
+        assertNotNull(result);
+        assertEquals("268045", result.getAdjustedReading().toPlainString());
+        assertEquals("0268045", result.getRawMeterReading());
+    }
+
+    @Test
+    void extractReadingPointsAnOldFormatRedReadingAsBefore() {
+        // TRANSITIONAL: FlowVision's previous version returned a red reading as digits only.
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("004983", "red"), HttpStatus.OK));
 
@@ -68,10 +113,24 @@ class FlowVisionBfmOcrExtractorTest {
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
         assertNotNull(result);
-        assertNotNull(result.getRequestId());
-        assertEquals("corr-123", result.getCorrelationId());
         assertEquals("498.3", result.getAdjustedReading().toPlainString());
-        assertEquals(1, restTemplate.getCallCount());
+        assertEquals("00498.3", result.getRawMeterReading());
+    }
+
+    @Test
+    void extractReadingPointsAOneDigitRedReadingAsBefore() {
+        // TRANSITIONAL: until FlowVision owns the point, a red reading without one keeps the previous rule,
+        // whatever its length. The point goes in without a leading zero so the digits stay the same.
+        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
+        restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("5", "red"), HttpStatus.OK));
+
+        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
+
+        OcrReadingResult result = service.extractReading("https://image-url", null);
+
+        assertNotNull(result);
+        assertEquals("0.5", result.getAdjustedReading().toPlainString());
+        assertEquals(".5", result.getRawMeterReading());
     }
 
     @Test
@@ -180,7 +239,6 @@ class FlowVisionBfmOcrExtractorTest {
         assertNotNull(result);
         assertTrue(result.isHasRollover());
         assertEquals("01234", result.getRawMeterReading());
-        assertFalse(result.isRedLastDigit());
         // meterReading (adjustedReading) is still built from the selectedDigits, untouched by rollover metadata.
         assertEquals("1234", result.getAdjustedReading().toPlainString());
         assertEquals(1, result.getRolloverPositions().size());
