@@ -24,6 +24,7 @@ import org.arghyam.jalsoochak.telemetry.service.capture.ImageReadingCapture;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimit;
 import org.arghyam.jalsoochak.telemetry.service.capture.PduDayLimitFixtures;
 import org.arghyam.jalsoochak.telemetry.service.capture.SubmittedValueCapture;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -34,6 +35,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -47,8 +49,10 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -252,13 +256,88 @@ class BfmReadingServiceImplausibleSupplyTest {
                     eq(TENANT_ID), eq(AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY), eq(OPERATOR_ID),
                     eq(SCHEME_ID), isNull(), isNull(), overridden.capture(), eq(0), previous.capture(),
                     eq(BASELINE_AT), eq(0), eq(AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_SUBMITTED),
-                    eq(AnomalyConstants.STATUS_OPEN), anyString(), any());
+                    eq(AnomalyConstants.STATUS_OPEN), anyString(), any(), notNull());
 
             assertThat(overridden.getValue()).isEqualByComparingTo("1100");
             assertThat(previous.getValue()).isEqualByComparingTo(BASELINE);
             // (1100 - 900) * 1000 = 200,000 L, the figure the decision was taken on.
             assertThat(overridden.getValue().subtract(previous.getValue())
                     .multiply(BigDecimal.valueOf(1000))).isEqualByComparingTo("200000");
+        }
+
+        /**
+         * Operator and scheme ids are per-tenant sequences, and analytics dedups the anomaly on a
+         * globally unique uuid derived from this id. Without the tenant in the key, a second tenant's
+         * quarantine for the same ids and day would land on the first tenant's row and be lost.
+         */
+        @Test
+        @DisplayName("the anomaly id is per tenant, and stable for a repeat within one tenant")
+        void anomalyCorrelationIdIsTenantScoped() {
+            checkableScheme();
+            // The tenant is taken from the operator row the service reads, so the third submission
+            // comes from another tenant's operator with the same id.
+            TelemetryOperator sameIdsOtherTenant =
+                    new TelemetryOperator(OPERATOR_ID, TENANT_ID + 1, "op", "op@example.com", CONTACT, null);
+            when(repo.findOperatorById(SCHEMA, OPERATOR_ID))
+                    .thenReturn(Optional.of(operator), Optional.of(operator), Optional.of(sameIdsOtherTenant));
+            BfmReadingService service = service(SupplyPlausibilityProperties.Mode.ENFORCE);
+
+            for (int i = 0; i < 3; i++) {
+                service.createReading(submission("1100", true), SCHEMA, operator, CONTACT, false);
+            }
+
+            ArgumentCaptor<String> correlationId = ArgumentCaptor.forClass(String.class);
+            verify(telemetryEventPublisher, times(3)).publishAnomalyRecorded(
+                    anyInt(), eq(AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY), eq(OPERATOR_ID),
+                    eq(SCHEME_ID), any(), any(), any(), anyInt(), any(), any(), anyInt(), anyString(),
+                    anyInt(), correlationId.capture(), any(), notNull());
+
+            assertThat(correlationId.getAllValues().get(1)).isEqualTo(correlationId.getAllValues().get(0));
+            assertThat(correlationId.getAllValues().get(2)).isNotEqualTo(correlationId.getAllValues().get(0));
+        }
+
+        /**
+         * Analytics keeps an anomaly's created_at on a repeat and dates the reported day by it, so a
+         * backdated reading re-sent on a later day needs its own id, or that day goes uncounted.
+         */
+        @Test
+        @DisplayName("the anomaly id is per arrival day as well as per reading date")
+        void anomalyCorrelationIdIsPerArrivalDay() {
+            LocalDate readingDate = READING_AT.toLocalDate();
+            LocalDate arrivedOn = readingDate.plusDays(1);
+            String id = supplyId(readingDate, arrivedOn);
+
+            assertThat(supplyId(readingDate, arrivedOn)).isEqualTo(id);
+            assertThat(supplyId(readingDate, arrivedOn.plusDays(1))).isNotEqualTo(id);
+            assertThat(supplyId(readingDate.minusDays(1), arrivedOn)).isNotEqualTo(id);
+        }
+
+        /**
+         * The key's arrival day and the published raisedAt, which analytics stores as created_at, are
+         * one instant. Read apart, the publisher's worker could stamp the next day after a midnight
+         * or a queue backlog, leaving the anomaly dated a day off its own key.
+         */
+        @Test
+        @DisplayName("the anomaly id's arrival day is the IST day of the published raisedAt")
+        void anomalyCorrelationIdArrivalDayMatchesRaisedAt() {
+            checkableScheme();
+
+            submit(SupplyPlausibilityProperties.Mode.ENFORCE, "1100", true);
+
+            ArgumentCaptor<String> correlationId = ArgumentCaptor.forClass(String.class);
+            ArgumentCaptor<Instant> raisedAt = ArgumentCaptor.forClass(Instant.class);
+            verify(telemetryEventPublisher).publishAnomalyRecorded(
+                    eq(TENANT_ID), eq(AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY), eq(OPERATOR_ID),
+                    eq(SCHEME_ID), any(), any(), any(), anyInt(), any(), any(), anyInt(), anyString(),
+                    anyInt(), correlationId.capture(), any(), raisedAt.capture());
+
+            assertThat(correlationId.getValue()).isEqualTo(
+                    supplyId(READING_AT.toLocalDate(), LocalDate.ofInstant(raisedAt.getValue(), ReadingTime.ZONE)));
+        }
+
+        private String supplyId(LocalDate readingDate, LocalDate arrivedOn) {
+            return BfmReadingService.buildSupplyAnomalyCorrelationId(TENANT_ID,
+                    AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY, OPERATOR_ID, SCHEME_ID, readingDate, arrivedOn);
         }
 
         /**
@@ -402,7 +481,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             verify(repo, never()).createTenantAnomalyRecord(anyString(), any());
             verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                     any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                    any(), any(), any());
+                    any(), any(), any(), any());
         }
     }
 

@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -318,7 +319,7 @@ class LocationAffinityServiceTest {
                     eq(AnomalyConstants.STATUS_OPEN),
                     anyString(),
                     // The warehouse joins fact_meter_reading_table on this, not on flow_reading_id.
-                    eq(SUBMISSION_CORRELATION));
+                    eq(SUBMISSION_CORRELATION), notNull());
         }
 
         @Test
@@ -330,7 +331,7 @@ class LocationAffinityServiceTest {
             ArgumentCaptor<String> correlationId = ArgumentCaptor.forClass(String.class);
             verify(telemetryEventPublisher, org.mockito.Mockito.times(2)).publishAnomalyRecorded(
                     any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                    any(), any(), correlationId.capture(), any());
+                    any(), any(), correlationId.capture(), any(), notNull());
 
             assertThat(correlationId.getAllValues().get(0))
                     .isEqualTo(correlationId.getAllValues().get(1));
@@ -349,7 +350,7 @@ class LocationAffinityServiceTest {
             ArgumentCaptor<String> correlationId = ArgumentCaptor.forClass(String.class);
             verify(telemetryEventPublisher, org.mockito.Mockito.times(2)).publishAnomalyRecorded(
                     any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                    any(), any(), correlationId.capture(), any());
+                    any(), any(), correlationId.capture(), any(), notNull());
 
             assertThat(correlationId.getAllValues().get(0))
                     .isNotEqualTo(correlationId.getAllValues().get(1));
@@ -369,7 +370,7 @@ class LocationAffinityServiceTest {
             // The event still goes out: analytics dedups on the derived uuid and touches the row.
             verify(telemetryEventPublisher).publishAnomalyRecorded(
                     any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                    any(), any(), any(), any());
+                    any(), any(), any(), any(), notNull());
         }
 
         @Test

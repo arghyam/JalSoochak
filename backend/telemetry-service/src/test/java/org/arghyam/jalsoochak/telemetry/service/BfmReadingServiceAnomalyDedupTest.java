@@ -39,6 +39,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -136,7 +137,7 @@ class BfmReadingServiceAnomalyDedupTest {
                 contains("Unreadable image"),
                 eq(AnomalyConstants.STATUS_OPEN),
                 correlationCaptor.capture()
-        , any());
+        , any(), notNull());
         assertEquals(2, correlationCaptor.getAllValues().size());
         assertFalse(correlationCaptor.getAllValues().get(0).isBlank());
         assertEquals(correlationCaptor.getAllValues().get(0), correlationCaptor.getAllValues().get(1));
@@ -199,7 +200,7 @@ class BfmReadingServiceAnomalyDedupTest {
                 contains("Duplicate image submission detected"),
                 eq(AnomalyConstants.STATUS_OPEN),
                 correlationCaptor.capture()
-        , any());
+        , any(), notNull());
         assertEquals(2, correlationCaptor.getAllValues().size());
         assertFalse(correlationCaptor.getAllValues().get(0).isBlank());
         verify(telemetryTenantRepository, times(2)).createTenantAnomalyRecord(

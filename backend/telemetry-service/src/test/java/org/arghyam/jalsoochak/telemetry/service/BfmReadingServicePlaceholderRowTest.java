@@ -292,7 +292,7 @@ class BfmReadingServicePlaceholderRowTest {
                 anyString(),
                 anyInt(),
                 anyString()
-        , any());
+        , any(), any());
     }
 
     @Test

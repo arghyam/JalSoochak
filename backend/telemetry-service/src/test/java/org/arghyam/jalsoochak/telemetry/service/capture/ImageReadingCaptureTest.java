@@ -16,6 +16,7 @@ import org.arghyam.jalsoochak.telemetry.service.OcrReadingsRetryService;
 import org.arghyam.jalsoochak.telemetry.service.OcrReadingsUnavailableException;
 import org.arghyam.jalsoochak.telemetry.service.OcrRetryMode;
 import org.arghyam.jalsoochak.telemetry.service.RolloverResolutionService;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,10 +24,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -35,6 +39,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -324,7 +329,7 @@ class ImageReadingCaptureTest {
                 eq(TENANT_ID), eq(AnomalyConstants.TYPE_NO_METER_DETECTED), eq(OPERATOR_ID), eq(SCHEME_ID),
                 isNull(), isNull(), isNull(), eq(1), isNull(), isNull(), eq(0),
                 eq(AnomalyConstants.REASON_NO_METER_DETECTED),
-                eq(AnomalyConstants.STATUS_OPEN), anyString(), isNull());
+                eq(AnomalyConstants.STATUS_OPEN), anyString(), isNull(), notNull());
     }
 
     @Test
@@ -413,6 +418,41 @@ class ImageReadingCaptureTest {
         verify(bfmOcrExtractor, never()).extractReading(anyString(), any());
     }
 
+    /**
+     * Analytics keeps an anomaly's created_at on a repeat and dates it by that, so the same photo resent
+     * on a later IST day needs its own id, or that day's rejection is dated, and counted, on the first.
+     */
+    @Test
+    @DisplayName("the same photo keeps its anomaly id within an IST day and gets a new one on another day")
+    void imageAnomalyCorrelationIdIsPerArrivalDay() {
+        CaptureInput input = input(ReadingChannel.BFM, null, OcrRetryMode.NONE);
+        LocalDate day = LocalDate.of(2026, 3, 1);
+        String id = ImageReadingCapture.imageAnomalyCorrelationId(input, AnomalyConstants.TYPE_UNREADABLE_IMAGE, day);
+
+        assertThat(ImageReadingCapture.imageAnomalyCorrelationId(input, AnomalyConstants.TYPE_UNREADABLE_IMAGE, day))
+                .isEqualTo(id);
+        assertThat(ImageReadingCapture.imageAnomalyCorrelationId(
+                input, AnomalyConstants.TYPE_UNREADABLE_IMAGE, day.plusDays(1))).isNotEqualTo(id);
+    }
+
+    @Test
+    @DisplayName("the image anomaly id's arrival day is the IST day of the published raisedAt")
+    void imageAnomalyCorrelationIdArrivalDayMatchesRaisedAt() {
+        bfmPhotosGoToTheDefaultProvider();
+        when(bfmOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(null);
+        CaptureInput input = input(ReadingChannel.BFM, null, OcrRetryMode.NONE);
+
+        capture.capture(input);
+
+        ArgumentCaptor<String> correlationId = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Instant> raisedAt = ArgumentCaptor.forClass(Instant.class);
+        verify(telemetryEventPublisher).publishAnomalyRecorded(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                correlationId.capture(), any(), raisedAt.capture());
+        assertThat(correlationId.getValue()).isEqualTo(ImageReadingCapture.imageAnomalyCorrelationId(
+                input, AnomalyConstants.TYPE_UNREADABLE_IMAGE, LocalDate.ofInstant(raisedAt.getValue(), ReadingTime.ZONE)));
+    }
+
     private void verifyUnreadableImageAnomaly(String reason) {
         verify(telemetryTenantRepository).createTenantAnomalyRecord(eq(SCHEMA), argThat(anomaly ->
                 anomaly.userId() == OPERATOR_ID
@@ -425,7 +465,7 @@ class ImageReadingCaptureTest {
         verify(telemetryEventPublisher).publishAnomalyRecorded(
                 eq(TENANT_ID), eq(AnomalyConstants.TYPE_UNREADABLE_IMAGE), eq(OPERATOR_ID), eq(SCHEME_ID),
                 isNull(), isNull(), isNull(), eq(1), isNull(), isNull(), eq(0), eq(reason),
-                eq(AnomalyConstants.STATUS_OPEN), anyString(), isNull());
+                eq(AnomalyConstants.STATUS_OPEN), anyString(), isNull(), notNull());
     }
 
     private static OcrReadingResult readable(String reading, String confidence) {

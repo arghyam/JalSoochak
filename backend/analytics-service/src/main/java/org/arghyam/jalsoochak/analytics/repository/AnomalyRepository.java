@@ -23,8 +23,7 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             UPDATE Anomaly a
-            SET a.createdAt = :timestamp,
-                a.updatedAt = :timestamp
+            SET a.updatedAt = :timestamp
             WHERE a.uuid = :uuid
               AND a.deletedAt IS NULL
             """)

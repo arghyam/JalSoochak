@@ -17,8 +17,10 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.UUID;
 
@@ -106,6 +108,12 @@ public class TelemetryEventPublisher {
         }
     }
 
+    /**
+     * @param raisedAt when the caller raised the anomaly, read on the caller's thread: this method runs
+     *                 on {@code kafkaPublisherExecutor}, possibly long after, and the supply anomaly's
+     *                 correlation key carries the IST day of this same instant. {@code null} leaves
+     *                 analytics to date the anomaly by receipt.
+     */
     @Async("kafkaPublisherExecutor")
     public void publishAnomalyRecorded(Integer tenantId,
                                        Integer type,
@@ -121,7 +129,8 @@ public class TelemetryEventPublisher {
                                        String reason,
                                        Integer status,
                                        String correlationId,
-                                       String submissionCorrelationId) {
+                                       String submissionCorrelationId,
+                                       Instant raisedAt) {
         String eventUuid = resolveAnomalyEventUuid(correlationId, userId);
         AnomalyEvent event = AnomalyEvent.builder()
                 .eventType(EVENT_ANOMALY_RECORDED)
@@ -143,6 +152,8 @@ public class TelemetryEventPublisher {
                 // ANOMALY-SUBMISSION-LINK: carried separately from correlationId, which is the dedup
                 // key the event uuid above is derived from and must keep its meaning.
                 .submissionCorrelationId(submissionCorrelationId)
+                // UTC, like attemptedAt: analytics dates the anomaly by this, not by when it got the event.
+                .raisedAt(raisedAt != null ? LocalDateTime.ofInstant(raisedAt, ZoneOffset.UTC).toString() : null)
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);

@@ -18,9 +18,12 @@ import org.arghyam.jalsoochak.telemetry.service.OcrReadingsRetryService;
 import org.arghyam.jalsoochak.telemetry.service.OcrReadingsUnavailableException;
 import org.arghyam.jalsoochak.telemetry.service.OcrRetryMode;
 import org.arghyam.jalsoochak.telemetry.service.RolloverResolutionService;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.UUID;
@@ -232,6 +235,9 @@ public class ImageReadingCapture implements ReadingCapture {
 
     /** A rejected photo: no reading row is written, so the anomaly has no submission to point at. */
     private void recordImageAnomaly(CaptureInput input, int anomalyType, String reason) {
+        // One instant for both the key's arrival day and the published raisedAt, so the anomaly
+        // analytics dates by created_at always lands on the day its own key names.
+        Instant raisedAt = Instant.now();
         telemetryTenantRepository.createTenantAnomalyRecord(
                 input.schemaName(),
                 TenantAnomalyRecord.builder()
@@ -256,17 +262,24 @@ public class ImageReadingCapture implements ReadingCapture {
                 0,
                 reason,
                 AnomalyConstants.STATUS_OPEN,
-                imageAnomalyCorrelationId(input, anomalyType),
+                imageAnomalyCorrelationId(input, anomalyType, LocalDate.ofInstant(raisedAt, ReadingTime.ZONE)),
                 // ANOMALY-SUBMISSION-LINK: the submission is rejected here, before any
                 // flow_reading_table row is written, so there is nothing to point at.
-                null);
+                null,
+                raisedAt);
     }
 
-    /** The same photo gives the same id on every attempt, so analytics keeps one anomaly for it. */
-    private static String imageAnomalyCorrelationId(CaptureInput input, int anomalyType) {
+    /**
+     * The same photo gives the same id on every attempt within an IST day, so analytics keeps one
+     * anomaly for it per day. The arrival day is in the key because a repeat keeps the row's
+     * {@code created_at}: without it, the photo resent on a later day would be dated on the first.
+     * Ids minted before the day was added are not matched, so a repeat across that change adds one
+     * row instead of touching. Package-visible for tests.
+     */
+    static String imageAnomalyCorrelationId(CaptureInput input, int anomalyType, LocalDate arrivalDate) {
         String normalizedUrl = input.readingUrl() == null ? "" : input.readingUrl().trim();
         String key = anomalyType + ":" + input.operatorId() + ":"
-                + input.schemeId() + ":" + normalizedUrl;
+                + input.schemeId() + ":" + normalizedUrl + ":" + arrivalDate;
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
