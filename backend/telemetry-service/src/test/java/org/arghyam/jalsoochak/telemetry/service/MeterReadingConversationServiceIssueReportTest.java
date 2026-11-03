@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -117,7 +118,7 @@ class MeterReadingConversationServiceIssueReportTest {
                 eq("Meter not working"),
                 eq(AnomalyConstants.STATUS_OPEN),
                 org.mockito.ArgumentMatchers.anyString()
-        , any());
+        , any(), notNull());
         verify(telemetryTenantRepository, never()).createIssueReportRecord(
                 eq("tenant_test"),
                 eq(10L),

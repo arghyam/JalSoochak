@@ -51,6 +51,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.notNull;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -368,7 +369,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 anyString(),
                 ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
                 anyString()
-        , any());
+        , any(), any());
     }
 
     @Test
@@ -839,7 +840,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 org.mockito.ArgumentMatchers.eq("Manual reading submitted as override."),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
                 any()
-        , any());
+        , any(), notNull());
         verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                 org.mockito.ArgumentMatchers.eq(1),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS),
@@ -855,7 +856,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 anyString(),
                 anyInt(),
                 any()
-        , any());
+        , any(), any());
     }
 
     @Test

@@ -35,6 +35,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -324,7 +325,7 @@ class ImageReadingCaptureTest {
                 eq(TENANT_ID), eq(AnomalyConstants.TYPE_NO_METER_DETECTED), eq(OPERATOR_ID), eq(SCHEME_ID),
                 isNull(), isNull(), isNull(), eq(1), isNull(), isNull(), eq(0),
                 eq(AnomalyConstants.REASON_NO_METER_DETECTED),
-                eq(AnomalyConstants.STATUS_OPEN), anyString(), isNull());
+                eq(AnomalyConstants.STATUS_OPEN), anyString(), isNull(), notNull());
     }
 
     @Test
@@ -425,7 +426,7 @@ class ImageReadingCaptureTest {
         verify(telemetryEventPublisher).publishAnomalyRecorded(
                 eq(TENANT_ID), eq(AnomalyConstants.TYPE_UNREADABLE_IMAGE), eq(OPERATOR_ID), eq(SCHEME_ID),
                 isNull(), isNull(), isNull(), eq(1), isNull(), isNull(), eq(0), eq(reason),
-                eq(AnomalyConstants.STATUS_OPEN), anyString(), isNull());
+                eq(AnomalyConstants.STATUS_OPEN), anyString(), isNull(), notNull());
     }
 
     private static OcrReadingResult readable(String reading, String confidence) {

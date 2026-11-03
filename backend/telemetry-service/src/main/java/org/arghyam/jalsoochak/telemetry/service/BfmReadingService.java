@@ -44,6 +44,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
@@ -335,7 +336,8 @@ public class BfmReadingService {
                     // this submission has no row. The *previous* reading it duplicates is not the
                     // submission that caused the anomaly and must not be linked as if it were.
                     null,
-                    null
+                    null,
+                    Instant.now()
             );
             return CreateReadingResponse.builder()
                     .success(false)
@@ -567,6 +569,9 @@ public class BfmReadingService {
         // marks the operator absent and the scheme non-reporting for the day: intended, and called
         // out in the ops runbook so the daily-report gap is not chased as a pipeline fault.
         if (quarantined) {
+            // One instant for both the key's arrival day and the published raisedAt, so the anomaly
+            // analytics dates by created_at always lands on the day its own key names.
+            Instant raisedAt = Instant.now();
             recordAnomaly(
                     schemaName,
                     tenantId,
@@ -590,12 +595,13 @@ public class BfmReadingService {
                             operatorInRequest.id(),
                             request.getSchemeId(),
                             LocalDate.from(readingAt),
-                            ReadingTime.today()),
+                            LocalDate.ofInstant(raisedAt, ReadingTime.ZONE)),
                     // ANOMALY-SUBMISSION-LINK: the quarantined row IS the submission that caused
                     // this. Both were already in hand here and were previously dropped, which is
                     // what left the anomaly matched to its reading only by operator, scheme and day.
                     readingId,
-                    storageCorrelationId);
+                    storageCorrelationId,
+                    raisedAt);
             return CreateReadingResponse.builder()
                     .success(false)
                     // THRESHOLD-DISCLOSURE: names no ceiling, population or FHTC figure. Echoing
@@ -1108,7 +1114,8 @@ public class BfmReadingService {
                 // — which is the submission this anomaly is about, whether it is published (case B)
                 // or itself quarantined (case C).
                 reading.id(),
-                reading.correlationId());
+                reading.correlationId(),
+                Instant.now());
 
         return CreateReadingResponse.builder()
                 .success(false)
@@ -1375,7 +1382,8 @@ public class BfmReadingService {
                                     Integer consecutiveDaysMissed,
                                     String correlationId,
                                     Long flowReadingId,
-                                    String submissionCorrelationId) {
+                                    String submissionCorrelationId,
+                                    Instant raisedAt) {
         telemetryTenantRepository.createTenantAnomalyRecord(
                 schemaName,
                 tenantAnomaly(userId, schemeId, anomalyType, reason, retries,
@@ -1397,7 +1405,8 @@ public class BfmReadingService {
                 reason,
                 AnomalyConstants.STATUS_OPEN,
                 correlationId,
-                submissionCorrelationId
+                submissionCorrelationId,
+                raisedAt
         );
     }
 

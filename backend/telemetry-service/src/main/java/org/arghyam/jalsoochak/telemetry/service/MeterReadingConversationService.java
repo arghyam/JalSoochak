@@ -37,6 +37,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
@@ -781,7 +782,8 @@ public class MeterReadingConversationService {
                         // issue-report menu and mean nothing was submitted. createIssueReportRecord
                         // runs only in the else-branch below, for issues NOT stored as anomalies, so
                         // this branch writes no flow_reading_table row to link.
-                        null
+                        null,
+                        Instant.now()
                 );
                 telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                         tenantId,
@@ -1089,7 +1091,8 @@ public class MeterReadingConversationService {
                     null,
                     // ANOMALY-SUBMISSION-LINK: /others/submitted is a free-text non-submission
                     // report — no reading was sent and no row is written.
-                    null
+                    null,
+                    Instant.now()
             );
             telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                     tenantId,
@@ -1548,7 +1551,8 @@ public class MeterReadingConversationService {
                                 "Manual reading is above allowed maximum reading (" + toPlain(maxAllowedReading) + ").",
                                 AnomalyConstants.STATUS_OPEN,
                                 null,
-                                pendingOpt.map(TelemetryPendingMeterChangeRecord::correlationId).orElse(null)
+                                pendingOpt.map(TelemetryPendingMeterChangeRecord::correlationId).orElse(null),
+                                Instant.now()
                         );
                         // THRESHOLD-DISCLOSURE: the reply says the value was too high but not what the
                         // limit is. Echoing "Maximum allowed reading: N" let any caller read the tenant's
@@ -1663,7 +1667,8 @@ public class MeterReadingConversationService {
                     // ANOMALY-SUBMISSION-LINK: correlationId here is already the submission's own —
                     // reused from the pending row or today's row a few lines up, or minted for the
                     // row just created — so the warehouse gets the same value the fact row carries.
-                    correlationId
+                    correlationId,
+                    Instant.now()
             );
 
             int consecutiveOverrideDays = calculateConsecutiveDays(

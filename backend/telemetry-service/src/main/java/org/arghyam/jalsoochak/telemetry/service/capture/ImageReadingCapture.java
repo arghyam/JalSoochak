@@ -21,6 +21,7 @@ import org.arghyam.jalsoochak.telemetry.service.RolloverResolutionService;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.UUID;
@@ -259,7 +260,8 @@ public class ImageReadingCapture implements ReadingCapture {
                 imageAnomalyCorrelationId(input, anomalyType),
                 // ANOMALY-SUBMISSION-LINK: the submission is rejected here, before any
                 // flow_reading_table row is written, so there is nothing to point at.
-                null);
+                null,
+                Instant.now());
     }
 
     /** The same photo gives the same id on every attempt, so analytics keeps one anomaly for it. */

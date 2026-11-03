@@ -46,6 +46,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -365,7 +366,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
                     eq(0),
                     eq(AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_CORRECTION_REJECTED_PUBLISHED),
                     eq(AnomalyConstants.STATUS_OPEN),
-                    isNull(), any());
+                    isNull(), any(), notNull());
         }
 
         /**
@@ -409,7 +410,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
                             && anomaly.reason() != null));
             verify(telemetryEventPublisher, times(2)).publishAnomalyRecorded(
                     any(), eq(AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY), any(), any(), any(),
-                    any(), any(), any(), any(), any(), any(), anyString(), any(), isNull(), any());
+                    any(), any(), any(), any(), any(), any(), anyString(), any(), isNull(), any(), notNull());
         }
     }
 
