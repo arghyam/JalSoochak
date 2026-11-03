@@ -103,24 +103,8 @@ class FlowVisionBfmOcrExtractorTest {
     }
 
     @Test
-    void extractReadingPointsAnOldFormatRedReadingAsBefore() {
-        // TRANSITIONAL: FlowVision's previous version returned a red reading as digits only.
-        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
-        restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("004983", "red"), HttpStatus.OK));
-
-        FlowVisionBfmOcrExtractor service = new FlowVisionBfmOcrExtractor(restTemplate, FLOW_VISION_URL);
-
-        OcrReadingResult result = service.extractReading("https://image-url", null);
-
-        assertNotNull(result);
-        assertEquals("498.3", result.getAdjustedReading().toPlainString());
-        assertEquals("00498.3", result.getRawMeterReading());
-    }
-
-    @Test
-    void extractReadingPointsAOneDigitRedReadingAsBefore() {
-        // TRANSITIONAL: until FlowVision owns the point, a red reading without one keeps the previous rule,
-        // whatever its length. The point goes in without a leading zero so the digits stay the same.
+    void extractReadingUsesARedReadingWithoutAPointAsReturned() {
+        // FlowVision alone places the point; a red reading it returns without one is used unchanged.
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("5", "red"), HttpStatus.OK));
 
@@ -129,8 +113,8 @@ class FlowVisionBfmOcrExtractorTest {
         OcrReadingResult result = service.extractReading("https://image-url", null);
 
         assertNotNull(result);
-        assertEquals("0.5", result.getAdjustedReading().toPlainString());
-        assertEquals(".5", result.getRawMeterReading());
+        assertEquals("5", result.getAdjustedReading().toPlainString());
+        assertEquals("5", result.getRawMeterReading());
     }
 
     @Test
