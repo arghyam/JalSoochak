@@ -18,8 +18,12 @@ public class ConversationLocalizationService {
     private static final Pattern SUBMITTED_PREVIOUS_PATTERN = Pattern.compile(
             "(?i)submitted\\s+reading:\\s*([^\\.]+)\\.\\s*previous\\s+reading:\\s*([^\\.]+)\\.?"
     );
+    /** Only the number: BfmReadingService writes the last confirmed reading straight after it, with no full stop. */
     private static final Pattern EXTRACTED_READING_PATTERN = Pattern.compile(
-            "(?i)extracted\\s+reading:\\s*([^\\.]+)"
+            "(?i)extracted\\s+reading:\\s*(\\d+(?:\\.\\d+)?)"
+    );
+    private static final Pattern LAST_CONFIRMED_READING_PATTERN = Pattern.compile(
+            "(?i)last\\s+confirmed\\s+reading\\s+was\\s+(\\d+(?:\\.\\d+)?)"
     );
     /** {@code SubmittedValueCapture.aboveMaximumMessage}: the maximum, then the unit if the channel has one. */
     private static final Pattern ABOVE_MAXIMUM_PATTERN = Pattern.compile(
@@ -284,15 +288,27 @@ public class ConversationLocalizationService {
 
             // ── Reading results ─────────────────────────────────────────────────────────────────────
             new Recognizer(normalized -> normalized.contains("reading captured successfully"), text -> {
-                Matcher matcher = EXTRACTED_READING_PATTERN.matcher(text);
-                return matcher.find()
-                        ? new Recognized(ConversationMessageCode.READING_CAPTURED_WITH_VALUE, matcher.group(1).trim())
-                        : new Recognized(ConversationMessageCode.READING_CAPTURED);
+                Matcher extracted = EXTRACTED_READING_PATTERN.matcher(text);
+                Matcher lastConfirmed = LAST_CONFIRMED_READING_PATTERN.matcher(text);
+                boolean hasExtracted = extracted.find();
+                boolean hasLastConfirmed = lastConfirmed.find();
+                if (hasExtracted && hasLastConfirmed) {
+                    return new Recognized(ConversationMessageCode.READING_CAPTURED_WITH_VALUE_AND_LAST_CONFIRMED,
+                            extracted.group(1), lastConfirmed.group(1));
+                }
+                if (hasExtracted) {
+                    return new Recognized(ConversationMessageCode.READING_CAPTURED_WITH_VALUE, extracted.group(1));
+                }
+                if (hasLastConfirmed) {
+                    return new Recognized(ConversationMessageCode.READING_CAPTURED_WITH_LAST_CONFIRMED,
+                            lastConfirmed.group(1));
+                }
+                return new Recognized(ConversationMessageCode.READING_CAPTURED);
             }),
             new Recognizer(normalized -> normalized.contains("low ocr confidence"), text -> {
                 Matcher matcher = EXTRACTED_READING_PATTERN.matcher(text);
                 return matcher.find()
-                        ? new Recognized(ConversationMessageCode.LOW_OCR_CONFIDENCE_WITH_VALUE, matcher.group(1).trim())
+                        ? new Recognized(ConversationMessageCode.LOW_OCR_CONFIDENCE_WITH_VALUE, matcher.group(1))
                         : new Recognized(ConversationMessageCode.LOW_OCR_CONFIDENCE);
             }),
             recognize("invalid reading value", ConversationMessageCode.INVALID_READING_VALUE),

@@ -38,6 +38,7 @@ class ConversationLocalizationServiceTest {
 
     private static final String CONTACT = "919999900001";
     private static final String HINDI = "hindi";
+    private static final String PUNJABI = "punjabi";
     private static final ConversationMessageCode FALLBACK = ConversationMessageCode.READING_NOT_PROCESSED;
     private static final String FALLBACK_TEXT = "Reading could not be processed.";
 
@@ -508,10 +509,56 @@ class ConversationLocalizationServiceTest {
                     .isEqualTo("रीडिंग सफलतापूर्वक दर्ज हुई।");
         }
 
+        /** BfmReadingService appends the last confirmed reading without a full stop before it. */
+        @Test
+        void translatesTheLastConfirmedReadingInsteadOfCarryingItAsTheExtractedValue() {
+            String english = "Reading captured successfully. Extracted reading: 1234 "
+                    + "Your last confirmed reading was 1200.";
+
+            assertThat(service.localizeMessage(english, HINDI))
+                    .isEqualTo("रीडिंग सफलतापूर्वक दर्ज हुई। प्राप्त रीडिंग: 1234। "
+                            + "आपकी पिछली पुष्टि की गई रीडिंग 1200 थी।");
+        }
+
+        @Test
+        void translatesTheLastConfirmedReadingIntoPunjabi() {
+            String english = "Reading captured successfully. Extracted reading: 1234 "
+                    + "Your last confirmed reading was 1200.";
+
+            assertThat(service.localizeMessage(english, PUNJABI))
+                    .isEqualTo("ਰੀਡਿੰਗ ਸਫਲਤਾਪੂਰਵਕ ਦਰਜ ਹੋ ਗਈ। ਪੜ੍ਹੀ ਗਈ ਰੀਡਿੰਗ: 1234। "
+                            + "ਤੁਹਾਡੀ ਪਿਛਲੀ ਪੁਸ਼ਟੀ ਕੀਤੀ ਰੀਡਿੰਗ 1200 ਸੀ।");
+        }
+
+        /** A reading with no OCR result carries no extracted value, only the last confirmed one. */
+        @Test
+        void keepsTheLastConfirmedReadingWithoutAnExtractedReading() {
+            assertThat(service.localizeMessage(
+                    "Reading captured successfully Your last confirmed reading was 1200.", HINDI))
+                    .isEqualTo("रीडिंग सफलतापूर्वक दर्ज हुई। आपकी पिछली पुष्टि की गई रीडिंग 1200 थी।");
+        }
+
+        @Test
+        void keepsTheDecimalPartOfBothReadings() {
+            String english = "Reading captured successfully. Extracted reading: 1234.5 "
+                    + "Your last confirmed reading was 1200.25.";
+
+            assertThat(service.localizeMessage(english, HINDI))
+                    .isEqualTo("रीडिंग सफलतापूर्वक दर्ज हुई। प्राप्त रीडिंग: 1234.5। "
+                            + "आपकी पिछली पुष्टि की गई रीडिंग 1200.25 थी।");
+        }
+
         @Test
         void carriesTheExtractedReadingIntoTheHindiLowConfidencePrompt() {
             assertThat(service.localizeMessage("Low OCR confidence. Extracted reading: 987", HINDI))
                     .isEqualTo("OCR भरोसा कम है। प्राप्त रीडिंग: 987। कृपया रीडिंग की पुष्टि करें।");
+        }
+
+        @Test
+        void keepsTheDecimalPartOfTheReadingInTheLowConfidencePrompt() {
+            assertThat(service.localizeMessage(
+                    "Low OCR confidence. Extracted reading: 987.5. Please confirm reading.", HINDI))
+                    .isEqualTo("OCR भरोसा कम है। प्राप्त रीडिंग: 987.5। कृपया रीडिंग की पुष्टि करें।");
         }
 
         @Test
@@ -530,6 +577,8 @@ class ConversationLocalizationServiceTest {
         @ValueSource(strings = {
                 "Reading cannot be less than previous confirmed reading. Submitted reading: 100. Previous reading: 200.",
                 "Reading captured successfully. Extracted reading: 1234",
+                "Reading captured successfully. Extracted reading: 1234 Your last confirmed reading was 1200.",
+                "Reading captured successfully Your last confirmed reading was 1200.",
                 "Low OCR confidence. Extracted reading: 987",
                 "Language selected: Hindi",
                 "Reading can't be more than the allowed limit."
