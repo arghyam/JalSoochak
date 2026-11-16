@@ -107,18 +107,13 @@ class UserEventPublisherTest {
         }
 
         @Test
-        @DisplayName("batches large phone lists into chunks of 1000")
+        @DisplayName("batches large phone lists into chunks of 100")
         void batchesLargeList() {
             when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), any())).thenReturn(true);
 
-            List<String> phones = new ArrayList<>();
-            for (int i = 0; i < 2500; i++) {
-                phones.add("9198765" + String.format("%05d", i));
-            }
+            publisher.publishAdminWelcomeMessages("mp", 1, phones(250));
 
-            publisher.publishAdminWelcomeMessages("mp", 1, phones);
-
-            // 2500 phones → 3 batches (1000 + 1000 + 500)
+            // 250 phones → 3 batches (100 + 100 + 50)
             verify(kafkaProducer, times(3)).publishJson(eq(UserEventPublisher.COMMON_TOPIC), any());
         }
     }
@@ -165,6 +160,21 @@ class UserEventPublisherTest {
                     .containsExactly("UPDATE_USER_LANGUAGE", "SEND_WELCOME_MESSAGE");
             assertThat(events).extracting(PumpOperatorMessagingEvent::getWhatsappLanguageId)
                     .containsOnly("en");
+        }
+
+        @Test
+        @DisplayName("splits each list into events of at most 100 phones, all language updates first")
+        void batchesLargeListsIntoEventsOf100() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("mp"), any())).thenReturn(true);
+
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", phones(150), phones(250));
+
+            List<PumpOperatorMessagingEvent> events = awaitPublished("mp", 5);
+            assertThat(events).extracting(PumpOperatorMessagingEvent::getEventType).containsExactly(
+                    "UPDATE_USER_LANGUAGE", "UPDATE_USER_LANGUAGE",
+                    "SEND_WELCOME_MESSAGE", "SEND_WELCOME_MESSAGE", "SEND_WELCOME_MESSAGE");
+            assertThat(events).extracting(e -> e.getPumpOperatorPhones().size())
+                    .containsExactly(100, 50, 100, 100, 50);
         }
 
         @Test
@@ -236,5 +246,13 @@ class UserEventPublisherTest {
 
             awaitPublished("tr", 2);
         }
+    }
+
+    private static List<String> phones(int count) {
+        List<String> phones = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            phones.add("91XXXXX" + String.format("%05d", i));
+        }
+        return phones;
     }
 }

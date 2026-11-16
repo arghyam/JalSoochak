@@ -23,7 +23,11 @@ import java.util.List;
 public class UserEventPublisher {
 
     public static final String COMMON_TOPIC = "common-topic";
-    private static final int MAX_PHONES_PER_EVENT = 1000;
+    /**
+     * message-service makes a few WhatsApp provider calls per phone and must finish each Kafka poll
+     * (up to 5 events) within its 600s max.poll.interval.ms, or the poll is delivered, and sent, again.
+     */
+    private static final int MAX_PHONES_PER_EVENT = 100;
 
     private final KafkaProducer kafkaProducer;
     private final ExecutorService publishExecutor = Executors.newFixedThreadPool(4);
