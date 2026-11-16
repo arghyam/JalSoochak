@@ -95,6 +95,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
 
         when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(TENANT));
         when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("English");
+        when(operatorContextService.ensureOperatorLanguage(any(), anyInt())).thenReturn("English");
         when(localizationService.normalizeLanguageKey(anyString())).thenReturn("english");
         when(localizationService.resolveLanguageKeyForContact(any())).thenReturn("english");
         when(templatesService.toTemplateLanguageCode("english")).thenReturn("en");
@@ -248,14 +249,18 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
             verify(operatorLanguageEventPublisher).publishLanguageUpdated(SCHEMA, TENANT, CONTACT, "Hindi");
         }
 
-        /** The chatbot may identify the operator by a phone hash; the event needs the phone itself. */
+        /**
+         * The chatbot may identify the operator by a phone hash; the language is saved and published under
+         * the phone itself, which is what every read of it looks up.
+         */
         @Test
-        void publishesTheOperatorsPhoneRatherThanTheContactId() {
+        void savesAndPublishesUnderTheOperatorsPhoneRatherThanTheContactId() {
             String phoneHash = "a".repeat(64);
             when(operatorContextService.resolveOperatorWithSchema(phoneHash)).thenReturn(operator(TENANT));
 
             service.selectedLanguageMessage(languageRequest(phoneHash, "2"));
 
+            verify(userLanguagePreferenceRepository).upsert(SCHEMA, CONTACT, "Hindi");
             verify(operatorLanguageEventPublisher).publishLanguageUpdated(SCHEMA, TENANT, CONTACT, "Hindi");
         }
 

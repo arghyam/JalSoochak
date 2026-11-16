@@ -170,6 +170,35 @@ class UserPreferenceRepositoriesIntegrationTest {
 
             assertThat(languageRepository.findLanguage("tenant_mp", CONTACT)).isEmpty();
         }
+
+        @Test
+        void setLanguageWhereUnsetAddsARowForAContactWithNone() {
+            assertThat(languageRepository.setLanguageWhereUnset("tenant_as", RAW_CONTACT, "Punjabi")).isTrue();
+
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT contact_id FROM tenant_as.user_language_preference", String.class))
+                    .isEqualTo(CONTACT);
+            assertThat(languageRepository.findLanguage("tenant_as", CONTACT)).contains("Punjabi");
+        }
+
+        @Test
+        void setLanguageWhereUnsetFillsABlankLanguage() {
+            insertLanguage("tenant_as", "  ", OLDER);
+
+            assertThat(languageRepository.setLanguageWhereUnset("tenant_as", CONTACT, "Punjabi")).isTrue();
+
+            assertThat(rowCount("tenant_as", "user_language_preference")).isEqualTo(1);
+            assertThat(languageRepository.findLanguage("tenant_as", CONTACT)).contains("Punjabi");
+        }
+
+        @Test
+        void setLanguageWhereUnsetNeverOverwritesAChosenLanguage() {
+            languageRepository.upsert("tenant_as", CONTACT, "Hindi");
+
+            assertThat(languageRepository.setLanguageWhereUnset("tenant_as", RAW_CONTACT, "Punjabi")).isFalse();
+
+            assertThat(languageRepository.findLanguage("tenant_as", CONTACT)).contains("Hindi");
+        }
     }
 
     @Nested
