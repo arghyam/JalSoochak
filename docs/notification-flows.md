@@ -239,7 +239,7 @@ Published by `user-service` (`UserEventPublisher.publishPumpOperatorOnboardedAft
 
 The shared key puts both on one partition, so message-service sets an operator's language before it starts their welcome flow.
 
-**Batch sizing.** message-service takes up to 5 events per poll (`max-poll-records`) and must finish them within `max.poll.interval.ms` (600 s), or the poll is delivered, and the welcomes sent, again. Each phone costs up to two provider calls (an opt-in, then the language update or the flow), spaced at least `whatsapp.request-interval-ms` (500 ms) apart: 5 × 100 × 2 × 0.5 s ≈ 500 s. Change `max-poll-records`, `MAX_PHONES_PER_EVENT` or the request interval only with this sum in mind.
+**Batch sizing.** message-service takes one event per poll (`max-poll-records: 1`) and must finish it within `max.poll.interval.ms` (600 s), or the poll is delivered, and the welcomes sent, again. Each phone costs up to two provider calls (an opt-in, then the language update or the flow), spaced at least `whatsapp.request-interval-ms` (500 ms) apart: 100 × 2 × 0.5 s = 100 s at best, so a call can average about 3 s before an event runs over. Change `max-poll-records`, `MAX_PHONES_PER_EVENT` or the request interval only with this sum in mind. A pod that stops mid-event still has that event delivered again, re-sending its welcomes.
 
 ### Kafka event
 

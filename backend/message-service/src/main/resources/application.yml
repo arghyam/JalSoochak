@@ -37,9 +37,9 @@ spring:
       auto-offset-reset: earliest
       enable-auto-commit: false
       # Every record of one poll must be handled within max.poll.interval.ms, or the poll is
-      # delivered, and sent, again. A pump-operator event carries up to 100 phones, each a few
-      # WhatsApp provider calls, so keep this small.
-      max-poll-records: 5
+      # delivered, and sent, again. A pump-operator event carries up to 100 phones, each up to two
+      # WhatsApp provider calls at least 500 ms apart: 100 s or more per event, so take one at a time.
+      max-poll-records: 1
       properties:
         session.timeout.ms: 30000
         heartbeat.interval.ms: 10000

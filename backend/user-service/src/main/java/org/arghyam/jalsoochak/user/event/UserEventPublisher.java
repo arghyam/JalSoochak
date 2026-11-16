@@ -24,8 +24,9 @@ public class UserEventPublisher {
 
     public static final String COMMON_TOPIC = "common-topic";
     /**
-     * message-service makes a few WhatsApp provider calls per phone and must finish each Kafka poll
-     * (up to 5 events) within its 600s max.poll.interval.ms, or the poll is delivered, and sent, again.
+     * message-service makes up to two WhatsApp provider calls per phone, at least 500 ms apart, and must
+     * finish each Kafka poll (one event) within its 600s max.poll.interval.ms, or the poll is delivered,
+     * and sent, again.
      */
     private static final int MAX_PHONES_PER_EVENT = 100;
 

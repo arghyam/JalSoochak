@@ -9,9 +9,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
+import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.ssl.SslBundles;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.kafka.listener.ConsumerRecordRecoverer;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
@@ -124,6 +128,23 @@ class KafkaConfigTest {
                 .containsEntry(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, "600000")
                 .containsEntry(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class)
                 .containsEntry(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+    }
+
+    /**
+     * Every record of one poll must be handled within {@code max.poll.interval.ms}. A pump-operator event
+     * carries up to 100 phones, each up to two WhatsApp provider calls at least 500 ms apart, so one event
+     * takes 100 s or more. Five per poll took 500 s of the 600 s, and a slower provider pushed the poll
+     * over: the consumer was evicted and the poll delivered, and its welcomes sent, again.
+     */
+    @Test
+    void applicationYaml_takesOneEventPerPoll_withinA600sPollInterval() throws IOException {
+        PropertySource<?> yaml = new YamlPropertySourceLoader()
+                .load("application.yml", new ClassPathResource("application.yml")).get(0);
+
+        assertThat(String.valueOf(yaml.getProperty("spring.kafka.consumer.max-poll-records")))
+                .isEqualTo("1");
+        assertThat(String.valueOf(yaml.getProperty("spring.kafka.consumer.properties.max.poll.interval.ms")))
+                .isEqualTo("600000");
     }
 
     @Test
