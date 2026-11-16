@@ -86,7 +86,7 @@ public class NotificationEventRouter {
      * Dead-letter topic for {@code SEND_WELCOME_MESSAGE} per-phone failures.
      *
      * <p>Messages are published here when a single phone cannot be processed
-     * (missing {@code whatsapp_connection_id} or a WhatsApp provider API error) so that
+     * (no user, an opt-in that returned no contact, or a WhatsApp provider API error) so that
      * already-succeeded phones in the same batch are not re-sent by Kafka retry.
      *
      * <p>This service intentionally does <em>not</em> consume this topic.
@@ -348,7 +348,7 @@ public class NotificationEventRouter {
         }
 
         String tenantSchema = "tenant_" + tenantCode;
-        int success = 0, failed = 0;
+        int success = 0, skipped = 0, failed = 0;
         for (JsonNode phoneNode : phonesNode) {
             String phone = phoneNode.asText("");
             if (phone.isBlank()) {
@@ -357,25 +357,29 @@ public class NotificationEventRouter {
                 continue;
             }
             try {
-                Long contactId = fetchWhatsappConnectionId(tenantSchema, phone);
-                if (contactId == null || contactId <= 0) {
-                    log.warn("[Router/UPDATE_LANGUAGE] No whatsapp_connection_id found in schema={}", tenantSchema);
-                    log.debug("[Router/UPDATE_LANGUAGE] No whatsapp_connection_id for phone={} in schema={}", phone, tenantSchema);
-                    failed++;
+                UserContactInfo contact = resolveContact(tenantSchema, phone);
+                if (!contact.hasContact()) {
+                    // No user, or an opt-in that yielded no contact (a dry run answers 0): a retry
+                    // would end the same way, so this is a skip, not a failure.
+                    log.warn("[Router/UPDATE_LANGUAGE] No WhatsApp contact ({}) in schema={}, skipping",
+                            contact.missingReason(), tenantSchema);
+                    log.debug("[Router/UPDATE_LANGUAGE] No WhatsApp contact for phone={} in schema={}", phone, tenantSchema);
+                    skipped++;
                     continue;
                 }
-                whatsAppSender.updateContactLanguage(contactId, whatsappLanguageId);
+                whatsAppSender.updateContactLanguage(contact.contactId(), whatsappLanguageId);
                 success++;
             } catch (Exception e) {
                 failed++;
                 log.error("[Router/UPDATE_LANGUAGE] Failed to update language: {}", e.getMessage(), e);
             }
         }
-        log.info("[Router/UPDATE_LANGUAGE] complete — success={} failed={} schema={}", success, failed, tenantSchema);
+        log.info("[Router/UPDATE_LANGUAGE] complete — success={} skipped={} failed={} schema={}",
+                success, skipped, failed, tenantSchema);
         if (failed > 0) {
             // Intentionally throw to trigger Kafka retry of the whole batch.
-            // updateContactLanguage is idempotent (re-setting the same language ID on a
-            // contact is harmless), so retrying already-succeeded phones is safe.
+            // Opt-in and updateContactLanguage are both idempotent (the contact keeps its id, and
+            // re-setting the same language ID is harmless), so retrying already-succeeded phones is safe.
             // Contrast with handleSendWelcomeMessage, where retrying would re-send a
             // one-time onboarding message — that is why the DLT pattern is used there instead.
             throw new IllegalStateException(
@@ -419,14 +423,14 @@ public class NotificationEventRouter {
                     .metadata(welcomeFlowId.isBlank() ? Map.of() : Map.of("flowRef", welcomeFlowId));
             LedgerRef ref = null;
             try {
-                UserContactInfo info = fetchUserContactInfo(tenantSchema, phone);
+                UserContactInfo info = resolveContact(tenantSchema, phone);
                 entry.userId(info.userId());
-                if (info.contactId() == null || info.contactId() <= 0) {
-                    log.warn("[Router/WELCOME] No whatsapp_connection_id found in schema={}", tenantSchema);
-                    log.debug("[Router/WELCOME] No whatsapp_connection_id for phone={} in schema={}", phone, tenantSchema);
-                    ledger.recordOutcome(entry.build(),
-                            LedgerOutcome.failed(DispatchStatus.SKIPPED_NO_CONTACT, null, null, null));
-                    publishWelcomeDlt(tenantSchema, phone, "no_whatsapp_connection_id");
+                if (!info.hasContact()) {
+                    log.warn("[Router/WELCOME] No WhatsApp contact ({}) in schema={}", info.missingReason(), tenantSchema);
+                    log.debug("[Router/WELCOME] No WhatsApp contact for phone={} in schema={}", phone, tenantSchema);
+                    ledger.recordOutcome(entry.build(), LedgerOutcome.failed(DispatchStatus.SKIPPED_NO_CONTACT,
+                            info.userId() == null ? null : "OPT_IN", null, null));
+                    publishWelcomeDlt(tenantSchema, phone, info.missingReason());
                     failed++;
                     continue;
                 }
@@ -924,25 +928,49 @@ public class NotificationEventRouter {
         }
     }
 
-    /**
-     * Looks up the WhatsApp contact ID stored for a given phone number in the tenant's user_table.
-     * tenantSchema is pre-validated to match {@code [a-z0-9_]+} before this call.
-     */
-    private Long fetchWhatsappConnectionId(String tenantSchema, String phone) {
-        Long byHash = fetchWhatsappConnectionIdByHash(tenantSchema, phone);
-        if (byHash != null) {
-            return byHash;
-        }
-        String sql = "SELECT whatsapp_connection_id FROM " + tenantSchema
-                + ".user_table WHERE phone_number = ? LIMIT 1";
-        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getObject("whatsapp_connection_id", Long.class), phone);
-        return rows.isEmpty() ? null : rows.get(0);
-    }
-
     record UserContactInfo(Long contactId, String name, Long userId) {
         UserContactInfo(Long contactId, String name) {
             this(contactId, name, null);
         }
+
+        boolean hasContact() {
+            return contactId != null && contactId > 0;
+        }
+
+        /** Why there is no contact, for logs and the welcome dead-letter record. */
+        String missingReason() {
+            return userId == null ? "user_not_found" : "optin_failed";
+        }
+    }
+
+    /**
+     * The operator's WhatsApp contact: the stored {@code whatsapp_connection_id}, or, for an operator
+     * the provider has never been given, a fresh opt-in by phone. A new contact id is published as
+     * {@code WHATSAPP_CONTACT_REGISTERED} so tenant-service stores it. A phone with no user in the
+     * tenant is not opted in. The result has no contact when there is no user or the opt-in returned
+     * none (a dry run answers 0). tenantSchema is pre-validated to match {@code [a-z0-9_]+}.
+     */
+    private UserContactInfo resolveContact(String tenantSchema, String phone) {
+        UserContactInfo info = fetchUserContactInfo(tenantSchema, phone);
+        if (info.hasContact() || info.userId() == null) {
+            return info;
+        }
+        Long contactId = whatsAppSender.optIn(normalizeIndianPhone(phone));
+        UserContactInfo optedIn = new UserContactInfo(contactId, info.name(), info.userId());
+        if (optedIn.hasContact()) {
+            publishContactRegistered(tenantSchema, info.userId(), contactId);
+        }
+        return optedIn;
+    }
+
+    private void publishContactRegistered(String tenantSchema, long userId, long contactId) {
+        kafkaProducer.publishJson(COMMON_TOPIC,
+                WhatsAppContactRegisteredEvent.builder()
+                        .eventType("WHATSAPP_CONTACT_REGISTERED")
+                        .tenantSchema(tenantSchema)
+                        .userId(userId)
+                        .contactId(contactId)
+                        .build());
     }
 
     /**
@@ -951,7 +979,7 @@ public class NotificationEventRouter {
      */
     private UserContactInfo fetchUserContactInfo(String tenantSchema, String phone) {
         UserContactInfo byHash = fetchUserContactInfoByHash(tenantSchema, phone);
-        if (byHash.contactId() != null || byHash.name() != null) {
+        if (byHash.userId() != null || byHash.contactId() != null || byHash.name() != null) {
             return byHash;
         }
         String sql = "SELECT id, whatsapp_connection_id, title FROM " + tenantSchema
@@ -963,23 +991,6 @@ public class NotificationEventRouter {
                         rs.getObject("id", Long.class)),
                 phone);
         return rows.isEmpty() ? new UserContactInfo(null, null) : rows.get(0);
-    }
-
-    private Long fetchWhatsappConnectionIdByHash(String tenantSchema, String phone) {
-        String sql = "SELECT whatsapp_connection_id FROM " + tenantSchema
-                + ".user_table WHERE phone_number_hash = ? LIMIT 1";
-        try {
-            for (String candidate : buildPhoneCandidates(phone)) {
-                String lookupHash = piiEncryptionService.hmac(candidate);
-                List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getObject("whatsapp_connection_id", Long.class), lookupHash);
-                if (rows != null && !rows.isEmpty()) {
-                    return rows.get(0);
-                }
-            }
-        } catch (Exception ex) {
-            return null;
-        }
-        return null;
     }
 
     private UserContactInfo fetchUserContactInfoByHash(String tenantSchema, String phone) {

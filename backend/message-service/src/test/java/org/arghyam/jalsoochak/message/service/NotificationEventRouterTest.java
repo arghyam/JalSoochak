@@ -41,6 +41,7 @@ import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.TenantRef;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
+import org.arghyam.jalsoochak.message.event.WhatsAppContactRegisteredEvent;
 import org.arghyam.jalsoochak.message.exception.StorageException;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
@@ -180,25 +181,10 @@ class NotificationEventRouterTest {
     }
 
     /**
-     * Helper method to stub jdbcTemplate.query for language-update user lookup (returns Long contact IDs).
+     * Stubs the operator lookup by phone that the welcome and language-update handlers share.
      */
     @SuppressWarnings("unchecked")
-    private void stubUserLookup(String tenantCode, String phone, List<Long> returnList) {
-        when(jdbcTemplate.query(
-                argThat(sql -> sql != null
-                        && sql.contains("FROM tenant_" + tenantCode + ".user_table")
-                        && sql.contains("WHERE phone_number = ?")
-                        && !sql.contains("title")),
-                any(RowMapper.class),
-                eq(phone)))
-                .thenReturn(returnList);
-    }
-
-    /**
-     * Helper method to stub jdbcTemplate.query for welcome-flow contact info lookup (returns UserContactInfo).
-     */
-    @SuppressWarnings("unchecked")
-    private void stubWelcomeLookup(String tenantCode, String phone,
+    private void stubContactLookup(String tenantCode, String phone,
                                    List<NotificationEventRouter.UserContactInfo> returnList) {
         when(jdbcTemplate.query(
                 argThat(sql -> sql != null
@@ -908,7 +894,7 @@ class NotificationEventRouterTest {
 
     @Test
     void route_sendsWelcomeMessage_whenContactIdFound() {
-        stubWelcomeLookup("mp", "919111111111",
+        stubContactLookup("mp", "919111111111",
                 List.of(new NotificationEventRouter.UserContactInfo(88L, "Ramesh Kumar")));
         when(messageTemplateService.findStateName(anyInt())).thenReturn("Madhya Pradesh");
 
@@ -922,8 +908,8 @@ class NotificationEventRouterTest {
     }
 
     @Test
-    void route_routesToDlt_whenNoContactIdFound() {
-        stubWelcomeLookup("mp", "919222222222", List.of());
+    void route_routesWelcomeToDlt_withoutOptingIn_whenPhoneHasNoUserInTenant() {
+        stubContactLookup("mp", "919222222222", List.of());
         when(messageTemplateService.findStateName(anyInt())).thenReturn("");
 
         router.route("""
@@ -931,8 +917,50 @@ class NotificationEventRouterTest {
                  "pumpOperatorPhones":["919222222222"]}
                 """);
 
+        verify(whatsAppSender, never()).optIn(anyString());
         verify(whatsAppSender, never()).startWelcomeFlow(anyLong(), anyString(), anyString());
-        verify(kafkaProducer).publishJson(eq("welcome-message-dlt"), any());
+        verify(kafkaProducer).publishJson(eq("welcome-message-dlt"),
+                argThat(p -> p.toString().contains("user_not_found")));
+        verify(ledger).recordOutcome(argThat(e -> e.type() == NotificationType.WELCOME),
+                argThat(o -> o.status() == DispatchStatus.SKIPPED_NO_CONTACT));
+    }
+
+    @Test
+    void route_optsInWelcomeRecipient_andRegistersContact_whenNoStoredContactId() {
+        stubContactLookup("mp", "919222222223",
+                List.of(new NotificationEventRouter.UserContactInfo(null, "Ramesh Kumar", 10L)));
+        when(whatsAppSender.optIn("919222222223")).thenReturn(77L);
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("Madhya Pradesh");
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
+                 "pumpOperatorPhones":["919222222223"]}
+                """);
+
+        verify(whatsAppSender).startWelcomeFlow(77L, "Ramesh Kumar", "Madhya Pradesh");
+        verifyContactRegistered(10L, 77L);
+        verify(kafkaProducer, never()).publishJson(eq("welcome-message-dlt"), any());
+    }
+
+    @Test
+    void route_routesWelcomeToDlt_whenOptInReturnsNoContact() {
+        // A dry-run opt-in answers 0: nothing to send to, and nothing to register.
+        stubContactLookup("mp", "919222222224",
+                List.of(new NotificationEventRouter.UserContactInfo(null, "Ramesh Kumar", 10L)));
+        when(whatsAppSender.optIn("919222222224")).thenReturn(0L);
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("");
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
+                 "pumpOperatorPhones":["919222222224"]}
+                """);
+
+        verify(whatsAppSender, never()).startWelcomeFlow(anyLong(), anyString(), anyString());
+        verify(kafkaProducer, never()).publishJson(eq("common-topic"), any());
+        verify(kafkaProducer).publishJson(eq("welcome-message-dlt"),
+                argThat(p -> p.toString().contains("optin_failed")));
+        verify(ledger).recordOutcome(argThat(e -> e.type() == NotificationType.WELCOME),
+                argThat(o -> o.status() == DispatchStatus.SKIPPED_NO_CONTACT));
     }
 
     @Test
@@ -959,7 +987,8 @@ class NotificationEventRouterTest {
 
     @Test
     void route_updatesLanguage_whenContactIdFound() {
-        stubUserLookup("mp", "919444444444", List.of(99L));
+        stubContactLookup("mp", "919444444444",
+                List.of(new NotificationEventRouter.UserContactInfo(99L, "Ramesh", 10L)));
 
         router.route("""
                 {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
@@ -968,19 +997,79 @@ class NotificationEventRouterTest {
                 """);
 
         verify(whatsAppSender).updateContactLanguage(99L, 3);
+        verify(whatsAppSender, never()).optIn(anyString());
+        verifyNoInteractions(kafkaProducer);
     }
 
     @Test
-    void route_rethrowsException_whenUpdateLanguageFails_forPhoneNotFound() {
-        stubUserLookup("mp", "919555555555", List.of());
+    void route_optsInOperator_registersContact_andUpdatesLanguage_whenNoStoredContactId() {
+        stubContactLookup("mp", "919444444445",
+                List.of(new NotificationEventRouter.UserContactInfo(null, "Ramesh", 10L)));
+        when(whatsAppSender.optIn("919444444445")).thenReturn(99L);
+
+        router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
+                 "whatsappLanguageId":3,
+                 "pumpOperatorPhones":["919444444445"]}
+                """);
+
+        verify(whatsAppSender).updateContactLanguage(99L, 3);
+        verifyContactRegistered(10L, 99L);
+    }
+
+    @Test
+    void route_skipsLanguageUpdate_withoutRetry_whenOptInReturnsNoContact() {
+        // A dry-run opt-in answers 0. Retrying would not change that, so the event must not fail.
+        stubContactLookup("mp", "919444444446",
+                List.of(new NotificationEventRouter.UserContactInfo(null, "Ramesh", 10L)));
+        when(whatsAppSender.optIn("919444444446")).thenReturn(0L);
+
+        router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
+                 "whatsappLanguageId":3,
+                 "pumpOperatorPhones":["919444444446"]}
+                """);
+
+        verify(whatsAppSender, never()).updateContactLanguage(anyLong(), anyInt());
+        verifyNoInteractions(kafkaProducer);
+    }
+
+    @Test
+    void route_skipsLanguageUpdate_withoutOptingIn_whenPhoneHasNoUserInTenant() {
+        stubContactLookup("mp", "919555555555", List.of());
+
+        router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
+                 "whatsappLanguageId":2,
+                 "pumpOperatorPhones":["919555555555"]}
+                """);
+
+        verify(whatsAppSender, never()).optIn(anyString());
+        verify(whatsAppSender, never()).updateContactLanguage(anyLong(), anyInt());
+    }
+
+    @Test
+    void route_rethrowsException_whenProviderRejectsLanguageUpdate() {
+        stubContactLookup("mp", "919555555556",
+                List.of(new NotificationEventRouter.UserContactInfo(99L, "Ramesh", 10L)));
+        doThrow(new RuntimeException("provider down")).when(whatsAppSender).updateContactLanguage(99L, 2);
 
         assertThatThrownBy(() -> router.route("""
                 {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
                  "whatsappLanguageId":2,
-                 "pumpOperatorPhones":["919555555555"]}
+                 "pumpOperatorPhones":["919555555556"]}
                 """))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Notification event processing failed");
+    }
+
+    private void verifyContactRegistered(long userId, long contactId) {
+        verify(kafkaProducer).publishJson(eq("common-topic"), argThat(event ->
+                event instanceof WhatsAppContactRegisteredEvent registered
+                        && "WHATSAPP_CONTACT_REGISTERED".equals(registered.getEventType())
+                        && "tenant_mp".equals(registered.getTenantSchema())
+                        && registered.getUserId() == userId
+                        && registered.getContactId() == contactId));
     }
 
     @Test
@@ -1039,7 +1128,7 @@ class NotificationEventRouterTest {
 
     @Test
     void route_sendsWelcomeAdmin_whenContactIdFoundInDb() {
-        stubWelcomeLookup("mp", "919100000003",
+        stubContactLookup("mp", "919100000003",
                 List.of(new NotificationEventRouter.UserContactInfo(55L, "Operator A")));
         when(messageTemplateService.findStateName(anyInt())).thenReturn("Madhya Pradesh");
 
@@ -1054,7 +1143,7 @@ class NotificationEventRouterTest {
 
     @Test
     void route_optInsAndSendsWelcomeAdmin_whenContactIdNotFoundInDb() {
-        stubWelcomeLookup("mp", "919100000004", List.of());
+        stubContactLookup("mp", "919100000004", List.of());
         when(whatsAppSender.optIn("919100000004")).thenReturn(66L);
         when(messageTemplateService.findStateName(anyInt())).thenReturn("MP");
 
@@ -1070,7 +1159,7 @@ class NotificationEventRouterTest {
 
     @Test
     void route_routesToDlt_whenOptInFails_forWelcomeAdmin() {
-        stubWelcomeLookup("mp", "919100000005", List.of());
+        stubContactLookup("mp", "919100000005", List.of());
         when(whatsAppSender.optIn(anyString())).thenReturn(0L);
         when(messageTemplateService.findStateName(anyInt())).thenReturn("");
 
@@ -2553,7 +2642,8 @@ class NotificationEventRouterTest {
 
     @Test
     void ledger_aLanguageUpdateSendsNothingAndRecordsNothing() {
-        stubUserLookup("mp", "919876543210", List.of(42L));
+        stubContactLookup("mp", "919876543210",
+                List.of(new NotificationEventRouter.UserContactInfo(42L, "Ramesh", 10L)));
 
         router.route("""
                 {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp","whatsappLanguageId":3,
