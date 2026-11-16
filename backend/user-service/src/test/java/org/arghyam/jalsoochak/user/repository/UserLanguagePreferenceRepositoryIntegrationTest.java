@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.user.repository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -32,6 +33,12 @@ class UserLanguagePreferenceRepositoryIntegrationTest extends AbstractPostgresIT
         jdbc.execute("TRUNCATE " + SCHEMA + ".user_language_preference RESTART IDENTITY");
     }
 
+    private void givenPreference(String contactId, String languageValue) {
+        jdbc.update("INSERT INTO " + SCHEMA + ".user_language_preference"
+                + " (contact_id, language_value, created_at, updated_at)"
+                + " VALUES (?, ?, NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day')", contactId, languageValue);
+    }
+
     private Map<String, String> languageByContact() {
         Map<String, String> languages = new HashMap<>();
         jdbc.queryForList("SELECT contact_id, language_value FROM " + SCHEMA + ".user_language_preference")
@@ -39,49 +46,98 @@ class UserLanguagePreferenceRepositoryIntegrationTest extends AbstractPostgresIT
         return languages;
     }
 
-    @Test
-    @DisplayName("adds a row for each contact that has none")
-    void insertsMissingContacts() {
-        repo.upsertAll(SCHEMA, List.of("919876543210", "919876543211"), "Punjabi");
+    @Nested
+    @DisplayName("findContactIdsWithLanguage")
+    class FindContactIdsWithLanguage {
 
-        assertThat(languageByContact()).containsOnly(
-                Map.entry("919876543210", "Punjabi"), Map.entry("919876543211", "Punjabi"));
+        @Test
+        @DisplayName("returns the given contacts that have a language, as given")
+        void returnsContactsWithALanguageAsGiven() {
+            givenPreference("919876543210", "Hindi");
+
+            assertThat(repo.findContactIdsWithLanguage(SCHEMA, List.of("+91 98765-43210", "919876543211")))
+                    .containsExactly("+91 98765-43210");
+        }
+
+        @Test
+        @DisplayName("does not count a blank or missing language, as the chatbot does not")
+        void ignoresBlankLanguages() {
+            givenPreference("919876543210", " ");
+            givenPreference("919876543211", null);
+
+            assertThat(repo.findContactIdsWithLanguage(SCHEMA, List.of("919876543210", "919876543211"))).isEmpty();
+        }
+
+        @Test
+        @DisplayName("returns nothing for no contacts")
+        void noContacts() {
+            assertThat(repo.findContactIdsWithLanguage(SCHEMA, List.of())).isEmpty();
+        }
+
+        @Test
+        @DisplayName("rejects a schema name that is not a tenant schema (never reaches SQL)")
+        void rejectsInvalidSchema() {
+            assertThatThrownBy(() -> repo.findContactIdsWithLanguage("tenant_mp; DROP TABLE x", List.of("919876543210")))
+                    .hasMessageContaining("Invalid schema name");
+        }
     }
 
-    @Test
-    @DisplayName("overwrites a contact's chosen language and bumps updated_at")
-    void overwritesExistingContact() {
-        jdbc.update("INSERT INTO " + SCHEMA + ".user_language_preference"
-                + " (contact_id, language_value, created_at, updated_at)"
-                + " VALUES ('919876543210', 'Hindi', NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day')");
+    @Nested
+    @DisplayName("setLanguageWhereUnset")
+    class SetLanguageWhereUnset {
 
-        repo.upsertAll(SCHEMA, List.of("919876543210"), "Punjabi");
+        @Test
+        @DisplayName("adds a row for each contact that has none")
+        void insertsMissingContacts() {
+            repo.setLanguageWhereUnset(SCHEMA, List.of("919876543210", "919876543211"), "Punjabi");
 
-        assertThat(languageByContact()).containsOnly(Map.entry("919876543210", "Punjabi"));
-        assertThat(jdbc.queryForObject("SELECT updated_at > NOW() - INTERVAL '1 hour' FROM " + SCHEMA
-                + ".user_language_preference WHERE contact_id = '919876543210'", Boolean.class)).isTrue();
-    }
+            assertThat(languageByContact()).containsOnly(
+                    Map.entry("919876543210", "Punjabi"), Map.entry("919876543211", "Punjabi"));
+        }
 
-    @Test
-    @DisplayName("stores the contact id digits-only, once, as the chatbot looks it up")
-    void storesDigitsOnlyOnce() {
-        repo.upsertAll(SCHEMA, List.of("+91 98765-43210", "919876543210"), "Punjabi");
+        @Test
+        @DisplayName("keeps a contact's chosen language and its updated_at")
+        void keepsAChosenLanguage() {
+            givenPreference("919876543210", "Hindi");
 
-        assertThat(languageByContact()).containsOnly(Map.entry("919876543210", "Punjabi"));
-    }
+            repo.setLanguageWhereUnset(SCHEMA, List.of("919876543210"), "Punjabi");
 
-    @Test
-    @DisplayName("does nothing for no contacts")
-    void noContacts() {
-        repo.upsertAll(SCHEMA, List.of(), "Punjabi");
+            assertThat(languageByContact()).containsOnly(Map.entry("919876543210", "Hindi"));
+            assertThat(jdbc.queryForObject("SELECT updated_at < NOW() - INTERVAL '1 hour' FROM " + SCHEMA
+                    + ".user_language_preference WHERE contact_id = '919876543210'", Boolean.class)).isTrue();
+        }
 
-        assertThat(languageByContact()).isEmpty();
-    }
+        @Test
+        @DisplayName("fills a blank language")
+        void fillsABlankLanguage() {
+            givenPreference("919876543210", "");
 
-    @Test
-    @DisplayName("rejects a schema name that is not a tenant schema (never reaches SQL)")
-    void rejectsInvalidSchema() {
-        assertThatThrownBy(() -> repo.upsertAll("tenant_mp; DROP TABLE x", List.of("919876543210"), "Punjabi"))
-                .hasMessageContaining("Invalid schema name");
+            repo.setLanguageWhereUnset(SCHEMA, List.of("919876543210"), "Punjabi");
+
+            assertThat(languageByContact()).containsOnly(Map.entry("919876543210", "Punjabi"));
+        }
+
+        @Test
+        @DisplayName("stores the contact id digits-only, once, as the chatbot looks it up")
+        void storesDigitsOnlyOnce() {
+            repo.setLanguageWhereUnset(SCHEMA, List.of("+91 98765-43210", "919876543210"), "Punjabi");
+
+            assertThat(languageByContact()).containsOnly(Map.entry("919876543210", "Punjabi"));
+        }
+
+        @Test
+        @DisplayName("does nothing for no contacts")
+        void noContacts() {
+            repo.setLanguageWhereUnset(SCHEMA, List.of(), "Punjabi");
+
+            assertThat(languageByContact()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("rejects a schema name that is not a tenant schema (never reaches SQL)")
+        void rejectsInvalidSchema() {
+            assertThatThrownBy(() -> repo.setLanguageWhereUnset("tenant_mp; DROP TABLE x", List.of("919876543210"), "Punjabi"))
+                    .hasMessageContaining("Invalid schema name");
+        }
     }
 }

@@ -34,52 +34,39 @@ public class UserEventPublisher {
     }
 
     /**
-     * Publishes message-service compatible onboarding events after DB commit.
-     * Emits two eventTypes for the same phone batch:
-     *  - UPDATE_USER_LANGUAGE
-     *  - SEND_WELCOME_MESSAGE
+     * Publishes message-service compatible onboarding events after DB commit:
+     *  - UPDATE_USER_LANGUAGE for the operators whose language the upload set
+     *  - SEND_WELCOME_MESSAGE for the operators to welcome
+     * Every event is keyed by the tenant code and the language updates go first, so message-service sets
+     * an operator's language before it starts their welcome flow.
      */
     public void publishPumpOperatorOnboardedAfterCommit(
             String tenantCode,
             Integer tenantId,
             String whatsappLanguageId,
-            List<String> pumpOperatorPhones
+            List<String> languagePhones,
+            List<String> welcomePhones
     ) {
-        if (pumpOperatorPhones == null || pumpOperatorPhones.isEmpty()) {
+        List<List<String>> languageBatches = partition(languagePhones, MAX_PHONES_PER_EVENT);
+        List<List<String>> welcomeBatches = partition(welcomePhones, MAX_PHONES_PER_EVENT);
+        if (languageBatches.isEmpty() && welcomeBatches.isEmpty()) {
             return;
         }
 
-        List<List<String>> batches = partition(pumpOperatorPhones, MAX_PHONES_PER_EVENT);
-        int eventCount = batches.size() * 2;
-        log.info("[user-events] queued_after_commit count={} topic={} tenantCode={} tenantId={} phones={}",
-                eventCount, COMMON_TOPIC, tenantCode, tenantId, pumpOperatorPhones.size());
+        log.info("[user-events] queued_after_commit count={} topic={} tenantCode={} tenantId={}"
+                        + " languagePhones={} welcomePhones={}",
+                languageBatches.size() + welcomeBatches.size(), COMMON_TOPIC, tenantCode, tenantId,
+                languagePhones == null ? 0 : languagePhones.size(), welcomePhones == null ? 0 : welcomePhones.size());
 
         Runnable publish = () -> {
             String triggeredAt = Instant.now().truncatedTo(ChronoUnit.MILLIS).toString();
-            for (List<String> phones : batches) {
-                PumpOperatorMessagingEvent update = PumpOperatorMessagingEvent.builder()
-                        .eventType("UPDATE_USER_LANGUAGE")
-                        .tenantCode(tenantCode)
-                        .tenantId(tenantId)
-                        .triggeredAt(triggeredAt)
-                        .whatsappLanguageId(whatsappLanguageId)
-                        .pumpOperatorPhones(phones)
-                        .build();
-                PumpOperatorMessagingEvent welcome = PumpOperatorMessagingEvent.builder()
-                        .eventType("SEND_WELCOME_MESSAGE")
-                        .tenantCode(tenantCode)
-                        .tenantId(tenantId)
-                        .triggeredAt(triggeredAt)
-                        .whatsappLanguageId(whatsappLanguageId)
-                        .pumpOperatorPhones(phones)
-                        .build();
-
-                boolean ok1 = kafkaProducer.publishJson(COMMON_TOPIC, update);
-                boolean ok2 = kafkaProducer.publishJson(COMMON_TOPIC, welcome);
-                if (!ok1 || !ok2) {
-                    log.warn("[user-events] publish_failed tenantCode={} tenantId={} phones={} okUpdate={} okWelcome={}",
-                            tenantCode, tenantId, phones.size(), ok1, ok2);
-                }
+            for (List<String> phones : languageBatches) {
+                publishOnboardingEvent("UPDATE_USER_LANGUAGE", tenantCode, tenantId, triggeredAt,
+                        whatsappLanguageId, phones);
+            }
+            for (List<String> phones : welcomeBatches) {
+                publishOnboardingEvent("SEND_WELCOME_MESSAGE", tenantCode, tenantId, triggeredAt,
+                        whatsappLanguageId, phones);
             }
         };
 
@@ -171,6 +158,22 @@ public class UserEventPublisher {
                 log.warn("[user-events] welcome_admin_publish_failed tenantCode={} tenantId={} phones={}",
                         tenantCode, tenantId, phones.size());
             }
+        }
+    }
+
+    private void publishOnboardingEvent(String eventType, String tenantCode, Integer tenantId,
+                                        String triggeredAt, String whatsappLanguageId, List<String> phones) {
+        PumpOperatorMessagingEvent event = PumpOperatorMessagingEvent.builder()
+                .eventType(eventType)
+                .tenantCode(tenantCode)
+                .tenantId(tenantId)
+                .triggeredAt(triggeredAt)
+                .whatsappLanguageId(whatsappLanguageId)
+                .pumpOperatorPhones(phones)
+                .build();
+        if (!kafkaProducer.publishJson(COMMON_TOPIC, tenantCode, event)) {
+            log.warn("[user-events] publish_failed eventType={} tenantCode={} tenantId={} phones={}",
+                    eventType, tenantCode, tenantId, phones.size());
         }
     }
 

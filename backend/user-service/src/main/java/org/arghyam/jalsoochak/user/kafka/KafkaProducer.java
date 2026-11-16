@@ -29,12 +29,26 @@ public class KafkaProducer {
      * Serializes {@code event} to JSON and publishes it to the given topic.
      */
     public boolean publishJson(String topic, Object event) {
+        return publish(topic, null, event);
+    }
+
+    /**
+     * As {@link #publishJson(String, Object)}, with a record key: Kafka delivers the records that share
+     * a key in the order they were sent.
+     */
+    public boolean publishJson(String topic, String key, Object event) {
+        return publish(topic, key, event);
+    }
+
+    private boolean publish(String topic, String key, Object event) {
         try {
             String json = objectMapper.writeValueAsString(event);
             // Log the full payload so operators can confirm what other services will consume.
             log.info("[kafka:publish] topic={} payload={}", topic, json);
 
-            CompletableFuture<SendResult<String, String>> fut = kafkaTemplate.send(topic, json);
+            CompletableFuture<SendResult<String, String>> fut = key == null
+                    ? kafkaTemplate.send(topic, json)
+                    : kafkaTemplate.send(topic, key, json);
             fut.whenComplete((res, ex) -> {
                 if (ex != null) {
                     log.error("[kafka:publish] FAILED topic={} err={}", topic, ex.getMessage(), ex);
