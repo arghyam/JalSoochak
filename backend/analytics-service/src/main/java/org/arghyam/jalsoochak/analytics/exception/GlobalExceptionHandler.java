@@ -74,6 +74,19 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Phased rollout hides a region that isn't onboarded as if it didn't exist, so the body doesn't name
+     * it.
+     */
+    @ExceptionHandler(RegionNotOnboardedException.class)
+    public ResponseEntity<Map<String, Object>> handleRegionNotOnboarded(
+            RegionNotOnboardedException ex,
+            HttpServletRequest request
+    ) {
+        log.warn("{} Not found: {}", formatRequest(request), ex.getMessage());
+        return buildResponse(HttpStatus.NOT_FOUND, "Region not found");
+    }
+
+    /**
      * A {@code @PreAuthorize} denial arrives here as an {@link AccessDeniedException}, because
      * method security throws inside the handler rather than in the filter chain. Without this it
      * fell through to the catch-all below and was reported as a 500 — an authorization decision

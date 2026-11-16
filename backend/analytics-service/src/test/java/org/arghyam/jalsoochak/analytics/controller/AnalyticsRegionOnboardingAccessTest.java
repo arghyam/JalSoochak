@@ -1,0 +1,82 @@
+package org.arghyam.jalsoochak.analytics.controller;
+
+import org.arghyam.jalsoochak.analytics.controller.regularity.AnalyticsRegularityController;
+import org.arghyam.jalsoochak.analytics.enums.RegionHierarchy;
+import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
+import org.arghyam.jalsoochak.analytics.exception.RegionNotOnboardedException;
+import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
+import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
+import org.arghyam.jalsoochak.analytics.service.RegionOnboardingService;
+import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.time.LocalDate;
+
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * Pins the phased-rollout wiring with the switch on: the guard runs ahead of a real route and its
+ * rejection reaches the client as a 404. The guard's own rules are in {@code RegionOnboardingInterceptorTest}.
+ */
+@WebMvcTest(controllers = AnalyticsRegularityController.class)
+@Import({GlobalExceptionHandler.class, SingleTenantModeGuard.class})
+@AutoConfigureMockMvc(addFilters = false)
+@TestPropertySource(properties = "analytics.phased-rollout.enabled=true")
+class AnalyticsRegionOnboardingAccessTest {
+
+    private static final String AVERAGE_REGULARITY = "/api/v1/analytics/scheme-regularity/average";
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private RegionOnboardingService regionOnboardingService;
+
+    @MockBean
+    private SchemeRegularityService schemeRegularityService;
+
+    @MockBean
+    private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
+
+    @Test
+    void parentNotOnboarded_isNotFound_andNeverReachesTheController() throws Exception {
+        doThrow(new RegionNotOnboardedException(3, RegionHierarchy.LGD, 12))
+                .when(regionOnboardingService).requireOnboarded(3, RegionHierarchy.LGD, 12);
+
+        mockMvc.perform(get(AVERAGE_REGULARITY)
+                        .param("tenant_id", "3")
+                        .param("parent_lgd_id", "12")
+                        .param("start_date", "2026-01-01")
+                        .param("end_date", "2026-01-31"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Region not found"));
+
+        verifyNoInteractions(schemeRegularityService);
+    }
+
+    @Test
+    void onboardedParent_reachesTheController() throws Exception {
+        mockMvc.perform(get(AVERAGE_REGULARITY)
+                        .param("tenant_id", "3")
+                        .param("parent_lgd_id", "12")
+                        .param("start_date", "2026-01-01")
+                        .param("end_date", "2026-01-31"))
+                .andExpect(status().isOk());
+
+        verify(regionOnboardingService).requireOnboarded(3, RegionHierarchy.LGD, 12);
+        verify(schemeRegularityService).getAverageSchemeRegularity(
+                3, 12, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31));
+    }
+}

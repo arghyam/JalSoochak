@@ -127,6 +127,11 @@ water-reports:
 analytics:
   single-tenant-mode: ${SINGLE_TENANT_MODE:false}
 
+  phased-rollout:
+    # On: only onboarded districts, and regions with schemes in them, are reachable on the
+    # dashboards. See docs/phased-rollout.md. Off: today's behaviour, no extra queries.
+    enabled: ${PHASED_ROLLOUT_ENABLED:false}
+
   dashboard:
     # Comma-separated work_status values whose schemes are included in dashboard calculations.
     # 4 = handed-over. Extend this list (e.g. "4,5") to include more statuses without a code change.
