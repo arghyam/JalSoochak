@@ -75,6 +75,14 @@ class ConversationMessageResolverTest {
             }
         }
 
+        /** The languages that must translate every message, not fall back to English for some. */
+        @ParameterizedTest(name = "conversation-messages_{0}")
+        @ValueSource(strings = {"hi", "pa"})
+        void translateEveryEnglishKeyInACompleteLanguage(String locale) throws IOException {
+            assertThat(bundle(locale).stringPropertyNames())
+                    .containsExactlyInAnyOrderElementsOf(bundle("en").stringPropertyNames());
+        }
+
         @ParameterizedTest(name = "conversation-messages_{0}")
         @MethodSource("org.arghyam.jalsoochak.telemetry.service.ConversationMessageResolverTest#allLocales")
         void escapeEveryApostropheForMessageFormat(String locale) throws IOException {

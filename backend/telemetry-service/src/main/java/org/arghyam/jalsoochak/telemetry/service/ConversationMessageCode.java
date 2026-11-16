@@ -138,6 +138,8 @@ public enum ConversationMessageCode {
     LANGUAGE_SELECTED_LABEL("recognised.languageSelectedLabel"),
     READING_CAPTURED("recognised.readingCaptured"),
     READING_CAPTURED_WITH_VALUE("recognised.readingCapturedWithValue"),
+    READING_CAPTURED_WITH_LAST_CONFIRMED("recognised.readingCapturedWithLastConfirmed"),
+    READING_CAPTURED_WITH_VALUE_AND_LAST_CONFIRMED("recognised.readingCapturedWithValueAndLastConfirmed"),
     LOW_OCR_CONFIDENCE("recognised.lowOcrConfidence"),
     LOW_OCR_CONFIDENCE_WITH_VALUE("recognised.lowOcrConfidenceWithValue"),
     INVALID_READING_VALUE("recognised.invalidReadingValue"),
