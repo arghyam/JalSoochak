@@ -32,7 +32,6 @@ class WhatsAppPropertyBindingTest {
 
     @ParameterizedTest
     @ValueSource(classes = {
-            GlificContactDirectory.class,
             GlificConversationResumeGateway.class,
             GlificMediaFetcher.class})
     void everyBoundPropertyIsDeclaredInApplicationYaml(Class<?> type) throws IOException {

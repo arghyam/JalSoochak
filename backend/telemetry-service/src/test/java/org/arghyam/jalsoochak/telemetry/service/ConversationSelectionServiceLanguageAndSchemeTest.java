@@ -5,7 +5,7 @@ import org.arghyam.jalsoochak.telemetry.channel.ReportingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
-import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
+import org.arghyam.jalsoochak.telemetry.event.OperatorLanguageEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.LanguageCatalogRepository;
 import org.arghyam.jalsoochak.telemetry.repository.SupportedLanguageRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
@@ -79,7 +79,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
     @Mock
     private UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     @Mock
-    private WhatsAppContactDirectory whatsAppContactDirectory;
+    private OperatorLanguageEventPublisher operatorLanguageEventPublisher;
     @Spy
     private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
 
@@ -91,7 +91,7 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
                 operatorContextService, localizationService, tenantConfigRepository, templatesService,
                 new LanguageMenuService(templatesService, supportedLanguageRepository, languageCatalogRepository),
                 telemetryTenantRepository, userChannelPreferenceRepository, userLanguagePreferenceRepository,
-                whatsAppContactDirectory, new ObjectMapper(), messageResolver);
+                operatorLanguageEventPublisher, new ObjectMapper(), messageResolver);
 
         when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(operator(TENANT));
         when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("English");
@@ -239,13 +239,24 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
         }
 
         @Test
-        void persistsTheSelectionAndSyncsItToTheWhatsAppProvider() {
+        void persistsTheSelectionAndPublishesItForTheWhatsAppContact() {
             var response = service.selectedLanguageMessage(languageRequest(CONTACT, "2"));
 
             assertThat(response.isSuccess()).isTrue();
             verify(telemetryTenantRepository).updateUserLanguageId(SCHEMA, 11L, 2);
             verify(userLanguagePreferenceRepository).upsert(SCHEMA, CONTACT, "Hindi");
-            verify(whatsAppContactDirectory).syncContactLanguageAsync(CONTACT, "Hindi");
+            verify(operatorLanguageEventPublisher).publishLanguageUpdated(SCHEMA, TENANT, CONTACT, "Hindi");
+        }
+
+        /** The chatbot may identify the operator by a phone hash; the event needs the phone itself. */
+        @Test
+        void publishesTheOperatorsPhoneRatherThanTheContactId() {
+            String phoneHash = "a".repeat(64);
+            when(operatorContextService.resolveOperatorWithSchema(phoneHash)).thenReturn(operator(TENANT));
+
+            service.selectedLanguageMessage(languageRequest(phoneHash, "2"));
+
+            verify(operatorLanguageEventPublisher).publishLanguageUpdated(SCHEMA, TENANT, CONTACT, "Hindi");
         }
 
         @Test
@@ -346,7 +357,8 @@ class ConversationSelectionServiceLanguageAndSchemeTest {
             var response = service.selectedLanguageMessage(languageRequest(CONTACT, "2"));
 
             assertThat(response.isSuccess()).isFalse();
-            verify(whatsAppContactDirectory, never()).syncContactLanguageAsync(anyString(), anyString());
+            verify(operatorLanguageEventPublisher, never())
+                    .publishLanguageUpdated(anyString(), anyInt(), anyString(), anyString());
         }
     }
 

@@ -12,7 +12,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
-import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
+import org.arghyam.jalsoochak.telemetry.event.OperatorLanguageEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeOption;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -48,7 +48,7 @@ public class ConversationSelectionService {
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final UserLanguagePreferenceRepository userLanguagePreferenceRepository;
-    private final WhatsAppContactDirectory whatsAppContactDirectory;
+    private final OperatorLanguageEventPublisher operatorLanguageEventPublisher;
     private final ObjectMapper objectMapper;
     private final ConversationMessageResolver messageResolver;
 
@@ -60,7 +60,7 @@ public class ConversationSelectionService {
                                         TelemetryTenantRepository telemetryTenantRepository,
                                         UserChannelPreferenceRepository userChannelPreferenceRepository,
                                         UserLanguagePreferenceRepository userLanguagePreferenceRepository,
-                                        WhatsAppContactDirectory whatsAppContactDirectory,
+                                        OperatorLanguageEventPublisher operatorLanguageEventPublisher,
                                         ObjectMapper objectMapper,
                                         ConversationMessageResolver messageResolver) {
         this.operatorContextService = operatorContextService;
@@ -71,7 +71,7 @@ public class ConversationSelectionService {
         this.telemetryTenantRepository = telemetryTenantRepository;
         this.userChannelPreferenceRepository = userChannelPreferenceRepository;
         this.userLanguagePreferenceRepository = userLanguagePreferenceRepository;
-        this.whatsAppContactDirectory = whatsAppContactDirectory;
+        this.operatorLanguageEventPublisher = operatorLanguageEventPublisher;
         this.objectMapper = objectMapper;
         this.messageResolver = messageResolver;
     }
@@ -189,7 +189,8 @@ public class ConversationSelectionService {
                     selectedLanguageId
             );
             userLanguagePreferenceRepository.upsert(operatorWithSchema.schemaName(), request.getContactId(), selectedLanguage);
-            whatsAppContactDirectory.syncContactLanguageAsync(request.getContactId(), selectedLanguage);
+            operatorLanguageEventPublisher.publishLanguageUpdated(operatorWithSchema.schemaName(), tenantId,
+                    operatorWithSchema.operator().phoneNumber(), selectedLanguage);
 
             String confirmation = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "LANGUAGE_SELECTION", selectedLanguageKey)

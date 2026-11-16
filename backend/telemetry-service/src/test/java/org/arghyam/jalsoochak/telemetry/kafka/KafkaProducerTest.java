@@ -128,6 +128,32 @@ class KafkaProducerTest {
     }
 
     @Test
+    void publishJsonWithAKeySendsTheRecordUnderThatKey() {
+        CompletableFuture<SendResult<String, String>> sent = completedSend();
+        when(kafkaTemplate.send(anyString(), anyString(), anyString())).thenReturn(sent);
+
+        boolean published = producer().publishJson("common-topic", "AS", Map.of("k", "v"));
+
+        assertThat(published).isTrue();
+        verify(kafkaTemplate).send("common-topic", "AS", "{\"k\":\"v\"}");
+    }
+
+    @Test
+    void publishJsonWithAKeyReportsFailureWhenTheBrokerCallThrows() {
+        when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("no broker available"));
+
+        assertThat(producer().publishJson("common-topic", "AS", Map.of("k", "v"))).isFalse();
+    }
+
+    @Test
+    void publishJsonWithAKeyReportsFailureWhenTheEventCannotBeSerialised() {
+        assertThat(producer().publishJson("common-topic", "AS", new Unserialisable())).isFalse();
+
+        verify(kafkaTemplate, org.mockito.Mockito.never()).send(anyString(), anyString(), anyString());
+    }
+
+    @Test
     void publishJsonAndAwaitReportsTheAcknowledgement() {
         CompletableFuture<SendResult<String, String>> sent = completedSend();
         when(kafkaTemplate.send(anyString(), anyString())).thenReturn(sent);

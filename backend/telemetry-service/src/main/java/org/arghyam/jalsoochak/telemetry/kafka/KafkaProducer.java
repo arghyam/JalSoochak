@@ -37,21 +37,7 @@ public class KafkaProducer {
             String json = objectMapper.writeValueAsString(event);
             log.info("[kafka:publish] topic={} payload={}", topic, json);
 
-            CompletableFuture<SendResult<String, String>> fut = kafkaTemplate.send(topic, json);
-            fut.whenComplete((res, ex) -> {
-                if (ex != null) {
-                    log.error("[kafka:publish] FAILED topic={} err={}", topic, ex.getMessage(), ex);
-                    return;
-                }
-                try {
-                    var meta = res.getRecordMetadata();
-                    log.info("[kafka:publish] OK topic={} partition={} offset={}",
-                            topic, meta.partition(), meta.offset());
-                } catch (Exception metaEx) {
-                    log.info("[kafka:publish] OK topic={} (metadata unavailable: {})",
-                            topic, metaEx.getMessage());
-                }
-            });
+            logOutcome(topic, kafkaTemplate.send(topic, json));
             return true;
         } catch (JsonProcessingException e) {
             log.error("[kafka:publish] SERIALIZE_FAILED topic={} err={}", topic, e.getMessage(), e);
@@ -63,9 +49,31 @@ public class KafkaProducer {
     }
 
     /**
-     * Like {@link #publishJson}, but waits up to {@code timeout} for the broker to acknowledge the
-     * event, for a caller that sends many events in a row: it cannot run ahead of Kafka, and it learns
-     * which events did not go. The payload is logged at DEBUG only, since such a caller sends many.
+     * Like {@link #publishJson(String, Object)}, with a record key: Kafka delivers the records that share
+     * a key in the order they were sent. The payload is logged at DEBUG only, since a keyed event may
+     * carry an operator's phone number.
+     */
+    public boolean publishJson(String topic, String key, Object event) {
+        try {
+            String json = objectMapper.writeValueAsString(event);
+            log.debug("[kafka:publish] topic={} key={} payload={}", topic, key, json);
+
+            logOutcome(topic, kafkaTemplate.send(topic, key, json));
+            return true;
+        } catch (JsonProcessingException e) {
+            log.error("[kafka:publish] SERIALIZE_FAILED topic={} err={}", topic, e.getMessage(), e);
+            return false;
+        } catch (Exception e) {
+            log.error("[kafka:publish] FAILED topic={} err={}", topic, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Like {@link #publishJson(String, Object)}, but waits up to {@code timeout} for the broker to
+     * acknowledge the event, for a caller that sends many events in a row: it cannot run ahead of Kafka,
+     * and it learns which events did not go. The payload is logged at DEBUG only, since such a caller
+     * sends many.
      *
      * <p>{@code false} after a timeout does not mean the event was lost: the producer may still deliver
      * it, so a consumer must be able to apply it twice.
@@ -99,5 +107,22 @@ public class KafkaProducer {
             log.error("[kafka:publish] FAILED topic={} err={}", topic, e.getMessage(), e);
             return false;
         }
+    }
+
+    private static void logOutcome(String topic, CompletableFuture<SendResult<String, String>> send) {
+        send.whenComplete((res, ex) -> {
+            if (ex != null) {
+                log.error("[kafka:publish] FAILED topic={} err={}", topic, ex.getMessage(), ex);
+                return;
+            }
+            try {
+                var meta = res.getRecordMetadata();
+                log.info("[kafka:publish] OK topic={} partition={} offset={}",
+                        topic, meta.partition(), meta.offset());
+            } catch (Exception metaEx) {
+                log.info("[kafka:publish] OK topic={} (metadata unavailable: {})",
+                        topic, metaEx.getMessage());
+            }
+        });
     }
 }
