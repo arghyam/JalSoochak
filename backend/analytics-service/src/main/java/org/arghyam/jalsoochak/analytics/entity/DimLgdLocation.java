@@ -12,6 +12,10 @@ import org.locationtech.jts.geom.Geometry;
 
 import java.time.LocalDateTime;
 
+/**
+ * {@code is_onboarded} (V62) is deliberately not mapped: ops set it with SQL, and every {@code save()}
+ * writes all mapped columns, which would overwrite it. Read it through {@code RegionOnboardingRepository}.
+ */
 @Entity
 @Table(name = "dim_lgd_location_table", schema = "analytics_schema")
 @Data
