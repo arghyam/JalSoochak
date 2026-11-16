@@ -240,6 +240,7 @@ public class PumpOperatorUploadChunkProcessor {
                     actor.tenantId(),
                     String.valueOf(preferredLanguage.whatsappLanguageId()),
                     defaultedPhones,
+                    phones -> stillDefaulted(schemaName, phones, preferredLanguage.languageValue()),
                     new ArrayList<>(phonesToNotify)
             );
         }
@@ -282,6 +283,17 @@ public class PumpOperatorUploadChunkProcessor {
                     schemaName, defaultedPhones, preferredLanguage.languageValue());
         }
         return defaultedPhones;
+    }
+
+    /**
+     * Of the operators this upload defaulted, those whose saved language is still its default, or with no
+     * default written, still none. Read after commit: an operator who chose a language in the chatbot
+     * since this upload read theirs keeps it at the provider too.
+     */
+    private List<String> stillDefaulted(String schemaName, List<String> defaultedPhones, String defaultLanguage) {
+        Set<String> chosen = userLanguagePreferenceRepository
+                .findContactIdsWithLanguageOtherThan(schemaName, defaultedPhones, defaultLanguage);
+        return defaultedPhones.stream().filter(phone -> !chosen.contains(phone)).toList();
     }
 
     private Integer resolveSchemeId(

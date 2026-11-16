@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -32,8 +33,23 @@ public class UserLanguagePreferenceRepository {
     }
 
     /** The given contacts that already have a language, each in the form it was given. */
-    @SuppressWarnings("java:S2077")
     public Set<String> findContactIdsWithLanguage(String schemaName, Collection<String> contactIds) {
+        return findContactIdsWithLanguage(schemaName, contactIds, "", List.of());
+    }
+
+    /**
+     * The given contacts whose language is one other than {@code languageValue}, each in the form it was
+     * given; with a null {@code languageValue}, those that have any language.
+     */
+    public Set<String> findContactIdsWithLanguageOtherThan(
+            String schemaName, Collection<String> contactIds, String languageValue) {
+        return findContactIdsWithLanguage(schemaName, contactIds,
+                "AND language_value IS DISTINCT FROM CAST(? AS TEXT)", Collections.singletonList(languageValue));
+    }
+
+    @SuppressWarnings("java:S2077")
+    private Set<String> findContactIdsWithLanguage(String schemaName, Collection<String> contactIds,
+                                                   String extraCondition, List<Object> extraArgs) {
         validateSchemaName(schemaName);
         if (contactIds == null || contactIds.isEmpty()) {
             return Set.of();
@@ -47,9 +63,12 @@ public class UserLanguagePreferenceRepository {
                 FROM %s.user_language_preference
                 WHERE contact_id IN (%s)
                   AND NULLIF(BTRIM(language_value), '') IS NOT NULL
-                """, schemaName, String.join(",", Collections.nCopies(givenByStored.size(), "?")));
+                  %s
+                """, schemaName, String.join(",", Collections.nCopies(givenByStored.size(), "?")), extraCondition);
+        List<Object> args = new ArrayList<>(givenByStored.keySet());
+        args.addAll(extraArgs);
         Set<String> withLanguage = new LinkedHashSet<>();
-        jdbcTemplate.queryForList(sql, String.class, givenByStored.keySet().toArray())
+        jdbcTemplate.queryForList(sql, String.class, args.toArray())
                 .forEach(stored -> withLanguage.addAll(givenByStored.get(stored)));
         return withLanguage;
     }

@@ -181,11 +181,19 @@ class NotificationEventRouterTest {
     }
 
     /**
-     * Stubs the operator lookup by phone that the welcome and language-update handlers share.
+     * Stubs the operator lookup by phone that the welcome and language-update handlers share: the lookup
+     * by phone hash finds nothing, and the one by phone answers {@code returnList}.
      */
     @SuppressWarnings("unchecked")
     private void stubContactLookup(String tenantCode, String phone,
                                    List<NotificationEventRouter.UserContactInfo> returnList) {
+        when(jdbcTemplate.query(
+                argThat(sql -> sql != null
+                        && sql.contains("FROM tenant_" + tenantCode + ".user_table")
+                        && sql.contains("WHERE phone_number_hash = ?")),
+                any(RowMapper.class),
+                org.mockito.ArgumentMatchers.<Object>any()))
+                .thenReturn(List.of());
         when(jdbcTemplate.query(
                 argThat(sql -> sql != null
                         && sql.contains("FROM tenant_" + tenantCode + ".user_table")
@@ -194,6 +202,18 @@ class NotificationEventRouterTest {
                 any(RowMapper.class),
                 eq(phone)))
                 .thenReturn(returnList);
+    }
+
+    /** Makes the operator lookup by phone hash fail, as a database error would. */
+    @SuppressWarnings("unchecked")
+    private void stubHashLookupFailure(String tenantCode) {
+        when(jdbcTemplate.query(
+                argThat(sql -> sql != null
+                        && sql.contains("FROM tenant_" + tenantCode + ".user_table")
+                        && sql.contains("WHERE phone_number_hash = ?")),
+                any(RowMapper.class),
+                org.mockito.ArgumentMatchers.<Object>any()))
+                .thenThrow(new org.springframework.dao.QueryTimeoutException("lookup timed out"));
     }
 
     // ──────────────────────────────── NUDGE ────────────────────────────────────
@@ -964,6 +984,22 @@ class NotificationEventRouterTest {
     }
 
     @Test
+    void route_routesWelcomeToDlt_withoutOptingIn_whenContactLookupFails() {
+        stubHashLookupFailure("mp");
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("");
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
+                 "pumpOperatorPhones":["919222222225"]}
+                """);
+
+        verify(whatsAppSender, never()).optIn(anyString());
+        verify(whatsAppSender, never()).startWelcomeFlow(anyLong(), anyString(), anyString());
+        verify(kafkaProducer).publishJson(eq("welcome-message-dlt"),
+                argThat(p -> p.toString().contains("lookup timed out")));
+    }
+
+    @Test
     void route_skipsWelcomeMessage_whenTenantCodeIsBlank() {
         router.route("""
                 {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"",
@@ -1043,6 +1079,23 @@ class NotificationEventRouterTest {
                  "whatsappLanguageId":2,
                  "pumpOperatorPhones":["919555555555"]}
                 """);
+
+        verify(whatsAppSender, never()).optIn(anyString());
+        verify(whatsAppSender, never()).updateContactLanguage(anyLong(), anyInt());
+    }
+
+    @Test
+    void route_rethrowsForRetry_withoutSkipping_whenContactLookupFails() {
+        // A failed lookup is not "no such user": skipping would lose the language for good.
+        stubHashLookupFailure("mp");
+
+        assertThatThrownBy(() -> router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
+                 "whatsappLanguageId":2,
+                 "pumpOperatorPhones":["919555555557"]}
+                """))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Notification event processing failed");
 
         verify(whatsAppSender, never()).optIn(anyString());
         verify(whatsAppSender, never()).updateContactLanguage(anyLong(), anyInt());
@@ -1170,6 +1223,21 @@ class NotificationEventRouterTest {
 
         verify(kafkaProducer).publishJson(eq("welcome-message-dlt"),
                 argThat(p -> p.toString().contains("optin_failed")));
+    }
+
+    @Test
+    void route_routesToDlt_withoutOptingIn_whenContactLookupFails_forWelcomeAdmin() {
+        stubHashLookupFailure("mp");
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("");
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE_ADMIN","tenantCode":"mp","tenantId":1,
+                 "pumpOperatorPhones":["919100000006"]}
+                """);
+
+        verify(whatsAppSender, never()).optIn(anyString());
+        verify(kafkaProducer).publishJson(eq("welcome-message-dlt"),
+                argThat(p -> p.toString().contains("lookup timed out")));
     }
 
     @Test

@@ -83,6 +83,55 @@ class UserLanguagePreferenceRepositoryIntegrationTest extends AbstractPostgresIT
     }
 
     @Nested
+    @DisplayName("findContactIdsWithLanguageOtherThan")
+    class FindContactIdsWithLanguageOtherThan {
+
+        @Test
+        @DisplayName("returns the given contacts whose language is another one, as given")
+        void returnsContactsWithAnotherLanguageAsGiven() {
+            givenPreference("919876543210", "Hindi");
+            givenPreference("919876543211", "Punjabi");
+
+            assertThat(repo.findContactIdsWithLanguageOtherThan(SCHEMA,
+                    List.of("+91 98765-43210", "919876543211", "919876543212"), "Punjabi"))
+                    .containsExactly("+91 98765-43210");
+        }
+
+        @Test
+        @DisplayName("does not count a blank or missing language")
+        void ignoresBlankLanguages() {
+            givenPreference("919876543210", " ");
+            givenPreference("919876543211", null);
+
+            assertThat(repo.findContactIdsWithLanguageOtherThan(SCHEMA,
+                    List.of("919876543210", "919876543211"), "Punjabi")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("counts every language when there is none to compare with")
+        void countsEveryLanguageWithoutOneToCompare() {
+            givenPreference("919876543210", "Hindi");
+
+            assertThat(repo.findContactIdsWithLanguageOtherThan(SCHEMA,
+                    List.of("919876543210", "919876543211"), null)).containsExactly("919876543210");
+        }
+
+        @Test
+        @DisplayName("returns nothing for no contacts")
+        void noContacts() {
+            assertThat(repo.findContactIdsWithLanguageOtherThan(SCHEMA, List.of(), "Punjabi")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("rejects a schema name that is not a tenant schema (never reaches SQL)")
+        void rejectsInvalidSchema() {
+            assertThatThrownBy(() -> repo.findContactIdsWithLanguageOtherThan(
+                    "tenant_mp; DROP TABLE x", List.of("919876543210"), "Punjabi"))
+                    .hasMessageContaining("Invalid schema name");
+        }
+    }
+
+    @Nested
     @DisplayName("setLanguageWhereUnset")
     class SetLanguageWhereUnset {
 

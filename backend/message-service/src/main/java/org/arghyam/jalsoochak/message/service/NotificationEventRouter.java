@@ -993,24 +993,24 @@ public class NotificationEventRouter {
         return rows.isEmpty() ? new UserContactInfo(null, null) : rows.get(0);
     }
 
+    /**
+     * Empty only when every lookup completed without a match. A failed lookup is thrown, not read as "no
+     * user", so a caller retries or dead-letters it instead of skipping the operator.
+     */
     private UserContactInfo fetchUserContactInfoByHash(String tenantSchema, String phone) {
         String sql = "SELECT id, whatsapp_connection_id, title FROM " + tenantSchema
                 + ".user_table WHERE phone_number_hash = ? LIMIT 1";
-        try {
-            for (String candidate : buildPhoneCandidates(phone)) {
-                String lookupHash = piiEncryptionService.hmac(candidate);
-                List<UserContactInfo> rows = jdbcTemplate.query(sql,
-                        (rs, n) -> new UserContactInfo(
-                                rs.getObject("whatsapp_connection_id", Long.class),
-                                piiEncryptionService.safeDecrypt(rs.getString("title")),
-                                rs.getObject("id", Long.class)),
-                        lookupHash);
-                if (rows != null && !rows.isEmpty()) {
-                    return rows.get(0);
-                }
+        for (String candidate : buildPhoneCandidates(phone)) {
+            String lookupHash = piiEncryptionService.hmac(candidate);
+            List<UserContactInfo> rows = jdbcTemplate.query(sql,
+                    (rs, n) -> new UserContactInfo(
+                            rs.getObject("whatsapp_connection_id", Long.class),
+                            piiEncryptionService.safeDecrypt(rs.getString("title")),
+                            rs.getObject("id", Long.class)),
+                    lookupHash);
+            if (rows != null && !rows.isEmpty()) {
+                return rows.get(0);
             }
-        } catch (Exception ex) {
-            return new UserContactInfo(null, null);
         }
         return new UserContactInfo(null, null);
     }

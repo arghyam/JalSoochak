@@ -14,6 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -84,6 +86,16 @@ class PumpOperatorUploadChunkProcessorTest {
             String phone, String personType, String stateSchemeId) {
         return new PumpOperatorUploadChunkProcessor.UploadRow(
                 rowNum, firstName, lastName, fullName, phone, personType, stateSchemeId);
+    }
+
+    /** Verifies the onboarding events the chunk queued, and returns the after-commit language re-check. */
+    @SuppressWarnings("unchecked")
+    private UnaryOperator<List<String>> verifyOnboarded(
+            String whatsappLanguageId, List<String> languagePhones, List<String> welcomePhones) {
+        ArgumentCaptor<UnaryOperator<List<String>>> reCheck = ArgumentCaptor.forClass(UnaryOperator.class);
+        verify(userEventPublisher).publishPumpOperatorOnboardedAfterCommit(eq(TENANT_CODE), eq(10),
+                eq(whatsappLanguageId), eq(languagePhones), reCheck.capture(), eq(welcomePhones));
+        return reCheck.getValue();
     }
 
     // ── empty input ───────────────────────────────────────────────────────────
@@ -166,8 +178,7 @@ class PumpOperatorUploadChunkProcessorTest {
                     List.of(uploadRow), schemeCache, new HashSet<>());
 
             verify(userTenantRepository).updateUserLanguageId(SCHEMA, 42L, 1);
-            verify(userEventPublisher).publishPumpOperatorOnboardedAfterCommit(
-                    TENANT_CODE, 10, "11", List.of("919876543210"), List.of("919876543210"));
+            verifyOnboarded("11", List.of("919876543210"), List.of("919876543210"));
         }
 
         @Test
@@ -482,8 +493,7 @@ class PumpOperatorUploadChunkProcessorTest {
 
             verify(userTenantRepository).updateUserLanguageId(SCHEMA, 42L, 1);
             verify(userLanguagePreferenceRepository).setLanguageWhereUnset(SCHEMA, List.of("919876543210"), "Punjabi");
-            verify(userEventPublisher).publishPumpOperatorOnboardedAfterCommit(
-                    TENANT_CODE, 10, "11", List.of("919876543210"), List.of("919876543210"));
+            verifyOnboarded("11", List.of("919876543210"), List.of("919876543210"));
         }
 
         @Test
@@ -500,8 +510,7 @@ class PumpOperatorUploadChunkProcessorTest {
 
             verify(userTenantRepository, never()).updateUserLanguageId(anyString(), anyLong(), anyInt());
             verify(userLanguagePreferenceRepository, never()).setLanguageWhereUnset(anyString(), any(), any());
-            verify(userEventPublisher).publishPumpOperatorOnboardedAfterCommit(
-                    TENANT_CODE, 10, "1", List.of(), List.of("919876543214"));
+            verifyOnboarded("1", List.of(), List.of("919876543214"));
         }
 
         @Test
@@ -516,8 +525,7 @@ class PumpOperatorUploadChunkProcessorTest {
 
             verify(userTenantRepository).updateUserLanguageId(SCHEMA, 55L, 1);
             verify(userLanguagePreferenceRepository).setLanguageWhereUnset(SCHEMA, List.of("919876543214"), "English");
-            verify(userEventPublisher).publishPumpOperatorOnboardedAfterCommit(
-                    TENANT_CODE, 10, "1", List.of("919876543214"), List.of("919876543214"));
+            verifyOnboarded("1", List.of("919876543214"), List.of("919876543214"));
         }
 
         @Test
@@ -537,8 +545,7 @@ class PumpOperatorUploadChunkProcessorTest {
             verify(userTenantRepository, never()).updateUserLanguageId(SCHEMA, 55L, 1);
             verify(userTenantRepository).updateUserLanguageId(SCHEMA, 56L, 1);
             verify(userLanguagePreferenceRepository).setLanguageWhereUnset(SCHEMA, List.of("919876543215"), "English");
-            verify(userEventPublisher).publishPumpOperatorOnboardedAfterCommit(
-                    TENANT_CODE, 10, "1", List.of("919876543215"), List.of("919876543214", "919876543215"));
+            verifyOnboarded("1", List.of("919876543215"), List.of("919876543214", "919876543215"));
         }
 
         @Test
@@ -555,7 +562,7 @@ class PumpOperatorUploadChunkProcessorTest {
             verify(userLanguagePreferenceRepository, never()).findContactIdsWithLanguage(anyString(), any());
             verify(userLanguagePreferenceRepository, never()).setLanguageWhereUnset(anyString(), any(), any());
             verify(userEventPublisher, never()).publishPumpOperatorOnboardedAfterCommit(
-                    anyString(), any(), anyString(), anyList(), anyList());
+                    anyString(), any(), anyString(), anyList(), any(), anyList());
         }
 
         @Test
@@ -570,8 +577,38 @@ class PumpOperatorUploadChunkProcessorTest {
 
             verify(userTenantRepository).updateUserLanguageId(SCHEMA, 42L, 1);
             verify(userLanguagePreferenceRepository, never()).setLanguageWhereUnset(anyString(), any(), any());
-            verify(userEventPublisher).publishPumpOperatorOnboardedAfterCommit(
-                    TENANT_CODE, 10, "1", List.of("919876543210"), List.of("919876543210"));
+            UnaryOperator<List<String>> reCheck =
+                    verifyOnboarded("1", List.of("919876543210"), List.of("919876543210"));
+
+            // With no default written, any language the operator has by then is one they chose.
+            when(userLanguagePreferenceRepository.findContactIdsWithLanguageOtherThan(
+                    SCHEMA, List.of("919876543210"), null)).thenReturn(Set.of("919876543210"));
+            assertThat(reCheck.apply(List.of("919876543210"))).isEmpty();
+        }
+
+        @Test
+        @DisplayName("after commit, sends the default only to the operators still holding it")
+        void reChecksDefaultedOperatorsAfterCommit() {
+            givenNewUser("919876543210", 4, 42L);
+            when(userTenantRepository.findUserByPhone(SCHEMA, "919876543211")).thenReturn(Optional.empty());
+            when(userTenantRepository.createUser(eq(SCHEMA), anyString(), eq(10), anyString(),
+                    anyString(), eq(4), eq("919876543211"), anyString(), eq(1L))).thenReturn(43L);
+            givenMappingsInserted(2);
+
+            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), new PreferredLanguage(1, 11, "Punjabi"), 1,
+                    List.of(row(1, "Ram", "", "", "9876543210", "pump_operator", "SS-1"),
+                            row(2, "Shyam", "", "", "9876543211", "pump_operator", "SS-1")),
+                    schemeCache("SS-1", 100), new HashSet<>());
+
+            List<String> defaulted = List.of("919876543210", "919876543211");
+            UnaryOperator<List<String>> reCheck = verifyOnboarded("11", defaulted, defaulted);
+            // The re-check runs after commit, not in the chunk's transaction.
+            verify(userLanguagePreferenceRepository, never()).findContactIdsWithLanguageOtherThan(any(), any(), any());
+
+            // The second operator chose Hindi in the chatbot after the upload read their language.
+            when(userLanguagePreferenceRepository.findContactIdsWithLanguageOtherThan(SCHEMA, defaulted, "Punjabi"))
+                    .thenReturn(Set.of("919876543211"));
+            assertThat(reCheck.apply(defaulted)).containsExactly("919876543210");
         }
     }
 

@@ -234,7 +234,7 @@ Sends an onboarding welcome flow to the pump operators of an upload. The flow in
 
 Published by `user-service` (`UserEventPublisher.publishPumpOperatorOnboardedAfterCommit`) after a bulk pump-operator upload commits. Each event carries up to 100 phones (`MAX_PHONES_PER_EVENT`) and is keyed by the tenant code:
 
-1. `UPDATE_USER_LANGUAGE` for the operators with no language chosen in the chatbot. The upload gives them the tenant's first language, in `user_table.language_id` and `user_language_preference`. A language the operator chose is kept, in the database and at the provider.
+1. `UPDATE_USER_LANGUAGE` for the operators with no language chosen in the chatbot. The upload gives them the tenant's first language, in `user_table.language_id` and `user_language_preference`. A language the operator chose is kept, in the database and at the provider: after the commit, just before publishing, the upload reads these operators' languages again and leaves out any who chose another meanwhile (if that read fails, no language update is sent).
 2. `SEND_WELCOME_MESSAGE` for every pump operator the upload maps to a scheme, so a re-upload welcomes its operators again.
 
 The shared key puts both on one partition, so message-service sets an operator's language before it starts their welcome flow.
@@ -289,7 +289,7 @@ message-service is the only service that sets a contact's language with the prov
 
 `handleUpdateUserLanguage`:
 
-1. For each phone, resolves the contact as the welcome does, opting in an operator who has none. A phone with no user, or an opt-in that returned no contact, is skipped, not retried.
+1. For each phone, resolves the contact as the welcome does, opting in an operator who has none. A phone with no user, or an opt-in that returned no contact, is skipped, not retried; a lookup that fails is a failure, not "no user".
 2. Calls `WhatsAppSender.updateContactLanguage(contactId, whatsappLanguageId)` (`updateContact` GraphQL mutation).
 3. Unlike welcome messages, a failure rethrows the whole Kafka message (triggering retry/DLT), because opt-in and `updateContactLanguage` are both idempotent — re-setting the same language on a contact that already has it is harmless.
 

@@ -15,7 +15,9 @@ import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.UnaryOperator;
 import java.util.List;
+import java.util.Objects;
 
 @Component
 @RequiredArgsConstructor
@@ -44,28 +46,35 @@ public class UserEventPublisher {
      *  - SEND_WELCOME_MESSAGE for the operators to welcome
      * Every event is keyed by the tenant code and the language updates go first, so message-service sets
      * an operator's language before it starts their welcome flow.
+     *
+     * @param reCheckLanguagePhones run after commit, just before publishing: given {@code languagePhones},
+     *                              returns those whose language is still to be sent. If it fails, no
+     *                              language update is sent; the welcome still is.
      */
     public void publishPumpOperatorOnboardedAfterCommit(
             String tenantCode,
             Integer tenantId,
             String whatsappLanguageId,
             List<String> languagePhones,
+            UnaryOperator<List<String>> reCheckLanguagePhones,
             List<String> welcomePhones
     ) {
-        List<List<String>> languageBatches = partition(languagePhones, MAX_PHONES_PER_EVENT);
+        List<String> queuedLanguagePhones = languagePhones == null ? List.of() : List.copyOf(languagePhones);
         List<List<String>> welcomeBatches = partition(welcomePhones, MAX_PHONES_PER_EVENT);
-        if (languageBatches.isEmpty() && welcomeBatches.isEmpty()) {
+        if (queuedLanguagePhones.isEmpty() && welcomeBatches.isEmpty()) {
             return;
         }
+        Objects.requireNonNull(reCheckLanguagePhones, "reCheckLanguagePhones");
 
-        log.info("[user-events] queued_after_commit count={} topic={} tenantCode={} tenantId={}"
+        log.info("[user-events] queued_after_commit topic={} tenantCode={} tenantId={}"
                         + " languagePhones={} welcomePhones={}",
-                languageBatches.size() + welcomeBatches.size(), COMMON_TOPIC, tenantCode, tenantId,
-                languagePhones == null ? 0 : languagePhones.size(), welcomePhones == null ? 0 : welcomePhones.size());
+                COMMON_TOPIC, tenantCode, tenantId,
+                queuedLanguagePhones.size(), welcomePhones == null ? 0 : welcomePhones.size());
 
         Runnable publish = () -> {
             String triggeredAt = Instant.now().truncatedTo(ChronoUnit.MILLIS).toString();
-            for (List<String> phones : languageBatches) {
+            List<String> stillToSend = reCheck(queuedLanguagePhones, reCheckLanguagePhones, tenantCode, tenantId);
+            for (List<String> phones : partition(stillToSend, MAX_PHONES_PER_EVENT)) {
                 publishOnboardingEvent("UPDATE_USER_LANGUAGE", tenantCode, tenantId, triggeredAt,
                         whatsappLanguageId, phones);
             }
@@ -163,6 +172,27 @@ public class UserEventPublisher {
                 log.warn("[user-events] welcome_admin_publish_failed tenantCode={} tenantId={} phones={}",
                         tenantCode, tenantId, phones.size());
             }
+        }
+    }
+
+    private static List<String> reCheck(List<String> languagePhones, UnaryOperator<List<String>> reCheck,
+                                        String tenantCode, Integer tenantId) {
+        if (languagePhones.isEmpty()) {
+            return List.of();
+        }
+        try {
+            List<String> stillToSend = reCheck.apply(languagePhones);
+            int dropped = languagePhones.size() - stillToSend.size();
+            if (dropped > 0) {
+                log.info("[user-events] language_update_dropped count={} tenantCode={} tenantId={}",
+                        dropped, tenantCode, tenantId);
+            }
+            return stillToSend;
+        } catch (RuntimeException e) {
+            log.warn("[user-events] language_recheck_failed tenantCode={} tenantId={} phones={};"
+                            + " language update not sent: {}",
+                    tenantCode, tenantId, languagePhones.size(), e.getMessage());
+            return List.of();
         }
     }
 
