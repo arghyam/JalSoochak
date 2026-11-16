@@ -234,6 +234,7 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 | GET | `/api/v1/analytics/tenant_data` | Tenant data |
 | GET | `/api/v1/analytics/tenant_boundaries` | Boundary GeoJSON for a parent area and its children |
 | GET | `/api/v1/analytics/tenant_performance_score` | Average performance score for a boundary |
+| GET | `/api/v1/analytics/onboarded-regions` | A parent's onboarded children (phased rollout²); `tenant_id` plus exactly one of `parent_lgd_id` / `parent_department_id` |
 | GET | `/api/v1/analytics/schemes` | Analytics schemes list |
 | GET | `/api/v1/analytics/meter-readings` | Meter readings analytics |
 | GET | `/api/v1/analytics/scheme-regularity/average` | Average scheme regularity |
@@ -249,6 +250,16 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 ¹ `totalSuppliedFhtcDays` is the LPCD denominator: each scheme's achieved FHTC summed over the days it
 supplied water. LPCD = litres ÷ (`totalSuppliedFhtcDays` × persons per household), so schemes that did not
 supply add no households. `totalAchievedFhtcCount` is still the region's household total.
+
+² Phased rollout, analytics-service only, off unless `PHASED_ROLLOUT_ENABLED=true`. With it on, any
+`/api/v1/analytics/**` request whose `lgd_id`, `parent_lgd_id`, `department_id` or `parent_department_id`
+names a region that isn't onboarded returns `404` with
+`{timestamp, status, error, message: "Region not found"}`, the `GlobalExceptionHandler` shape rather than
+the `{success, data}` envelope. Responses for onboarded regions are unchanged. `onboarded-regions` returns
+`{tenantId, parentLgdId, parentDepartmentId, phasedRollout, onboardedChildIds}`: with the switch off,
+`phasedRollout` is `false` and `onboardedChildIds` is `null`, meaning every region is onboarded. Its `400`
+(not exactly one parent, or no such parent) uses the same handler shape. The rule and runbook are in
+`docs/phased-rollout.md`.
 
 ---
 
