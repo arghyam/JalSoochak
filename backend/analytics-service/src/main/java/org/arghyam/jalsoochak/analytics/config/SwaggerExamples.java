@@ -900,6 +900,37 @@ public final class SwaggerExamples {
             }
             """;
 
+    public static final String ONBOARDED_REGIONS_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "tenantId": 3,
+                "parentLgdId": 1,
+                "parentDepartmentId": null,
+                "phasedRollout": true,
+                "onboardedChildIds": [12, 15]
+              }
+            }
+            """;
+
+    public static final String ERROR_BAD_REQUEST = """
+            {
+              "timestamp": "2026-11-16T10:15:30",
+              "status": 400,
+              "error": "Bad Request",
+              "message": "Provide exactly one of parent_lgd_id or parent_department_id"
+            }
+            """;
+
+    public static final String ERROR_REGION_NOT_FOUND = """
+            {
+              "timestamp": "2026-11-16T10:15:30",
+              "status": 404,
+              "error": "Not Found",
+              "message": "Region not found"
+            }
+            """;
+
     public static final String GENERIC_FAILURE = """
             {
               "success": false,

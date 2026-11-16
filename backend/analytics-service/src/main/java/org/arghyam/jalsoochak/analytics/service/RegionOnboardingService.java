@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.analytics.service;
 
+import org.arghyam.jalsoochak.analytics.dto.response.OnboardedRegionsResponse;
 import org.arghyam.jalsoochak.analytics.enums.RegionHierarchy;
 import org.arghyam.jalsoochak.analytics.exception.RegionNotOnboardedException;
 import org.arghyam.jalsoochak.analytics.repository.RegionOnboardingRepository;
@@ -52,5 +53,28 @@ public class RegionOnboardingService {
         if (!isOnboarded(tenantId, hierarchy, regionId)) {
             throw new RegionNotOnboardedException(tenantId, hierarchy, regionId);
         }
+    }
+
+    /**
+     * The parent's onboarded children, one level down. With the switch off, no query runs and the ids
+     * are null: every child is onboarded. Whether the parent itself is onboarded is the guard's call.
+     *
+     * @throws IllegalArgumentException when the tenant has no such parent
+     */
+    public OnboardedRegionsResponse onboardedChildren(int tenantId, RegionHierarchy hierarchy, int parentId) {
+        OnboardedRegionsResponse.OnboardedRegionsResponseBuilder response = OnboardedRegionsResponse.builder()
+                .tenantId(tenantId)
+                .parentLgdId(hierarchy == RegionHierarchy.LGD ? parentId : null)
+                .parentDepartmentId(hierarchy == RegionHierarchy.DEPARTMENT ? parentId : null)
+                .phasedRollout(phasedRollout);
+        if (!phasedRollout) {
+            return response.build();
+        }
+        int parentLevel = repository.findLevel(tenantId, hierarchy, parentId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        hierarchy + " region " + parentId + " not found for tenant_id: " + tenantId));
+        return response
+                .onboardedChildIds(repository.findOnboardedChildIds(tenantId, hierarchy, parentLevel, parentId))
+                .build();
     }
 }

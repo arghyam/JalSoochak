@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.analytics.service;
 
+import org.arghyam.jalsoochak.analytics.dto.response.OnboardedRegionsResponse;
 import org.arghyam.jalsoochak.analytics.enums.RegionHierarchy;
 import org.arghyam.jalsoochak.analytics.exception.RegionNotOnboardedException;
 import org.arghyam.jalsoochak.analytics.repository.RegionOnboardingRepository;
@@ -11,6 +12,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -91,6 +93,54 @@ class RegionOnboardingServiceTest {
                 .isInstanceOf(RegionNotOnboardedException.class)
                 .hasMessageContaining(String.valueOf(TENANT_ID))
                 .hasMessageContaining(String.valueOf(REGION_ID));
+    }
+
+    @ParameterizedTest
+    @EnumSource(RegionHierarchy.class)
+    void onboardedChildren_switchOff_saysSoWithNullIds_withoutAQuery(RegionHierarchy hierarchy) {
+        OnboardedRegionsResponse response = service(false).onboardedChildren(TENANT_ID, hierarchy, REGION_ID);
+
+        assertThat(response.getTenantId()).isEqualTo(TENANT_ID);
+        assertThat(response.isPhasedRollout()).isFalse();
+        assertThat(response.getOnboardedChildIds()).isNull();
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void onboardedChildren_lgdParent_listsTheChildrenOneLevelDown() {
+        when(repository.findLevel(TENANT_ID, RegionHierarchy.LGD, REGION_ID)).thenReturn(Optional.of(1));
+        when(repository.findOnboardedChildIds(TENANT_ID, RegionHierarchy.LGD, 1, REGION_ID))
+                .thenReturn(List.of(20, 25));
+
+        OnboardedRegionsResponse response = service(true).onboardedChildren(TENANT_ID, RegionHierarchy.LGD, REGION_ID);
+
+        assertThat(response.isPhasedRollout()).isTrue();
+        assertThat(response.getParentLgdId()).isEqualTo(REGION_ID);
+        assertThat(response.getParentDepartmentId()).isNull();
+        assertThat(response.getOnboardedChildIds()).containsExactly(20, 25);
+    }
+
+    @Test
+    void onboardedChildren_departmentParent_namesItAsTheDepartmentParent() {
+        when(repository.findLevel(TENANT_ID, RegionHierarchy.DEPARTMENT, REGION_ID)).thenReturn(Optional.of(3));
+        when(repository.findOnboardedChildIds(TENANT_ID, RegionHierarchy.DEPARTMENT, 3, REGION_ID))
+                .thenReturn(List.of());
+
+        OnboardedRegionsResponse response =
+                service(true).onboardedChildren(TENANT_ID, RegionHierarchy.DEPARTMENT, REGION_ID);
+
+        assertThat(response.getParentLgdId()).isNull();
+        assertThat(response.getParentDepartmentId()).isEqualTo(REGION_ID);
+        assertThat(response.getOnboardedChildIds()).isEmpty();
+    }
+
+    @Test
+    void onboardedChildren_parentTheTenantDoesNotHave_isABadRequest() {
+        when(repository.findLevel(TENANT_ID, RegionHierarchy.LGD, REGION_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service(true).onboardedChildren(TENANT_ID, RegionHierarchy.LGD, REGION_ID))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(repository, never()).findOnboardedChildIds(anyInt(), any(), anyInt(), anyInt());
     }
 
     @Test

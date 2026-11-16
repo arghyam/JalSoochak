@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.controller.regularity.AnalyticsRegularityController;
+import org.arghyam.jalsoochak.analytics.controller.tenant.AnalyticsRegionOnboardingController;
 import org.arghyam.jalsoochak.analytics.enums.RegionHierarchy;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.exception.RegionNotOnboardedException;
@@ -19,7 +20,10 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDate;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -30,13 +34,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Pins the phased-rollout wiring with the switch on: the guard runs ahead of a real route and its
  * rejection reaches the client as a 404. The guard's own rules are in {@code RegionOnboardingInterceptorTest}.
  */
-@WebMvcTest(controllers = AnalyticsRegularityController.class)
+@WebMvcTest(controllers = {AnalyticsRegularityController.class, AnalyticsRegionOnboardingController.class})
 @Import({GlobalExceptionHandler.class, SingleTenantModeGuard.class})
 @AutoConfigureMockMvc(addFilters = false)
 @TestPropertySource(properties = "analytics.phased-rollout.enabled=true")
 class AnalyticsRegionOnboardingAccessTest {
 
     private static final String AVERAGE_REGULARITY = "/api/v1/analytics/scheme-regularity/average";
+    private static final String ONBOARDED_REGIONS = "/api/v1/analytics/onboarded-regions";
 
     @Autowired
     private MockMvc mockMvc;
@@ -78,5 +83,19 @@ class AnalyticsRegionOnboardingAccessTest {
         verify(regionOnboardingService).requireOnboarded(3, RegionHierarchy.LGD, 12);
         verify(schemeRegularityService).getAverageSchemeRegularity(
                 3, 12, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31));
+    }
+
+    @Test
+    void onboardedRegions_parentNotOnboarded_isNotFound() throws Exception {
+        doThrow(new RegionNotOnboardedException(3, RegionHierarchy.DEPARTMENT, 40))
+                .when(regionOnboardingService).requireOnboarded(3, RegionHierarchy.DEPARTMENT, 40);
+
+        mockMvc.perform(get(ONBOARDED_REGIONS)
+                        .param("tenant_id", "3")
+                        .param("parent_department_id", "40"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Region not found"));
+
+        verify(regionOnboardingService, never()).onboardedChildren(anyInt(), any(), anyInt());
     }
 }
