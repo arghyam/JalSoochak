@@ -46,7 +46,7 @@ is named after a storage product at all.
  telemetry-service                                   message-service
  ─────────────────                                   ───────────────
  provider/whatsapp/                                  channel/provider/
-   WhatsAppContactDirectory  ◀── GlificContactDirectory     WhatsAppSender  ◀── GlificWhatsAppSender
+                                                            WhatsAppSender  ◀── GlificWhatsAppSender
    ConversationResumeGateway ◀── GlificConversationResumeGateway
    InboundMediaFetcher       ◀── GlificMediaFetcher         WhatsAppDeliveryStatusReader ◀── GlificDeliveryStatusReader
  MeterReadingExtractor       ◀── FlowVisionBfmOcrExtractor
@@ -56,7 +56,7 @@ is named after a storage product at all.
 
 | Port | Service | Notes |
 | --- | --- | --- |
-| `WhatsAppContactDirectory`, `ConversationResumeGateway`, `InboundMediaFetcher` | telemetry | The three classes that made real outbound calls. The SSRF guard and bounded download stay on our side of the port. |
+| `ConversationResumeGateway`, `InboundMediaFetcher` | telemetry | The classes that make real outbound calls. The SSRF guard and bounded download stay on our side of the port. A third port, `WhatsAppContactDirectory`, was removed later: telemetry now publishes `UPDATE_USER_LANGUAGE`, and message-service sets the contact's language. |
 | `MeterReadingExtractor` | telemetry | Already existed. Only the vendor-named types around it were renamed (`OcrReadingResult`, `OcrReadingsRetryService`, `OcrResilienceConfig`, …). |
 | `WhatsAppSender` | message | 13 methods covering opt-in, flows, HSMs, media upload and report delivery. No per-tenant factory, because all tenants share one WhatsApp account. |
 | `WhatsAppDeliveryStatusReader` | message | Delivery-status reads for reconciliation. |

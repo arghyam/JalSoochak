@@ -156,15 +156,21 @@ report HSMs carry only names, dates and links, and their wording is the provider
 
 - `user_table.language_id` — the chosen `LANGUAGE_SELECTION` option's `order` (for an option without a
   positive order, its position in the options sorted by `order`), or for a tenant without template options,
-  the language's position in its `language_N` list. The chatbot reads `user_language_preference` first
-  (`OperatorContextService.resolveOperatorLanguage`) and uses `language_id`, as a `language_N` position, only
-  when the operator has no row
+  the language's position in its `language_N` list
+- The chatbot answers in the first found of (`OperatorContextService.resolveOperatorLanguage`, which saves
+  nothing): the saved `user_language_preference`; `language_id`, read as a menu option's id, or as a
+  `language_N` position for a tenant with no menu; the tenant's first language (its first menu option, else
+  `language_1`); English. The welcome and the trigger word's first reply call `ensureOperatorLanguage`
+  instead: when nothing is saved, it saves the resolved language (and `language_id`, when that is the
+  tenant's first language) and publishes `UPDATE_USER_LANGUAGE`. It never overwrites a chosen language, and
+  a failure only logs a WARN
 - `whatsappLanguageId` — the language's `common_schema.language_master` id (the provider's language id);
-  user-service puts it on `UPDATE_USER_LANGUAGE`, and message-service sets it as the contact's language
+  user-service and telemetry put it on `UPDATE_USER_LANGUAGE`, and message-service, the only service that
+  sets a contact's language, opts the contact in if needed and sets it
 - The chatbot's language menu is the `LANGUAGE_SELECTION` options for the tenant's `SUPPORTED_LANGUAGES`,
-  matched through the catalog (`LanguageMenuService`). A pump-operator upload resets each operator to its
-  first option in `user_table.language_id`, `user_language_preference` and the provider
-  (`WhatsAppPreferredLanguageService`)
+  matched through the catalog (`LanguageMenuService`). A pump-operator upload gives each operator with no
+  chosen language the first option, in `user_table.language_id`, `user_language_preference` and the
+  provider (`WhatsAppPreferredLanguageService`); a chosen language is kept
 
 ### Object storage + WhatsApp provider
 
