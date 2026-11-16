@@ -112,4 +112,32 @@ class KafkaProducerTest {
             assertThat(producer.publishJson("topic", "payload")).isFalse();
         }
     }
+
+    // ── publishJson with a key ────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("publishJson with a key")
+    class PublishJsonWithKey {
+
+        @Test
+        @DisplayName("sends the record with its key")
+        void sendsWithKey() throws JsonProcessingException {
+            when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+            when(kafkaTemplate.send("topic", "mp", "{}"))
+                    .thenReturn(CompletableFuture.completedFuture(null));
+
+            assertThat(producer.publishJson("topic", "mp", "payload")).isTrue();
+            verify(kafkaTemplate).send("topic", "mp", "{}");
+        }
+
+        @Test
+        @DisplayName("returns false when kafkaTemplate.send throws unexpectedly")
+        void returnsFalseWhenKafkaSendThrows() throws JsonProcessingException {
+            when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+            when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+                    .thenThrow(new RuntimeException("kafka down"));
+
+            assertThat(producer.publishJson("topic", "mp", "payload")).isFalse();
+        }
+    }
 }

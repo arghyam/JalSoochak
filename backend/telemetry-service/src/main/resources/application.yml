@@ -55,12 +55,6 @@ storage:
 whatsapp:
   api-token: ${WHATSAPP_API_TOKEN:}
   media-base-url: ${WHATSAPP_MEDIA_BASE_URL:https://api.glific.org/v1/media}
-  sync:
-    enabled: ${WHATSAPP_SYNC_ENABLED:false}
-    base-url: ${WHATSAPP_SYNC_BASE_URL:https://api.arghyam.glific.com}
-    user:
-      phone: ${WHATSAPP_SYNC_USER_PHONE:}
-      password: ${WHATSAPP_SYNC_USER_PASSWORD:}
   resume:
     enabled: ${WHATSAPP_RESUME_ENABLED:true}
     base-url: ${WHATSAPP_RESUME_BASE_URL:https://api.arghyam.glific.com}

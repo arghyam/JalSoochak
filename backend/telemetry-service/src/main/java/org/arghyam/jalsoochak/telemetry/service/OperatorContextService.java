@@ -1,30 +1,44 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.event.OperatorLanguageEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserLanguagePreferenceRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 import java.util.Optional;
 
 @Service
+@Slf4j
 public class OperatorContextService {
 
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     private final TenantConfigRepository tenantConfigRepository;
     private final PiiEncryptionService piiEncryptionService;
+    private final LanguageMenuService languageMenuService;
+    private final OperatorLanguageEventPublisher operatorLanguageEventPublisher;
+    private final TransactionTemplate transactionTemplate;
 
     public OperatorContextService(TelemetryTenantRepository telemetryTenantRepository,
                                   UserLanguagePreferenceRepository userLanguagePreferenceRepository,
                                   TenantConfigRepository tenantConfigRepository,
-                                  PiiEncryptionService piiEncryptionService) {
+                                  PiiEncryptionService piiEncryptionService,
+                                  LanguageMenuService languageMenuService,
+                                  OperatorLanguageEventPublisher operatorLanguageEventPublisher,
+                                  TransactionTemplate transactionTemplate) {
         this.telemetryTenantRepository = telemetryTenantRepository;
         this.userLanguagePreferenceRepository = userLanguagePreferenceRepository;
         this.tenantConfigRepository = tenantConfigRepository;
         this.piiEncryptionService = piiEncryptionService;
+        this.languageMenuService = languageMenuService;
+        this.operatorLanguageEventPublisher = operatorLanguageEventPublisher;
+        this.transactionTemplate = transactionTemplate;
     }
 
     public TelemetryOperatorWithSchema resolveOperatorWithSchema(String contactId) {
@@ -118,29 +132,101 @@ public class OperatorContextService {
         }
     }
 
+    /**
+     * The language to answer the operator in, the first found of: the language saved in
+     * {@code user_language_preference}; {@code user_table.language_id}, read as the id of a language menu
+     * option, or for a tenant without a menu, as a {@code language_N} position; the tenant's first
+     * language; English. Saves nothing — see {@link #ensureOperatorLanguage}.
+     */
     public String resolveOperatorLanguage(TelemetryOperatorWithSchema operatorWithSchema, Integer tenantId) {
-        if (operatorWithSchema == null || operatorWithSchema.operator() == null) {
-            return "English";
+        return resolveLanguage(operatorWithSchema, tenantId).language();
+    }
+
+    /**
+     * {@link #resolveOperatorLanguage} for what may be the operator's first message. When the operator has
+     * no saved language, saves the one resolved — with {@code language_id} too when it is the tenant's
+     * first language — and hands it to message-service for the operator's WhatsApp contact. A language
+     * saved meanwhile is kept. A failure is logged, never raised: the answer is unchanged and the next
+     * message retries.
+     */
+    public String ensureOperatorLanguage(TelemetryOperatorWithSchema operatorWithSchema, Integer tenantId) {
+        ResolvedLanguage resolved = resolveLanguage(operatorWithSchema, tenantId);
+        if (resolved.toSave() && resolved.language() != null && !resolved.language().isBlank()) {
+            saveLanguage(operatorWithSchema, tenantId, resolved);
         }
-        if (tenantId != null) {
-            String contactId = operatorWithSchema.operator().phoneNumber();
-            if (contactId != null && !contactId.isBlank()) {
-                String preferredLanguage = userLanguagePreferenceRepository
-                        .findLanguage(operatorWithSchema.schemaName(), contactId)
-                        .orElse(null);
-                if (preferredLanguage != null && !preferredLanguage.isBlank()) {
-                    return preferredLanguage;
-                }
+        return resolved.language();
+    }
+
+    private ResolvedLanguage resolveLanguage(TelemetryOperatorWithSchema operatorWithSchema, Integer tenantId) {
+        if (operatorWithSchema == null || operatorWithSchema.operator() == null) {
+            return ResolvedLanguage.FALLBACK;
+        }
+        String schemaName = operatorWithSchema.schemaName();
+        String phone = operatorWithSchema.operator().phoneNumber();
+        // Without a tenant or a phone the saved language cannot be read, so none is saved either.
+        boolean canSave = tenantId != null && phone != null && !phone.isBlank();
+        if (canSave) {
+            Optional<String> savedLanguage = userLanguagePreferenceRepository.findLanguage(schemaName, phone)
+                    .filter(language -> !language.isBlank());
+            if (savedLanguage.isPresent()) {
+                return new ResolvedLanguage(savedLanguage.get(), false, null);
             }
         }
+
         Integer languageId = operatorWithSchema.operator().languageId();
-        if (languageId == null || languageId <= 0) {
-            return "English";
+        List<LanguageMenuService.MenuOption> menu = languageMenuService.resolveOptions(tenantId, schemaName);
+        if (!menu.isEmpty()) {
+            if (languageId != null) {
+                for (LanguageMenuService.MenuOption option : menu) {
+                    if (option.languageId() == languageId) {
+                        return new ResolvedLanguage(option.option().canonicalLabel(), canSave, null);
+                    }
+                }
+            }
+            LanguageMenuService.MenuOption first = menu.get(0);
+            return new ResolvedLanguage(first.option().canonicalLabel(), canSave, first.languageId());
         }
+
         List<String> languageOptions = tenantConfigRepository.findLanguageOptions(tenantId);
-        if (languageOptions.isEmpty() || languageId > languageOptions.size()) {
-            return "English";
+        if (languageOptions.isEmpty()) {
+            return ResolvedLanguage.FALLBACK;
         }
-        return languageOptions.get(languageId - 1);
+        if (languageId != null && languageId > 0 && languageId <= languageOptions.size()) {
+            return new ResolvedLanguage(languageOptions.get(languageId - 1), canSave, null);
+        }
+        return new ResolvedLanguage(languageOptions.get(0), canSave, 1);
+    }
+
+    private void saveLanguage(TelemetryOperatorWithSchema operatorWithSchema, Integer tenantId,
+                              ResolvedLanguage resolved) {
+        String schemaName = operatorWithSchema.schemaName();
+        TelemetryOperator operator = operatorWithSchema.operator();
+        try {
+            Boolean saved = transactionTemplate.execute(status -> {
+                if (!userLanguagePreferenceRepository.setLanguageWhereUnset(
+                        schemaName, operator.phoneNumber(), resolved.language())) {
+                    return false;
+                }
+                if (resolved.languageIdToSet() != null) {
+                    telemetryTenantRepository.updateUserLanguageId(schemaName, operator.id(), resolved.languageIdToSet());
+                }
+                return true;
+            });
+            if (Boolean.TRUE.equals(saved)) {
+                operatorLanguageEventPublisher.publishLanguageUpdated(
+                        schemaName, tenantId, operator.phoneNumber(), resolved.language());
+            }
+        } catch (RuntimeException e) {
+            log.warn("[operator-language] Language '{}' of operatorId={} (tenantId={}) not saved or not published: {}",
+                    resolved.language(), operator.id(), tenantId, e.getMessage());
+        }
+    }
+
+    /**
+     * @param toSave          the operator has no saved language, and this one is to be saved for them
+     * @param languageIdToSet the {@code language_id} to save with it; null to leave {@code language_id} as is
+     */
+    private record ResolvedLanguage(String language, boolean toSave, Integer languageIdToSet) {
+        private static final ResolvedLanguage FALLBACK = new ResolvedLanguage("English", false, null);
     }
 }

@@ -99,6 +99,24 @@ class UserLanguagePreferenceRepositoryTest {
     }
 
     @Test
+    void setLanguageWhereUnsetStoresTheDigitsOnlyContactIdAndReportsTheWrite() {
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+
+        assertThat(repository.setLanguageWhereUnset(SCHEMA, RAW_CONTACT, "Punjabi")).isTrue();
+
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(anyString(), args.capture());
+        assertThat(args.getValue()).containsExactly(NORMALISED_CONTACT, "Punjabi");
+    }
+
+    @Test
+    void setLanguageWhereUnsetReportsNoWriteWhenTheContactAlreadyHasALanguage() {
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0);
+
+        assertThat(repository.setLanguageWhereUnset(SCHEMA, RAW_CONTACT, "Punjabi")).isFalse();
+    }
+
+    @Test
     void findLanguageLooksUpTheNormalisedContactIdInTheTenantTable() {
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(List.of("Hindi"));

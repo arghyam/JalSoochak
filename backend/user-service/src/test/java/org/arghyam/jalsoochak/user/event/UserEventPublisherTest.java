@@ -15,6 +15,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.UnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -23,6 +25,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -106,18 +109,13 @@ class UserEventPublisherTest {
         }
 
         @Test
-        @DisplayName("batches large phone lists into chunks of 1000")
+        @DisplayName("batches large phone lists into chunks of 100")
         void batchesLargeList() {
             when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), any())).thenReturn(true);
 
-            List<String> phones = new ArrayList<>();
-            for (int i = 0; i < 2500; i++) {
-                phones.add("9198765" + String.format("%05d", i));
-            }
+            publisher.publishAdminWelcomeMessages("mp", 1, phones(250));
 
-            publisher.publishAdminWelcomeMessages("mp", 1, phones);
-
-            // 2500 phones → 3 batches (1000 + 1000 + 500)
+            // 250 phones → 3 batches (100 + 100 + 50)
             verify(kafkaProducer, times(3)).publishJson(eq(UserEventPublisher.COMMON_TOPIC), any());
         }
     }
@@ -128,6 +126,9 @@ class UserEventPublisherTest {
     @DisplayName("publishPumpOperatorOnboardedAfterCommit")
     class PublishPumpOperatorOnboarded {
 
+        /** A re-check that finds every language phone still to be sent. */
+        private static final UnaryOperator<List<String>> KEEP_ALL = UnaryOperator.identity();
+
         @AfterEach
         void cleanUpTransactionSync() {
             if (TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -135,75 +136,177 @@ class UserEventPublisherTest {
             }
         }
 
-        @Test
-        @DisplayName("does nothing for null or empty phone list")
-        void doesNothingForNullOrEmpty() {
-            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", null);
-            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", List.of());
-            verify(kafkaProducer, never()).publishJson(any(), any());
+        private List<PumpOperatorMessagingEvent> awaitPublished(String key, int count) {
+            ArgumentCaptor<PumpOperatorMessagingEvent> captor =
+                    ArgumentCaptor.forClass(PumpOperatorMessagingEvent.class);
+            verify(kafkaProducer, timeout(2000).times(count))
+                    .publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq(key), captor.capture());
+            return captor.getAllValues();
         }
 
         @Test
-        @DisplayName("publishes UPDATE_USER_LANGUAGE and SEND_WELCOME_MESSAGE events when no transaction active")
-        void publishesEventsForNonEmptyPhoneList() {
-            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), any())).thenReturn(true);
+        @DisplayName("does nothing for null or empty phone lists")
+        void doesNothingForNullOrEmpty() {
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", null, KEEP_ALL, null);
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", List.of(), KEEP_ALL, List.of());
+            verifyNoInteractions(kafkaProducer);
+        }
 
-            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", List.of("91XXXXXXXXX1"));
+        @Test
+        @DisplayName("publishes UPDATE_USER_LANGUAGE before SEND_WELCOME_MESSAGE, keyed by tenant, when no transaction active")
+        void publishesLanguageUpdateBeforeWelcome() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("mp"), any())).thenReturn(true);
 
-            // Two events published asynchronously: UPDATE_USER_LANGUAGE + SEND_WELCOME_MESSAGE
-            ArgumentCaptor<PumpOperatorMessagingEvent> captor =
-                    ArgumentCaptor.forClass(PumpOperatorMessagingEvent.class);
-            verify(kafkaProducer, timeout(2000).times(2))
-                    .publishJson(eq(UserEventPublisher.COMMON_TOPIC), captor.capture());
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en",
+                    List.of("91XXXXXXXXX1"), KEEP_ALL, List.of("91XXXXXXXXX1"));
 
-            List<String> eventTypes = captor.getAllValues().stream()
-                    .map(PumpOperatorMessagingEvent::getEventType)
-                    .toList();
-            assertThat(eventTypes).containsExactlyInAnyOrder("UPDATE_USER_LANGUAGE", "SEND_WELCOME_MESSAGE");
-            assertThat(captor.getAllValues())
-                    .extracting(PumpOperatorMessagingEvent::getWhatsappLanguageId)
+            List<PumpOperatorMessagingEvent> events = awaitPublished("mp", 2);
+            assertThat(events).extracting(PumpOperatorMessagingEvent::getEventType)
+                    .containsExactly("UPDATE_USER_LANGUAGE", "SEND_WELCOME_MESSAGE");
+            assertThat(events).extracting(PumpOperatorMessagingEvent::getWhatsappLanguageId)
                     .containsOnly("en");
+        }
+
+        @Test
+        @DisplayName("splits each list into events of at most 100 phones, all language updates first")
+        void batchesLargeListsIntoEventsOf100() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("mp"), any())).thenReturn(true);
+
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", phones(150), KEEP_ALL, phones(250));
+
+            List<PumpOperatorMessagingEvent> events = awaitPublished("mp", 5);
+            assertThat(events).extracting(PumpOperatorMessagingEvent::getEventType).containsExactly(
+                    "UPDATE_USER_LANGUAGE", "UPDATE_USER_LANGUAGE",
+                    "SEND_WELCOME_MESSAGE", "SEND_WELCOME_MESSAGE", "SEND_WELCOME_MESSAGE");
+            assertThat(events).extracting(e -> e.getPumpOperatorPhones().size())
+                    .containsExactly(100, 50, 100, 100, 50);
+        }
+
+        @Test
+        @DisplayName("sends the language update only to the operators whose language was set")
+        void sendsLanguageUpdateOnlyToItsPhones() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("mp"), any())).thenReturn(true);
+
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en",
+                    List.of("91XXXXXXXXX1"), KEEP_ALL, List.of("91XXXXXXXXX1", "91XXXXXXXXX2"));
+
+            List<PumpOperatorMessagingEvent> events = awaitPublished("mp", 2);
+            assertThat(events.get(0).getPumpOperatorPhones()).containsExactly("91XXXXXXXXX1");
+            assertThat(events.get(1).getPumpOperatorPhones()).containsExactly("91XXXXXXXXX1", "91XXXXXXXXX2");
+        }
+
+        @Test
+        @DisplayName("re-checks the language phones after commit and sends the update only to those it keeps")
+        void reChecksLanguagePhonesAfterCommit() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("mp"), any())).thenReturn(true);
+            AtomicBoolean committed = new AtomicBoolean(false);
+            AtomicBoolean reCheckedAfterCommit = new AtomicBoolean(false);
+            UnaryOperator<List<String>> dropSecond = phones -> {
+                reCheckedAfterCommit.set(committed.get());
+                return List.of("91XXXXXXXXX1");
+            };
+            TransactionSynchronizationManager.initSynchronization();
+
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en",
+                    List.of("91XXXXXXXXX1", "91XXXXXXXXX2"), dropSecond, List.of("91XXXXXXXXX1", "91XXXXXXXXX2"));
+            committed.set(true);
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(TransactionSynchronization::afterCommit);
+
+            List<PumpOperatorMessagingEvent> events = awaitPublished("mp", 2);
+            assertThat(reCheckedAfterCommit).isTrue();
+            assertThat(events.get(0).getEventType()).isEqualTo("UPDATE_USER_LANGUAGE");
+            assertThat(events.get(0).getPumpOperatorPhones()).containsExactly("91XXXXXXXXX1");
+            assertThat(events.get(1).getPumpOperatorPhones()).containsExactly("91XXXXXXXXX1", "91XXXXXXXXX2");
+        }
+
+        @Test
+        @DisplayName("sends no language update when the re-check keeps no phone, but still the welcome")
+        void sendsOnlyWelcomeWhenReCheckKeepsNoPhone() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("mp"), any())).thenReturn(true);
+
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en",
+                    List.of("91XXXXXXXXX1"), phones -> List.of(), List.of("91XXXXXXXXX1"));
+
+            assertThat(awaitPublished("mp", 1)).extracting(PumpOperatorMessagingEvent::getEventType)
+                    .containsExactly("SEND_WELCOME_MESSAGE");
+        }
+
+        @Test
+        @DisplayName("sends no language update when the re-check fails, but still the welcome")
+        void sendsOnlyWelcomeWhenReCheckFails() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("mp"), any())).thenReturn(true);
+
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", List.of("91XXXXXXXXX1"),
+                    phones -> { throw new IllegalStateException("db down"); }, List.of("91XXXXXXXXX1"));
+
+            assertThat(awaitPublished("mp", 1)).extracting(PumpOperatorMessagingEvent::getEventType)
+                    .containsExactly("SEND_WELCOME_MESSAGE");
+        }
+
+        @Test
+        @DisplayName("publishes only the welcome when no operator's language was set")
+        void publishesOnlyWelcome() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("mp"), any())).thenReturn(true);
+
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", List.of(), KEEP_ALL, List.of("91XXXXXXXXX1"));
+
+            assertThat(awaitPublished("mp", 1)).extracting(PumpOperatorMessagingEvent::getEventType)
+                    .containsExactly("SEND_WELCOME_MESSAGE");
+        }
+
+        @Test
+        @DisplayName("publishes only the language update when there is no one to welcome")
+        void publishesOnlyLanguageUpdate() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("mp"), any())).thenReturn(true);
+
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", List.of("91XXXXXXXXX1"), KEEP_ALL, List.of());
+
+            assertThat(awaitPublished("mp", 1)).extracting(PumpOperatorMessagingEvent::getEventType)
+                    .containsExactly("UPDATE_USER_LANGUAGE");
         }
 
         @Test
         @DisplayName("registers afterCommit synchronization when transaction is active and fires on commit")
         void registersAfterCommitWhenTransactionActive() {
-            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), any())).thenReturn(true);
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("mp"), any())).thenReturn(true);
 
             // Simulate an active transaction synchronization context
             TransactionSynchronizationManager.initSynchronization();
 
-            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", List.of("91XXXXXXXXX1"));
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en",
+                    List.of("91XXXXXXXXX1"), KEEP_ALL, List.of("91XXXXXXXXX1"));
 
             // Before commit fires — events must NOT have been published yet
-            verify(kafkaProducer, never()).publishJson(any(), any());
+            verifyNoInteractions(kafkaProducer);
 
             // Fire afterCommit on all registered synchronizations
             TransactionSynchronizationManager.getSynchronizations()
                     .forEach(TransactionSynchronization::afterCommit);
 
             // Now events should be published asynchronously
-            ArgumentCaptor<PumpOperatorMessagingEvent> captor =
-                    ArgumentCaptor.forClass(PumpOperatorMessagingEvent.class);
-            verify(kafkaProducer, timeout(2000).times(2))
-                    .publishJson(eq(UserEventPublisher.COMMON_TOPIC), captor.capture());
-
-            List<String> eventTypes = captor.getAllValues().stream()
-                    .map(PumpOperatorMessagingEvent::getEventType)
-                    .toList();
-            assertThat(eventTypes).containsExactlyInAnyOrder("UPDATE_USER_LANGUAGE", "SEND_WELCOME_MESSAGE");
+            assertThat(awaitPublished("mp", 2)).extracting(PumpOperatorMessagingEvent::getEventType)
+                    .containsExactly("UPDATE_USER_LANGUAGE", "SEND_WELCOME_MESSAGE");
         }
 
         @Test
         @DisplayName("logs warning and publishes immediately when no transaction synchronization is active")
         void publishesImmediatelyWhenNoTransactionSync() {
-            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), any())).thenReturn(true);
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("tr"), any())).thenReturn(true);
 
             // No TransactionSynchronizationManager.initSynchronization() — tests the else branch
-            publisher.publishPumpOperatorOnboardedAfterCommit("tr", 2, "hi", List.of("91XXXXXXXXX2"));
+            publisher.publishPumpOperatorOnboardedAfterCommit("tr", 2, "hi",
+                    List.of("91XXXXXXXXX2"), KEEP_ALL, List.of("91XXXXXXXXX2"));
 
-            verify(kafkaProducer, timeout(2000).times(2))
-                    .publishJson(eq(UserEventPublisher.COMMON_TOPIC), any());
+            awaitPublished("tr", 2);
         }
+    }
+
+    private static List<String> phones(int count) {
+        List<String> phones = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            phones.add("91XXXXX" + String.format("%05d", i));
+        }
+        return phones;
     }
 }

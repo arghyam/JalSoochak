@@ -228,11 +228,18 @@ Same `NotificationJobScheduler`, due window and run table as nudges (§1, Trigge
 
 ### Purpose
 
-Sends an onboarding welcome flow to newly registered pump operators. The flow introduces the Jalmitra application and sets up the operator's preferred language with the WhatsApp provider.
+Sends an onboarding welcome flow to the pump operators of an upload. The flow introduces the Jalmitra application. The companion `UPDATE_USER_LANGUAGE` event sets the operator's language on their WhatsApp contact first.
 
 ### Trigger
 
-Published by `user-service` (`UserEventPublisher.publishPumpOperatorOnboardedAfterCommit`) after a successful bulk pump-operator upload and DB commit. The publisher batches phones into groups of up to 1000 and emits two Kafka events per batch: `UPDATE_USER_LANGUAGE` (updates the contact's language with the WhatsApp provider) followed by `SEND_WELCOME_MESSAGE`.
+Published by `user-service` (`UserEventPublisher.publishPumpOperatorOnboardedAfterCommit`) after a bulk pump-operator upload commits. Each event carries up to 100 phones (`MAX_PHONES_PER_EVENT`) and is keyed by the tenant code:
+
+1. `UPDATE_USER_LANGUAGE` for the operators with no language chosen in the chatbot. The upload gives them the tenant's first language, in `user_table.language_id` and `user_language_preference`. A language the operator chose is kept, in the database and at the provider: after the commit, just before publishing, the upload reads these operators' languages again and leaves out any who chose another meanwhile (if that read fails, no language update is sent).
+2. `SEND_WELCOME_MESSAGE` for every pump operator the upload maps to a scheme, so a re-upload welcomes its operators again.
+
+The shared key puts both on one partition, so message-service sets an operator's language before it starts their welcome flow.
+
+**Batch sizing.** message-service takes one event per poll (`max-poll-records: 1`) and must finish it within `max.poll.interval.ms` (600 s), or the poll is delivered, and the welcomes sent, again. Each phone costs up to two provider calls (an opt-in, then the language update or the flow), spaced at least `whatsapp.request-interval-ms` (500 ms) apart: 100 × 2 × 0.5 s = 100 s at best, so a call can average about 3 s before an event runs over. Change `max-poll-records`, `MAX_PHONES_PER_EVENT` or the request interval only with this sum in mind. A pod that stops mid-event still has that event delivered again, re-sending its welcomes.
 
 ### Kafka event
 
@@ -250,8 +257,8 @@ Published by `user-service` (`UserEventPublisher.publishPumpOperatorOnboardedAft
 
 For each phone in the batch:
 
-1. Looks up `whatsapp_connection_id` in `<tenantSchema>.user_table` via a direct JDBC query (`fetchWhatsappConnectionId`). The `tenantCode` is validated against the regex `[a-z0-9_]+` before it is interpolated into the `tenantSchema` string used in the SQL query. This validation prevents SQL injection and unauthorized schema access by ensuring only safe, alphanumeric/underscore schema names can reach the database — without it, a crafted `tenantCode` could escape the schema prefix and query arbitrary tables.
-2. If no contact ID is found, the phone is routed to the dead-letter topic `welcome-message-dlt` with reason `no_whatsapp_connection_id` — the batch continues.
+1. **Contact resolution** (`resolveContact`): finds the operator in `<tenantSchema>.user_table` by phone hash, then by plain phone, and uses its `whatsapp_connection_id`. An operator without one is opted in by phone (`WhatsAppSender.optIn`), and the new contact ID is published as `WHATSAPP_CONTACT_REGISTERED` so tenant-service stores it. A phone with no user in the tenant is not opted in. The `tenantCode` must match `[a-z0-9_]+` before it is interpolated into the `tenantSchema` used in the SQL, so a crafted code cannot escape the schema prefix.
+2. If there is still no contact, the phone is routed to the dead-letter topic `welcome-message-dlt` — reason `user_not_found`, or `optin_failed` when the opt-in returned none (as in a dry run) — and the batch continues.
 3. Calls `WhatsAppSender.startWelcomeFlow`, which triggers the `startContactFlow` mutation with the tenant's welcome flow ID — `whatsapp.flow.welcome-id` when the tenant configures none — and `defaultResults` carrying the operator's name and the state name.
 
 Failures for individual phones are dead-lettered rather than thrown, preventing a single bad record from causing Kafka to retry the entire batch (which would re-send welcome messages to already-succeeded phones).
@@ -264,22 +271,27 @@ Failures for individual phones are dead-lettered rather than thrown, preventing 
   "eventType": "SEND_WELCOME_MESSAGE_RETRY",
   "tenantSchema": "tenant_mp",
   "failedAt": "2026-03-24T08:00:00Z",
-  "errorMessage": "no_whatsapp_connection_id",
+  "errorMessage": "user_not_found",
   "phone": "<phone>"
 }
 ```
 
-The `retryId` is a deterministic UUID v3 derived from `"SEND_WELCOME_MESSAGE_RETRY:<tenantSchema>:<phone>"` for idempotent downstream reprocessing.
+`errorMessage` is `user_not_found`, `optin_failed`, `blank_phone`, or the send failure's message. The `retryId` is a deterministic UUID v3 derived from `"SEND_WELCOME_MESSAGE_RETRY:<tenantSchema>:<phone>"` for idempotent downstream reprocessing.
 
 **Config required** (`whatsapp.flow.welcome-id`): the provider's default welcome flow ID. The service fails to start if this is blank.
 
 ### UPDATE_USER_LANGUAGE (companion event)
 
-Published alongside `SEND_WELCOME_MESSAGE` by user-service. Handled separately by `handleUpdateUserLanguage`:
+message-service is the only service that sets a contact's language with the provider. Two services publish this event, keyed by the tenant code, with `whatsappLanguageId` set to the language's `common_schema.language_master` id:
 
-1. For each phone, looks up `whatsapp_connection_id` from the tenant schema.
+- **user-service**, alongside `SEND_WELCOME_MESSAGE` (see Trigger above).
+- **telemetry-service** (`OperatorLanguageEventPublisher`), for one operator, when they choose a language in the chatbot, or when their first message (`OperatorContextService.ensureOperatorLanguage`) finds no saved language and saves the resolved one. A language missing from the catalog is not published.
+
+`handleUpdateUserLanguage`:
+
+1. For each phone, resolves the contact as the welcome does, opting in an operator who has none. A phone with no user, or an opt-in that returned no contact, is skipped, not retried; a lookup that fails is a failure, not "no user".
 2. Calls `WhatsAppSender.updateContactLanguage(contactId, whatsappLanguageId)` (`updateContact` GraphQL mutation).
-3. Unlike welcome messages, failures here cause the whole Kafka message to be rethrown (triggering retry/DLT), because `updateContactLanguage` is idempotent — re-setting the same language on a contact that already has it is harmless.
+3. Unlike welcome messages, a failure rethrows the whole Kafka message (triggering retry/DLT), because opt-in and `updateContactLanguage` are both idempotent — re-setting the same language on a contact that already has it is harmless.
 
 ---
 

@@ -33,6 +33,26 @@ public class UserLanguagePreferenceRepository {
         jdbcTemplate.update(sql, normalizeContactId(contactId), languageValue);
     }
 
+    /**
+     * Gives the contact {@code languageValue} unless it already has a language: adds a row for a contact
+     * that has none and fills a blank one, but never overwrites a language the contact chose.
+     *
+     * @return whether the language was written
+     */
+    public boolean setLanguageWhereUnset(String schemaName, String contactId, String languageValue) {
+        SchemaNames.validate(schemaName);
+        String sql = String.format("""
+                INSERT INTO %s.user_language_preference AS preference
+                    (contact_id, language_value, created_at, updated_at)
+                VALUES (?, ?, NOW(), NOW())
+                ON CONFLICT (contact_id)
+                DO UPDATE SET language_value = EXCLUDED.language_value,
+                              updated_at = NOW()
+                WHERE NULLIF(BTRIM(preference.language_value), '') IS NULL
+                """, schemaName);
+        return jdbcTemplate.update(sql, normalizeContactId(contactId), languageValue) > 0;
+    }
+
     public Optional<String> findLanguage(String schemaName, String contactId) {
         SchemaNames.validate(schemaName);
         String sql = String.format("""

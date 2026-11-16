@@ -12,7 +12,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
-import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
+import org.arghyam.jalsoochak.telemetry.event.OperatorLanguageEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeOption;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -48,7 +48,7 @@ public class ConversationSelectionService {
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final UserLanguagePreferenceRepository userLanguagePreferenceRepository;
-    private final WhatsAppContactDirectory whatsAppContactDirectory;
+    private final OperatorLanguageEventPublisher operatorLanguageEventPublisher;
     private final ObjectMapper objectMapper;
     private final ConversationMessageResolver messageResolver;
 
@@ -60,7 +60,7 @@ public class ConversationSelectionService {
                                         TelemetryTenantRepository telemetryTenantRepository,
                                         UserChannelPreferenceRepository userChannelPreferenceRepository,
                                         UserLanguagePreferenceRepository userLanguagePreferenceRepository,
-                                        WhatsAppContactDirectory whatsAppContactDirectory,
+                                        OperatorLanguageEventPublisher operatorLanguageEventPublisher,
                                         ObjectMapper objectMapper,
                                         ConversationMessageResolver messageResolver) {
         this.operatorContextService = operatorContextService;
@@ -71,7 +71,7 @@ public class ConversationSelectionService {
         this.telemetryTenantRepository = telemetryTenantRepository;
         this.userChannelPreferenceRepository = userChannelPreferenceRepository;
         this.userLanguagePreferenceRepository = userLanguagePreferenceRepository;
-        this.whatsAppContactDirectory = whatsAppContactDirectory;
+        this.operatorLanguageEventPublisher = operatorLanguageEventPublisher;
         this.objectMapper = objectMapper;
         this.messageResolver = messageResolver;
     }
@@ -188,8 +188,11 @@ public class ConversationSelectionService {
                     operatorWithSchema.operator().id(),
                     selectedLanguageId
             );
-            userLanguagePreferenceRepository.upsert(operatorWithSchema.schemaName(), request.getContactId(), selectedLanguage);
-            whatsAppContactDirectory.syncContactLanguageAsync(request.getContactId(), selectedLanguage);
+            // Saved under the operator's phone, which every read of it looks up; the contact id may be a hash.
+            String phone = operatorWithSchema.operator().phoneNumber();
+            userLanguagePreferenceRepository.upsert(operatorWithSchema.schemaName(), phone, selectedLanguage);
+            operatorLanguageEventPublisher.publishLanguageUpdated(operatorWithSchema.schemaName(), tenantId,
+                    phone, selectedLanguage);
 
             String confirmation = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "LANGUAGE_SELECTION", selectedLanguageKey)
@@ -442,7 +445,9 @@ public class ConversationSelectionService {
                 throw new IllegalStateException("Operator tenant could not be resolved");
             }
 
-            String languageKey = localizationService.normalizeLanguageKey(operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
+            // The trigger word's first reply may be the operator's first message, so its language is saved.
+            String languageKey = localizationService.normalizeLanguageKey(
+                    operatorContextService.ensureOperatorLanguage(operatorWithSchema, tenantId));
 
             String prompt = templatesService.resolveScreenPrompt(tenantId, "ITEM_SELECTION", languageKey)
                     .or(() -> tenantConfigRepository.findItemSelectionPrompt(tenantId, languageKey))

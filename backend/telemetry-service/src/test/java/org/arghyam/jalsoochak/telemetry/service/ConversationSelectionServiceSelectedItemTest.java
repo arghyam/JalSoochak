@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
-import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
+import org.arghyam.jalsoochak.telemetry.event.OperatorLanguageEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -41,7 +41,7 @@ class ConversationSelectionServiceSelectedItemTest {
     @Mock
     private UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     @Mock
-    private WhatsAppContactDirectory whatsAppContactDirectory;
+    private OperatorLanguageEventPublisher operatorLanguageEventPublisher;
 
     @Test
     void selectedItemReadingSubmissionReturnsNormalCodeOnlyWhenLocationCheckIsYesAndSchemeHasCoordinates() {
@@ -54,7 +54,7 @@ class ConversationSelectionServiceSelectedItemTest {
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
-                whatsAppContactDirectory,
+                operatorLanguageEventPublisher,
                 new ObjectMapper(),
                 ConversationMessageResolverFixtures.real()
         );
@@ -113,7 +113,7 @@ class ConversationSelectionServiceSelectedItemTest {
                 telemetryTenantRepository,
                 userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
-                whatsAppContactDirectory,
+                operatorLanguageEventPublisher,
                 new ObjectMapper(),
                 ConversationMessageResolverFixtures.real()
         );
@@ -209,7 +209,7 @@ class ConversationSelectionServiceSelectedItemTest {
                 operatorContextService, localizationService, tenantConfigRepository, templatesService,
                 LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository, userChannelPreferenceRepository, userLanguagePreferenceRepository,
-                whatsAppContactDirectory, new ObjectMapper(), ConversationMessageResolverFixtures.real()
+                operatorLanguageEventPublisher, new ObjectMapper(), ConversationMessageResolverFixtures.real()
         );
         Integer tenantId = 1;
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(

@@ -84,7 +84,7 @@ public class PumpOperatorUploadChunkProcessor {
         List<String> phonesForInsertRows = new ArrayList<>(rows.size());
         List<String> typesForInsertRows = new ArrayList<>(rows.size());
         Set<Long> userIdsToReplace = new LinkedHashSet<>();
-        Set<String> pumpOperatorPhones = new LinkedHashSet<>();
+        Map<String, Long> pumpOperatorUserIds = new java.util.LinkedHashMap<>();
         Map<Long, UploadUserSnapshot> userSnapshots = new java.util.LinkedHashMap<>();
         int uploaded = 0;
         int skipped = 0;
@@ -129,7 +129,6 @@ public class PumpOperatorUploadChunkProcessor {
                         skipped++;
                         continue;
                     }
-                    userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguage.languageId());
                     userUuid = UUID.fromString(newUuid);
                     userEmail = newEmail;
                 } else {
@@ -147,7 +146,6 @@ public class PumpOperatorUploadChunkProcessor {
                         staffKeycloakService.revokeKeycloakAccount(user, schemaName, actor.id());
                     }
                     userTenantRepository.updateUserProfile(schemaName, userId, title, normalizedPhone);
-                    userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguage.languageId());
                     userUuid = null;
                     if (user.keycloakUuid() != null && !user.keycloakUuid().isBlank()) {
                         try {
@@ -159,7 +157,10 @@ public class PumpOperatorUploadChunkProcessor {
                     userEmail = user.email();
                 }
                 if ("pump_operator".equals(typeKey)) {
-                    pumpOperatorPhones.add(normalizedPhone);
+                    pumpOperatorUserIds.putIfAbsent(normalizedPhone, userId);
+                } else {
+                    // Only pump operators pick a language in the chatbot, so officers have none to keep.
+                    userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguage.languageId());
                 }
                 userSnapshots.put(userId, new UploadUserSnapshot(
                         userId,
@@ -190,10 +191,7 @@ public class PumpOperatorUploadChunkProcessor {
             }
         }
 
-        // The chatbot reads user_language_preference ahead of language_id, so it gets the same reset.
-        if (preferredLanguage.languageValue() != null && !pumpOperatorPhones.isEmpty()) {
-            userLanguagePreferenceRepository.upsertAll(schemaName, pumpOperatorPhones, preferredLanguage.languageValue());
-        }
+        List<String> defaultedPhones = applyDefaultLanguage(schemaName, pumpOperatorUserIds, preferredLanguage);
         if (!userIdsToReplace.isEmpty()) {
             userUploadRepository.markUserSchemeMappingsDeleted(schemaName, new ArrayList<>(userIdsToReplace), actorUserId);
         }
@@ -236,11 +234,13 @@ public class PumpOperatorUploadChunkProcessor {
             );
         }
 
-        if (!phonesToNotify.isEmpty()) {
+        if (!defaultedPhones.isEmpty() || !phonesToNotify.isEmpty()) {
             userEventPublisher.publishPumpOperatorOnboardedAfterCommit(
                     tenantCode,
                     actor.tenantId(),
                     String.valueOf(preferredLanguage.whatsappLanguageId()),
+                    defaultedPhones,
+                    phones -> stillDefaulted(schemaName, phones, preferredLanguage.languageValue()),
                     new ArrayList<>(phonesToNotify)
             );
         }
@@ -253,6 +253,47 @@ public class PumpOperatorUploadChunkProcessor {
                 rows.size(), uploaded, skipped, inserted);
 
         return new ChunkResult(uploaded, skipped, unchanged);
+    }
+
+    /**
+     * Gives the tenant's default language to each pump operator who has not chosen one in the chatbot,
+     * and returns their phones, so the WhatsApp provider is given it too. A language the operator chose
+     * is kept, here and at the provider.
+     */
+    private List<String> applyDefaultLanguage(
+            String schemaName,
+            Map<String, Long> pumpOperatorUserIds,
+            PreferredLanguage preferredLanguage
+    ) {
+        if (pumpOperatorUserIds.isEmpty()) {
+            return List.of();
+        }
+        Set<String> withLanguage =
+                userLanguagePreferenceRepository.findContactIdsWithLanguage(schemaName, pumpOperatorUserIds.keySet());
+        List<String> defaultedPhones = new ArrayList<>();
+        pumpOperatorUserIds.forEach((phone, userId) -> {
+            if (!withLanguage.contains(phone)) {
+                userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguage.languageId());
+                defaultedPhones.add(phone);
+            }
+        });
+        // The chatbot reads user_language_preference ahead of language_id, so it gets the same default.
+        if (preferredLanguage.languageValue() != null && !defaultedPhones.isEmpty()) {
+            userLanguagePreferenceRepository.setLanguageWhereUnset(
+                    schemaName, defaultedPhones, preferredLanguage.languageValue());
+        }
+        return defaultedPhones;
+    }
+
+    /**
+     * Of the operators this upload defaulted, those whose saved language is still its default, or with no
+     * default written, still none. Read after commit: an operator who chose a language in the chatbot
+     * since this upload read theirs keeps it at the provider too.
+     */
+    private List<String> stillDefaulted(String schemaName, List<String> defaultedPhones, String defaultLanguage) {
+        Set<String> chosen = userLanguagePreferenceRepository
+                .findContactIdsWithLanguageOtherThan(schemaName, defaultedPhones, defaultLanguage);
+        return defaultedPhones.stream().filter(phone -> !chosen.contains(phone)).toList();
     }
 
     private Integer resolveSchemeId(

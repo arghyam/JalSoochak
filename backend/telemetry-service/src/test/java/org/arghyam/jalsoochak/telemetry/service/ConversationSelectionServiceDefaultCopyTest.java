@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
-import org.arghyam.jalsoochak.telemetry.provider.whatsapp.WhatsAppContactDirectory;
+import org.arghyam.jalsoochak.telemetry.event.OperatorLanguageEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -61,7 +61,7 @@ class ConversationSelectionServiceDefaultCopyTest {
     @Mock
     private UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     @Mock
-    private WhatsAppContactDirectory whatsAppContactDirectory;
+    private OperatorLanguageEventPublisher operatorLanguageEventPublisher;
     @Spy
     private ConversationMessageResolver messageResolver = ConversationMessageResolverFixtures.real();
 
@@ -73,11 +73,12 @@ class ConversationSelectionServiceDefaultCopyTest {
                 operatorContextService, localizationService, tenantConfigRepository, templatesService,
                 LanguageMenuServiceFixtures.unfiltered(templatesService),
                 telemetryTenantRepository, userChannelPreferenceRepository, userLanguagePreferenceRepository,
-                whatsAppContactDirectory, new ObjectMapper(), messageResolver);
+                operatorLanguageEventPublisher, new ObjectMapper(), messageResolver);
 
         when(operatorContextService.resolveOperatorWithSchema(CONTACT)).thenReturn(new TelemetryOperatorWithSchema(
                 SCHEMA, new TelemetryOperator(11L, TENANT, "Asha", "a@b.c", CONTACT, 1)));
         when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("English");
+        when(operatorContextService.ensureOperatorLanguage(any(), anyInt())).thenReturn("English");
         when(localizationService.normalizeLanguageKey(anyString())).thenReturn("english");
         when(localizationService.resolveLanguageKeyForContact(any())).thenReturn("english");
         when(templatesService.resolveScreenOptions(anyInt(), anyString())).thenReturn(List.of());
@@ -171,6 +172,15 @@ class ConversationSelectionServiceDefaultCopyTest {
     @Nested
     @DisplayName("itemSelectionMessage")
     class ItemPrompt {
+
+        /** The trigger word's first reply may be an operator's first message, so it saves their language. */
+        @Test
+        void savesTheOperatorsLanguageBeforeAnsweringInIt() {
+            service.itemSelectionMessage(introRequest(CONTACT));
+
+            verify(operatorContextService).ensureOperatorLanguage(new TelemetryOperatorWithSchema(
+                    SCHEMA, new TelemetryOperator(11L, TENANT, "Asha", "a@b.c", CONTACT, 1)), TENANT);
+        }
 
         @Test
         void usesTheBuiltInPromptWhenTheTenantConfiguresNone() {

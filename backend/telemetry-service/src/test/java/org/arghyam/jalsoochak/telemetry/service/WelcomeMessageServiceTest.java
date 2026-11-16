@@ -27,6 +27,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -67,7 +68,7 @@ class WelcomeMessageServiceTest {
     @BeforeEach
     void stubDefaults() {
         when(operatorContextService.resolveOperatorWithSchema(PHONE)).thenReturn(operator(3, "Asha"));
-        when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("English");
+        when(operatorContextService.ensureOperatorLanguage(any(), anyInt())).thenReturn("English");
         when(localizationService.normalizeLanguageKey(anyString())).thenReturn("english");
         when(tenantConfigRepository.findConfigValue(anyInt(), anyString())).thenReturn(Optional.empty());
         when(tenantConfigRepository.findTenantTitleById(anyInt())).thenReturn(Optional.empty());
@@ -93,6 +94,15 @@ class WelcomeMessageServiceTest {
             assertThatThrownBy(() -> service.triggerWelcomeMessage(PHONE, false))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("Tenant could not be resolved");
+        }
+
+        /** The welcome may be an operator's first message, so it saves the language it answers in. */
+        @Test
+        void savesTheOperatorsLanguageBeforeAnsweringInIt() {
+            service.triggerWelcomeMessage(PHONE, false);
+
+            verify(operatorContextService).ensureOperatorLanguage(operator(3, "Asha"), 3);
+            verify(operatorContextService, never()).resolveOperatorLanguage(any(), any());
         }
 
         @Test
@@ -134,7 +144,7 @@ class WelcomeMessageServiceTest {
         @Test
         void looksUpTheLocaleCodeKeyBeforeFallingBackToEnglish() {
             when(localizationService.normalizeLanguageKey(anyString())).thenReturn("assamese");
-            when(operatorContextService.resolveOperatorLanguage(any(), anyInt())).thenReturn("Assamese");
+            when(operatorContextService.ensureOperatorLanguage(any(), anyInt())).thenReturn("Assamese");
             when(tenantConfigRepository.findConfigValue(3, "welcome_message_as"))
                     .thenReturn(Optional.of("Assamese locale template"));
 

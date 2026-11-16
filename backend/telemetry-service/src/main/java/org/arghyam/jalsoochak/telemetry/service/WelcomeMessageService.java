@@ -35,7 +35,8 @@ public class WelcomeMessageService {
             throw new IllegalStateException("Tenant could not be resolved for contact");
         }
 
-        String language = operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId);
+        // The welcome may be the operator's first message, so the language it is written in is saved.
+        String language = operatorContextService.ensureOperatorLanguage(operatorWithSchema, tenantId);
         String languageKey = localizationService.normalizeLanguageKey(language);
         String name = safeName(operatorWithSchema.operator().title(), languageKey);
         String state = safeState(tenantConfigRepository.findConfigValue(tenantId, "state_name")
