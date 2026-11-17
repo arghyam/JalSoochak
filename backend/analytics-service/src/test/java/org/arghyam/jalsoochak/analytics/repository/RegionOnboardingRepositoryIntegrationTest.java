@@ -191,7 +191,7 @@ class RegionOnboardingRepositoryIntegrationTest {
                 INSERT INTO analytics_schema.dim_tenant_table
                 (tenant_id, state_code, title, country_code, status, created_at)
                 VALUES (1, 'pb', 'Punjab', 'IN', 1, NOW()),
-                       (2, 'as', 'Assam', 'IN', 1, NOW())
+                       (2, 'os', 'Other State', 'IN', 1, NOW())
                 """);
 
         insertLgd(TENANT, 100, 1, 100, null, null, false);
