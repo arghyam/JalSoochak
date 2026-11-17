@@ -1,7 +1,10 @@
 package org.arghyam.jalsoochak.analytics.exception;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import org.arghyam.jalsoochak.analytics.enums.RegionHierarchy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -14,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -63,6 +67,20 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void handleRegionNotOnboarded_returnsNotFoundWithoutNamingTheRegion() throws Exception {
+        String body = mockMvc.perform(get("/probe/not-onboarded"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message").value("Region not found"))
+                .andReturn().getResponse().getContentAsString();
+
+        // The timestamp's fraction of a second can hold any digits, so it is left out of the scan.
+        ObjectNode fields = (ObjectNode) new ObjectMapper().readTree(body);
+        fields.remove("timestamp");
+        assertThat(fields.toString()).doesNotContain("4242");
+    }
+
+    @Test
     void handleGeneral_returnsInternalServerError() throws Exception {
         mockMvc.perform(get("/probe/boom"))
                 .andExpect(status().isInternalServerError())
@@ -96,6 +114,12 @@ class GlobalExceptionHandlerTest {
         @ResponseBody
         void conflict() {
             throw new IllegalStateException("in use");
+        }
+
+        @GetMapping("/not-onboarded")
+        @ResponseBody
+        void notOnboarded() {
+            throw new RegionNotOnboardedException(3, RegionHierarchy.LGD, 4242);
         }
 
         @GetMapping("/boom")

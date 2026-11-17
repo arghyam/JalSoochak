@@ -96,6 +96,28 @@ each `config/` package. All three check independently, since login and the role 
 outside tenant-service. DEGRADED tenants are loginable but only WARN. A `@SpringBootTest` with the
 flag on needs ≤1 ACTIVE tenant or `@MockBean` on the validator.
 
+### Phased rollout (`PHASED_ROLLOUT_ENABLED`)
+
+analytics-service only, bound as `analytics.phased-rollout.enabled`, default `false`. Off: no extra
+query, and `GET /api/v1/analytics/onboarded-regions` answers `phasedRollout: false`.
+
+When on, a region below the state (LGD or department) is onboarded when `dim_scheme_table` holds one of
+its schemes whose district has `is_onboarded = TRUE` in `analytics_schema.dim_lgd_location_table` (V62:
+districts only, by CHECK; `FALSE` by default, so a district stays hidden until ops flag it).
+`RegionOnboardingService` evaluates this live, so a flag change needs no re-aggregation or cache flush.
+`DimLgdLocation` deliberately doesn't map the column, so JPA upserts can't overwrite it.
+
+`RegionOnboardingInterceptor` checks `lgd_id`, `parent_lgd_id`, `department_id` and
+`parent_department_id` on every `/api/v1/analytics/**` request and answers 404 "Region not found" (the
+`GlobalExceptionHandler` shape, logged at WARN) before the controller and its cache run. Metric responses
+are unchanged; the dashboard hides the rest through `onboarded-regions`. The interceptor isn't a bean:
+`PhasedRolloutWebMvcConfig` (`@ConditionalOnProperty`) registers it, so `@WebMvcTest` slices need
+`RegionOnboardingService` only when they set the property.
+
+**Trade-off:** scheme upload isn't gated, so schemes in a non-onboarded district still count in
+state-level KPIs and scheme lists. Upload a district's schemes only when, or shortly before, onboarding
+it. Runbook: `docs/phased-rollout.md`.
+
 ### Service Communication
 
 - **Synchronous:** none between services — they share the database and Kafka. Eureka is optional: most services default `EUREKA_ENABLED` to `false` (anomaly and scheme have no switch), and the gateway routes to configured URIs, not through the registry
