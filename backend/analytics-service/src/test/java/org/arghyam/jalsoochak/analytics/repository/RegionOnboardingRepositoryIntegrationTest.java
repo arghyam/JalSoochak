@@ -177,6 +177,17 @@ class RegionOnboardingRepositoryIntegrationTest {
         assertThat(onboarded).isFalse();
     }
 
+    /** V62 adds the check NOT VALID; V63 validates it. */
+    @Test
+    void districtOnlyCheck_isValidated() {
+        Boolean validated = jdbcTemplate.queryForObject("""
+                SELECT convalidated FROM pg_constraint
+                WHERE conrelid = 'analytics_schema.dim_lgd_location_table'::regclass
+                  AND conname = 'ck_dim_lgd_location_is_onboarded_district_only'
+                """, Boolean.class);
+        assertThat(validated).isTrue();
+    }
+
     /** One violation per run: the first one aborts the test's transaction. */
     @ParameterizedTest(name = "lgd_id {0}")
     @ValueSource(ints = {100, 111})

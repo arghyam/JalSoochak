@@ -17,10 +17,11 @@ import java.util.OptionalInt;
  * controller, and so the response cache, runs. {@link PhasedRolloutWebMvcConfig} registers it only
  * when the switch is on. Deliberately not a bean, so the {@code @WebMvcTest} slices don't pick it up.
  *
- * <p>Ids are parsed the way Spring binds an {@code Integer} request param ({@link NumberUtils#parseNumber}:
- * whitespace stripped, hex accepted), so no spelling the controller accepts gets past the guard, and
- * every value of a repeated param is checked. A value that doesn't parse or isn't positive is skipped,
- * since the controller rejects it.
+ * <p>Params are read the way Spring binds an {@code Integer} {@code @RequestParam}: by name, or by
+ * {@code name[]} when the name is absent, and parsed with {@link NumberUtils#parseNumber} (whitespace
+ * stripped, hex accepted). So no spelling the controller accepts gets past the guard. The tenant is the
+ * first value, as Spring binds it; every value of a repeated region param is checked. A value that
+ * doesn't parse or isn't positive is skipped, since the controller rejects it.
  */
 @RequiredArgsConstructor
 public class RegionOnboardingInterceptor implements HandlerInterceptor {
@@ -37,12 +38,15 @@ public class RegionOnboardingInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        OptionalInt tenantId = positiveInt(request.getParameter(TENANT_ID_PARAM));
+        String[] tenantValues = parameterValues(request, TENANT_ID_PARAM);
+        OptionalInt tenantId = tenantValues == null || tenantValues.length == 0
+                ? OptionalInt.empty()
+                : positiveInt(tenantValues[0]);
         if (tenantId.isEmpty()) {
             return true;
         }
         for (Map.Entry<String, RegionHierarchy> param : REGION_PARAMS) {
-            String[] values = request.getParameterValues(param.getKey());
+            String[] values = parameterValues(request, param.getKey());
             if (values == null) {
                 continue;
             }
@@ -55,6 +59,12 @@ public class RegionOnboardingInterceptor implements HandlerInterceptor {
             }
         }
         return true;
+    }
+
+    /** As {@code RequestParamMethodArgumentResolver} resolves a name: its values, else those of {@code name[]}. */
+    private static String[] parameterValues(HttpServletRequest request, String name) {
+        String[] values = request.getParameterValues(name);
+        return values != null ? values : request.getParameterValues(name + "[]");
     }
 
     private static OptionalInt positiveInt(String value) {

@@ -47,7 +47,8 @@ public class AnalyticsRegionOnboardingController {
                     ),
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "400",
-                            description = "Not exactly one parent, or the tenant has no such parent",
+                            description = "Not exactly one parent, or, with phased rollout on, the tenant has no "
+                                    + "such parent (with it off, the parent isn't looked up and the answer is 200)",
                             content = @Content(
                                     mediaType = "application/json",
                                     examples = @ExampleObject(name = "failure", value = SwaggerExamples.ERROR_BAD_REQUEST)

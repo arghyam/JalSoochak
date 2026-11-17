@@ -10,6 +10,8 @@ import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
 import org.arghyam.jalsoochak.analytics.service.RegionOnboardingService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -63,6 +65,28 @@ class AnalyticsRegionOnboardingAccessTest {
         mockMvc.perform(get(AVERAGE_REGULARITY)
                         .param("tenant_id", "3")
                         .param("parent_lgd_id", "12")
+                        .param("start_date", "2026-01-01")
+                        .param("end_date", "2026-01-31"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Region not found"));
+
+        verifyNoInteractions(schemeRegularityService);
+    }
+
+    /** {@code @RequestParam} binds {@code name[]} when {@code name} is absent, so neither alias may bypass the guard. */
+    @ParameterizedTest(name = "{0}=3&{1}=12")
+    @CsvSource({
+            "tenant_id, parent_lgd_id[]",
+            "tenant_id[], parent_lgd_id"
+    })
+    void parentNotOnboarded_namedThroughABracketedAlias_isNotFound(String tenantParam, String parentParam)
+            throws Exception {
+        doThrow(new RegionNotOnboardedException(3, RegionHierarchy.LGD, 12))
+                .when(regionOnboardingService).requireOnboarded(3, RegionHierarchy.LGD, 12);
+
+        mockMvc.perform(get(AVERAGE_REGULARITY)
+                        .param(tenantParam, "3")
+                        .param(parentParam, "12")
                         .param("start_date", "2026-01-01")
                         .param("end_date", "2026-01-31"))
                 .andExpect(status().isNotFound())

@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.analytics.exception;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.arghyam.jalsoochak.analytics.enums.RegionHierarchy;
@@ -15,11 +17,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.not;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
@@ -68,11 +68,16 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void handleRegionNotOnboarded_returnsNotFoundWithoutNamingTheRegion() throws Exception {
-        mockMvc.perform(get("/probe/not-onboarded"))
+        String body = mockMvc.perform(get("/probe/not-onboarded"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404))
                 .andExpect(jsonPath("$.message").value("Region not found"))
-                .andExpect(content().string(not(containsString("4242"))));
+                .andReturn().getResponse().getContentAsString();
+
+        // The timestamp's fraction of a second can hold any digits, so it is left out of the scan.
+        ObjectNode fields = (ObjectNode) new ObjectMapper().readTree(body);
+        fields.remove("timestamp");
+        assertThat(fields.toString()).doesNotContain("4242");
     }
 
     @Test

@@ -98,6 +98,44 @@ class RegionOnboardingInterceptorTest {
         verify(regionOnboardingService).requireOnboarded(3, RegionHierarchy.LGD, 12);
     }
 
+    /** {@code @RequestParam} falls back to {@code name[]} when {@code name} is absent, so the guard must too. */
+    @ParameterizedTest
+    @CsvSource({
+            "lgd_id[], LGD",
+            "parent_lgd_id[], LGD",
+            "department_id[], DEPARTMENT",
+            "parent_department_id[], DEPARTMENT"
+    })
+    void bracketedRegionParam_isChecked(String param, RegionHierarchy hierarchy) {
+        request.addParameter("tenant_id", "3");
+        request.addParameter(param, "12");
+
+        assertThat(preHandle()).isTrue();
+        verify(regionOnboardingService).requireOnboarded(3, hierarchy, 12);
+    }
+
+    @Test
+    void bracketedTenantId_isUsed() {
+        request.addParameter("tenant_id[]", "3");
+        request.addParameter("parent_lgd_id", "12");
+
+        assertThat(preHandle()).isTrue();
+        verify(regionOnboardingService).requireOnboarded(3, RegionHierarchy.LGD, 12);
+    }
+
+    /** As in {@code @RequestParam}, the bracketed alias is read only when the exact name is absent. */
+    @Test
+    void exactName_shadowsItsBracketedAlias() {
+        request.addParameter("tenant_id", "3");
+        request.addParameter("tenant_id[]", "4");
+        request.addParameter("parent_lgd_id", "12");
+        request.addParameter("parent_lgd_id[]", "15");
+
+        assertThat(preHandle()).isTrue();
+        verify(regionOnboardingService).requireOnboarded(3, RegionHierarchy.LGD, 12);
+        verifyNoMoreInteractions(regionOnboardingService);
+    }
+
     @Test
     void missingTenantId_isLeftToTheController() {
         request.addParameter("parent_lgd_id", "12");

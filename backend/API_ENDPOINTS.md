@@ -258,8 +258,9 @@ names a region that isn't onboarded returns `404` with
 the `{success, data}` envelope. Responses for onboarded regions are unchanged. `onboarded-regions` returns
 `{tenantId, parentLgdId, parentDepartmentId, phasedRollout, onboardedChildIds}`: with the switch off,
 `phasedRollout` is `false` and `onboardedChildIds` is `null`, meaning every region is onboarded. Its `400`
-(not exactly one parent, or no such parent) uses the same handler shape. The rule and runbook are in
-`docs/phased-rollout.md`.
+uses the same handler shape: not exactly one parent or, with the switch on, a parent the tenant doesn't
+have. With the switch off the parent isn't looked up, so an unknown one gets `200`. The rule and runbook
+are in `docs/phased-rollout.md`.
 
 ---
 
