@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -83,6 +84,9 @@ public class WeeklyReportPdfService {
     private static final Set<String> NEGATIVE_KPI_LABELS =
             Set.of(KPI_NOT_SUPPLYING, KPI_NOT_SUPPLYING_SDO, KPI_LOW_LPCD);
 
+    /** Source of the header's generation date; read in {@link #REPORT_ZONE} whatever the clock's own zone. */
+    private Clock clock = Clock.systemUTC();
+
     /**
      * Generates the report PDF and returns the path it was written to.
      *
@@ -149,7 +153,7 @@ public class WeeklyReportPdfService {
                 officerName != null ? officerName : "Officer");
         // IST, like every other date in this pipeline — a UTC "today" would print yesterday for a
         // report generated in the small hours of Monday morning.
-        c.labelValueLine(11, "Date: ", LocalDate.now(REPORT_ZONE).format(HEADER));
+        c.labelValueLine(11, "Date: ", LocalDate.ofInstant(clock.instant(), REPORT_ZONE).format(HEADER));
         // Day names are derived, not fixed: the reported week starts on the tenant's configured
         // weekStartDay, so it is only Monday-Sunday by default.
         c.labelValueLine(11, "Reporting Period: ",
@@ -340,6 +344,11 @@ public class WeeklyReportPdfService {
 
     private static String nvl(String s) {
         return s == null ? "" : s;
+    }
+
+    /** Test seam: fixes the header's generation date so rendered output is reproducible. */
+    void setClock(Clock clock) {
+        this.clock = clock;
     }
 
     private void ensureReportDirExists() throws IOException {

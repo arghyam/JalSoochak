@@ -15,6 +15,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
@@ -307,6 +310,16 @@ class WeeklyReportPdfServiceTest {
         // And the output those formatters actually produce.
         String text = render(SO, kpis(142, 140), List.of(), List.of(), List.of(), List.of());
         assertThat(text).contains("Monday 13-Jul-2026 to Sunday 19-Jul-2026");
+    }
+
+    @Test
+    void datesTheHeaderFromTheClockInIst() throws Exception {
+        // 20:00 UTC on Sunday is already 01:30 IST on Monday, so a UTC "today" would print the day before.
+        service.setClock(Clock.fixed(Instant.parse("2026-07-19T20:00:00Z"), ZoneOffset.UTC));
+
+        String text = render(SO, kpis(142, 140), List.of(), List.of(), List.of(), List.of());
+
+        assertThat(text).contains("Date: 20 July 2026");
     }
 
     private static Locale formatterLocale(String fieldName) {
