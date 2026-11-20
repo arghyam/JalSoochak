@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.tenant.service;
 
+import org.arghyam.jalsoochak.tenant.enums.reportlayout.ReportKind;
 import org.arghyam.jalsoochak.tenant.event.DailyReportRequestEvent;
 import org.arghyam.jalsoochak.tenant.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.tenant.repository.NudgeRepository;
@@ -15,6 +16,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -37,10 +39,12 @@ public class DailySituationReportSchedulerService {
 
     private final NudgeRepository nudgeRepository;
     private final KafkaProducer kafkaProducer;
+    private final TenantConfigService tenantConfigService;
 
     /**
-     * Officer roles that receive the daily report. Section Officers only: Sub-Divisional Officers
-     * moved to the weekly report, which gives them a command-wide view instead of a same-day one.
+     * Officer roles that receive the daily report when the tenant's {@code SITUATION_REPORT_LAYOUT}
+     * names none. Section Officers only: Sub-Divisional Officers moved to the weekly report, which
+     * gives them a command-wide view instead of a same-day one.
      */
     @Value("${daily-report.officer.user-types:SECTION_OFFICER}")
     private String officerUserTypesCsv;
@@ -58,10 +62,15 @@ public class DailySituationReportSchedulerService {
         LocalDateTime cutoffIst = LocalDateTime.now(IST);
         String correlationId = UUID.randomUUID().toString();
         long startNanos = System.nanoTime();
-        List<String> roles = officerRoles();
+        // The tenant's SITUATION_REPORT_LAYOUT names the recipients when it has a daily block;
+        // otherwise the env roles do, as they always have.
+        Optional<List<String>> configuredRoles =
+                tenantConfigService.findReportRecipientRoles(tenantId, ReportKind.DAILY);
+        List<String> roles = configuredRoles.orElseGet(this::officerRoles);
+        String rolesSource = configuredRoles.isPresent() ? "config" : "env";
 
-        log.info("[DailyReportJob] corr={} start: tenant={} schema={} date={} cutoff={} roles={}",
-                correlationId, tenantId, schema, reportDate, cutoffIst, roles);
+        log.info("[DailyReportJob] corr={} start: tenant={} schema={} date={} cutoff={} roles={} rolesSource={}",
+                correlationId, tenantId, schema, reportDate, cutoffIst, roles, rolesSource);
 
         // Requested-count per role — the denominator the downstream GENERATED/SENT counts reconcile
         // against . LinkedHashMap keeps the configured order.

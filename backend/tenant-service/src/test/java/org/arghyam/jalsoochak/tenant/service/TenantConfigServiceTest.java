@@ -4,6 +4,11 @@ import org.arghyam.jalsoochak.tenant.config.DailyReportScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.WeeklyReportScheduleConfig;
+import org.arghyam.jalsoochak.tenant.enums.reportlayout.ReportKind;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,14 +17,17 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -287,6 +295,89 @@ class TenantConfigServiceTest {
         assertThat(service.getWeeklyReportConfig(TENANT_ID).getWeekStartDay()).isEqualTo(1);
     }
 
+    // ── findReportRecipientRoles ────────────────────────────────────────────────
+
+    @Test
+    void findReportRecipientRoles_returnsTheBlocksRolesInDocumentOrder() {
+        stubReportLayoutJson("{\"version\":1,\"weekly\":{\"roles\":{"
+                + "\"SUB_DIVISIONAL_OFFICER\":{\"useDefault\":true},\"SECTION_OFFICER\":{\"useDefault\":true}}}}");
+
+        assertThat(service.findReportRecipientRoles(TENANT_ID, ReportKind.WEEKLY))
+                .contains(List.of("SUB_DIVISIONAL_OFFICER", "SECTION_OFFICER"));
+    }
+
+    @Test
+    void findReportRecipientRoles_readsOnlyTheRequestedReportsBlock() {
+        stubReportLayoutJson("{\"version\":1,"
+                + "\"daily\":{\"roles\":{\"SUB_DIVISIONAL_OFFICER\":{\"layout\":{}}}},"
+                + "\"weekly\":{\"roles\":{\"SECTION_OFFICER\":{\"useDefault\":true}}}}");
+
+        assertThat(service.findReportRecipientRoles(TENANT_ID, ReportKind.DAILY))
+                .contains(List.of("SUB_DIVISIONAL_OFFICER"));
+        assertThat(service.findReportRecipientRoles(TENANT_ID, ReportKind.WEEKLY))
+                .contains(List.of("SECTION_OFFICER"));
+    }
+
+    @Test
+    void findReportRecipientRoles_returnsNoRoles_whenTheBlockListsNone() {
+        // An empty roles object is a decision, not an absence: nobody gets this report.
+        stubReportLayoutJson("{\"version\":1,\"daily\":{\"roles\":{}}}");
+
+        assertThat(service.findReportRecipientRoles(TENANT_ID, ReportKind.DAILY)).contains(List.of());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+            "{\"version\":1}",
+            "{\"version\":1,\"daily\":null}",
+            "{\"version\":1,\"weekly\":{\"roles\":{}}}"})
+    void findReportRecipientRoles_isEmpty_whenTheConfigHasNoBlockForTheReport(String json) {
+        stubReportLayoutJson(json);
+
+        assertThat(service.findReportRecipientRoles(TENANT_ID, ReportKind.DAILY)).isEmpty();
+    }
+
+    @Test
+    void findReportRecipientRoles_isEmpty_whenRowAbsent() {
+        when(jdbcTemplate.queryForObject(any(String.class), eq(String.class), eq(TENANT_ID),
+                eq("SITUATION_REPORT_LAYOUT")))
+                .thenThrow(new EmptyResultDataAccessException(1));
+
+        assertThat(service.findReportRecipientRoles(TENANT_ID, ReportKind.DAILY)).isEmpty();
+    }
+
+    @Test
+    void findReportRecipientRoles_isEmpty_whenTheValueIsNull() {
+        stubReportLayoutJson(null);
+
+        assertThat(service.findReportRecipientRoles(TENANT_ID, ReportKind.DAILY)).isEmpty();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+            "not-valid-json{{",
+            "[]",
+            "{\"daily\":{\"roles\":{\"SECTION_OFFICER\":{\"useDefault\":true}}}}",
+            "{\"version\":2,\"daily\":{\"roles\":{\"SECTION_OFFICER\":{\"useDefault\":true}}}}",
+            "{\"version\":1,\"daily\":[]}",
+            "{\"version\":1,\"daily\":{}}",
+            "{\"version\":1,\"daily\":{\"roles\":[\"SECTION_OFFICER\"]}}",
+            "{\"version\":1,\"daily\":{\"roles\":{\"DISTRICT_OFFICER\":{\"useDefault\":true}}}}",
+            "{\"version\":1,\"daily\":{\"roles\":{\"section_officer\":{\"useDefault\":true}}}}"})
+    void findReportRecipientRoles_isEmptyWithAWarning_whenTheConfigIsUnusable(String json) {
+        // message-service ignores the same configs and draws the built-in layouts, so falling back
+        // to the env roles keeps both services on today's behaviour.
+        stubReportLayoutJson(json);
+
+        List<ILoggingEvent> logged = capturingLogs(
+                () -> assertThat(service.findReportRecipientRoles(TENANT_ID, ReportKind.DAILY)).isEmpty());
+
+        assertThat(logged).anySatisfy(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.WARN);
+            assertThat(event.getFormattedMessage()).contains("SITUATION_REPORT_LAYOUT", "tenant=" + TENANT_ID);
+        });
+    }
+
     // ── validateDefaults ────────────────────────────────────────────────────────
 
     @Test
@@ -386,7 +477,10 @@ class TenantConfigServiceTest {
                 Arguments.of("DAILY_SITUATION_REPORT_TIME",
                         (Function<TenantConfigService, Object>) s -> s.getDailyReportConfig(TENANT_ID)),
                 Arguments.of("WEEKLY_SITUATION_REPORT_TIME",
-                        (Function<TenantConfigService, Object>) s -> s.getWeeklyReportConfig(TENANT_ID)));
+                        (Function<TenantConfigService, Object>) s -> s.getWeeklyReportConfig(TENANT_ID)),
+                Arguments.of("SITUATION_REPORT_LAYOUT",
+                        (Function<TenantConfigService, Object>)
+                                s -> s.findReportRecipientRoles(TENANT_ID, ReportKind.DAILY)));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -400,6 +494,26 @@ class TenantConfigServiceTest {
                 .thenThrow(failure);
 
         assertThatThrownBy(() -> read.apply(service)).isSameAs(failure);
+    }
+
+    private void stubReportLayoutJson(String json) {
+        when(jdbcTemplate.queryForObject(any(String.class), eq(String.class), eq(TENANT_ID),
+                eq("SITUATION_REPORT_LAYOUT")))
+                .thenReturn(json);
+    }
+
+    private static List<ILoggingEvent> capturingLogs(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(TenantConfigService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+        return appender.list;
     }
 
     private void stubWeeklyReportJson(int tenantId, String json) {

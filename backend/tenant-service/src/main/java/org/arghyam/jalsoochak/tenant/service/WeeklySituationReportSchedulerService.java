@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.tenant.service;
 
+import org.arghyam.jalsoochak.tenant.enums.reportlayout.ReportKind;
 import org.arghyam.jalsoochak.tenant.event.WeeklyReportRequestEvent;
 import org.arghyam.jalsoochak.tenant.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.tenant.repository.NudgeRepository;
@@ -15,6 +16,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -22,9 +24,10 @@ import java.util.UUID;
  * officer to {@code common-topic}, asking analytics-service to compute that officer's Weekly Water
  * Service Situation Report KPIs (which message-service then renders and delivers).
  *
- * <p>Called by {@link NotificationJobScheduler} on each tenant's individual weekly schedule. Unlike the
- * daily report, both Section Officers and Sub-Divisional Officers receive this one — they get
- * different layouts, resolved downstream from {@code officerUserType}.</p>
+ * <p>Called by {@link NotificationJobScheduler} on each tenant's individual weekly schedule. By default,
+ * unlike the daily report, both Section Officers and Sub-Divisional Officers receive this one — they
+ * get different layouts, resolved downstream from {@code officerUserType}. A tenant's
+ * {@code SITUATION_REPORT_LAYOUT} can name other recipients.</p>
  *
  * <p>The reported window is the last complete week beginning on the tenant's configured
  * {@code weekStartDay}, which the caller resolves from config and passes in. It is independent of the
@@ -44,8 +47,12 @@ public class WeeklySituationReportSchedulerService {
 
     private final NudgeRepository nudgeRepository;
     private final KafkaProducer kafkaProducer;
+    private final TenantConfigService tenantConfigService;
 
-    /** Officer roles that receive the weekly report. Both SO and SDO by default. */
+    /**
+     * Officer roles that receive the weekly report when the tenant's {@code SITUATION_REPORT_LAYOUT}
+     * names none. Both SO and SDO by default.
+     */
     @Value("${weekly-report.officer.user-types:SECTION_OFFICER,SUB_DIVISIONAL_OFFICER}")
     private String officerUserTypesCsv;
 
@@ -61,12 +68,17 @@ public class WeeklySituationReportSchedulerService {
 
         String correlationId = UUID.randomUUID().toString();
         long startNanos = System.nanoTime();
-        List<String> roles = officerRoles();
+        // The tenant's SITUATION_REPORT_LAYOUT names the recipients when it has a weekly block;
+        // otherwise the env roles do, as they always have.
+        Optional<List<String>> configuredRoles =
+                tenantConfigService.findReportRecipientRoles(tenantId, ReportKind.WEEKLY);
+        List<String> roles = configuredRoles.orElseGet(this::officerRoles);
+        String rolesSource = configuredRoles.isPresent() ? "config" : "env";
 
         log.info("[WeeklyReportJob] corr={} start: tenant={} schema={} weekStartDay={} week={}..{}"
-                        + " prevWeek={}..{} roles={}",
+                        + " prevWeek={}..{} roles={} rolesSource={}",
                 correlationId, tenantId, schema, weekStartDay, weekStart, weekEnd,
-                previousWeekStart, previousWeekEnd, roles);
+                previousWeekStart, previousWeekEnd, roles, rolesSource);
 
         // Requested-count per role — the denominator the downstream GENERATED/SENT counts reconcile
         // against. LinkedHashMap keeps the configured order.
@@ -74,8 +86,8 @@ public class WeeklySituationReportSchedulerService {
         int count = 0;
         for (String role : roles) {
             List<Long> officerIds = nudgeRepository.findDistinctOfficerUserIdsByUserType(schema, role);
-            // officerRoles() de-duplicates, so merge and put are equivalent here; merge keeps the
-            // total honest if the loop ever gains a second source of roles.
+            // Neither source repeats a role (officerRoles() de-duplicates; config roles are JSON
+            // keys), so merge and put are equivalent here; merge keeps the total honest regardless.
             requestedByRole.merge(role, officerIds.size(), Integer::sum);
             log.info("[WeeklyReportJob] corr={} result=REQUESTED role={} tenant={} officers={}",
                     correlationId, role, tenantId, officerIds.size());

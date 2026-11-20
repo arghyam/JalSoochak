@@ -4,6 +4,10 @@ import org.arghyam.jalsoochak.tenant.config.DailyReportScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.WeeklyReportScheduleConfig;
+import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum;
+import org.arghyam.jalsoochak.tenant.enums.reportlayout.ReportKind;
+import org.arghyam.jalsoochak.tenant.enums.reportlayout.ReportRole;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -14,6 +18,12 @@ import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -40,6 +50,25 @@ public class TenantConfigService {
     private static final String ESCALATION_KEY = "FIELD_STAFF_ESCALATION_RULES";
     private static final String DAILY_REPORT_KEY = "DAILY_SITUATION_REPORT_TIME";
     private static final String WEEKLY_REPORT_KEY = "WEEKLY_SITUATION_REPORT_TIME";
+    private static final String REPORT_LAYOUT_KEY = TenantConfigKeyEnum.SITUATION_REPORT_LAYOUT.name();
+    /** The only {@code SITUATION_REPORT_LAYOUT} version; message-service ignores any other, so this does too. */
+    private static final int REPORT_LAYOUT_VERSION = 1;
+
+    private static final String CONFIG_VALUE_SQL = """
+            SELECT config_value
+              FROM common_schema.tenant_config_master_table
+             WHERE tenant_id = ? AND config_key = ?
+             ORDER BY updated_at DESC, id DESC
+             LIMIT 1
+            """;
+    /** The live row only: the one message-service reads the report layouts from. */
+    private static final String LIVE_CONFIG_VALUE_SQL = """
+            SELECT config_value
+              FROM common_schema.tenant_config_master_table
+             WHERE tenant_id = ? AND config_key = ? AND deleted_at IS NULL
+             ORDER BY updated_at DESC, id DESC
+             LIMIT 1
+            """;
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -229,11 +258,64 @@ public class TenantConfigService {
                 .build();
     }
 
-    private String fetchConfigValue(int tenantId, String key) {
+    /**
+     * The roles that receive the {@code kind} report for this tenant: the keys of that report's
+     * {@code roles} in its {@code SITUATION_REPORT_LAYOUT} config, in document order. An empty list
+     * means nobody receives it.
+     *
+     * <p>Empty when the tenant has no such config or the config has no block for {@code kind}; the
+     * caller then uses its env roles, as before the key existed. A config that can't be used (one that
+     * doesn't parse, a version other than {@value #REPORT_LAYOUT_VERSION}, a block or {@code roles} that
+     * isn't an object, or a role this service doesn't know) is treated the same way, with a WARN.
+     * message-service ignores such a config too and draws the built-in layouts, so both services stay
+     * on today's behaviour.</p>
+     *
+     * <p>Only the roles are read. Whether a role's layout can be drawn is message-service's call when
+     * it renders the report.</p>
+     */
+    public Optional<List<String>> findReportRecipientRoles(int tenantId, ReportKind kind) {
+        String json = queryConfigValue(LIVE_CONFIG_VALUE_SQL, tenantId, REPORT_LAYOUT_KEY);
+        if (json == null) return Optional.empty();
         try {
-            String sql = "SELECT config_value FROM common_schema.tenant_config_master_table " +
-                    "WHERE tenant_id = ? AND config_key = ? " +
-                    "ORDER BY updated_at DESC, id DESC LIMIT 1";
+            return reportRecipientRoles(objectMapper.readTree(json), kind);
+        } catch (JsonProcessingException | IllegalArgumentException e) {
+            log.warn("[TenantConfig] Unusable {} for tenant={}, so the {} report goes to the default roles: {}",
+                    REPORT_LAYOUT_KEY, tenantId, kind, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /** @throws IllegalArgumentException when the config can't be used */
+    private static Optional<List<String>> reportRecipientRoles(JsonNode root, ReportKind kind) {
+        JsonNode version = root.path("version");
+        if (!version.isInt() || version.intValue() != REPORT_LAYOUT_VERSION) {
+            throw new IllegalArgumentException("version must be " + REPORT_LAYOUT_VERSION + ", was "
+                    + (version.isMissingNode() ? "absent" : version));
+        }
+        String blockName = kind.name().toLowerCase(Locale.ROOT);
+        JsonNode block = root.path(blockName);
+        if (block.isMissingNode() || block.isNull()) return Optional.empty();
+        JsonNode roles = block.path("roles");
+        if (!roles.isObject()) {
+            throw new IllegalArgumentException(blockName + ".roles is not an object");
+        }
+        List<String> names = new ArrayList<>();
+        for (Iterator<String> it = roles.fieldNames(); it.hasNext(); ) {
+            String name = it.next();
+            if (Arrays.stream(ReportRole.values()).noneMatch(role -> role.name().equals(name))) {
+                throw new IllegalArgumentException(blockName + ".roles has an unknown role: " + name);
+            }
+            names.add(name);
+        }
+        return Optional.of(List.copyOf(names));
+    }
+
+    private String fetchConfigValue(int tenantId, String key) {
+        return queryConfigValue(CONFIG_VALUE_SQL, tenantId, key);
+    }
+
+    private String queryConfigValue(String sql, int tenantId, String key) {
+        try {
             return jdbcTemplate.queryForObject(sql, String.class, tenantId, key);
         } catch (EmptyResultDataAccessException e) {
             log.debug("[TenantConfig] Key '{}' not found for tenant={}", key, tenantId);

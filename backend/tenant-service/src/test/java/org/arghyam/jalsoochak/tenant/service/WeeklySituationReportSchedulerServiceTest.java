@@ -1,29 +1,37 @@
 package org.arghyam.jalsoochak.tenant.service;
 
+import org.arghyam.jalsoochak.tenant.enums.reportlayout.ReportKind;
 import org.arghyam.jalsoochak.tenant.event.WeeklyReportRequestEvent;
 import org.arghyam.jalsoochak.tenant.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.tenant.repository.NudgeRepository;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.temporal.TemporalAdjusters;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -42,6 +50,9 @@ class WeeklySituationReportSchedulerServiceTest {
 
     @Mock
     private KafkaProducer kafkaProducer;
+
+    @Mock
+    private TenantConfigService tenantConfigService;
 
     @InjectMocks
     private WeeklySituationReportSchedulerService service;
@@ -230,6 +241,73 @@ class WeeklySituationReportSchedulerServiceTest {
     }
 
     @Test
+    @DisplayName("the tenant config's roles replace the env roles, and an SDO still gets its subordinates")
+    void sendsToTheRolesTheTenantConfigLists_insteadOfTheEnvRoles() {
+        when(tenantConfigService.findReportRecipientRoles(TENANT, ReportKind.WEEKLY))
+                .thenReturn(Optional.of(List.of("SUB_DIVISIONAL_OFFICER")));
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER"))
+                .thenReturn(List.of(20L));
+        when(nudgeRepository.findSubordinateSectionOfficerIds(SCHEMA, 20L)).thenReturn(List.of(11L, 12L));
+
+        List<ILoggingEvent> logged = capturingLogs(
+                () -> service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY, RUN_DATE));
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
+        WeeklyReportRequestEvent event = (WeeklyReportRequestEvent) captor.getValue();
+        assertThat(event.getOfficerUserType()).isEqualTo("SUB_DIVISIONAL_OFFICER");
+        assertThat(event.getSubordinateOfficerUserIds()).containsExactly(11L, 12L);
+        // The env lists Section Officers too; the tenant's config leaves them out.
+        verify(nudgeRepository, never()).findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER");
+        assertThat(logged).anySatisfy(e -> assertThat(e.getFormattedMessage())
+                .contains("roles=[SUB_DIVISIONAL_OFFICER]", "rolesSource=config"));
+    }
+
+    @Test
+    @DisplayName("publishes to the tenant config's roles in the order it lists them")
+    void keepsTheOrderOfTheTenantConfigsRoles() {
+        when(tenantConfigService.findReportRecipientRoles(TENANT, ReportKind.WEEKLY))
+                .thenReturn(Optional.of(List.of("SUB_DIVISIONAL_OFFICER", "SECTION_OFFICER")));
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER"))
+                .thenReturn(List.of());
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
+                .thenReturn(List.of());
+
+        service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY, RUN_DATE);
+
+        InOrder inOrder = inOrder(nudgeRepository);
+        inOrder.verify(nudgeRepository).findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER");
+        inOrder.verify(nudgeRepository).findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER");
+    }
+
+    @Test
+    @DisplayName("a tenant config that lists no roles sends the report to nobody")
+    void publishesNothing_whenTheTenantConfigListsNoRoles() {
+        when(tenantConfigService.findReportRecipientRoles(TENANT, ReportKind.WEEKLY))
+                .thenReturn(Optional.of(List.of()));
+
+        service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY, RUN_DATE);
+
+        verifyNoInteractions(nudgeRepository, kafkaProducer);
+    }
+
+    @Test
+    @DisplayName("without roles in the tenant config, the env roles get the report")
+    void usesTheEnvRoles_whenTheTenantConfigListsNone() {
+        when(tenantConfigService.findReportRecipientRoles(TENANT, ReportKind.WEEKLY)).thenReturn(Optional.empty());
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
+                .thenReturn(List.of());
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER"))
+                .thenReturn(List.of());
+
+        List<ILoggingEvent> logged = capturingLogs(
+                () -> service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY, RUN_DATE));
+
+        assertThat(logged).anySatisfy(e -> assertThat(e.getFormattedMessage())
+                .contains("roles=[SECTION_OFFICER, SUB_DIVISIONAL_OFFICER]", "rolesSource=env"));
+    }
+
+    @Test
     void publishesNothingWhenNoOfficers() {
         when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
                 .thenReturn(List.of());
@@ -252,5 +330,19 @@ class WeeklySituationReportSchedulerServiceTest {
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
         return (WeeklyReportRequestEvent) captor.getValue();
+    }
+
+    private static List<ILoggingEvent> capturingLogs(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(WeeklySituationReportSchedulerService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+        return appender.list;
     }
 }
