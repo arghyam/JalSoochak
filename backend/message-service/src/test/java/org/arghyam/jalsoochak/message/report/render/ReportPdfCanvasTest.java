@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.message.service;
+package org.arghyam.jalsoochak.message.report.render;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.junit.jupiter.api.DisplayName;
@@ -8,9 +8,9 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Set;
 
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.BLANK_LINE;
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.CONTENT_WIDTH;
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.MARGIN;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.BLANK_LINE;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.CONTENT_WIDTH;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.MARGIN;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**

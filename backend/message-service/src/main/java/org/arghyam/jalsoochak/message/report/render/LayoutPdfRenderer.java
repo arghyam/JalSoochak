@@ -15,7 +15,6 @@ import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
 import org.arghyam.jalsoochak.message.report.layout.ReportSection;
 import org.arghyam.jalsoochak.message.report.layout.Spacer;
 import org.arghyam.jalsoochak.message.report.layout.SummaryRowSpec;
-import org.arghyam.jalsoochak.message.service.ReportPdfCanvas;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -27,7 +26,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.BLANK_LINE;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.BLANK_LINE;
 
 /**
  * Draws a situation report from a layout: the header lines, the numbered sections, then the footer

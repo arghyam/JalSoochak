@@ -8,9 +8,9 @@ import org.arghyam.jalsoochak.message.report.layout.ColumnSpec;
 import java.util.List;
 import java.util.function.Function;
 
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.CELL_PAD;
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.CONTENT_WIDTH;
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.DENSE_CELL_PAD;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.CELL_PAD;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.CONTENT_WIDTH;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.DENSE_CELL_PAD;
 
 /**
  * The fixed presentation rules for a table: font sizes and padding by table kind and column count,
