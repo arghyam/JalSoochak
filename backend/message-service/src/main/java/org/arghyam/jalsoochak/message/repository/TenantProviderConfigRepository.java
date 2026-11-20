@@ -118,7 +118,9 @@ public class TenantProviderConfigRepository {
         try {
             List<String> rows = jdbcTemplate.query(FIND_CONFIG_SQL,
                     (rs, rowNum) -> rs.getString("config_value"), tenantId, configKey);
-            return rows.stream().findFirst().filter(value -> value != null && !value.isBlank());
+            // Not Stream.findFirst(): it throws on a null element, and config_value is nullable.
+            return rows.isEmpty() ? Optional.empty()
+                    : Optional.ofNullable(rows.get(0)).filter(value -> !value.isBlank());
         } catch (DataAccessException e) {
             log.error("[Providers] Failed to read {} for tenantId={}; falling back to the system"
                     + " default: {}", configKey, tenantId, e.getMessage());
