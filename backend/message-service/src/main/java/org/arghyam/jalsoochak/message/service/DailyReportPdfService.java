@@ -1,9 +1,14 @@
 package org.arghyam.jalsoochak.message.service;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
+import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
+import org.arghyam.jalsoochak.message.report.render.DailyReportContent;
+import org.arghyam.jalsoochak.message.report.render.LayoutPdfRenderer;
+import org.arghyam.jalsoochak.message.report.render.ReportFormats;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -11,32 +16,22 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Clock;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.BLANK_LINE;
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.CONTENT_WIDTH;
 
 /**
- * Renders the Daily Water Service Situation Report PDF for one Section Officer.
+ * Renders the Daily Water Service Situation Report PDF for one officer, in the layout it is given.
  *
- * <p>Layout follows {@code SO daily report.docx}:</p>
- * <ol>
- *   <li><b>Summary</b> — scheme counts, the household split with percentages, Average LPCD (of the
- *       schemes that supplied), and the anomaly count.</li>
- *   <li><b>Scheme with No Water Supply</b> — IMIS id, name, Jal Mitra name and mobile.</li>
- *   <li><b>Schemes with Anomalous Submissions</b> — the same, plus the anomaly type.</li>
- * </ol>
- *
- * <p>Only Section Officers receive this report; Sub-Divisional Officers get the weekly one.</p>
+ * <p>The built-in layout follows {@code SO daily report.docx}: a summary of scheme counts, the
+ * household split with percentages, Average LPCD (of the schemes that supplied) and the anomaly
+ * count, then the schemes with no water supply and the schemes with anomalous submissions.</p>
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class DailyReportPdfService {
 
     @Value("${daily-report.report.dir:${escalation.report.dir:/tmp/escalation-reports/}}")
@@ -49,11 +44,13 @@ public class DailyReportPdfService {
     private String supportPhone;
 
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE;
-    private static final DateTimeFormatter HEADER = DateTimeFormatter.ofPattern("dd MMMM yyyy");
-    private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm");
+    /** The platform reports on IST days throughout; the generation date must agree. */
+    private static final ZoneId REPORT_ZONE = ZoneId.of("Asia/Kolkata");
 
-    /** The daily report has no trend column, so no KPI needs inverted colouring. */
-    private static final Set<String> NO_TREND_KPIS = Set.of();
+    private final LayoutPdfRenderer renderer;
+
+    /** Source of {@code {generatedDate}}; read in {@link #REPORT_ZONE} whatever the clock's own zone. */
+    private Clock clock = Clock.systemUTC();
 
     /**
      * Generates the report PDF and returns the path it was written to.
@@ -66,8 +63,10 @@ public class DailyReportPdfService {
      * @param officerUserId the filename discriminator. Deliberately the id and not the officer's
      *                      name: names collide, and the reports share one storage bucket, so a
      *                      collision would expose one officer's report to another.
+     * @param layout        what the report shows, and where
      */
     public Path generate(DailyReportKpis kpis, long officerUserId, String officerName, String officerUserType,
+                         ReportLayout layout,
                          List<ReportSchemeRow> noSupplyRows,
                          List<ReportSchemeRow> anomalyRows) throws IOException {
         ensureReportDirExists();
@@ -76,18 +75,19 @@ public class DailyReportPdfService {
         String filename = ReportFileNaming.dailyFilename(officerUserType, officerUserId, reportDate);
         Path filePath = Paths.get(reportDir, filename);
 
-        try (PDDocument doc = new PDDocument()) {
-            // The canvas closes in its own block: PDFBox refuses to serialise a document while a page
-            // content stream is still open, so the save has to happen after the last page is flushed.
-            try (ReportPdfCanvas c = new ReportPdfCanvas(doc, NO_TREND_KPIS)) {
-                c.newPage();
+        DailyReportContent content = DailyReportContent.builder()
+                .kpis(kpis)
+                .officerName(officerName)
+                .generatedDate(LocalDate.ofInstant(clock.instant(), REPORT_ZONE))
+                .formats(ReportFormats.defaults())
+                .dashboardUrl(dashboardUrl)
+                .supportPhone(supportPhone)
+                .noSupplyRows(noSupplyRows)
+                .anomalyRows(anomalyRows)
+                .build();
 
-                drawHeader(c, kpis, officerName, reportDate);
-                drawSummary(c, kpis);
-                drawNoSupplySection(c, noSupplyRows);
-                drawAnomalySection(c, anomalyRows);
-                drawFooter(c);
-            }
+        try (PDDocument doc = new PDDocument()) {
+            renderer.render(doc, layout, content);
             doc.save(filePath.toFile());
         }
 
@@ -96,123 +96,9 @@ public class DailyReportPdfService {
         return filePath;
     }
 
-    private void drawHeader(ReportPdfCanvas c, DailyReportKpis kpis, String officerName, LocalDate reportDate)
-            throws IOException {
-        c.centeredLine(c.bold(), 16, "Daily Water Service Situation Report");
-        c.centeredLine(c.font(), 10, "(Auto generated by JalSoochak)");
-        c.moveDown(BLANK_LINE);
-        c.labelValueLine(11, "Section-Officer: ", officerName != null ? officerName : "Officer");
-        c.labelValueLine(11, "Date: ", reportDate.format(HEADER));
-        // The window is whatever the tenant's cron actually closed at, not a hard-coded 16:00 — a
-        // tenant that moves its schedule would otherwise be told the report covers hours it does not.
-        c.labelValueLine(11, "Reporting Period: ", "00:00 hrs – " + cutoffLabel(kpis) + " hrs");
-        c.moveDown(BLANK_LINE);
-        c.headerLinkLine(9, "Visit JalSoochak Dashboard at ", dashboardUrl, " for more insights");
-    }
-
-    private void drawSummary(ReportPdfCanvas c, DailyReportKpis kpis) throws IOException {
-        c.sectionTitle("1. Summary");
-
-        float[] cols = {CONTENT_WIDTH * 0.62f, CONTENT_WIDTH * 0.38f};
-        String[] header = {"Parameters", "Today (Up to " + cutoffLabel(kpis) + ")"};
-        boolean[] center = {false, true};
-
-        List<String[]> rows = new ArrayList<>();
-        rows.add(new String[]{"Total Schemes (Handed Over Schemes only)",
-                String.valueOf(kpis.getTotalSchemes())});
-        rows.add(new String[]{"Schemes Supplying Water",
-                String.valueOf(kpis.getSchemesSupplying())});
-        rows.add(new String[]{"Schemes Not having supplied Water (Till " + cutoffLabel(kpis) + ")",
-                String.valueOf(kpis.getSchemesNotSupplying())});
-        rows.add(new String[]{"Number of HHs with water supply TODAY",
-                countWithPct(kpis.getHouseholdsWithSupply(), kpis.getHouseholdsWithSupplyPct())});
-        rows.add(new String[]{"Number of HHs yet to get water supply",
-                countWithPct(kpis.getHouseholdsWithoutSupply(), kpis.getHouseholdsWithoutSupplyPct())});
-        rows.add(new String[]{"Average LPCD*", fmt(kpis.getAvgLpcd())});
-        rows.add(new String[]{"Number of Anomalous Submissions",
-                String.valueOf(kpis.getAnomalousCount())});
-
-        c.drawTable(cols, header, rows, 10f, 10f, center);
-        // The asterisk is load-bearing: this LPCD divides by the population of the supplying schemes
-        // only, so it reads higher than an LPCD over the whole command area and must say so.
-        c.footnote("* of schemes that have supplied water");
-    }
-
-    private void drawNoSupplySection(ReportPdfCanvas c, List<ReportSchemeRow> rows) throws IOException {
-        c.sectionTitle("2. Scheme with No Water Supply");
-
-        // The IMIS column is sized so the "Scheme IMIS Id" header fits on one line: any narrower and
-        // it wraps, which costs a row of height on every page the table spills onto.
-        float[] cols = {CONTENT_WIDTH * 0.21f, CONTENT_WIDTH * 0.33f,
-                CONTENT_WIDTH * 0.26f, CONTENT_WIDTH * 0.20f};
-        String[] header = {"Scheme IMIS Id", "Scheme Name", "Jal Mitra Name", "Mobile No."};
-
-        c.drawTable(cols, header, schemeRows(rows, false), 9f, 9.5f);
-    }
-
-    private void drawAnomalySection(ReportPdfCanvas c, List<ReportSchemeRow> rows) throws IOException {
-        c.sectionTitle("3. Schemes with Anomalous Submissions");
-
-        float[] cols = {CONTENT_WIDTH * 0.20f, CONTENT_WIDTH * 0.20f, CONTENT_WIDTH * 0.23f,
-                CONTENT_WIDTH * 0.20f, CONTENT_WIDTH * 0.17f};
-        String[] header = {"Scheme IMIS Id", "Scheme Name", "Type of Anomaly in Submission",
-                "Jal Mitra Name", "Mobile No."};
-
-        c.drawTable(cols, header, schemeRows(rows, true), 9f, 9.5f);
-    }
-
-    private void drawFooter(ReportPdfCanvas c) throws IOException {
-        if (supportPhone == null || supportPhone.isBlank()) {
-            return;
-        }
-        c.footnote("For support, contact " + supportPhone);
-    }
-
-    private static List<String[]> schemeRows(List<ReportSchemeRow> rows, boolean withAnomalyType) {
-        List<String[]> out = new ArrayList<>();
-        if (rows == null || rows.isEmpty()) {
-            // An empty section reads as "nothing to act on", which is a result worth stating plainly
-            // rather than leaving a bare header that looks like a rendering failure.
-            out.add(withAnomalyType
-                    ? new String[]{"", "None", "", "", ""}
-                    : new String[]{"", "None", "", ""});
-            return out;
-        }
-        for (ReportSchemeRow r : rows) {
-            out.add(withAnomalyType
-                    ? new String[]{nvl(r.getImisId()), nvl(r.getSchemeName()), nvl(r.getAnomalyType()),
-                            nvl(r.getJalMitraNames()), nvl(r.getJalMitraMobiles())}
-                    : new String[]{nvl(r.getImisId()), nvl(r.getSchemeName()),
-                            nvl(r.getJalMitraNames()), nvl(r.getJalMitraMobiles())});
-        }
-        return out;
-    }
-
-    /** {@code nn (m%)} — the count with its share of the officer's households. */
-    private static String countWithPct(long count, double pct) {
-        return count + " (" + fmt(pct) + "%)";
-    }
-
-    /** The cut-off as {@code HH:mm}, falling back to the template's 16:00 when the event omits it. */
-    private static String cutoffLabel(DailyReportKpis kpis) {
-        String raw = kpis.getCutoffIst();
-        if (raw == null || raw.isBlank()) {
-            return "16:00";
-        }
-        try {
-            return LocalDateTime.parse(raw).format(CLOCK);
-        } catch (DateTimeParseException e) {
-            return "16:00";
-        }
-    }
-
-    /** Drops a trailing {@code .0} so whole numbers read as counts rather than measurements. */
-    private static String fmt(double v) {
-        return v == Math.rint(v) ? String.valueOf((long) v) : String.valueOf(v);
-    }
-
-    private static String nvl(String s) {
-        return s == null ? "" : s;
+    /** Test seam: fixes {@code {generatedDate}} so rendered output is reproducible. */
+    void setClock(Clock clock) {
+        this.clock = clock;
     }
 
     private void ensureReportDirExists() throws IOException {

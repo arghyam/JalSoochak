@@ -41,6 +41,9 @@ import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.TenantRef;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
+import org.arghyam.jalsoochak.message.report.DefaultReportLayouts;
+import org.arghyam.jalsoochak.message.report.ReportKind;
+import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
 import org.arghyam.jalsoochak.message.event.WhatsAppContactRegisteredEvent;
 import org.arghyam.jalsoochak.message.exception.StorageException;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
@@ -98,6 +101,10 @@ class NotificationEventRouterTest {
 
     @Mock
     private WeeklyReportPdfService weeklyReportPdfService;
+
+    /** The real built-in layouts, so each report is rendered with the one its role gets in production. */
+    @Spy
+    private DefaultReportLayouts defaultReportLayouts = new DefaultReportLayouts(new ObjectMapper());
 
     /** The store of record, behind the real {@link ReportPublisher} each test runs with. */
     @Mock
@@ -1464,7 +1471,7 @@ class NotificationEventRouterTest {
     void handleDailyReport_generatesPdfAndSendsToSectionOfficer() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(12345L, "https://storage.example.org/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
@@ -1472,7 +1479,7 @@ class NotificationEventRouterTest {
 
         router.route(DAILY_REPORT_JSON);
 
-        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
+        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList());
         verify(objectStorageService).ensureBucket(ReportFileNaming.DAILY_BUCKET);
         verify(objectStorageService).upload(eq(ReportFileNaming.DAILY_BUCKET), anyString(), any(InputStream.class),
                 eq((long) PDF_BYTES.length), eq("application/pdf"));
@@ -1481,13 +1488,32 @@ class NotificationEventRouterTest {
         verify(whatsAppSender, never()).optIn(anyString());
     }
 
+    @Test
+    void handleDailyReport_rendersTheBuiltInSectionOfficerLayout() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), anyLong(), anyString(), anyString(), any(), anyList(), anyList()))
+                .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString()))
+                .thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), anyString()))
+                .thenReturn(acceptedSend());
+
+        ReportLayout expected = defaultReportLayouts.builtIn(ReportKind.DAILY, "SECTION_OFFICER").orElseThrow();
+
+        router.route(DAILY_REPORT_JSON);
+
+        verify(dailyReportPdfService).generate(any(), eq(500L), anyString(), eq("SECTION_OFFICER"), eq(expected),
+                anyList(), anyList());
+    }
+
 
 
     @Test
     void handleDailyReport_logsFailedGenerationOutcomeAndRethrows() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenThrow(new java.io.IOException("PDF write failed"));
 
         ch.qos.logback.classic.Logger logger =
@@ -1542,7 +1568,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(null, "enc-title", "enc-phone");
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(piiEncryptionService.safeDecrypt("enc-phone")).thenReturn("919876500024");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppSender.optIn("919876500024")).thenReturn(88L);
@@ -1551,7 +1577,7 @@ class NotificationEventRouterTest {
 
         router.route(DAILY_REPORT_JSON);
 
-        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
+        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList());
         verify(whatsAppSender).optIn("919876500024");
         verify(whatsAppChannel).sendDailyReport(88L, "https://storage.example.org/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli");
         verify(kafkaProducer).publishJson(eq("common-topic"), argThat(event -> {
@@ -1650,7 +1676,7 @@ class NotificationEventRouterTest {
                 default -> v;
             };
         });
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("f.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/f.pdf"));
         when(whatsAppChannel.sendDailyReport(12345L, "https://storage.example.org/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod"))
@@ -1659,7 +1685,7 @@ class NotificationEventRouterTest {
         router.route(json);
 
         ArgumentCaptor<List<ReportSchemeRow>> cap = ArgumentCaptor.forClass(List.class);
-        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), cap.capture(), anyList());
+        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), any(), cap.capture(), anyList());
         List<ReportSchemeRow> rows = cap.getValue();
         assertThat(rows).hasSize(1);
         ReportSchemeRow row = rows.get(0);
@@ -1684,7 +1710,7 @@ class NotificationEventRouterTest {
     void handleDailyReport_sentLineCarriesTheProviderJoinKeys() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
@@ -1709,7 +1735,7 @@ class NotificationEventRouterTest {
     void handleDailyReport_sentLinePreservesTheFieldAdjacencyTheCountingRecipesRelyOn() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
@@ -1728,7 +1754,7 @@ class NotificationEventRouterTest {
     void handleDailyReport_failedDeliveryLineCarriesTheStageAndProviderErrorKey() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
@@ -1753,7 +1779,7 @@ class NotificationEventRouterTest {
     void handleDailyReport_aConfigFailureIsCountedAsFailedButNotRetried() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
@@ -1781,7 +1807,7 @@ class NotificationEventRouterTest {
     void handleDailyReport_suppressedSendIsNotCountedAsSent() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
@@ -1808,7 +1834,7 @@ class NotificationEventRouterTest {
     void handleDailyReport_aTimeoutIsRecordedButNotRetried() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
@@ -1836,7 +1862,7 @@ class NotificationEventRouterTest {
     void handleDailyReport_aSendWithNoMessageIdIsRecordedButNotRetried() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
@@ -1856,7 +1882,7 @@ class NotificationEventRouterTest {
     void handleDailyReport_aRejectedSendStillRethrowsForRetry() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
@@ -1966,7 +1992,7 @@ class NotificationEventRouterTest {
     void handleWeeklyReport_generatesUploadsAndSendsForASectionOfficer() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(weeklyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"),
+        when(weeklyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(),
                 anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString()))
                 .thenReturn(URI.create("https://storage.example.org/weekly.pdf"));
@@ -1975,7 +2001,7 @@ class NotificationEventRouterTest {
 
         router.route(WEEKLY_SO_JSON);
 
-        verify(weeklyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"),
+        verify(weeklyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(),
                 anyList(), anyList(), anyList(), anyList());
         // The weekly bucket, not the daily one — they are separate stores.
         verify(objectStorageService).ensureBucket(ReportFileNaming.WEEKLY_BUCKET);
@@ -1990,7 +2016,7 @@ class NotificationEventRouterTest {
     void handleWeeklyReport_uploadsUnderTheWeekRangeFolder() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
+        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(), any(),
                 anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString()))
                 .thenReturn(URI.create("https://storage.example.org/weekly.pdf"));
@@ -2010,7 +2036,7 @@ class NotificationEventRouterTest {
         // Unlike the daily report, the weekly one serves both roles.
         stubOfficerContact(999L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("SDO Kumar");
-        when(weeklyReportPdfService.generate(any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"),
+        when(weeklyReportPdfService.generate(any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"), any(),
                 anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly_sdo.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString()))
                 .thenReturn(URI.create("https://storage.example.org/weekly_sdo.pdf"));
@@ -2023,6 +2049,29 @@ class NotificationEventRouterTest {
         verify(objectStorageService).upload(eq(ReportFileNaming.WEEKLY_BUCKET), key.capture(), any(InputStream.class),
                 anyLong(), anyString());
         assertThat(key.getValue()).startsWith("SDO/");
+    }
+
+    @Test
+    void handleWeeklyReport_rendersEachRoleItsBuiltInLayout() throws Exception {
+        stubOfficerContact(999L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("SDO Kumar");
+        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(), any(),
+                anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString()))
+                .thenReturn(URI.create("https://storage.example.org/weekly.pdf"));
+        when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), any(), anyString()))
+                .thenReturn(acceptedSend());
+
+        ReportLayout so = defaultReportLayouts.builtIn(ReportKind.WEEKLY, "SECTION_OFFICER").orElseThrow();
+        ReportLayout sdo = defaultReportLayouts.builtIn(ReportKind.WEEKLY, "SUB_DIVISIONAL_OFFICER").orElseThrow();
+
+        router.route(WEEKLY_SO_JSON);
+        router.route(WEEKLY_SO_JSON.replace("SECTION_OFFICER", "SUB_DIVISIONAL_OFFICER"));
+
+        verify(weeklyReportPdfService).generate(any(), anyLong(), anyString(), eq("SECTION_OFFICER"), eq(so),
+                anyList(), anyList(), anyList(), anyList());
+        verify(weeklyReportPdfService).generate(any(), anyLong(), anyString(), eq("SUB_DIVISIONAL_OFFICER"), eq(sdo),
+                anyList(), anyList(), anyList(), anyList());
     }
 
     @Test
@@ -2081,7 +2130,7 @@ class NotificationEventRouterTest {
     void handleWeeklyReport_rethrowsWhenTheUploadFailsSoTheReportIsNotLost() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
+        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(), any(),
                 anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
         doThrow(new StorageException("Upload failed for key: weekly.pdf"))
                 .when(objectStorageService).upload(anyString(), anyString(), any(InputStream.class), anyLong(), anyString());
@@ -2117,7 +2166,7 @@ class NotificationEventRouterTest {
     private void stubDailyReport() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
     }
 
@@ -2221,7 +2270,7 @@ class NotificationEventRouterTest {
         withDeliveryStore();
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
+        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(), any(),
                 anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
         when(whatsAppSender.weeklyReportDeliveryMode()).thenReturn(ReportDeliveryMode.DOCUMENT);
         when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), any(), anyString()))
@@ -2339,7 +2388,7 @@ class NotificationEventRouterTest {
     void handleDailyReport_keepsItsOwnPrefixAndDateFieldOnTheTerminalLines() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"),
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(),
                 anyList(), anyList())).thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString()))
                 .thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
@@ -2525,7 +2574,7 @@ class NotificationEventRouterTest {
     private void stubWeeklySend(ReportSendOutcome outcome) throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
+        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(), any(),
                 anyList(), anyList(), anyList(), anyList())).thenAnswer(inv -> reportPdf("weekly.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString()))
                 .thenReturn(URI.create("https://storage.example.org/weekly.pdf"));
@@ -2585,7 +2634,7 @@ class NotificationEventRouterTest {
         when(ledger.open(any())).thenReturn(LEDGER_REF);
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_x.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/daily_report_x.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any())).thenReturn(acceptedSend());
@@ -2631,7 +2680,7 @@ class NotificationEventRouterTest {
         when(ledger.open(any())).thenReturn(LEDGER_REF);
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), anyLong(), anyString(), anyString(), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), anyLong(), anyString(), anyString(), any(), anyList(), anyList()))
                 .thenThrow(new IllegalStateException("font missing"));
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> router.route(DAILY_REPORT_JSON))
@@ -2645,7 +2694,7 @@ class NotificationEventRouterTest {
         when(ledger.open(any())).thenReturn(LEDGER_REF);
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), anyLong(), anyString(), anyString(), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), anyLong(), anyString(), anyString(), any(), anyList(), anyList()))
                 .thenAnswer(inv -> reportPdf("daily_report_y.pdf"));
         when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create("https://storage.example.org/y.pdf"));
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))

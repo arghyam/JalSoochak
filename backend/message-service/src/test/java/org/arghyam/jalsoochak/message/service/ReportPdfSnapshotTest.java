@@ -1,9 +1,14 @@
 package org.arghyam.jalsoochak.message.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
+import org.arghyam.jalsoochak.message.report.DefaultReportLayouts;
+import org.arghyam.jalsoochak.message.report.ReportKind;
+import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
+import org.arghyam.jalsoochak.message.report.render.LayoutPdfRenderer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -19,11 +24,9 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Pins the exact drawing of the three situation reports — daily SO, weekly SO and weekly SDO — so a
@@ -49,6 +52,11 @@ class ReportPdfSnapshotTest {
     /** 10:00 IST on Monday 20 July 2026, the morning after the default reported week closes. */
     private static final Instant GENERATED_AT = Instant.parse("2026-07-20T04:30:00Z");
 
+    private static final DefaultReportLayouts LAYOUTS = new DefaultReportLayouts(new ObjectMapper());
+    private static final ReportLayout DAILY_SO_LAYOUT = LAYOUTS.builtIn(ReportKind.DAILY, SO).orElseThrow();
+    private static final ReportLayout WEEKLY_SO_LAYOUT = LAYOUTS.builtIn(ReportKind.WEEKLY, SO).orElseThrow();
+    private static final ReportLayout WEEKLY_SDO_LAYOUT = LAYOUTS.builtIn(ReportKind.WEEKLY, SDO).orElseThrow();
+
     @TempDir
     Path tempDir;
 
@@ -57,12 +65,13 @@ class ReportPdfSnapshotTest {
 
     @BeforeEach
     void setUp() {
-        daily = new DailyReportPdfService();
+        daily = new DailyReportPdfService(new LayoutPdfRenderer());
         ReflectionTestUtils.setField(daily, "reportDir", tempDir + "/");
         ReflectionTestUtils.setField(daily, "dashboardUrl", DASHBOARD_URL);
         ReflectionTestUtils.setField(daily, "supportPhone", SUPPORT_PHONE);
+        daily.setClock(Clock.fixed(GENERATED_AT, ZoneOffset.UTC));
 
-        weekly = new WeeklyReportPdfService();
+        weekly = new WeeklyReportPdfService(new LayoutPdfRenderer());
         ReflectionTestUtils.setField(weekly, "reportDir", tempDir + "/");
         ReflectionTestUtils.setField(weekly, "dashboardUrl", DASHBOARD_URL);
         ReflectionTestUtils.setField(weekly, "supportPhone", SUPPORT_PHONE);
@@ -72,17 +81,10 @@ class ReportPdfSnapshotTest {
     @Nested
     class Daily {
 
-        @BeforeEach
-        void requireEnglishMonthNames() {
-            // The daily header formatter takes the JVM default locale. The snapshots were recorded on an
-            // English one, which is what production runs; elsewhere the month name alone would differ.
-            assumeTrue("en".equals(Locale.getDefault(Locale.Category.FORMAT).getLanguage()),
-                    "daily snapshots need an English default locale");
-        }
-
         @Test
         void d1Typical() throws IOException {
             Path pdf = daily.generate(dailyKpis("2026-07-19T17:30:00"), 5521L, "Bharat Sharma", SO,
+                    DAILY_SO_LAYOUT,
                     List.of(
                             scheme(1, "Rampur", "98767", "Ramesh", "919000000001"),
                             scheme(2, "Bhagwanpur Piped Water Supply Scheme", "98769",
@@ -102,7 +104,7 @@ class ReportPdfSnapshotTest {
                     .noSupplySchemeIds(List.of()).schemeAnomalies(List.of())
                     .build();
 
-            Path pdf = daily.generate(kpis, 5521L, "Bharat Sharma", SO, List.of(), List.of());
+            Path pdf = daily.generate(kpis, 5521L, "Bharat Sharma", SO, DAILY_SO_LAYOUT, List.of(), List.of());
 
             assertMatchesSnapshot("D2-daily-empty-no-phone", pdf);
         }
@@ -124,6 +126,7 @@ class ReportPdfSnapshotTest {
             }
 
             Path pdf = daily.generate(dailyKpis("2026-07-19T16:00:00"), 5521L, "Bharat Sharma", SO,
+                    DAILY_SO_LAYOUT,
                     noSupply, anomalies);
 
             assertMatchesSnapshot("D3-daily-pagination", pdf);
@@ -131,7 +134,7 @@ class ReportPdfSnapshotTest {
 
         @Test
         void d4MissingCutoffAndOfficerName() throws IOException {
-            Path pdf = daily.generate(dailyKpis(null), 5521L, null, SO,
+            Path pdf = daily.generate(dailyKpis(null), 5521L, null, SO, DAILY_SO_LAYOUT,
                     List.of(scheme(1, "Rampur", "98767", "Ramesh", "919000000001")), List.of());
 
             assertMatchesSnapshot("D4-daily-missing-cutoff", pdf);
@@ -144,7 +147,7 @@ class ReportPdfSnapshotTest {
         @Test
         void w1Typical() throws IOException {
             Path pdf = weekly.generate(weeklyKpis(defaultWeek(), week(148, 142, 6, 4, 63.4), week(148, 140, 4, 7, 61.2)),
-                    5521L, "Bharat Sharma", SO,
+                    5521L, "Bharat Sharma", SO, WEEKLY_SO_LAYOUT,
                     List.of(scheme(1, "Rampur", null, "Ramesh", "919000000001")),
                     List.of(scheme(2, "Bhagwanpur", null, "Suresh, Mahesh", "919000000002, 919000000003")),
                     List.of(scheme(3, "Kishanganj", null, "Mahesh", "919000000003")),
@@ -161,7 +164,8 @@ class ReportPdfSnapshotTest {
                     .previousWeekStart("2026-07-06").previousWeekEnd("2026-07-12")
                     .build();
 
-            Path pdf = weekly.generate(sparse, 5521L, null, SO, List.of(), List.of(), List.of(), null);
+            Path pdf = weekly.generate(sparse, 5521L, null, SO, WEEKLY_SO_LAYOUT,
+                    List.of(), List.of(), List.of(), null);
 
             assertMatchesSnapshot("W2-weekly-so-empty", pdf);
         }
@@ -171,7 +175,7 @@ class ReportPdfSnapshotTest {
             String[] thursdayWeek = {"2026-07-16", "2026-07-22", "2026-07-09", "2026-07-15"};
 
             Path pdf = weekly.generate(weeklyKpis(thursdayWeek, week(20, 18, 2, 1, 55.0), week(20, 18, 2, 1, 55.0)),
-                    5521L, "Bharat Sharma", SO,
+                    5521L, "Bharat Sharma", SO, WEEKLY_SO_LAYOUT,
                     List.of(scheme(1, "Rampur", null, "Ramesh", "919000000001")),
                     List.of(), List.of(), List.of());
 
@@ -185,7 +189,7 @@ class ReportPdfSnapshotTest {
         @Test
         void w4TypicalWithOfficers() throws IOException {
             Path pdf = weekly.generate(weeklyKpis(defaultWeek(), week(148, 120, 6, 9, 58.7), week(150, 118, 8, 9, 60.0)),
-                    7700L, "Kavita Rao", SDO,
+                    7700L, "Kavita Rao", SDO, WEEKLY_SDO_LAYOUT,
                     List.of(sdoScheme(1, "Rampur", "Rampur, Kishanganj"), sdoScheme(4, "Dharampur", "Dharampur")),
                     List.of(sdoScheme(2, "Bhagwanpur", "Bhagwanpur")),
                     List.of(sdoScheme(3, "Kishanganj", "Kishanganj Khurd")),
@@ -203,7 +207,8 @@ class ReportPdfSnapshotTest {
                     .previousWeekStart("2026-07-06").previousWeekEnd("2026-07-12")
                     .build();
 
-            Path pdf = weekly.generate(sparse, 7700L, "Kavita Rao", SDO, List.of(), List.of(), List.of(), null);
+            Path pdf = weekly.generate(sparse, 7700L, "Kavita Rao", SDO, WEEKLY_SDO_LAYOUT,
+                    List.of(), List.of(), List.of(), null);
 
             assertMatchesSnapshot("W5-weekly-sdo-empty", pdf);
         }
@@ -224,7 +229,7 @@ class ReportPdfSnapshotTest {
             }
 
             Path pdf = weekly.generate(weeklyKpis(defaultWeek(), week(400, 300, 50, 30, 48.2), week(400, 310, 45, 28, 49.9)),
-                    7700L, "Kavita Rao", SDO, noSupply, List.of(), lowLpcd, officers);
+                    7700L, "Kavita Rao", SDO, WEEKLY_SDO_LAYOUT, noSupply, List.of(), lowLpcd, officers);
 
             assertMatchesSnapshot("W6-weekly-sdo-pagination", pdf);
         }
@@ -234,7 +239,7 @@ class ReportPdfSnapshotTest {
             // Flat total; supplying up (good); not supplying down (good: inverted); low LPCD up (bad:
             // inverted); average LPCD down by a fraction (bad).
             Path pdf = weekly.generate(weeklyKpis(defaultWeek(), week(148, 125, 5, 12, 58.5), week(148, 120, 9, 8, 60.0)),
-                    7700L, "Kavita Rao", SDO, List.of(), List.of(), List.of(),
+                    7700L, "Kavita Rao", SDO, WEEKLY_SDO_LAYOUT, List.of(), List.of(), List.of(),
                     List.of(officer(1, "Alice Das", 148, 125, 5, 12, 58.5)));
 
             assertMatchesSnapshot("W7-weekly-sdo-trend-mix", pdf);

@@ -1,11 +1,16 @@
 package org.arghyam.jalsoochak.message.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
+import org.arghyam.jalsoochak.message.report.DefaultReportLayouts;
+import org.arghyam.jalsoochak.message.report.ReportKind;
+import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
+import org.arghyam.jalsoochak.message.report.render.LayoutPdfRenderer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -18,9 +23,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Locale;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -38,12 +41,19 @@ class WeeklyReportPdfServiceTest {
     private static final String SO = "SECTION_OFFICER";
     private static final String SDO = "SUB_DIVISIONAL_OFFICER";
 
+    private static final DefaultReportLayouts LAYOUTS = new DefaultReportLayouts(new ObjectMapper());
+
     @BeforeEach
     void setUp() {
-        service = new WeeklyReportPdfService();
+        service = new WeeklyReportPdfService(new LayoutPdfRenderer());
         ReflectionTestUtils.setField(service, "reportDir", tempDir.toString() + "/");
         ReflectionTestUtils.setField(service, "dashboardUrl", "https://jalsoochak.jjmbrain.in/staff/");
         ReflectionTestUtils.setField(service, "supportPhone", "919999999999");
+    }
+
+    /** The built-in weekly layout for the role, as the router passes it. */
+    private static ReportLayout layout(String role) {
+        return LAYOUTS.builtIn(ReportKind.WEEKLY, role).orElseThrow();
     }
 
     private WeeklyReportKpis kpis(int supplyingThisWeek, int supplyingLastWeek) {
@@ -84,7 +94,7 @@ class WeeklyReportPdfServiceTest {
                           List<ReportSchemeRow> noSupply, List<ReportSchemeRow> lowDays,
                           List<ReportSchemeRow> lowLpcd, List<WeeklyReportOfficerRow> officers)
             throws IOException {
-        Path pdf = service.generate(kpis, 5521L, "Bharat Sharma", role,
+        Path pdf = service.generate(kpis, 5521L, "Bharat Sharma", role, layout(role),
                 noSupply, lowDays, lowLpcd, officers);
         try (PDDocument doc = Loader.loadPDF(pdf.toFile())) {
             return new PDFTextStripper().getText(doc).replaceAll("\\s+", " ");
@@ -97,7 +107,7 @@ class WeeklyReportPdfServiceTest {
 
         @Test
         void carriesTheFullWeekRange() throws Exception {
-            Path pdf = service.generate(kpis(142, 140), 21343L, "Binod", SO,
+            Path pdf = service.generate(kpis(142, 140), 21343L, "Binod", SO, layout(SO),
                     List.of(), List.of(), List.of(), List.of());
 
             assertThat(pdf.getFileName().toString())
@@ -106,9 +116,9 @@ class WeeklyReportPdfServiceTest {
 
         @Test
         void distinguishesTheRoles() throws Exception {
-            Path so = service.generate(kpis(142, 140), 1L, "X", SO,
+            Path so = service.generate(kpis(142, 140), 1L, "X", SO, layout(SO),
                     List.of(), List.of(), List.of(), List.of());
-            Path sdo = service.generate(kpis(142, 140), 1L, "X", SDO,
+            Path sdo = service.generate(kpis(142, 140), 1L, "X", SDO, layout(SDO),
                     List.of(), List.of(), List.of(), List.of());
 
             assertThat(so.getFileName().toString()).contains("SECTION_OFFICER");
@@ -117,7 +127,7 @@ class WeeklyReportPdfServiceTest {
 
         @Test
         void returnsThePathThePdfWasActuallyWrittenTo() throws Exception {
-            Path pdf = service.generate(kpis(142, 140), 21343L, "Binod", SO,
+            Path pdf = service.generate(kpis(142, 140), 21343L, "Binod", SO, layout(SO),
                     List.of(), List.of(), List.of(), List.of());
 
             // The caller uploads this path verbatim rather than rebuilding it from a directory
@@ -299,15 +309,10 @@ class WeeklyReportPdfServiceTest {
     }
 
     @Test
-    void formatsDatesInEnglishWhateverTheJvmDefaultLocaleIs() throws Exception {
-        // Asserted on the formatters themselves, not on rendered output: they are static finals that
-        // capture the default locale once at class-init, so a Locale.setDefault in a test would come
-        // too late to prove anything. Month names reach a PDF font that renders what it cannot encode
-        // as '?', so a JVM started with e.g. hi-IN would otherwise ship a header of question marks.
-        assertThat(formatterLocale("HEADER")).isEqualTo(Locale.ENGLISH);
-        assertThat(formatterLocale("RANGE")).isEqualTo(Locale.ENGLISH);
-
-        // And the output those formatters actually produce.
+    void formatsDatesInEnglish() throws Exception {
+        // Month names reach a PDF font that renders what it cannot encode as '?', so a JVM started with
+        // e.g. hi-IN would otherwise ship a header of question marks. That every pattern is pinned to
+        // English whatever the JVM default locale is, is proved in ReportFormatsTest.
         String text = render(SO, kpis(142, 140), List.of(), List.of(), List.of(), List.of());
         assertThat(text).contains("Monday 13-Jul-2026 to Sunday 19-Jul-2026");
     }
@@ -320,11 +325,6 @@ class WeeklyReportPdfServiceTest {
         String text = render(SO, kpis(142, 140), List.of(), List.of(), List.of(), List.of());
 
         assertThat(text).contains("Date: 20 July 2026");
-    }
-
-    private static Locale formatterLocale(String fieldName) {
-        return ((DateTimeFormatter) ReflectionTestUtils.getField(WeeklyReportPdfService.class, fieldName))
-                .getLocale();
     }
 
     @Test
