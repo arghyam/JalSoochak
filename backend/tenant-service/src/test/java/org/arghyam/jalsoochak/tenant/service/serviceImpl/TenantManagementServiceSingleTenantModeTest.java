@@ -20,6 +20,7 @@ import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
 import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
 import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
+import org.arghyam.jalsoochak.tenant.validation.SituationReportLayoutValidator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -69,6 +70,9 @@ public class TenantManagementServiceSingleTenantModeTest {
     @Mock
     private org.arghyam.jalsoochak.tenant.service.ApiKeyService apiKeyService;
 
+    @Mock
+    private SituationReportLayoutValidator situationReportLayoutValidator;
+
     private TenantManagementServiceImpl tenantManagementService;
     private MockedStatic<SecurityUtils> mockedSecurityUtils;
 
@@ -84,7 +88,8 @@ public class TenantManagementServiceSingleTenantModeTest {
                 eventPublisher,
                 objectStorageService,
                 systemManagementService,
-                apiKeyService);
+                apiKeyService,
+                situationReportLayoutValidator);
     }
 
     @AfterEach

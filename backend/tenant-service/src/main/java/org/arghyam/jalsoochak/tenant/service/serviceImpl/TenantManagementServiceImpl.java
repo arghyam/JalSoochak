@@ -40,6 +40,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.ManualReadingMaxValueConfigDTO
 import org.arghyam.jalsoochak.tenant.dto.internal.NudgeTimingConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.SituationReportLayoutConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WeeklyReportTimingConfigDTO;
@@ -81,6 +82,7 @@ import org.arghyam.jalsoochak.tenant.service.TenantManagementService;
 import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
 import org.arghyam.jalsoochak.tenant.util.TenantConstants;
+import org.arghyam.jalsoochak.tenant.validation.SituationReportLayoutValidator;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -109,6 +111,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     private final ObjectStorageService objectStorageService;
     private final SystemManagementService systemManagementService;
     private final ApiKeyService apiKeyService;
+    private final SituationReportLayoutValidator situationReportLayoutValidator;
 
     // TODO: Re-enable "image/svg+xml" only after implementing SVG sanitization and
     // serving from an isolated origin.
@@ -424,6 +427,14 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 }
                 ManualReadingMaxValueConfigDTO maxValuesDto = (ManualReadingMaxValueConfigDTO) dto;
                 maxValuesDto.setMaxValues(maxValuesDto.validatedMaxValues());
+            }
+
+            if (key == TenantConfigKeyEnum.SITUATION_REPORT_LAYOUT) {
+                // The raw value too: the bind above silently drops properties the DTO doesn't declare.
+                if (dto == null) {
+                    throw new InvalidConfigValueException("SITUATION_REPORT_LAYOUT must not be null");
+                }
+                situationReportLayoutValidator.validate(entry.getValue(), (SituationReportLayoutConfigDTO) dto);
             }
 
             if (key.getType() == ConfigType.GENERIC) {

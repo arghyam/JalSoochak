@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.SituationReportLayoutConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SmsProviderConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.StateITSystemConfigDTO;
@@ -329,7 +330,21 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * A WHATSAPP_PROVIDER_SETTINGS key is deliberately absent: every tenant shares one WhatsApp provider
      * organisation today, so there is nothing per-tenant to store.
      */
-    SMS_PROVIDER_SETTINGS(ConfigType.GENERIC, SmsProviderConfigDTO.class, false, true, false);
+    SMS_PROVIDER_SETTINGS(ConfigType.GENERIC, SmsProviderConfigDTO.class, false, true, false),
+
+    /**
+     * Which officers get the daily and weekly Water Service Situation Reports, and the layout of each:
+     * sections, KPIs, columns, labels, and date and number formats. Format:
+     * {@code { version: 1, settings: {...}, daily: { roles: {...} }, weekly: { roles: {...} } }}; see
+     * {@link SituationReportLayoutConfigDTO}.
+     * <p>
+     * message-service reads it for every report event, so a change applies from the next run. Validated
+     * on write by {@code SituationReportLayoutValidator}, which lists every problem at once.
+     * <p>
+     * Optional: a tenant without it, or without a {@code daily}/{@code weekly} block, gets today's
+     * reports (env recipient roles, built-in layouts). PUT {@code {"version": 1}} to return to that.
+     */
+    SITUATION_REPORT_LAYOUT(ConfigType.GENERIC, SituationReportLayoutConfigDTO.class, false, false, false);
 
     private final ConfigType type;
     private final Class<? extends ConfigValueDTO> dtoClass;
