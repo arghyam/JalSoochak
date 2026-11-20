@@ -1,6 +1,6 @@
 package org.arghyam.jalsoochak.message.report.layout;
 
-import org.arghyam.jalsoochak.message.report.ReportRole;
+import org.arghyam.jalsoochak.message.report.catalog.ReportRole;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;

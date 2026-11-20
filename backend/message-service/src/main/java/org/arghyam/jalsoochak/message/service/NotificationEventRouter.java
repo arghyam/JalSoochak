@@ -1181,7 +1181,7 @@ public class NotificationEventRouter {
         // role the config does not list. It has to be checked rather than assumed, since events
         // published before a config change can still be sitting in the topic.
         Optional<ResolvedReportLayout> layout = reportLayoutResolver.resolve(
-                tenantId, org.arghyam.jalsoochak.message.report.ReportKind.DAILY, officerUserType);
+                tenantId, org.arghyam.jalsoochak.message.report.catalog.ReportKind.DAILY, officerUserType);
         if (layout.isEmpty()) {
             log.info("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_LAYOUT role={} tenant={} officer={}"
                             + " — no daily report layout for this role",
@@ -1325,7 +1325,7 @@ public class NotificationEventRouter {
         }
         // Without a tenant config every role has a built-in weekly layout; with one, only the roles it lists.
         Optional<ResolvedReportLayout> resolved = reportLayoutResolver.resolve(
-                tenantId, org.arghyam.jalsoochak.message.report.ReportKind.WEEKLY, officerUserType);
+                tenantId, org.arghyam.jalsoochak.message.report.catalog.ReportKind.WEEKLY, officerUserType);
         if (resolved.isEmpty()) {
             log.info("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_NO_LAYOUT role={} tenant={} officer={}"
                             + " — no weekly report layout for this role",

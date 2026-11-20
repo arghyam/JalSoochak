@@ -2,9 +2,9 @@ package org.arghyam.jalsoochak.message.report.render;
 
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
-import org.arghyam.jalsoochak.message.report.ReportKind;
 import org.arghyam.jalsoochak.message.report.catalog.KpiDisplay;
 import org.arghyam.jalsoochak.message.report.catalog.Placeholder;
+import org.arghyam.jalsoochak.message.report.catalog.ReportKind;
 import org.arghyam.jalsoochak.message.report.catalog.SchemeList;
 import org.arghyam.jalsoochak.message.report.catalog.SummaryColumn;
 import org.arghyam.jalsoochak.message.report.catalog.SummaryKpi;

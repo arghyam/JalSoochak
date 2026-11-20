@@ -6,6 +6,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.arghyam.jalsoochak.message.report.catalog.ReportKind;
 import org.arghyam.jalsoochak.message.report.catalog.SchemeList;
 import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
 import org.arghyam.jalsoochak.message.report.layout.ReportSection;

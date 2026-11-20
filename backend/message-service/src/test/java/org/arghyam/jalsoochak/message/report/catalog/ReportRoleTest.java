@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.message.report;
+package org.arghyam.jalsoochak.message.report.catalog;
 
 import org.junit.jupiter.api.Test;
 

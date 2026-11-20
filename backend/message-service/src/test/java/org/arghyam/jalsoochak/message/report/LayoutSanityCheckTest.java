@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.message.report;
 
 import org.arghyam.jalsoochak.message.report.catalog.KpiDisplay;
 import org.arghyam.jalsoochak.message.report.catalog.OfficerColumn;
+import org.arghyam.jalsoochak.message.report.catalog.ReportKind;
 import org.arghyam.jalsoochak.message.report.catalog.SchemeColumn;
 import org.arghyam.jalsoochak.message.report.catalog.SchemeList;
 import org.arghyam.jalsoochak.message.report.catalog.SummaryColumn;
@@ -20,10 +21,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 
-import static org.arghyam.jalsoochak.message.report.ReportKind.DAILY;
-import static org.arghyam.jalsoochak.message.report.ReportKind.WEEKLY;
-import static org.arghyam.jalsoochak.message.report.ReportRole.SECTION_OFFICER;
-import static org.arghyam.jalsoochak.message.report.ReportRole.SUB_DIVISIONAL_OFFICER;
+import static org.arghyam.jalsoochak.message.report.catalog.ReportKind.DAILY;
+import static org.arghyam.jalsoochak.message.report.catalog.ReportKind.WEEKLY;
+import static org.arghyam.jalsoochak.message.report.catalog.ReportRole.SECTION_OFFICER;
+import static org.arghyam.jalsoochak.message.report.catalog.ReportRole.SUB_DIVISIONAL_OFFICER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LayoutSanityCheckTest {
