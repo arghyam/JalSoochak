@@ -26,6 +26,7 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.sql.ResultSet;
 import java.util.List;
+import java.util.Optional;
 
 import org.arghyam.jalsoochak.message.channel.provider.ReportDeliveryMode;
 import org.arghyam.jalsoochak.message.channel.provider.ReportSendOutcome;
@@ -43,7 +44,11 @@ import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
 import org.arghyam.jalsoochak.message.report.DefaultReportLayouts;
 import org.arghyam.jalsoochak.message.report.ReportKind;
+import org.arghyam.jalsoochak.message.report.ReportLayoutResolver;
+import org.arghyam.jalsoochak.message.report.ResolvedReportLayout;
 import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
+import org.arghyam.jalsoochak.message.repository.TenantReportLayoutRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.arghyam.jalsoochak.message.event.WhatsAppContactRegisteredEvent;
 import org.arghyam.jalsoochak.message.exception.StorageException;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
@@ -103,8 +108,14 @@ class NotificationEventRouterTest {
     private WeeklyReportPdfService weeklyReportPdfService;
 
     /** The real built-in layouts, so each report is rendered with the one its role gets in production. */
-    @Spy
-    private DefaultReportLayouts defaultReportLayouts = new DefaultReportLayouts(new ObjectMapper());
+    private final DefaultReportLayouts defaultReportLayouts = new DefaultReportLayouts(new ObjectMapper());
+
+    /** The tenant's stored report layout config. Unstubbed it has none, like every tenant until one is set. */
+    @Mock
+    private TenantReportLayoutRepository reportLayoutRepository;
+
+    /** Where the real resolver counts a tenant config it could not use. */
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
 
     /** The store of record, behind the real {@link ReportPublisher} each test runs with. */
     @Mock
@@ -178,6 +189,9 @@ class NotificationEventRouterTest {
         ReflectionTestUtils.setField(router, "baseUrl", "https://example.com");
         // A real publisher over the mocked store, so the upload assertions below still see each call.
         ReflectionTestUtils.setField(router, "reportPublisher", new ReportPublisher(objectStorageService));
+        // The real resolver over the mocked config row, so a tenant with no config gets the built-ins.
+        ReflectionTestUtils.setField(router, "reportLayoutResolver", new ReportLayoutResolver(reportLayoutRepository,
+                defaultReportLayouts, new ObjectMapper(), meters, ENV_DASHBOARD_URL, "", ENV_DASHBOARD_URL, ""));
         lenient().when(piiEncryptionService.hmac(anyString()))
                 .thenAnswer(inv -> "hash_" + inv.getArgument(0, String.class));
         // Default: pass the halves through unresolved. Tests that care stub a full resolution.
@@ -1503,7 +1517,7 @@ class NotificationEventRouterTest {
 
         router.route(DAILY_REPORT_JSON);
 
-        verify(dailyReportPdfService).generate(any(), eq(500L), anyString(), eq("SECTION_OFFICER"), eq(expected),
+        verify(dailyReportPdfService).generate(any(), eq(500L), anyString(), eq("SECTION_OFFICER"), drawnWith(expected),
                 anyList(), anyList());
     }
 
@@ -2068,10 +2082,10 @@ class NotificationEventRouterTest {
         router.route(WEEKLY_SO_JSON);
         router.route(WEEKLY_SO_JSON.replace("SECTION_OFFICER", "SUB_DIVISIONAL_OFFICER"));
 
-        verify(weeklyReportPdfService).generate(any(), anyLong(), anyString(), eq("SECTION_OFFICER"), eq(so),
+        verify(weeklyReportPdfService).generate(any(), anyLong(), anyString(), eq("SECTION_OFFICER"), drawnWith(so),
                 anyList(), anyList(), anyList(), anyList());
-        verify(weeklyReportPdfService).generate(any(), anyLong(), anyString(), eq("SUB_DIVISIONAL_OFFICER"), eq(sdo),
-                anyList(), anyList(), anyList(), anyList());
+        verify(weeklyReportPdfService).generate(any(), anyLong(), anyString(), eq("SUB_DIVISIONAL_OFFICER"),
+                drawnWith(sdo), anyList(), anyList(), anyList(), anyList());
     }
 
     @Test
@@ -2596,6 +2610,284 @@ class NotificationEventRouterTest {
     /** Writes a stand-in water-report PDF and returns its path, as the report PDF services do. */
     private Path reportPdf(String filename) throws IOException {
         return Files.write(tempDir.resolve(filename), PDF_BYTES);
+    }
+
+    // ── per-tenant report layouts ────────────────────────────────────────────────────────────────
+
+    /** The environment's dashboard URL the resolver falls back to; no support phone is set. */
+    private static final String ENV_DASHBOARD_URL = "https://jalsoochak.jjmbrain.in/staff/";
+
+    /** Matches the resolved layout the PDF services are handed by the layout it draws. */
+    private static ResolvedReportLayout drawnWith(ReportLayout layout) {
+        return argThat(resolved -> resolved != null && resolved.layout().equals(layout));
+    }
+
+    /** Stores {@code json} as tenant 1's {@code SITUATION_REPORT_LAYOUT}. */
+    private void storeLayoutConfig(String json) {
+        when(reportLayoutRepository.findConfigValue(1)).thenReturn(Optional.of(json));
+    }
+
+    /** A config giving one role of one report the {@code layout}, and nobody else that report. */
+    private static String configFor(String report, String role, String layout) {
+        return """
+                {"version":1,
+                 "settings":{"dashboardUrl":"https://dashboard.example.org/staff/","supportPhone":"1800-000-0000"},
+                 "%s":{"roles":{"%s":{"layout":%s}}}}
+                """.formatted(report, role, layout);
+    }
+
+    /** A daily layout that draws only a summary, so it needs no scheme list. */
+    private static final String SUMMARY_ONLY_DAILY_LAYOUT = """
+            {"sections":[{"type":"SUMMARY","title":"Summary",
+              "columns":[{"field":"LABEL","label":"KPI"},{"field":"VALUE","label":"Today"}],
+              "rows":[{"kpi":"TOTAL_SCHEMES","label":"Total schemes"}]}]}
+            """;
+
+    /** A daily layout whose lists show Section Officers and villages, which the built-in one does not. */
+    private static final String DETAILED_DAILY_LAYOUT = """
+            {"sections":[
+              {"type":"SCHEME_LIST","list":"NO_SUPPLY","title":"No supply",
+               "columns":[{"field":"SCHEME_NAME","label":"Scheme"},
+                          {"field":"SECTION_OFFICER_NAMES","label":"JE"},
+                          {"field":"SECTION_OFFICER_MOBILES","label":"JE Mobile"},
+                          {"field":"VILLAGES","label":"Village"}]},
+              {"type":"SCHEME_LIST","list":"ANOMALIES","title":"Anomalies",
+               "columns":[{"field":"SCHEME_NAME","label":"Scheme"},
+                          {"field":"SECTION_OFFICER_NAMES","label":"JE"},
+                          {"field":"VILLAGES","label":"Village"},
+                          {"field":"ANOMALY_TYPE","label":"Anomaly"}]}]}
+            """;
+
+    /** A weekly layout that draws only the no-supply list. */
+    private static final String NO_SUPPLY_ONLY_WEEKLY_LAYOUT = """
+            {"sections":[{"type":"SCHEME_LIST","list":"NO_SUPPLY","title":"No supply",
+              "columns":[{"field":"SCHEME_NAME","label":"Scheme"}]}]}
+            """;
+
+    private static boolean schemeLabelSql(String sql) {
+        return sql != null && sql.contains(".scheme_master_table WHERE id IN");
+    }
+
+    private static boolean sectionOfficerSql(String sql) {
+        return sql != null && sql.contains("= 'SECTION_OFFICER'");
+    }
+
+    private static boolean villageSql(String sql) {
+        return sql != null && sql.contains(".scheme_lgd_mapping_table");
+    }
+
+    @SuppressWarnings("unchecked")
+    private void verifyNoSectionOfficerOrVillageLookup() {
+        verify(jdbcTemplate, never()).query(argThat(NotificationEventRouterTest::sectionOfficerSql),
+                any(RowMapper.class), any(Object[].class));
+        verify(jdbcTemplate, never()).query(argThat(NotificationEventRouterTest::villageSql),
+                any(RowMapper.class), any(Object[].class));
+    }
+
+    @Test
+    void handleDailyReport_skipsARoleTheTenantConfigDoesNotList() {
+        storeLayoutConfig("{\"version\":1,\"daily\":{\"roles\":{}}}");
+
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON, false);
+
+        assertThat(lines).anySatisfy(line -> assertThat(line)
+                .contains("result=SKIPPED_NO_LAYOUT role=SECTION_OFFICER tenant=1 officer=500"));
+        // Decided before any PII lookup, and nothing was attempted, so there is nothing to record.
+        verifyNoInteractions(dailyReportPdfService, jdbcTemplate, piiEncryptionService, ledger);
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any(), any());
+    }
+
+    @Test
+    void handleDailyReport_skipsASubDivisionalOfficerWithoutConfigUnderTheNoLayoutTag() {
+        String sdoJson = DAILY_REPORT_JSON.replace("\"SECTION_OFFICER\"", "\"SUB_DIVISIONAL_OFFICER\"");
+
+        List<String> lines = captureRouterLogs(sdoJson, false);
+
+        assertThat(lines).anySatisfy(line -> assertThat(line)
+                .contains("result=SKIPPED_NO_LAYOUT role=SUB_DIVISIONAL_OFFICER tenant=1 officer=500"));
+        verifyNoInteractions(dailyReportPdfService, ledger);
+    }
+
+    @Test
+    void handleWeeklyReport_skipsARoleTheTenantConfigDoesNotList() {
+        storeLayoutConfig(configFor("weekly", "SUB_DIVISIONAL_OFFICER", NO_SUPPLY_ONLY_WEEKLY_LAYOUT));
+
+        List<String> lines = captureRouterLogs(WEEKLY_SO_JSON, false);
+
+        assertThat(lines).anySatisfy(line -> assertThat(line)
+                .contains("result=SKIPPED_NO_LAYOUT role=SECTION_OFFICER tenant=1 officer=500"));
+        verifyNoInteractions(weeklyReportPdfService, jdbcTemplate, piiEncryptionService, ledger);
+        verify(whatsAppChannel, never()).sendWeeklyReport(anyLong(), anyString(), anyString(), any(), any(), any());
+    }
+
+    @Test
+    void handleDailyReport_rendersATenantsOwnLayoutForASubDivisionalOfficer() throws Exception {
+        storeLayoutConfig(configFor("daily", "SUB_DIVISIONAL_OFFICER", SUMMARY_ONLY_DAILY_LAYOUT));
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("SDO Kumar");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"), any(),
+                anyList(), anyList())).thenAnswer(inv -> reportPdf("daily_sdo.pdf"));
+        when(objectStorageService.publicUrl(anyString(), anyString()))
+                .thenReturn(URI.create("https://storage.example.org/daily_sdo.pdf"));
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), eq("SUB_DIVISIONAL_OFFICER"), any(), anyString()))
+                .thenReturn(acceptedSend());
+
+        router.route(DAILY_REPORT_JSON.replace("\"SECTION_OFFICER\"", "\"SUB_DIVISIONAL_OFFICER\""));
+
+        ArgumentCaptor<ResolvedReportLayout> layout = ArgumentCaptor.forClass(ResolvedReportLayout.class);
+        verify(dailyReportPdfService).generate(any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"),
+                layout.capture(), anyList(), anyList());
+        assertThat(layout.getValue().layout().sections()).singleElement()
+                .satisfies(section -> assertThat(section.title()).isEqualTo("Summary"));
+        // The tenant's own settings, over the environment's.
+        assertThat(layout.getValue().dashboardUrl()).isEqualTo("https://dashboard.example.org/staff/");
+        assertThat(layout.getValue().supportPhone()).isEqualTo("1800-000-0000");
+        verify(whatsAppChannel).sendDailyReport(eq(12345L), anyString(), eq("SUB_DIVISIONAL_OFFICER"), any(),
+                eq("SDO Kumar"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void handleDailyReport_resolvesNoListTheLayoutDoesNotDraw() throws Exception {
+        storeLayoutConfig(configFor("daily", "SECTION_OFFICER", SUMMARY_ONLY_DAILY_LAYOUT));
+        stubDailyReport();
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create(RECORD_URL));
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), anyString()))
+                .thenReturn(acceptedSend());
+
+        router.route(DAILY_REPORT_JSON);
+
+        // The event carries no-supply schemes and an anomaly, but nothing draws them.
+        verify(jdbcTemplate, never()).query(argThat(NotificationEventRouterTest::schemeLabelSql),
+                any(RowMapper.class), any(Object[].class));
+        verify(dailyReportPdfService).generate(any(), eq(500L), anyString(), anyString(), any(),
+                eq(List.of()), eq(List.of()));
+    }
+
+    @Test
+    void handleDailyReport_theBuiltInLayoutLooksUpNoSectionOfficersOrVillages() throws Exception {
+        stubDailyReport();
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create(RECORD_URL));
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), anyString()))
+                .thenReturn(acceptedSend());
+
+        router.route(DAILY_REPORT_JSON);
+
+        verifyNoSectionOfficerOrVillageLookup();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void handleDailyReport_looksUpSectionOfficersAndVillagesWhenTheLayoutShowsThem() throws Exception {
+        storeLayoutConfig(configFor("daily", "SECTION_OFFICER", DETAILED_DAILY_LAYOUT));
+        stubDailyReport();
+        // Scheme 11 has no supply and an anomaly; scheme 12 has no supply only.
+        when(jdbcTemplate.query(argThat(NotificationEventRouterTest::sectionOfficerSql), any(RowMapper.class),
+                any(Object[].class)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getInt("scheme_id")).thenReturn(11);
+                    when(rs.getString("title")).thenReturn("enc-so");
+                    when(rs.getString("phone_number")).thenReturn("enc-so-phone");
+                    return List.of(rm.mapRow(rs, 0));
+                });
+        when(jdbcTemplate.query(argThat(NotificationEventRouterTest::villageSql), any(RowMapper.class),
+                any(Object[].class)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getInt("scheme_id")).thenReturn(11);
+                    when(rs.getString("title")).thenReturn("Rampur");
+                    return List.of(rm.mapRow(rs, 0));
+                });
+        // Lenient: the officer's own null phone is decrypted before these are, which strict stubs would flag.
+        lenient().when(piiEncryptionService.safeDecrypt("enc-so")).thenReturn("Alice Das");
+        lenient().when(piiEncryptionService.safeDecrypt("enc-so-phone")).thenReturn("919000000009");
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create(RECORD_URL));
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), anyString()))
+                .thenReturn(acceptedSend());
+
+        router.route(DAILY_REPORT_JSON);
+
+        ArgumentCaptor<List<ReportSchemeRow>> noSupply = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<ReportSchemeRow>> anomalies = ArgumentCaptor.forClass(List.class);
+        verify(dailyReportPdfService).generate(any(), eq(500L), anyString(), anyString(), any(),
+                noSupply.capture(), anomalies.capture());
+        assertThat(noSupply.getValue()).extracting(ReportSchemeRow::getSchemeId).containsExactly(11, 12);
+        assertThat(noSupply.getValue().get(0).getSectionOfficerNames()).isEqualTo("Alice Das");
+        assertThat(noSupply.getValue().get(0).getSectionOfficerMobiles()).isEqualTo("919000000009");
+        assertThat(noSupply.getValue().get(0).getVillageNames()).isEqualTo("Rampur");
+        // An anomaly row carries every field its scheme resolved to, not just the ones the built-in shows.
+        ReportSchemeRow anomaly = anomalies.getValue().get(0);
+        assertThat(anomaly.getSchemeId()).isEqualTo(11);
+        assertThat(anomaly.getSectionOfficerNames()).isEqualTo("Alice Das");
+        assertThat(anomaly.getSectionOfficerMobiles()).isEqualTo("919000000009");
+        assertThat(anomaly.getVillageNames()).isEqualTo("Rampur");
+        assertThat(anomaly.getAnomalyType()).isNotBlank();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void handleWeeklyReport_resolvesOnlyTheListsTheLayoutDraws() throws Exception {
+        storeLayoutConfig(configFor("weekly", "SECTION_OFFICER", NO_SUPPLY_ONLY_WEEKLY_LAYOUT));
+        stubWeeklySend(acceptedSend());
+
+        router.route(WEEKLY_SO_JSON);
+
+        // No supply is scheme 11; the 1-3 day (12) and low-LPCD (13) lists are not drawn.
+        verify(jdbcTemplate).query(argThat(NotificationEventRouterTest::schemeLabelSql), any(RowMapper.class), eq(11));
+        verify(jdbcTemplate, never()).query(argThat(NotificationEventRouterTest::schemeLabelSql),
+                any(RowMapper.class), eq(12));
+        verify(jdbcTemplate, never()).query(argThat(NotificationEventRouterTest::schemeLabelSql),
+                any(RowMapper.class), eq(13));
+        verifyNoSectionOfficerOrVillageLookup();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void handleWeeklyReport_theBuiltInLayoutsIssueTheSameLookupsAsBefore() throws Exception {
+        stubWeeklySend(acceptedSend());
+
+        router.route(WEEKLY_SO_JSON);
+
+        // Section Officer: all three lists, with no officer or village detail.
+        for (int schemeId : new int[] {11, 12, 13}) {
+            verify(jdbcTemplate).query(argThat(NotificationEventRouterTest::schemeLabelSql), any(RowMapper.class),
+                    eq(schemeId));
+        }
+        verifyNoSectionOfficerOrVillageLookup();
+
+        router.route(WEEKLY_SO_JSON.replace("SECTION_OFFICER", "SUB_DIVISIONAL_OFFICER"));
+
+        // Sub-Divisional Officer: no 1-3 day list, and officers and villages on the other two.
+        verify(jdbcTemplate, times(2)).query(argThat(NotificationEventRouterTest::schemeLabelSql),
+                any(RowMapper.class), eq(11));
+        verify(jdbcTemplate, times(1)).query(argThat(NotificationEventRouterTest::schemeLabelSql),
+                any(RowMapper.class), eq(12));
+        for (int schemeId : new int[] {11, 13}) {
+            verify(jdbcTemplate).query(argThat(NotificationEventRouterTest::sectionOfficerSql), any(RowMapper.class),
+                    eq(schemeId));
+            verify(jdbcTemplate).query(argThat(NotificationEventRouterTest::villageSql), any(RowMapper.class),
+                    eq(schemeId));
+        }
+    }
+
+    @Test
+    void handleDailyReport_anUnusableConfigFallsBackToTheBuiltInLayoutAndIsCounted() throws Exception {
+        storeLayoutConfig("{not json");
+        stubDailyReport();
+        when(objectStorageService.publicUrl(anyString(), anyString())).thenReturn(URI.create(RECORD_URL));
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), anyString()))
+                .thenReturn(acceptedSend());
+        ReportLayout builtIn = defaultReportLayouts.builtIn(ReportKind.DAILY, "SECTION_OFFICER").orElseThrow();
+
+        router.route(DAILY_REPORT_JSON);
+
+        verify(dailyReportPdfService).generate(any(), eq(500L), anyString(), eq("SECTION_OFFICER"), drawnWith(builtIn),
+                anyList(), anyList());
+        verify(whatsAppChannel).sendDailyReport(anyLong(), anyString(), anyString(), any(), anyString());
+        assertThat(meters.counter("report.layout.fallback", "report", "daily").count()).isEqualTo(1.0);
     }
 
     // ── delivery ledger ──────────────────────────────────────────────────────────────────────────

@@ -5,10 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
-import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
+import org.arghyam.jalsoochak.message.report.ResolvedReportLayout;
 import org.arghyam.jalsoochak.message.report.render.DailyReportContent;
 import org.arghyam.jalsoochak.message.report.render.LayoutPdfRenderer;
-import org.arghyam.jalsoochak.message.report.render.ReportFormats;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -37,12 +36,6 @@ public class DailyReportPdfService {
     @Value("${daily-report.report.dir:${escalation.report.dir:/tmp/escalation-reports/}}")
     private String reportDir;
 
-    @Value("${daily-report.dashboard-url:https://jalsoochak.jjmbrain.in/staff/}")
-    private String dashboardUrl;
-
-    @Value("${daily-report.support-phone:}")
-    private String supportPhone;
-
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE;
     /** The platform reports on IST days throughout; the generation date must agree. */
     private static final ZoneId REPORT_ZONE = ZoneId.of("Asia/Kolkata");
@@ -63,10 +56,10 @@ public class DailyReportPdfService {
      * @param officerUserId the filename discriminator. Deliberately the id and not the officer's
      *                      name: names collide, and the reports share one storage bucket, so a
      *                      collision would expose one officer's report to another.
-     * @param layout        what the report shows, and where
+     * @param layout        what the report shows, and where, with the tenant's settings
      */
     public Path generate(DailyReportKpis kpis, long officerUserId, String officerName, String officerUserType,
-                         ReportLayout layout,
+                         ResolvedReportLayout layout,
                          List<ReportSchemeRow> noSupplyRows,
                          List<ReportSchemeRow> anomalyRows) throws IOException {
         ensureReportDirExists();
@@ -79,15 +72,15 @@ public class DailyReportPdfService {
                 .kpis(kpis)
                 .officerName(officerName)
                 .generatedDate(LocalDate.ofInstant(clock.instant(), REPORT_ZONE))
-                .formats(ReportFormats.defaults())
-                .dashboardUrl(dashboardUrl)
-                .supportPhone(supportPhone)
+                .formats(layout.formats())
+                .dashboardUrl(layout.dashboardUrl())
+                .supportPhone(layout.supportPhone())
                 .noSupplyRows(noSupplyRows)
                 .anomalyRows(anomalyRows)
                 .build();
 
         try (PDDocument doc = new PDDocument()) {
-            renderer.render(doc, layout, content);
+            renderer.render(doc, layout.layout(), content);
             doc.save(filePath.toFile());
         }
 

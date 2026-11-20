@@ -9,8 +9,9 @@ import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.report.DefaultReportLayouts;
 import org.arghyam.jalsoochak.message.report.ReportKind;
-import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
+import org.arghyam.jalsoochak.message.report.ResolvedReportLayout;
 import org.arghyam.jalsoochak.message.report.render.LayoutPdfRenderer;
+import org.arghyam.jalsoochak.message.report.render.ReportFormats;
 import org.arghyam.jalsoochak.message.storage.ObjectStorageService;
 import org.arghyam.jalsoochak.message.storage.ReportPublisher;
 import org.junit.jupiter.api.AfterEach;
@@ -59,10 +60,12 @@ class ReportStorageUploadIT {
     private static final String DELIVERY_BUCKET = "report-delivery";
 
     private static final DefaultReportLayouts LAYOUTS = new DefaultReportLayouts(new ObjectMapper());
-    private static final ReportLayout DAILY_SO_LAYOUT =
-            LAYOUTS.builtIn(ReportKind.DAILY, "SECTION_OFFICER").orElseThrow();
-    private static final ReportLayout WEEKLY_SDO_LAYOUT =
-            LAYOUTS.builtIn(ReportKind.WEEKLY, "SUB_DIVISIONAL_OFFICER").orElseThrow();
+
+    /** The built-in layout for the role, with the settings a tenant without its own config gets. */
+    private static ResolvedReportLayout builtIn(ReportKind kind, String role, String supportPhone) {
+        return new ResolvedReportLayout(LAYOUTS.builtIn(kind, role).orElseThrow(), ReportFormats.defaults(),
+                "https://jalsoochak.jjmbrain.in/staff/", supportPhone);
+    }
 
     @Container
     static final GenericContainer<?> STORE =
@@ -115,8 +118,6 @@ class ReportStorageUploadIT {
     void generatesTheDailyReportAndUploadsItUnderItsRoleAndDateFolder() throws Exception {
         DailyReportPdfService pdfService = new DailyReportPdfService(new LayoutPdfRenderer());
         ReflectionTestUtils.setField(pdfService, "reportDir", tempDir.toString() + "/");
-        ReflectionTestUtils.setField(pdfService, "dashboardUrl", "https://jalsoochak.jjmbrain.in/staff/");
-        ReflectionTestUtils.setField(pdfService, "supportPhone", "919999999999");
 
         List<ReportSchemeRow> noSupply = List.of(
                 ReportSchemeRow.builder().schemeId(1).schemeName("Rampur WSS").imisId("RPWSS-108")
@@ -124,7 +125,7 @@ class ReportStorageUploadIT {
 
         LocalDate reportDate = LocalDate.of(2026, 7, 19);
         Path localPdf = pdfService.generate(dailyKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
-                DAILY_SO_LAYOUT, noSupply, List.of());
+                builtIn(ReportKind.DAILY, "SECTION_OFFICER", "919999999999"), noSupply, List.of());
         String filename = localPdf.getFileName().toString();
         assertThat(localPdf.toFile()).exists();
 
@@ -143,13 +144,11 @@ class ReportStorageUploadIT {
     void generatesTheSdoWeeklyReportAndUploadsItUnderItsWeekFolder() throws Exception {
         WeeklyReportPdfService pdfService = new WeeklyReportPdfService(new LayoutPdfRenderer());
         ReflectionTestUtils.setField(pdfService, "reportDir", tempDir.toString() + "/");
-        ReflectionTestUtils.setField(pdfService, "dashboardUrl", "https://jalsoochak.jjmbrain.in/staff/");
-        ReflectionTestUtils.setField(pdfService, "supportPhone", "");
 
         LocalDate weekStart = LocalDate.of(2026, 7, 13);
         LocalDate weekEnd = LocalDate.of(2026, 7, 19);
         Path localPdf = pdfService.generate(weeklyKpis(), 5521L, "Bharat Sharma", "SUB_DIVISIONAL_OFFICER",
-                WEEKLY_SDO_LAYOUT, List.of(), List.of(), List.of(), List.of());
+                builtIn(ReportKind.WEEKLY, "SUB_DIVISIONAL_OFFICER", ""), List.of(), List.of(), List.of(), List.of());
         String filename = localPdf.getFileName().toString();
         assertThat(localPdf.toFile()).exists();
 
@@ -181,12 +180,10 @@ class ReportStorageUploadIT {
     void stagesADocumentInTheDeliveryBucket_andHandsOutThatCopysUrl() throws Exception {
         DailyReportPdfService pdfService = new DailyReportPdfService(new LayoutPdfRenderer());
         ReflectionTestUtils.setField(pdfService, "reportDir", tempDir.toString() + "/");
-        ReflectionTestUtils.setField(pdfService, "dashboardUrl", "https://jalsoochak.jjmbrain.in/staff/");
-        ReflectionTestUtils.setField(pdfService, "supportPhone", "");
 
         LocalDate reportDate = LocalDate.of(2026, 7, 19);
         Path localPdf = pdfService.generate(dailyKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
-                DAILY_SO_LAYOUT, List.of(), List.of());
+                builtIn(ReportKind.DAILY, "SECTION_OFFICER", ""), List.of(), List.of());
         String filename = localPdf.getFileName().toString();
         String objectKey = ReportFileNaming.dailyObjectKey("SECTION_OFFICER", filename, reportDate);
 
