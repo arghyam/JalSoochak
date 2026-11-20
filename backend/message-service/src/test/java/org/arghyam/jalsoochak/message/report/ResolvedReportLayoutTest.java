@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.message.report;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.message.report.catalog.ReportKind;
 import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
 import org.arghyam.jalsoochak.message.report.render.ReportFormats;
 import org.junit.jupiter.api.Test;

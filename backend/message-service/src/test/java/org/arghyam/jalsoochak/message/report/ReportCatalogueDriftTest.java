@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.message.report.catalog.KpiDisplay;
 import org.arghyam.jalsoochak.message.report.catalog.OfficerColumn;
 import org.arghyam.jalsoochak.message.report.catalog.Placeholder;
+import org.arghyam.jalsoochak.message.report.catalog.ReportKind;
+import org.arghyam.jalsoochak.message.report.catalog.ReportRole;
 import org.arghyam.jalsoochak.message.report.catalog.SchemeColumn;
 import org.arghyam.jalsoochak.message.report.catalog.SchemeList;
 import org.arghyam.jalsoochak.message.report.catalog.SummaryColumn;

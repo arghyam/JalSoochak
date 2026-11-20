@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.message.report.catalog.ReportKind;
+import org.arghyam.jalsoochak.message.report.catalog.ReportRole;
 import org.arghyam.jalsoochak.message.report.layout.ReportBlock;
 import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
 import org.arghyam.jalsoochak.message.report.layout.ReportSettings;

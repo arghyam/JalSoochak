@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.message.report;
+package org.arghyam.jalsoochak.message.report.catalog;
 
 import java.util.Locale;
 import java.util.Optional;
