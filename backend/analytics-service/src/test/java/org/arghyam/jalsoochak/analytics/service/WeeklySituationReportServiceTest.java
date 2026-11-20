@@ -114,6 +114,38 @@ class WeeklySituationReportServiceTest {
     }
 
     @Nested
+    @DisplayName("applied thresholds")
+    class AppliedThresholds {
+
+        // Echoed so a layout's label can print the bar analytics actually applied. Values other than
+        // the defaults prove they come from configuration, not from a constant.
+        @BeforeEach
+        void configureNonDefaultBars() {
+            service = new WeeklySituationReportService(reportRepository, tenantPopulationRepository, 25, 2, 5);
+        }
+
+        @Test
+        void echoesTheLowLpcdThreshold() {
+            assertThat(build(SO).getLowLpcdThreshold()).isEqualTo(25);
+        }
+
+        @Test
+        void echoesTheSectionOfficersSupplyDaysBar() {
+            assertThat(build(SO).getMinSupplyDays()).isEqualTo(2);
+        }
+
+        @Test
+        void echoesTheSubDivisionalOfficersSupplyDaysBar() {
+            assertThat(build(SDO_ROLE).getMinSupplyDays()).isEqualTo(5);
+        }
+
+        @Test
+        void echoesTheSectionOfficersBarForAnUnknownRole() {
+            assertThat(build("SOMETHING_ELSE").getMinSupplyDays()).isEqualTo(2);
+        }
+    }
+
+    @Nested
     @DisplayName("scheme lists")
     class SchemeLists {
 

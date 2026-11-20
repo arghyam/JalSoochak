@@ -28,6 +28,18 @@ public class WeeklyReportKpiDTO {
     private String previousWeekStart;
     private String previousWeekEnd;
 
+    /**
+     * The average LPCD at or below which a scheme was counted as low-LPCD, as applied to this report.
+     * Echoed so a report layout can print the bar analytics used instead of restating it.
+     */
+    private Integer lowLpcdThreshold;
+
+    /**
+     * The supply-days bar applied to {@link WeekKpis#schemesSupplying}: the officer's role decides it
+     * (1 for a Section Officer, 4 for an SDO, by default). Echoed for the same reason.
+     */
+    private Integer minSupplyDays;
+
     /** Summary metrics for the reported week and for the comparison week; the PDF renders the delta. */
     private WeekKpis week;
     private WeekKpis previousWeek;
