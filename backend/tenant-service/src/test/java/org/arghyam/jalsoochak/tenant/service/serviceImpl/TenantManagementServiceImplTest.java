@@ -45,6 +45,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelNameDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonItemDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.SituationReportLayoutConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
 import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetTenantConfigRequestDTO;
@@ -81,6 +82,7 @@ import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
 import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
 import org.arghyam.jalsoochak.tenant.util.TenantConstants;
+import org.arghyam.jalsoochak.tenant.validation.SituationReportLayoutValidator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -164,7 +166,8 @@ class TenantManagementServiceImplTest {
             eventPublisher,
             objectStorageService,
             systemManagementService,
-            apiKeyService
+            apiKeyService,
+            new SituationReportLayoutValidator(objectMapper)
         );
     }
 
@@ -1244,6 +1247,67 @@ class TenantManagementServiceImplTest {
             assertThrows(InvalidConfigValueException.class,
                     () -> tenantManagementService.setTenantConfigs(tenantId, request));
             verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("SITUATION_REPORT_LAYOUT stores a valid layout without nulls, keeps the role order, and publishes the update")
+        void testSetTenantConfigs_situationReportLayout_storesValidLayout() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            String value = "{\"version\":1,\"weekly\":{\"roles\":{"
+                    + "\"SUB_DIVISIONAL_OFFICER\":{\"useDefault\":true},"
+                    + "\"SECTION_OFFICER\":{\"layout\":{\"sections\":[{\"type\":\"SCHEME_LIST\",\"list\":\"LOW_LPCD\","
+                    + "\"title\":\"Low LPCD\",\"columns\":[{\"field\":\"SCHEME_NAME\",\"label\":\"Scheme\"}]}]}}}}}";
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.SITUATION_REPORT_LAYOUT, objectMapper.readTree(value));
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            ArgumentCaptor<String> serialized = ArgumentCaptor.forClass(String.class);
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.SITUATION_REPORT_LAYOUT.name()), serialized.capture(), eq(100)))
+                    .thenAnswer(inv -> Optional.of(ConfigDTO.builder()
+                            .configKey(TenantConfigKeyEnum.SITUATION_REPORT_LAYOUT.name())
+                            .configValue(inv.getArgument(2))
+                            .build()));
+
+            TenantConfigResponseDTO result = tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            // Re-serialised from the DTO: no "settings": null, no "daily": null, the SDO listed first as sent.
+            assertEquals(value, serialized.getValue());
+            assertInstanceOf(SituationReportLayoutConfigDTO.class,
+                    result.getConfigs().get(TenantConfigKeyEnum.SITUATION_REPORT_LAYOUT));
+            ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
+            verify(eventPublisher).publishEvent(event.capture());
+            assertTrue(((TenantConfigUpdatedEvent) event.getValue()).getConfigKeys()
+                    .contains(TenantConfigKeyEnum.SITUATION_REPORT_LAYOUT.name()));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "null",
+                "{}",
+                "{\"version\":1,\"daily\":{\"roles\":{\"SUB_DIVISIONAL_OFFICER\":{\"useDefault\":true}}}}",
+                "{\"version\":1,\"daily\":{\"roles\":{\"EXECUTIVE_ENGINEER\":{\"useDefault\":true}}}}",
+                "{\"version\":1,\"settings\":{\"dashboardUrl\":\"http://example.org\"}}"})
+        @DisplayName("SITUATION_REPORT_LAYOUT rejects a null, unversioned, unbindable or invalid layout before it reaches the database")
+        void testSetTenantConfigs_situationReportLayout_rejectsInvalidLayout(String value) throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.SITUATION_REPORT_LAYOUT, objectMapper.readTree(value));
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+            assertThrows(InvalidConfigValueException.class,
+                    () -> tenantManagementService.setTenantConfigs(tenantId, request(configs)));
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
+            verify(eventPublisher, never()).publishEvent(any());
         }
 
         @Test

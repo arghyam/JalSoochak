@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "settings": {
+    "dashboardUrl": "https://dashboard.example.org/staff/",
+    "supportPhone": "1800-000-0000",
+    "dateFormats": { "date": "dd-MM-yyyy", "shortDate": "dd-MM-yyyy", "time": "HH:mm" },
+    "numberFormat": { "decimals": 0, "trimTrailingZeros": true }
+  },
+  "daily": {
+    "roles": {
+      "SECTION_OFFICER": { "layout": {
+        "header": [
+          { "type": "TITLE", "text": "Daily Water Supply Report" },
+          { "type": "FIELD", "label": "Junior Engineer: ", "value": "{officerName}" },
+          { "type": "FIELD", "label": "Date: ", "value": "{reportDate} (till {cutoff})" },
+          { "type": "SPACER" },
+          { "type": "DASHBOARD_LINK", "prefix": "Dashboard: ", "suffix": "" } ],
+        "sections": [
+          { "type": "SCHEME_LIST", "list": "NO_SUPPLY", "title": "Schemes with no supply today",
+            "columns": [
+              { "field": "SERIAL_NO", "label": "S. No." },
+              { "field": "SCHEME_NAME", "label": "Scheme" },
+              { "field": "VILLAGES", "label": "Village" },
+              { "field": "PUMP_OPERATOR_NAMES", "label": "Pump Operator" },
+              { "field": "PUMP_OPERATOR_MOBILES", "label": "Mobile" } ] },
+          { "type": "SUMMARY", "title": "Summary",
+            "columns": [ { "field": "LABEL", "label": "Indicator" }, { "field": "VALUE", "label": "Today" } ],
+            "rows": [
+              { "kpi": "TOTAL_SCHEMES", "label": "Total schemes" },
+              { "kpi": "SCHEMES_NOT_SUPPLYING", "label": "Schemes not supplying" },
+              { "kpi": "HOUSEHOLDS_WITHOUT_SUPPLY", "label": "Households without supply", "display": "COUNT" } ] } ],
+        "footer": [ { "type": "SUPPORT_CONTACT", "text": "Helpline: {supportPhone}" } ] } },
+      "SUB_DIVISIONAL_OFFICER": { "layout": {
+        "numberSections": false,
+        "header": [
+          { "type": "TITLE", "text": "Daily Water Supply Report" },
+          { "type": "SUBTITLE", "text": "Sub-Division summary" },
+          { "type": "FIELD", "label": "Sub-Divisional Officer: ", "value": "{officerName}" },
+          { "type": "FIELD", "label": "Date: ", "value": "{reportDate} (till {cutoff})" } ],
+        "sections": [
+          { "type": "SUMMARY", "title": "Summary",
+            "columns": [
+              { "field": "LABEL", "label": "Indicator", "width": 70 },
+              { "field": "VALUE", "label": "Today", "width": 30 } ],
+            "rows": [
+              { "kpi": "TOTAL_SCHEMES", "label": "Total schemes" },
+              { "kpi": "SCHEMES_SUPPLYING", "label": "Schemes supplying" },
+              { "kpi": "HOUSEHOLDS_WITH_SUPPLY", "label": "Households with supply", "display": "PERCENT" },
+              { "kpi": "AVG_LPCD", "label": "Average LPCD*" } ],
+            "footnotes": [ "* of schemes that have supplied water" ] },
+          { "type": "SCHEME_LIST", "list": "NO_SUPPLY", "title": "Schemes with no supply today",
+            "emptyText": "All schemes supplied water",
+            "columns": [
+              { "field": "SECTION_OFFICER_NAMES", "label": "Junior Engineer" },
+              { "field": "SECTION_OFFICER_MOBILES", "label": "JE Mobile" },
+              { "field": "SCHEME_NAME", "label": "Scheme" },
+              { "field": "PUMP_OPERATOR_NAMES", "label": "Pump Operator" } ] },
+          { "type": "SCHEME_LIST", "list": "ANOMALIES", "title": "Anomalous submissions",
+            "columns": [
+              { "field": "SCHEME_NAME", "label": "Scheme" },
+              { "field": "ANOMALY_TYPE", "label": "Anomaly" } ] } ],
+        "footer": [
+          { "type": "NOTE", "text": "Figures are provisional until 23:59." },
+          { "type": "SPACER" },
+          { "type": "SUPPORT_CONTACT", "text": "Helpline: {supportPhone}" } ] } }
+    }
+  },
+  "weekly": {
+    "roles": {
+      "SECTION_OFFICER": { "useDefault": true },
+      "SUB_DIVISIONAL_OFFICER": { "useDefault": true }
+    }
+  }
+}
