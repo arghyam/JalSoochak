@@ -102,6 +102,18 @@ class EscalationPdfServiceTest {
         assertThat(pdfText).contains("12");
     }
 
+    /** The date is the operator's latest reading on any channel, so the label names no meter type. */
+    @Test
+    void generate_labelsTheLastReadingDateWithoutAMeterType() throws Exception {
+        List<OperatorEscalationDetail> operators = List.of(buildOperator("Op", "S", 4, "2024-01-08"));
+
+        String filename = service.generate(operators, 1, "SO Name", "SECTION_OFFICER", "test-corr-id");
+        String pdfText = extractText(tempDir.resolve(filename));
+
+        assertThat(pdfText).contains("Last Recorded Reading Date: 2024-01-08");
+        assertThat(pdfText).doesNotContain("BFM");
+    }
+
     @Test
     void generate_pdfContainsTitleWithOfficerRoleAndName() throws Exception {
         List<OperatorEscalationDetail> operators = List.of(buildOperator("Op", "S", 3, "2024-01-08"));

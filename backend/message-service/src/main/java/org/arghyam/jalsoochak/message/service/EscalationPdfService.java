@@ -104,9 +104,10 @@ public class EscalationPdfService {
                         ? String.valueOf(op.getConsecutiveDaysMissed()) : "Never";
                 y = writeLabelValue(cs, boldFont, regularFont, "   Consecutive Days Missed:",
                         daysMissedText, y);
-                String bfmDate = (op.getLastRecordedBfmDate() == null || op.getLastRecordedBfmDate().isBlank())
+                // The latest reading on any channel; the event field keeps its legacy BFM name.
+                String lastReadingDate = (op.getLastRecordedBfmDate() == null || op.getLastRecordedBfmDate().isBlank())
                         ? "Never" : op.getLastRecordedBfmDate();
-                y = writeLabelValue(cs, boldFont, regularFont, "   Last Recorded BFM Date:", bfmDate, y);
+                y = writeLabelValue(cs, boldFont, regularFont, "   Last Recorded Reading Date:", lastReadingDate, y);
                 y -= LINE_HEIGHT;
             }
 
