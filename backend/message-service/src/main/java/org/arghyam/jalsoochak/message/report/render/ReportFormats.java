@@ -12,9 +12,9 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.util.Locale;
 
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.DOWN;
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.NO_CHANGE;
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.UP;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.DOWN;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.NO_CHANGE;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.UP;
 
 /**
  * How a report prints dates and numbers. Immutable.

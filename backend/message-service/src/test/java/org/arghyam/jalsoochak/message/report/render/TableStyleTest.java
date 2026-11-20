@@ -16,9 +16,9 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.List;
 
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.CELL_PAD;
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.CONTENT_WIDTH;
-import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.DENSE_CELL_PAD;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.CELL_PAD;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.CONTENT_WIDTH;
+import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.DENSE_CELL_PAD;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
