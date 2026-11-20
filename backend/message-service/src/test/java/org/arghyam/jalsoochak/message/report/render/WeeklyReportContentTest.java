@@ -1,5 +1,9 @@
 package org.arghyam.jalsoochak.message.report.render;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
@@ -10,9 +14,11 @@ import org.arghyam.jalsoochak.message.report.catalog.SummaryColumn;
 import org.arghyam.jalsoochak.message.report.catalog.SummaryKpi;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -90,6 +96,61 @@ class WeeklyReportContentTest {
             assertThat(content.placeholder(Placeholder.REPORT_DATE)).isEmpty();
             assertThat(content.placeholder(Placeholder.LOW_LPCD_THRESHOLD)).isEmpty();
             assertThat(content.placeholder(Placeholder.MIN_SUPPLY_DAYS)).isEmpty();
+        }
+    }
+
+    @Nested
+    class Thresholds {
+
+        @Test
+        void printsTheBarsAnalyticsApplied() {
+            WeeklyReportContent content = content(kpis().lowLpcdThreshold(15).minSupplyDays(4).build()).build();
+
+            assertThat(content.resolve("<= {lowLpcdThreshold} LPCD, >= {minSupplyDays} days"))
+                    .isEqualTo("<= 15 LPCD, >= 4 days");
+        }
+
+        @Test
+        void leavesAnAbsentBarBlankAndWarnsOncePerPlaceholder() {
+            WeeklyReportContent content = content(kpis().build()).build();
+
+            List<ILoggingEvent> warnings = logged(c -> {
+                assertThat(c.resolve("<= {lowLpcdThreshold} LPCD")).isEqualTo("<=  LPCD");
+                assertThat(c.resolve("{lowLpcdThreshold}/{minSupplyDays}")).isEqualTo("/");
+            }, content);
+
+            assertThat(warnings).hasSize(2).allSatisfy(event -> assertThat(event.getLevel()).isEqualTo(Level.WARN));
+            assertThat(warnings).extracting(ILoggingEvent::getFormattedMessage).satisfiesExactly(
+                    message -> assertThat(message).contains("{lowLpcdThreshold}").contains("prints blank"),
+                    message -> assertThat(message).contains("{minSupplyDays}").contains("prints blank"));
+        }
+
+        @Test
+        void staysQuietWhenNoTextUsesAnAbsentBar() {
+            WeeklyReportContent content = content(kpis().build()).build();
+
+            assertThat(logged(c -> c.resolve("Week of {weekStart}, for {officerName}"), content)).isEmpty();
+        }
+
+        @Test
+        void staysQuietWhenTheBarsArePresent() {
+            WeeklyReportContent content = content(kpis().lowLpcdThreshold(15).minSupplyDays(1).build()).build();
+
+            assertThat(logged(c -> c.resolve("{lowLpcdThreshold} {minSupplyDays}"), content)).isEmpty();
+        }
+
+        private static List<ILoggingEvent> logged(Consumer<WeeklyReportContent> use, WeeklyReportContent content) {
+            Logger logger = (Logger) LoggerFactory.getLogger(WeeklyReportContent.class);
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.addAppender(appender);
+            try {
+                use.accept(content);
+            } finally {
+                logger.detachAppender(appender);
+                appender.stop();
+            }
+            return appender.list;
         }
     }
 
