@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.message.report.render;
 
 import lombok.Builder;
+import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
@@ -13,17 +14,25 @@ import org.arghyam.jalsoochak.message.report.catalog.SummaryKpi;
 
 import java.time.LocalDate;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 /**
  * The Weekly Water Service Situation Report's values for one officer and week, compared with the
- * week before. Immutable.
+ * week before. Its values are immutable, and it is thread-safe.
  */
+@Slf4j
 public final class WeeklyReportContent implements ReportContent {
+
+    /** Placeholders whose value analytics-service sends, and which an older one leaves out. */
+    private static final Set<Placeholder> ANALYTICS_THRESHOLDS =
+            EnumSet.of(Placeholder.LOW_LPCD_THRESHOLD, Placeholder.MIN_SUPPLY_DAYS);
 
     private final WeeklyReportKpis.WeekKpis week;
     private final WeeklyReportKpis.WeekKpis previousWeek;
@@ -35,6 +44,8 @@ public final class WeeklyReportContent implements ReportContent {
     private final List<ReportSchemeRow> lowLpcdRows;
     private final List<WeeklyReportOfficerRow> officerRows;
     private final Map<Placeholder, String> placeholders = new EnumMap<>(Placeholder.class);
+    /** The absent thresholds already warned about, so a report warns once however often a text uses one. */
+    private final Set<Placeholder> warnedAbsent = ConcurrentHashMap.newKeySet();
 
     /**
      * @param officerName   {@code null} prints as {@value ReportContent#UNNAMED_OFFICER}
@@ -69,6 +80,8 @@ public final class WeeklyReportContent implements ReportContent {
         // is only Monday to Sunday by default.
         placeholders.put(Placeholder.WEEK_START_DAY_NAME, date(kpis.getWeekStart(), ReportFormats::dayName));
         placeholders.put(Placeholder.WEEK_END_DAY_NAME, date(kpis.getWeekEnd(), ReportFormats::dayName));
+        putIfPresent(Placeholder.LOW_LPCD_THRESHOLD, kpis.getLowLpcdThreshold());
+        putIfPresent(Placeholder.MIN_SUPPLY_DAYS, kpis.getMinSupplyDays());
         placeholders.put(Placeholder.SUPPORT_PHONE, supportPhone != null ? supportPhone : "");
     }
 
@@ -92,9 +105,23 @@ public final class WeeklyReportContent implements ReportContent {
         return supportPhone;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>A threshold the KPI payload lacks prints blank, with a WARN the first time a text uses it. The
+     * built-in layouts state the thresholds literally, so only a tenant's layout can reach the WARN.</p>
+     */
     @Override
     public String placeholder(Placeholder placeholder) {
-        return placeholders.getOrDefault(placeholder, "");
+        String value = placeholders.get(placeholder);
+        if (value != null) {
+            return value;
+        }
+        if (ANALYTICS_THRESHOLDS.contains(placeholder) && warnedAbsent.add(placeholder)) {
+            log.warn("[WeeklyReportPdf] The layout uses {}, but the KPI payload has no value for it, so it"
+                    + " prints blank. analytics-service may predate the field", placeholder.token());
+        }
+        return "";
     }
 
     /** The reported week, the week before, or the change between them. */
@@ -123,6 +150,13 @@ public final class WeeklyReportContent implements ReportContent {
     @Override
     public Optional<List<WeeklyReportOfficerRow>> officerRows() {
         return Optional.of(officerRows);
+    }
+
+    /** Leaves {@code placeholder} unset when the payload has no value, so it reads as absent. */
+    private void putIfPresent(Placeholder placeholder, Integer value) {
+        if (value != null) {
+            placeholders.put(placeholder, value.toString());
+        }
     }
 
     /** An ISO date from the payload, formatted; {@code ""} when the payload has none. */
