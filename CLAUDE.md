@@ -243,6 +243,16 @@ The ledger never throws into a send, stores no address or message text, and is o
 `NOTIFICATIONS_LEDGER_ENABLED`. A new send path must record itself — `NotificationEventRouterTest`
 fails until it does. Details: `docs/notification-delivery-ledger.md`.
 
+### Situation report layouts (`SITUATION_REPORT_LAYOUT`)
+
+A GENERIC tenant config key, written through `PUT /api/v1/tenants/{id}/config` and validated by
+tenant-service's `SituationReportLayoutValidator`, sets who receives the daily and weekly reports
+(`TenantConfigService.findReportRecipientRoles`) and what each role's PDF shows (message-service
+`ReportLayoutResolver` → `LayoutPdfRenderer`). No row, or no block for a report, means the env roles and the
+built-in layouts in `message-service/src/main/resources/report-layouts/`. A role without a layout is skipped
+(`SKIPPED_NO_LAYOUT`); an unusable row falls back to the built-ins (ERROR + `report.layout.fallback`). Deploy
+analytics → message → tenant. Details: `docs/situation-report-layouts.md`.
+
 ### Privacy rule
 
 Phone numbers are PII — log them only at `DEBUG` level. Never include raw phone numbers in
