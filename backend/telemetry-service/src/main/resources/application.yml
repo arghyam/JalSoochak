@@ -55,6 +55,9 @@ storage:
 whatsapp:
   api-token: ${WHATSAPP_API_TOKEN:}
   media-base-url: ${WHATSAPP_MEDIA_BASE_URL:https://api.glific.org/v1/media}
+  # Keyword that starts this deployment's chatbot flow (e.g. startpb), named in the welcome message.
+  # Must match the main flow's keyword. Blank keeps START (STARTTENANT for a single-tenant request).
+  start-keyword: ${WHATSAPP_START_KEYWORD:}
   resume:
     enabled: ${WHATSAPP_RESUME_ENABLED:true}
     base-url: ${WHATSAPP_RESUME_BASE_URL:https://api.arghyam.glific.com}

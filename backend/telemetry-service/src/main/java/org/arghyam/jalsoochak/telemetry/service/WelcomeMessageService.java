@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -23,6 +24,13 @@ public class WelcomeMessageService {
     private final LanguageLocaleResolver languageLocaleResolver;
     private final ConversationMessageResolver messageResolver;
     private static final Pattern NON_ALNUM = Pattern.compile("[^a-z0-9]+");
+
+    /**
+     * The trigger word of this deployment's chatbot flow, named in the welcome. Deployments sharing
+     * one WhatsApp account each need their own keyword. Blank keeps the legacy START / STARTTENANT.
+     */
+    @Value("${whatsapp.start-keyword:}")
+    private String startKeyword;
 
     public IntroResponse triggerWelcomeMessage(String phoneNumber, boolean isSingleTenant) {
         if (phoneNumber == null || phoneNumber.isBlank()) {
@@ -70,6 +78,9 @@ public class WelcomeMessageService {
     }
 
     private String resolveStartKeyword(boolean isSingleTenant) {
+        if (startKeyword != null && !startKeyword.isBlank()) {
+            return startKeyword.trim();
+        }
         return isSingleTenant ? "STARTTENANT" : "START";
     }
 

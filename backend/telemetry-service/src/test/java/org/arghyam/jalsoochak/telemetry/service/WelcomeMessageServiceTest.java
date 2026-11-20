@@ -11,12 +11,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
 
@@ -184,7 +187,7 @@ class WelcomeMessageServiceTest {
                     You have been registered as Pump Operator for your state in Jalsoochak.
 
                     You can use this number to:
-                    - Share photos of the bulk flow meter
+                    - Share meter readings
                     - Report water supply issues
 
                     Reply START to begin.
@@ -201,7 +204,7 @@ class WelcomeMessageServiceTest {
                     आपको जलसूचक में आपके राज्य के लिए पंप ऑपरेटर के रूप में पंजीकृत किया गया है।
 
                     आप इस नंबर का उपयोग इन कार्यों के लिए कर सकते हैं:
-                    - बल्क फ्लो मीटर की फोटो साझा करना
+                    - मीटर रीडिंग साझा करना
                     - जल आपूर्ति से जुड़ी समस्याएं रिपोर्ट करना
 
                     शुरू करने के लिए START लिखें।
@@ -219,7 +222,7 @@ class WelcomeMessageServiceTest {
                     আপুনি জলোসূচকত your state ৰ পাম্প অপাৰেটৰ হিচাপে নথিভুক্ত হৈছে।
 
                     এই নম্বৰ ব্যৱহাৰ কৰি আপুনি:
-                    - বাল্ক ফ্ল’ মিটাৰৰ ফটো পঠাব পাৰে
+                    - মিটাৰ ৰিডিং পঠাব পাৰে
                     - পানী যোগানৰ সমস্যা জনাব পাৰে
 
                     আৰম্ভ কৰিবলৈ START লিখক।
@@ -236,7 +239,7 @@ class WelcomeMessageServiceTest {
                     ਤੁਹਾਨੂੰ ਜਲਸੂਚਕ ਵਿੱਚ ਤੁਹਾਡੇ ਰਾਜ ਲਈ ਪੰਪ ਆਪਰੇਟਰ ਵਜੋਂ ਰਜਿਸਟਰ ਕੀਤਾ ਗਿਆ ਹੈ।
 
                     ਤੁਸੀਂ ਇਸ ਨੰਬਰ ਦੀ ਵਰਤੋਂ ਇਨ੍ਹਾਂ ਕੰਮਾਂ ਲਈ ਕਰ ਸਕਦੇ ਹੋ:
-                    - ਬਲਕ ਫਲੋ ਮੀਟਰ ਦੀਆਂ ਫੋਟੋਆਂ ਸਾਂਝੀਆਂ ਕਰਨਾ
+                    - ਮੀਟਰ ਰੀਡਿੰਗਾਂ ਸਾਂਝੀਆਂ ਕਰਨਾ
                     - ਪਾਣੀ ਦੀ ਸਪਲਾਈ ਨਾਲ ਜੁੜੀਆਂ ਸਮੱਸਿਆਵਾਂ ਦੀ ਰਿਪੋਰਟ ਕਰਨਾ
 
                     ਸ਼ੁਰੂ ਕਰਨ ਲਈ START ਲਿਖੋ।
@@ -261,6 +264,58 @@ class WelcomeMessageServiceTest {
         void usesTheSingleTenantStartKeywordInTheBuiltInBody() {
             assertThat(service.triggerWelcomeMessage(PHONE, true).getMessage())
                     .contains("Reply STARTTENANT to begin.");
+        }
+    }
+
+    /**
+     * Each deployment's chatbot flow has its own trigger word (several deployments share one WhatsApp
+     * account, which needs every keyword to be unique), so the welcome names the one configured.
+     */
+    @Nested
+    @DisplayName("configured start keyword")
+    class ConfiguredStartKeyword {
+
+        @Test
+        void namesTheConfiguredKeywordInTheBuiltInBody() {
+            ReflectionTestUtils.setField(service, "startKeyword", "startpb");
+
+            assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage())
+                    .contains("Reply startpb to begin.");
+        }
+
+        @Test
+        void fillsTheConfiguredKeywordIntoATenantTemplate() {
+            ReflectionTestUtils.setField(service, "startKeyword", "startpb");
+            when(tenantConfigRepository.findConfigValue(3, "welcome_message_english"))
+                    .thenReturn(Optional.of("Send {start_keyword}."));
+
+            assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage()).isEqualTo("Send startpb.");
+        }
+
+        @Test
+        void prefersTheConfiguredKeywordOverTheSingleTenantOne() {
+            ReflectionTestUtils.setField(service, "startKeyword", "startpb");
+
+            assertThat(service.triggerWelcomeMessage(PHONE, true).getMessage())
+                    .contains("Reply startpb to begin.");
+        }
+
+        @Test
+        void trimsTheConfiguredKeyword() {
+            ReflectionTestUtils.setField(service, "startKeyword", "  startpb  ");
+
+            assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage())
+                    .contains("Reply startpb to begin.");
+        }
+
+        @ParameterizedTest(name = "startKeyword=\"{0}\" falls back to START")
+        @NullSource
+        @ValueSource(strings = {"", "   "})
+        void fallsBackToTheDefaultKeywordWhenNoneIsConfigured(String configured) {
+            ReflectionTestUtils.setField(service, "startKeyword", configured);
+
+            assertThat(service.triggerWelcomeMessage(PHONE, false).getMessage())
+                    .contains("Reply START to begin.");
         }
     }
 
