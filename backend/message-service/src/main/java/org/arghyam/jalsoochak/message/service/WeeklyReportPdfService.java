@@ -6,9 +6,8 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
-import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
+import org.arghyam.jalsoochak.message.report.ResolvedReportLayout;
 import org.arghyam.jalsoochak.message.report.render.LayoutPdfRenderer;
-import org.arghyam.jalsoochak.message.report.render.ReportFormats;
 import org.arghyam.jalsoochak.message.report.render.WeeklyReportContent;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -41,12 +40,6 @@ public class WeeklyReportPdfService {
     @Value("${weekly-report.report.dir:${daily-report.report.dir:${escalation.report.dir:/tmp/escalation-reports/}}}")
     private String reportDir;
 
-    @Value("${weekly-report.dashboard-url:${daily-report.dashboard-url:https://jalsoochak.jjmbrain.in/staff/}}")
-    private String dashboardUrl;
-
-    @Value("${weekly-report.support-phone:${daily-report.support-phone:}}")
-    private String supportPhone;
-
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE;
     /** The platform reports on IST days throughout; the generation date must agree. */
     private static final ZoneId REPORT_ZONE = ZoneId.of("Asia/Kolkata");
@@ -69,11 +62,11 @@ public class WeeklyReportPdfService {
      * path this method actually saved to leaves nothing to re-derive.</p>
      *
      * @param officerUserType SECTION_OFFICER or SUB_DIVISIONAL_OFFICER; names the file
-     * @param layout          what the report shows, and where
-     * @param officerRows     SDO only: the per-Section-Officer performance rows
+     * @param layout          what the report shows, and where, with the tenant's settings
+     * @param officerRows     the per-Section-Officer performance rows; empty unless the layout draws them
      */
     public Path generate(WeeklyReportKpis kpis, long officerUserId, String officerName, String officerUserType,
-                         ReportLayout layout,
+                         ResolvedReportLayout layout,
                          List<ReportSchemeRow> noSupplyRows,
                          List<ReportSchemeRow> lowSupplyDaysRows,
                          List<ReportSchemeRow> lowLpcdRows,
@@ -89,9 +82,9 @@ public class WeeklyReportPdfService {
                 .kpis(kpis)
                 .officerName(officerName)
                 .generatedDate(LocalDate.ofInstant(clock.instant(), REPORT_ZONE))
-                .formats(ReportFormats.defaults())
-                .dashboardUrl(dashboardUrl)
-                .supportPhone(supportPhone)
+                .formats(layout.formats())
+                .dashboardUrl(layout.dashboardUrl())
+                .supportPhone(layout.supportPhone())
                 .noSupplyRows(noSupplyRows)
                 .lowSupplyDaysRows(lowSupplyDaysRows)
                 .lowLpcdRows(lowLpcdRows)
@@ -99,7 +92,7 @@ public class WeeklyReportPdfService {
                 .build();
 
         try (PDDocument doc = new PDDocument()) {
-            renderer.render(doc, layout, content);
+            renderer.render(doc, layout.layout(), content);
             doc.save(filePath.toFile());
         }
 
