@@ -91,6 +91,8 @@ public class WeeklySituationReportService {
                 .weekEnd(weekEnd.toString())
                 .previousWeekStart(previousWeekStart.toString())
                 .previousWeekEnd(previousWeekEnd.toString())
+                .lowLpcdThreshold(lowLpcdThreshold)
+                .minSupplyDays(minSupplyDays)
                 .week(summarise(week, minSupplyDays, personsPerHousehold))
                 .previousWeek(summarise(previous, minSupplyDays, personsPerHousehold))
                 .noSupplySchemeIds(schemeIds(week, s -> s.supplyDays() == 0))
