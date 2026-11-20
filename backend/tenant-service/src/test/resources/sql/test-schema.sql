@@ -28,7 +28,8 @@ CREATE TABLE common_schema.tenant_config_master_table (
     config_key  TEXT,
     config_value TEXT,
     created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
+    updated_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    deleted_at  TIMESTAMP
 );
 
 -- Seed reference data
