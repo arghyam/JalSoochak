@@ -28,7 +28,8 @@ public class RegionOnboardingInterceptor implements HandlerInterceptor {
 
     private static final String TENANT_ID_PARAM = "tenant_id";
 
-    private static final List<Map.Entry<String, RegionHierarchy>> REGION_PARAMS = List.of(
+    /** The params the guard checks. {@link RegionNotFoundResponseCustomizer} documents its 404 on each. */
+    static final List<Map.Entry<String, RegionHierarchy>> REGION_PARAMS = List.of(
             Map.entry("lgd_id", RegionHierarchy.LGD),
             Map.entry("parent_lgd_id", RegionHierarchy.LGD),
             Map.entry("department_id", RegionHierarchy.DEPARTMENT),
