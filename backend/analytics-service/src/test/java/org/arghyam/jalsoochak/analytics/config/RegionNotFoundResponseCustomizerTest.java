@@ -7,6 +7,7 @@ import io.swagger.v3.oas.models.responses.ApiResponses;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.method.HandlerMethod;
 
@@ -19,7 +20,8 @@ class RegionNotFoundResponseCustomizerTest {
     private final RegionNotFoundResponseCustomizer customizer = new RegionNotFoundResponseCustomizer();
 
     @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {"byLgdId", "byParentLgdId", "byDepartmentId", "byParentDepartmentId", "byValueAlias"})
+    @ValueSource(strings = {"byLgdId", "byParentLgdId", "byDepartmentId", "byParentDepartmentId", "byValueAlias",
+            "byPathVariableThenLgdId"})
     void operationTakingARegionParam_documentsTheGuardsNotFound(String handler) {
         Operation operation = customizer.customize(operationWithOk(), handlerMethod(handler));
 
@@ -94,6 +96,10 @@ class RegionNotFoundResponseCustomizerTest {
         }
 
         void byValueAlias(@RequestParam("lgd_id") Integer lgdId) {
+        }
+
+        void byPathVariableThenLgdId(@PathVariable("tenant_code") String tenantCode,
+                                     @RequestParam(name = "lgd_id") Integer lgdId) {
         }
 
         void byTenantOnly(@RequestParam(name = "tenant_id") Integer tenantId) {

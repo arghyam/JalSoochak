@@ -19,6 +19,7 @@ import org.springframework.web.method.HandlerMethod;
 import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -62,6 +63,8 @@ public class RegionNotFoundResponseCustomizer implements OperationCustomizer {
     private static boolean takesARegionParam(HandlerMethod handlerMethod) {
         return Arrays.stream(handlerMethod.getMethodParameters())
                 .map(RegionNotFoundResponseCustomizer::requestParamName)
+                // The set is immutable, so contains(null) would throw.
+                .filter(Objects::nonNull)
                 .anyMatch(REGION_PARAM_NAMES::contains);
     }
 
