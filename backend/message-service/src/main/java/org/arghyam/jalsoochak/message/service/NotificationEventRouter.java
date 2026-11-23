@@ -28,6 +28,8 @@ import org.arghyam.jalsoochak.message.ledger.LedgerOutcome;
 import org.arghyam.jalsoochak.message.ledger.LedgerRef;
 import org.arghyam.jalsoochak.message.ledger.NotificationLedger;
 import org.arghyam.jalsoochak.message.ledger.NotificationType;
+import org.arghyam.jalsoochak.message.report.DefaultReportLayouts;
+import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
 import org.arghyam.jalsoochak.message.storage.ReportPublisher;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -54,6 +56,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -138,6 +141,7 @@ public class NotificationEventRouter {
     private final EscalationPdfService escalationPdfService;
     private final DailyReportPdfService dailyReportPdfService;
     private final WeeklyReportPdfService weeklyReportPdfService;
+    private final DefaultReportLayouts defaultReportLayouts;
     private final ReportPublisher reportPublisher;
     private final StorageProperties storageProperties;
     private final MessageTemplateService messageTemplateService;
@@ -1170,11 +1174,13 @@ public class NotificationEventRouter {
         log.info("[Router/DAILY_REPORT] corr={} received: tenant={} officer={} role={}",
                 corr, tenantId, officerUserId, role);
 
-        // The daily report is a Section Officer product now; SDOs are served by the weekly one. This
-        // still has to be checked rather than assumed: events published before the upgrade can be
-        // sitting in the topic, and an SDO's queued daily report must be dropped, not rendered into a
-        // layout that no longer describes their command.
-        if ("SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType)) {
+        // The daily report is a Section Officer product now; SDOs are served by the weekly one, so they
+        // have no daily layout. This still has to be checked rather than assumed: events published
+        // before the upgrade can be sitting in the topic, and an SDO's queued daily report must be
+        // dropped, not rendered into a layout that does not describe their command.
+        Optional<ReportLayout> layout =
+                defaultReportLayouts.builtIn(org.arghyam.jalsoochak.message.report.ReportKind.DAILY, officerUserType);
+        if (layout.isEmpty()) {
             log.info("[Router/DAILY_REPORT] corr={} result=SKIPPED_SDO_DAILY_RETIRED role={} tenant={} officer={}"
                             + " — SDOs receive the weekly report instead",
                     corr, role, tenantId, officerUserId);
@@ -1228,7 +1234,7 @@ public class NotificationEventRouter {
             noSupplyRows = buildSchemeRows(tenantSchema, kpis.getNoSupplySchemeIds(), false);
             anomalyRows = buildAnomalyRows(tenantSchema, kpis);
             localPath = dailyReportPdfService.generate(
-                    kpis, officerUserId, officerName, officerUserType, noSupplyRows, anomalyRows);
+                    kpis, officerUserId, officerName, officerUserType, layout.get(), noSupplyRows, anomalyRows);
         } catch (Exception generateEx) {
             // Row lookup or PDF rendering failed: tag the outcome so it is counted like every other
             // terminal state, then rethrow so the event is still retried.
@@ -1311,6 +1317,10 @@ public class NotificationEventRouter {
                     + " (non-retryable)", corr, role, tenantId, officerUserId);
             return;
         }
+        // Every role has a built-in weekly layout: an SDO gets the SDO one, anyone else the SO one.
+        ReportLayout layout = defaultReportLayouts
+                .builtIn(org.arghyam.jalsoochak.message.report.ReportKind.WEEKLY, officerUserType)
+                .orElseThrow();
 
         LedgerEntry.LedgerEntryBuilder entry = reportEntry(NotificationType.WEEKLY_REPORT, "WEEKLY_REPORT_KPIS",
                 tenantSchema, tenantId, officerUserId, role, corr, LocalDate.parse(kpis.getWeekStart()));
@@ -1351,7 +1361,7 @@ public class NotificationEventRouter {
             lowLpcdRows = buildSchemeRows(tenantSchema, kpis.getLowLpcdSchemeIds(), sdo);
             officerRows = sdo ? buildWeeklyOfficerRows(tenantSchema, kpis) : List.of();
             localPath = weeklyReportPdfService.generate(kpis, officerUserId, officerName, officerUserType,
-                    noSupplyRows, lowSupplyDaysRows, lowLpcdRows, officerRows);
+                    layout, noSupplyRows, lowSupplyDaysRows, lowLpcdRows, officerRows);
         } catch (Exception generateEx) {
             log.error("[Router/WEEKLY_REPORT] corr={} result=FAILED_GENERATION role={} tenant={} officer={} — {}",
                     corr, role, tenantId, officerUserId, generateEx.getMessage(), generateEx);

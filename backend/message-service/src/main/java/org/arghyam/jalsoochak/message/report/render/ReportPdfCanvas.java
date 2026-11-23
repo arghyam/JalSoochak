@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.message.service;
+package org.arghyam.jalsoochak.message.report.render;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;

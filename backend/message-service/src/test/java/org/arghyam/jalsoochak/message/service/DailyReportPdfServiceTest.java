@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.message.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.interactive.action.PDActionURI;
@@ -8,6 +9,10 @@ import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
+import org.arghyam.jalsoochak.message.report.DefaultReportLayouts;
+import org.arghyam.jalsoochak.message.report.ReportKind;
+import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
+import org.arghyam.jalsoochak.message.report.render.LayoutPdfRenderer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -27,6 +32,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class DailyReportPdfServiceTest {
 
+    private static final ReportLayout LAYOUT = new DefaultReportLayouts(new ObjectMapper())
+            .builtIn(ReportKind.DAILY, "SECTION_OFFICER").orElseThrow();
+
     @TempDir
     Path tempDir;
 
@@ -34,7 +42,7 @@ class DailyReportPdfServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DailyReportPdfService();
+        service = new DailyReportPdfService(new LayoutPdfRenderer());
         ReflectionTestUtils.setField(service, "reportDir", tempDir.toString() + "/");
         ReflectionTestUtils.setField(service, "dashboardUrl", "https://jalsoochak.jjmbrain.in/staff/");
         ReflectionTestUtils.setField(service, "supportPhone", "919999999999");
@@ -92,7 +100,7 @@ class DailyReportPdfServiceTest {
      */
     private String renderRaw(DailyReportKpis kpis, List<ReportSchemeRow> noSupply,
                              List<ReportSchemeRow> anomalies) throws IOException {
-        Path pdf = service.generate(kpis, 21343L, "Binod Nimoli", "SECTION_OFFICER", noSupply, anomalies);
+        Path pdf = service.generate(kpis, 21343L, "Binod Nimoli", "SECTION_OFFICER", LAYOUT, noSupply, anomalies);
         try (PDDocument doc = Loader.loadPDF(pdf.toFile())) {
             return new PDFTextStripper().getText(doc);
         }
@@ -104,7 +112,7 @@ class DailyReportPdfServiceTest {
 
         @Test
         void namesTheFileByRoleOfficerIdAndDate() throws Exception {
-            Path pdf = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
+            Path pdf = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER", LAYOUT,
                     List.of(), List.of());
 
             assertThat(pdf.getFileName().toString())
@@ -115,15 +123,16 @@ class DailyReportPdfServiceTest {
         void usesTheOfficerIdNotTheNameSoTwoOfficersCannotCollide() throws Exception {
             // A shared bucket plus a name-based filename would let one officer's report overwrite
             // another's — handing the second officer the first one's scheme list and Jal Mitra phones.
-            Path first = service.generate(sampleKpis(), 1L, "R Kumar", "SECTION_OFFICER", List.of(), List.of());
-            Path second = service.generate(sampleKpis(), 2L, "R Kumar", "SECTION_OFFICER", List.of(), List.of());
+            Path first = service.generate(sampleKpis(), 1L, "R Kumar", "SECTION_OFFICER", LAYOUT, List.of(), List.of());
+            Path second = service.generate(sampleKpis(), 2L, "R Kumar", "SECTION_OFFICER", LAYOUT,
+                    List.of(), List.of());
 
             assertThat(first).isNotEqualTo(second);
         }
 
         @Test
         void returnsThePathThePdfWasActuallyWrittenTo() throws Exception {
-            Path pdf = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
+            Path pdf = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER", LAYOUT,
                     List.of(), List.of());
 
             // The caller uploads this path verbatim. It used to rebuild it from escalation.report.dir,
@@ -208,7 +217,7 @@ class DailyReportPdfServiceTest {
         void embedsTheDashboardLinkAsARealAnnotation() throws Exception {
             // WhatsApp's PDF viewer does not auto-detect bare URLs, so without the annotation the link
             // is dead on exactly the path every officer uses.
-            Path pdf = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
+            Path pdf = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER", LAYOUT,
                     List.of(), List.of());
 
             try (PDDocument doc = Loader.loadPDF(pdf.toFile())) {
@@ -332,7 +341,7 @@ class DailyReportPdfServiceTest {
                         .jalMitraMobiles("9190000" + String.format("%05d", i)).build());
             }
 
-            Path pdf = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
+            Path pdf = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER", LAYOUT,
                     many, List.of());
 
             try (PDDocument doc = Loader.loadPDF(pdf.toFile())) {
