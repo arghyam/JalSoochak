@@ -8,8 +8,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalOnboardedDistrictsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OnboardedRegionsResponse;
 import org.arghyam.jalsoochak.analytics.enums.RegionHierarchy;
+import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
 import org.arghyam.jalsoochak.analytics.service.RegionOnboardingService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,10 +20,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Phased rollout: which of a parent's children the dashboards may show. Not cached, so that
- * onboarding a district takes effect on the next request. Errors are answered by
- * {@code GlobalExceptionHandler}: 400 for a bad request, 404 (from the guard) for a parent that isn't
- * onboarded.
+ * Phased rollout: which of a parent's children, or which districts nationally, the dashboards may
+ * show. Not cached, so that onboarding a district takes effect on the next request. Errors are
+ * answered by {@code GlobalExceptionHandler}: 400 for a bad request, 404 (from the guard) for a parent
+ * that isn't onboarded, 403 for the national route in single-tenant mode.
  */
 @RestController
 @RequestMapping("/api/v1/analytics")
@@ -30,6 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AnalyticsRegionOnboardingController {
 
     private final RegionOnboardingService regionOnboardingService;
+    private final SingleTenantModeGuard singleTenantModeGuard;
 
     @GetMapping("/onboarded-regions")
     @Operation(
@@ -78,6 +81,43 @@ public class AnalyticsRegionOnboardingController {
         return ResponseEntity.ok(ApiResponse.<OnboardedRegionsResponse>builder()
                 .success(true)
                 .data(data)
+                .build());
+    }
+
+    /**
+     * The national district map's onboarded list: each state's {@code onboarded-regions} answer for its
+     * districts, in one request rather than one per state.
+     */
+    @GetMapping("/national/onboarded-districts")
+    @Operation(
+            summary = "List every tenant's onboarded districts (phased rollout), for the national district map",
+            description = "phasedRollout=false means every district is onboarded, and tenants is null. "
+                    + "With it true, a tenant that isn't listed has no onboarded district.",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Onboarded districts fetched successfully",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "success", value = SwaggerExamples.NATIONAL_ONBOARDED_DISTRICTS_SUCCESS)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "403",
+                            description = "Single-tenant mode is on, so there is no national dashboard",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.ERROR_SINGLE_TENANT_MODE)
+                            )
+                    )
+            }
+    )
+    public ResponseEntity<ApiResponse<NationalOnboardedDistrictsResponse>> getNationalOnboardedDistricts() {
+        singleTenantModeGuard.rejectIfSingleTenantMode("national/onboarded-districts");
+        return ResponseEntity.ok(ApiResponse.<NationalOnboardedDistrictsResponse>builder()
+                .success(true)
+                .data(regionOnboardingService.onboardedDistrictsByTenant())
                 .build());
     }
 }

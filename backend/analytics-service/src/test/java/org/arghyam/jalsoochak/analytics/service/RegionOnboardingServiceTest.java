@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.analytics.service;
 
+import org.arghyam.jalsoochak.analytics.dto.response.NationalOnboardedDistrictsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OnboardedRegionsResponse;
 import org.arghyam.jalsoochak.analytics.enums.RegionHierarchy;
 import org.arghyam.jalsoochak.analytics.exception.RegionNotOnboardedException;
@@ -12,7 +13,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -141,6 +144,40 @@ class RegionOnboardingServiceTest {
         assertThatThrownBy(() -> service(true).onboardedChildren(TENANT_ID, RegionHierarchy.LGD, REGION_ID))
                 .isInstanceOf(IllegalArgumentException.class);
         verify(repository, never()).findOnboardedChildIds(anyInt(), any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void onboardedDistrictsByTenant_switchOff_saysSoWithNullTenants_withoutAQuery() {
+        NationalOnboardedDistrictsResponse response = service(false).onboardedDistrictsByTenant();
+
+        assertThat(response.isPhasedRollout()).isFalse();
+        assertThat(response.getTenants()).isNull();
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void onboardedDistrictsByTenant_listsEachTenantInTheRepositorysOrder() {
+        Map<Integer, List<Integer>> byTenant = new LinkedHashMap<>();
+        byTenant.put(3, List.of(12, 15));
+        byTenant.put(7, List.of(40));
+        when(repository.findOnboardedDistrictIdsByTenant()).thenReturn(byTenant);
+
+        NationalOnboardedDistrictsResponse response = service(true).onboardedDistrictsByTenant();
+
+        assertThat(response.isPhasedRollout()).isTrue();
+        assertThat(response.getTenants()).containsExactly(
+                new NationalOnboardedDistrictsResponse.TenantOnboardedDistricts(3, List.of(12, 15)),
+                new NationalOnboardedDistrictsResponse.TenantOnboardedDistricts(7, List.of(40)));
+    }
+
+    @Test
+    void onboardedDistrictsByTenant_noneOnboarded_isAnEmptyListNotNull() {
+        when(repository.findOnboardedDistrictIdsByTenant()).thenReturn(Map.of());
+
+        NationalOnboardedDistrictsResponse response = service(true).onboardedDistrictsByTenant();
+
+        assertThat(response.isPhasedRollout()).isTrue();
+        assertThat(response.getTenants()).isEmpty();
     }
 
     @Test

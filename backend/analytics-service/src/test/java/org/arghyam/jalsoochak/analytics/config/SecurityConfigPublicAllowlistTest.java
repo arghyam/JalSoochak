@@ -51,6 +51,7 @@ class SecurityConfigPublicAllowlistTest {
             "/api/v1/analytics/national/dashboard",
             "/api/v1/analytics/national/dashboard/boundary",
             "/api/v1/analytics/national/dashboard/boundary/district",
+            "/api/v1/analytics/national/onboarded-districts",
             "/api/v1/analytics/onboarded-regions",
             "/api/v1/analytics/outage-reasons",
             "/api/v1/analytics/outage-reasons/periodic",

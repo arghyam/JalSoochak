@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.analytics.service;
 
+import org.arghyam.jalsoochak.analytics.dto.response.NationalOnboardedDistrictsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OnboardedRegionsResponse;
 import org.arghyam.jalsoochak.analytics.enums.RegionHierarchy;
 import org.arghyam.jalsoochak.analytics.exception.RegionNotOnboardedException;
@@ -7,6 +8,7 @@ import org.arghyam.jalsoochak.analytics.repository.RegionOnboardingRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -75,6 +77,26 @@ public class RegionOnboardingService {
                         hierarchy + " region " + parentId + " not found for tenant_id: " + tenantId));
         return response
                 .onboardedChildIds(repository.findOnboardedChildIds(tenantId, hierarchy, parentLevel, parentId))
+                .build();
+    }
+
+    /**
+     * Every tenant's onboarded districts, for the national map: each state's {@link #onboardedChildren}
+     * in one query. With the switch off, no query runs and the tenants are null: every district is
+     * onboarded.
+     */
+    public NationalOnboardedDistrictsResponse onboardedDistrictsByTenant() {
+        if (!phasedRollout) {
+            return NationalOnboardedDistrictsResponse.builder().phasedRollout(false).build();
+        }
+        List<NationalOnboardedDistrictsResponse.TenantOnboardedDistricts> tenants =
+                repository.findOnboardedDistrictIdsByTenant().entrySet().stream()
+                        .map(tenant -> new NationalOnboardedDistrictsResponse.TenantOnboardedDistricts(
+                                tenant.getKey(), tenant.getValue()))
+                        .toList();
+        return NationalOnboardedDistrictsResponse.builder()
+                .phasedRollout(true)
+                .tenants(tenants)
                 .build();
     }
 }

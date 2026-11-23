@@ -3,9 +3,13 @@ package org.arghyam.jalsoochak.analytics.repository;
 import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.analytics.enums.RegionHierarchy;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Repository;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -63,6 +67,16 @@ public class RegionOnboardingRepository {
             ORDER BY child_id
             """;
 
+    /** Every tenant's onboarded districts: a state's onboarded children, for all states at once. */
+    private static final String FIND_ONBOARDED_DISTRICT_IDS_BY_TENANT_SQL = """
+            SELECT DISTINCT s.tenant_id, s.level_2_lgd_id AS district_id
+            FROM analytics_schema.dim_scheme_table s
+            %1$s
+            WHERE s.tenant_id > 0
+              AND s.level_2_lgd_id > 0
+            ORDER BY s.tenant_id, district_id
+            """.formatted(ONBOARDED_DISTRICT_JOIN);
+
     private final JdbcTemplate jdbcTemplate;
 
     /** The region's level in its dimension table, or empty when the tenant has no such region. */
@@ -97,6 +111,18 @@ public class RegionOnboardingRepository {
                 schemeColumn(hierarchy, parentLevel),
                 schemeColumn(hierarchy, parentLevel + 1));
         return jdbcTemplate.queryForList(sql, Integer.class, tenantId, parentId);
+    }
+
+    /**
+     * Each tenant's districts that hold at least one scheme and are onboarded, keyed by tenant in
+     * ascending order, with ascending district ids. A tenant without any is absent.
+     */
+    public Map<Integer, List<Integer>> findOnboardedDistrictIdsByTenant() {
+        Map<Integer, List<Integer>> byTenant = new LinkedHashMap<>();
+        jdbcTemplate.query(FIND_ONBOARDED_DISTRICT_IDS_BY_TENANT_SQL, (RowCallbackHandler) rs ->
+                byTenant.computeIfAbsent(rs.getInt("tenant_id"), tenantId -> new ArrayList<>())
+                        .add(rs.getInt("district_id")));
+        return byTenant;
     }
 
     /**
