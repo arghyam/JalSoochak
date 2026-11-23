@@ -62,6 +62,7 @@ class RouteParityTest {
             "GET /api/v1/analytics/tenant_boundaries",
             "GET /api/v1/analytics/tenant_performance_score",
             "GET /api/v1/analytics/onboarded-regions",
+            "GET /api/v1/analytics/national/onboarded-districts",
             // National dashboard
             "GET /api/v1/analytics/national/dashboard",
             "GET /api/v1/analytics/national/dashboard/district",

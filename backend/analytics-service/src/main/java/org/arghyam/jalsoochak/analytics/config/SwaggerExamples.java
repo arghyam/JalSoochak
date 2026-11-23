@@ -913,6 +913,28 @@ public final class SwaggerExamples {
             }
             """;
 
+    public static final String NATIONAL_ONBOARDED_DISTRICTS_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "phasedRollout": true,
+                "tenants": [
+                  { "tenantId": 3, "onboardedDistrictIds": [12, 15] },
+                  { "tenantId": 7, "onboardedDistrictIds": [40] }
+                ]
+              }
+            }
+            """;
+
+    public static final String ERROR_SINGLE_TENANT_MODE = """
+            {
+              "timestamp": "2026-11-16T10:15:30",
+              "status": 403,
+              "error": "Forbidden",
+              "message": "API 'national/onboarded-districts' cannot be accessed when single-tenant mode is enabled"
+            }
+            """;
+
     public static final String ERROR_BAD_REQUEST = """
             {
               "timestamp": "2026-11-16T10:15:30",

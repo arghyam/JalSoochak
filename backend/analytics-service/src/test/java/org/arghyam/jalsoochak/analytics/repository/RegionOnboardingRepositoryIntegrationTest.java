@@ -19,10 +19,14 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.util.List;
+import java.util.Map;
+
 import static org.arghyam.jalsoochak.analytics.enums.RegionHierarchy.DEPARTMENT;
 import static org.arghyam.jalsoochak.analytics.enums.RegionHierarchy.LGD;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 
 /**
  * Fixture, tenant 1 (state 100, department root 200):
@@ -143,6 +147,35 @@ class RegionOnboardingRepositoryIntegrationTest {
         assertThatThrownBy(() -> repository.findOnboardedChildIds(TENANT, DEPARTMENT, 0, 200))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported DEPARTMENT level: 0");
+    }
+
+    @Test
+    void findOnboardedDistrictIdsByTenant_listsEachTenantsDistrictsThatAreFlaggedAndHaveSchemes() {
+        // Tenant 2 has none yet: its flagged 103 has no scheme, and its 101 with a scheme isn't flagged.
+        assertThat(repository.findOnboardedDistrictIdsByTenant()).containsExactly(entry(TENANT, List.of(101)));
+
+        setOnboarded(OTHER_TENANT, 101);
+        insertLgd(TENANT, 104, 2, 100, 104, null, true);
+        insertScheme(TENANT, 6, 100, 104, null, null, null);
+
+        Map<Integer, List<Integer>> byTenant = repository.findOnboardedDistrictIdsByTenant();
+        assertThat(byTenant).containsExactly(entry(TENANT, List.of(101, 104)), entry(OTHER_TENANT, List.of(101)));
+    }
+
+    @Test
+    void findOnboardedDistrictIdsByTenant_agreesWithEachStatesOnboardedChildren() {
+        setOnboarded(OTHER_TENANT, 101);
+
+        Map<Integer, List<Integer>> byTenant = repository.findOnboardedDistrictIdsByTenant();
+        assertThat(byTenant.get(TENANT)).isEqualTo(repository.findOnboardedChildIds(TENANT, LGD, 1, 100));
+        assertThat(byTenant.get(OTHER_TENANT)).isEqualTo(repository.findOnboardedChildIds(OTHER_TENANT, LGD, 1, 100));
+    }
+
+    @Test
+    void findOnboardedDistrictIdsByTenant_noDistrictFlagged_isEmpty() {
+        jdbcTemplate.update("UPDATE analytics_schema.dim_lgd_location_table SET is_onboarded = FALSE");
+
+        assertThat(repository.findOnboardedDistrictIdsByTenant()).isEmpty();
     }
 
     @Test

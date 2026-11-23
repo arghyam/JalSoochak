@@ -235,6 +235,7 @@ POSTs then answer 409. See `docs/jjm-brain-sync-plan.md`.
 | GET | `/api/v1/analytics/tenant_boundaries` | Boundary GeoJSON for a parent area and its children |
 | GET | `/api/v1/analytics/tenant_performance_score` | Average performance score for a boundary |
 | GET | `/api/v1/analytics/onboarded-regions` | A parent's onboarded children (phased rollout²); `tenant_id` plus exactly one of `parent_lgd_id` / `parent_department_id` |
+| GET | `/api/v1/analytics/national/onboarded-districts` | Every tenant's onboarded districts (phased rollout²), for the national district map |
 | GET | `/api/v1/analytics/schemes` | Analytics schemes list |
 | GET | `/api/v1/analytics/meter-readings` | Meter readings analytics |
 | GET | `/api/v1/analytics/scheme-regularity/average` | Average scheme regularity |
@@ -259,8 +260,12 @@ the `{success, data}` envelope. Responses for onboarded regions are unchanged. `
 `{tenantId, parentLgdId, parentDepartmentId, phasedRollout, onboardedChildIds}`: with the switch off,
 `phasedRollout` is `false` and `onboardedChildIds` is `null`, meaning every region is onboarded. Its `400`
 uses the same handler shape: not exactly one parent or, with the switch on, a parent the tenant doesn't
-have. With the switch off the parent isn't looked up, so an unknown one gets `200`. The rule and runbook
-are in `docs/phased-rollout.md`.
+have. With the switch off the parent isn't looked up, so an unknown one gets `200`.
+`national/onboarded-districts` returns `{phasedRollout, tenants: [{tenantId, onboardedDistrictIds}]}`: each
+state's `onboarded-regions` answer for its districts, in one request. A tenant that isn't listed has none;
+with the switch off, `tenants` is `null`. Like the other national routes, it answers `403` in single-tenant
+mode. Swagger lists the `404` on every operation that takes one of the four region params. The rule and
+runbook are in `docs/phased-rollout.md`.
 
 ---
 

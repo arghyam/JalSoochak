@@ -1,8 +1,11 @@
 package org.arghyam.jalsoochak.analytics.controller.tenant;
 
+import org.arghyam.jalsoochak.analytics.dto.response.NationalOnboardedDistrictsResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalOnboardedDistrictsResponse.TenantOnboardedDistricts;
 import org.arghyam.jalsoochak.analytics.dto.response.OnboardedRegionsResponse;
 import org.arghyam.jalsoochak.analytics.enums.RegionHierarchy;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
+import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
 import org.arghyam.jalsoochak.analytics.service.RegionOnboardingService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,15 +27,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * The {@code /onboarded-regions} contract. What counts as onboarded is {@code RegionOnboardingServiceTest}'s;
+ * The {@code /onboarded-regions} and {@code /national/onboarded-districts} contracts. What counts as onboarded is {@code RegionOnboardingServiceTest}'s;
  * the 404 for a parent that isn't onboarded is {@code AnalyticsRegionOnboardingAccessTest}'s.
  */
 @WebMvcTest(controllers = AnalyticsRegionOnboardingController.class)
-@Import(GlobalExceptionHandler.class)
+@Import({GlobalExceptionHandler.class, SingleTenantModeGuard.class})
 @AutoConfigureMockMvc(addFilters = false)
 class AnalyticsRegionOnboardingControllerTest {
 
     private static final String ONBOARDED_REGIONS = "/api/v1/analytics/onboarded-regions";
+    private static final String NATIONAL_ONBOARDED_DISTRICTS = "/api/v1/analytics/national/onboarded-districts";
 
     @Autowired
     private MockMvc mockMvc;
@@ -140,5 +144,37 @@ class AnalyticsRegionOnboardingControllerTest {
                         .param("parent_lgd_id", "999"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("LGD region 999 not found for tenant_id: 3"));
+    }
+
+    @Test
+    void national_answersEachTenantsOnboardedDistrictsInTheEnvelope() throws Exception {
+        when(regionOnboardingService.onboardedDistrictsByTenant())
+                .thenReturn(NationalOnboardedDistrictsResponse.builder()
+                        .phasedRollout(true)
+                        .tenants(List.of(
+                                new TenantOnboardedDistricts(3, List.of(12, 15)),
+                                new TenantOnboardedDistricts(7, List.of(40))))
+                        .build());
+
+        mockMvc.perform(get(NATIONAL_ONBOARDED_DISTRICTS))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.phasedRollout").value(true))
+                .andExpect(jsonPath("$.data.tenants[0].tenantId").value(3))
+                .andExpect(jsonPath("$.data.tenants[0].onboardedDistrictIds", contains(12, 15)))
+                .andExpect(jsonPath("$.data.tenants[1].tenantId").value(7))
+                .andExpect(jsonPath("$.data.tenants[1].onboardedDistrictIds", contains(40)));
+    }
+
+    @Test
+    void national_switchOff_keepsTheNullTenantsInTheBody() throws Exception {
+        when(regionOnboardingService.onboardedDistrictsByTenant())
+                .thenReturn(NationalOnboardedDistrictsResponse.builder().phasedRollout(false).build());
+
+        mockMvc.perform(get(NATIONAL_ONBOARDED_DISTRICTS))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.phasedRollout").value(false))
+                .andExpect(jsonPath("$.data", hasKey("tenants")))
+                .andExpect(jsonPath("$.data.tenants").value(nullValue()));
     }
 }

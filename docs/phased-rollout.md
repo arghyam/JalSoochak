@@ -38,6 +38,7 @@ restart, a re-aggregation or a cache flush.
 | --- | --- | --- |
 | Region-scoped analytics endpoints | Unchanged | 404 for a region that isn't onboarded |
 | `GET /api/v1/analytics/onboarded-regions` | `phasedRollout: false`, `onboardedChildIds: null` | The parent's onboarded children |
+| `GET /api/v1/analytics/national/onboarded-districts` | `phasedRollout: false`, `tenants: null` | Every tenant's onboarded districts (403 in single-tenant mode) |
 | Extra queries | None | Up to two small lookups per region a request names |
 | `is_onboarded` column | Ignored | Read on every such request |
 
@@ -102,6 +103,10 @@ curl "<gateway>/api/v1/analytics/onboarded-regions?tenant_id=<tenant_id>&parent_
 
 `onboardedChildIds` lists the districts that are both flagged and have schemes. A flagged district missing
 from it has no schemes yet. For the department hierarchy, pass `parent_department_id` instead.
+
+The national District View asks for every state's districts at once, with
+`GET <gateway>/api/v1/analytics/national/onboarded-districts`. Its `tenants[].onboardedDistrictIds` match
+each state's `onboardedChildIds` above.
 
 **Stray schemes.** Schemes in a district that isn't onboarded still count in the state's numbers (§6), so
 this list should be empty:

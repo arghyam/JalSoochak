@@ -2,9 +2,11 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.controller.dashboard.AnalyticsNationalDashboardController;
 import org.arghyam.jalsoochak.analytics.controller.regularity.AnalyticsRegularityController;
+import org.arghyam.jalsoochak.analytics.controller.tenant.AnalyticsRegionOnboardingController;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.helper.SingleTenantModeGuard;
+import org.arghyam.jalsoochak.analytics.service.RegionOnboardingService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,15 +17,19 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Pins that all five national routes, across the two controllers that serve them, answer 403 in
+ * Pins that all six national routes, across the three controllers that serve them, answer 403 in
  * single-tenant mode.
  */
-@WebMvcTest(controllers = {AnalyticsNationalDashboardController.class, AnalyticsRegularityController.class})
+@WebMvcTest(controllers = {
+        AnalyticsNationalDashboardController.class,
+        AnalyticsRegularityController.class,
+        AnalyticsRegionOnboardingController.class})
 @Import({GlobalExceptionHandler.class, SingleTenantModeGuard.class})
 @AutoConfigureMockMvc(addFilters = false)
 @TestPropertySource(properties = "analytics.single-tenant-mode=true")
@@ -39,6 +45,9 @@ class AnalyticsNationalEndpointsSingleTenantModeAccessTest {
 
     @MockBean
     private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
+
+    @MockBean
+    private RegionOnboardingService regionOnboardingService;
 
     @Test
     void nationalDashboardBoundary_forbiddenInSingleTenantMode() throws Exception {
@@ -79,5 +88,13 @@ class AnalyticsNationalEndpointsSingleTenantModeAccessTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value("API 'scheme-regularity/periodic/national' cannot be accessed when single-tenant mode is enabled"));
     }
-}
 
+    @Test
+    void nationalOnboardedDistricts_forbiddenInSingleTenantMode() throws Exception {
+        mockMvc.perform(get(BASE + "/national/onboarded-districts"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("API 'national/onboarded-districts' cannot be accessed when single-tenant mode is enabled"));
+
+        verifyNoInteractions(regionOnboardingService);
+    }
+}
