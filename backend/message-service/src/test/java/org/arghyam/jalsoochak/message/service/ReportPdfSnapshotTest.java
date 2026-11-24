@@ -6,9 +6,10 @@ import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
 import org.arghyam.jalsoochak.message.report.DefaultReportLayouts;
-import org.arghyam.jalsoochak.message.report.ReportKind;
-import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
+import org.arghyam.jalsoochak.message.report.ResolvedReportLayout;
+import org.arghyam.jalsoochak.message.report.catalog.ReportKind;
 import org.arghyam.jalsoochak.message.report.render.LayoutPdfRenderer;
+import org.arghyam.jalsoochak.message.report.render.ReportFormats;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -53,9 +54,15 @@ class ReportPdfSnapshotTest {
     private static final Instant GENERATED_AT = Instant.parse("2026-07-20T04:30:00Z");
 
     private static final DefaultReportLayouts LAYOUTS = new DefaultReportLayouts(new ObjectMapper());
-    private static final ReportLayout DAILY_SO_LAYOUT = LAYOUTS.builtIn(ReportKind.DAILY, SO).orElseThrow();
-    private static final ReportLayout WEEKLY_SO_LAYOUT = LAYOUTS.builtIn(ReportKind.WEEKLY, SO).orElseThrow();
-    private static final ReportLayout WEEKLY_SDO_LAYOUT = LAYOUTS.builtIn(ReportKind.WEEKLY, SDO).orElseThrow();
+    private static final ResolvedReportLayout DAILY_SO_LAYOUT = builtIn(ReportKind.DAILY, SO, SUPPORT_PHONE);
+    private static final ResolvedReportLayout WEEKLY_SO_LAYOUT = builtIn(ReportKind.WEEKLY, SO, SUPPORT_PHONE);
+    private static final ResolvedReportLayout WEEKLY_SDO_LAYOUT = builtIn(ReportKind.WEEKLY, SDO, SUPPORT_PHONE);
+
+    /** The built-in layout for the role, with the settings a tenant without its own config gets. */
+    private static ResolvedReportLayout builtIn(ReportKind kind, String role, String supportPhone) {
+        return new ResolvedReportLayout(LAYOUTS.builtIn(kind, role).orElseThrow(), ReportFormats.defaults(),
+                DASHBOARD_URL, supportPhone);
+    }
 
     @TempDir
     Path tempDir;
@@ -67,14 +74,10 @@ class ReportPdfSnapshotTest {
     void setUp() {
         daily = new DailyReportPdfService(new LayoutPdfRenderer());
         ReflectionTestUtils.setField(daily, "reportDir", tempDir + "/");
-        ReflectionTestUtils.setField(daily, "dashboardUrl", DASHBOARD_URL);
-        ReflectionTestUtils.setField(daily, "supportPhone", SUPPORT_PHONE);
         daily.setClock(Clock.fixed(GENERATED_AT, ZoneOffset.UTC));
 
         weekly = new WeeklyReportPdfService(new LayoutPdfRenderer());
         ReflectionTestUtils.setField(weekly, "reportDir", tempDir + "/");
-        ReflectionTestUtils.setField(weekly, "dashboardUrl", DASHBOARD_URL);
-        ReflectionTestUtils.setField(weekly, "supportPhone", SUPPORT_PHONE);
         weekly.setClock(Clock.fixed(GENERATED_AT, ZoneOffset.UTC));
     }
 
@@ -98,13 +101,13 @@ class ReportPdfSnapshotTest {
 
         @Test
         void d2EmptyListsAndNoSupportPhone() throws IOException {
-            ReflectionTestUtils.setField(daily, "supportPhone", "");
+            ResolvedReportLayout noPhone = builtIn(ReportKind.DAILY, SO, "");
             DailyReportKpis kpis = DailyReportKpis.builder()
                     .reportDate("2026-07-19").cutoffIst("2026-07-19T16:00:00")
                     .noSupplySchemeIds(List.of()).schemeAnomalies(List.of())
                     .build();
 
-            Path pdf = daily.generate(kpis, 5521L, "Bharat Sharma", SO, DAILY_SO_LAYOUT, List.of(), List.of());
+            Path pdf = daily.generate(kpis, 5521L, "Bharat Sharma", SO, noPhone, List.of(), List.of());
 
             assertMatchesSnapshot("D2-daily-empty-no-phone", pdf);
         }
@@ -158,13 +161,13 @@ class ReportPdfSnapshotTest {
 
         @Test
         void w2EmptyWithoutSupportPhone() throws IOException {
-            ReflectionTestUtils.setField(weekly, "supportPhone", "");
+            ResolvedReportLayout noPhone = builtIn(ReportKind.WEEKLY, SO, "");
             WeeklyReportKpis sparse = WeeklyReportKpis.builder()
                     .weekStart("2026-07-13").weekEnd("2026-07-19")
                     .previousWeekStart("2026-07-06").previousWeekEnd("2026-07-12")
                     .build();
 
-            Path pdf = weekly.generate(sparse, 5521L, null, SO, WEEKLY_SO_LAYOUT,
+            Path pdf = weekly.generate(sparse, 5521L, null, SO, noPhone,
                     List.of(), List.of(), List.of(), null);
 
             assertMatchesSnapshot("W2-weekly-so-empty", pdf);

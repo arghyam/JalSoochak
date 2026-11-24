@@ -1,15 +1,21 @@
 package org.arghyam.jalsoochak.tenant.service;
 
+import org.arghyam.jalsoochak.tenant.enums.reportlayout.ReportKind;
 import org.arghyam.jalsoochak.tenant.event.DailyReportRequestEvent;
 import org.arghyam.jalsoochak.tenant.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.tenant.repository.NudgeRepository;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.util.ReflectionUtils;
@@ -19,9 +25,12 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -38,6 +47,9 @@ class DailySituationReportSchedulerServiceTest {
 
     @Mock
     private KafkaProducer kafkaProducer;
+
+    @Mock
+    private TenantConfigService tenantConfigService;
 
     @InjectMocks
     private DailySituationReportSchedulerService service;
@@ -155,6 +167,69 @@ class DailySituationReportSchedulerServiceTest {
     }
 
     @Test
+    void sendsToTheRolesTheTenantConfigLists_insteadOfTheEnvRoles() {
+        when(tenantConfigService.findReportRecipientRoles(TENANT, ReportKind.DAILY))
+                .thenReturn(Optional.of(List.of("SUB_DIVISIONAL_OFFICER")));
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER"))
+                .thenReturn(List.of(20L));
+        when(nudgeRepository.findSubordinateSectionOfficerIds(SCHEMA, 20L)).thenReturn(List.of(11L, 12L));
+
+        List<ILoggingEvent> logged = capturingLogs(
+                () -> service.processDailyReportsForTenant(SCHEMA, TENANT, RUN_DATE));
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
+        DailyReportRequestEvent event = (DailyReportRequestEvent) captor.getValue();
+        assertThat(event.getOfficerUserType()).isEqualTo("SUB_DIVISIONAL_OFFICER");
+        assertThat(event.getSubordinateOfficerUserIds()).containsExactly(11L, 12L);
+        // The env lists Section Officers too; the tenant's config leaves them out.
+        verify(nudgeRepository, never()).findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER");
+        assertThat(logged).anySatisfy(e -> assertThat(e.getFormattedMessage())
+                .contains("roles=[SUB_DIVISIONAL_OFFICER]", "rolesSource=config"));
+    }
+
+    @Test
+    void keepsTheOrderOfTheTenantConfigsRoles() {
+        when(tenantConfigService.findReportRecipientRoles(TENANT, ReportKind.DAILY))
+                .thenReturn(Optional.of(List.of("SUB_DIVISIONAL_OFFICER", "SECTION_OFFICER")));
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER"))
+                .thenReturn(List.of());
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
+                .thenReturn(List.of());
+
+        service.processDailyReportsForTenant(SCHEMA, TENANT, RUN_DATE);
+
+        InOrder inOrder = inOrder(nudgeRepository);
+        inOrder.verify(nudgeRepository).findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER");
+        inOrder.verify(nudgeRepository).findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER");
+    }
+
+    @Test
+    void publishesNothing_whenTheTenantConfigListsNoRoles() {
+        when(tenantConfigService.findReportRecipientRoles(TENANT, ReportKind.DAILY))
+                .thenReturn(Optional.of(List.of()));
+
+        service.processDailyReportsForTenant(SCHEMA, TENANT, RUN_DATE);
+
+        verifyNoInteractions(nudgeRepository, kafkaProducer);
+    }
+
+    @Test
+    void usesTheEnvRoles_whenTheTenantConfigListsNone() {
+        when(tenantConfigService.findReportRecipientRoles(TENANT, ReportKind.DAILY)).thenReturn(Optional.empty());
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
+                .thenReturn(List.of());
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER"))
+                .thenReturn(List.of());
+
+        List<ILoggingEvent> logged = capturingLogs(
+                () -> service.processDailyReportsForTenant(SCHEMA, TENANT, RUN_DATE));
+
+        assertThat(logged).anySatisfy(e -> assertThat(e.getFormattedMessage())
+                .contains("roles=[SECTION_OFFICER, SUB_DIVISIONAL_OFFICER]", "rolesSource=env"));
+    }
+
+    @Test
     void publishesNothingWhenNoOfficers() {
         when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
                 .thenReturn(List.of());
@@ -164,5 +239,19 @@ class DailySituationReportSchedulerServiceTest {
         service.processDailyReportsForTenant(SCHEMA, TENANT, RUN_DATE);
 
         verifyNoInteractions(kafkaProducer);
+    }
+
+    private static List<ILoggingEvent> capturingLogs(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(DailySituationReportSchedulerService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+        return appender.list;
     }
 }

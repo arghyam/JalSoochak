@@ -10,9 +10,10 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.report.DefaultReportLayouts;
-import org.arghyam.jalsoochak.message.report.ReportKind;
-import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
+import org.arghyam.jalsoochak.message.report.ResolvedReportLayout;
+import org.arghyam.jalsoochak.message.report.catalog.ReportKind;
 import org.arghyam.jalsoochak.message.report.render.LayoutPdfRenderer;
+import org.arghyam.jalsoochak.message.report.render.ReportFormats;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -32,8 +33,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class DailyReportPdfServiceTest {
 
-    private static final ReportLayout LAYOUT = new DefaultReportLayouts(new ObjectMapper())
-            .builtIn(ReportKind.DAILY, "SECTION_OFFICER").orElseThrow();
+    /** The built-in layout with the settings a tenant without its own config gets. */
+    private static final ResolvedReportLayout LAYOUT = new ResolvedReportLayout(
+            new DefaultReportLayouts(new ObjectMapper()).builtIn(ReportKind.DAILY, "SECTION_OFFICER").orElseThrow(),
+            ReportFormats.defaults(), "https://jalsoochak.jjmbrain.in/staff/", "919999999999");
 
     @TempDir
     Path tempDir;
@@ -44,8 +47,6 @@ class DailyReportPdfServiceTest {
     void setUp() {
         service = new DailyReportPdfService(new LayoutPdfRenderer());
         ReflectionTestUtils.setField(service, "reportDir", tempDir.toString() + "/");
-        ReflectionTestUtils.setField(service, "dashboardUrl", "https://jalsoochak.jjmbrain.in/staff/");
-        ReflectionTestUtils.setField(service, "supportPhone", "919999999999");
     }
 
     private DailyReportKpis sampleKpis() {

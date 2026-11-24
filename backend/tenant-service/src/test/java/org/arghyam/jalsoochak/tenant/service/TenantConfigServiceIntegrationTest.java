@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.tenant.service;
 
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
+import org.arghyam.jalsoochak.tenant.enums.reportlayout.ReportKind;
 import org.arghyam.jalsoochak.tenant.service.PiiEncryptionService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -168,11 +171,52 @@ class TenantConfigServiceIntegrationTest {
         assertThat(cfg1.getLevel2Days()).isEqualTo(7); // default
     }
 
+    // ── findReportRecipientRoles ────────────────────────────────────────────────
+
+    private static final String REPORT_LAYOUT_KEY = "SITUATION_REPORT_LAYOUT";
+
+    @Test
+    void findReportRecipientRoles_readsTheStoredRolesInDocumentOrder() {
+        insertConfig(1, REPORT_LAYOUT_KEY, "{\"version\":1,\"weekly\":{\"roles\":{"
+                + "\"SUB_DIVISIONAL_OFFICER\":{\"useDefault\":true},\"SECTION_OFFICER\":{\"useDefault\":true}}}}");
+
+        assertThat(tenantConfigService.findReportRecipientRoles(1, ReportKind.WEEKLY))
+                .contains(List.of("SUB_DIVISIONAL_OFFICER", "SECTION_OFFICER"));
+        assertThat(tenantConfigService.findReportRecipientRoles(2, ReportKind.WEEKLY)).isEmpty();
+    }
+
+    @Test
+    void findReportRecipientRoles_ignoresASoftDeletedRow_evenWhenItIsNewer() {
+        // The same row message-service draws the layout from, so recipients and layouts can't disagree.
+        insertConfig(1, REPORT_LAYOUT_KEY,
+                "{\"version\":1,\"daily\":{\"roles\":{\"SECTION_OFFICER\":{\"useDefault\":true}}}}");
+        insertSoftDeletedConfig(1, REPORT_LAYOUT_KEY,
+                "{\"version\":1,\"daily\":{\"roles\":{\"SUB_DIVISIONAL_OFFICER\":{\"layout\":{}}}}}");
+
+        assertThat(tenantConfigService.findReportRecipientRoles(1, ReportKind.DAILY))
+                .contains(List.of("SECTION_OFFICER"));
+    }
+
+    @Test
+    void findReportRecipientRoles_isEmpty_whenTheOnlyRowIsSoftDeleted() {
+        insertSoftDeletedConfig(1, REPORT_LAYOUT_KEY,
+                "{\"version\":1,\"daily\":{\"roles\":{\"SECTION_OFFICER\":{\"useDefault\":true}}}}");
+
+        assertThat(tenantConfigService.findReportRecipientRoles(1, ReportKind.DAILY)).isEmpty();
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────
 
     private void insertConfig(int tenantId, String key, String value) {
         jdbcTemplate.update(
                 "INSERT INTO common_schema.tenant_config_master_table (tenant_id, config_key, config_value) VALUES (?, ?, ?)",
+                tenantId, key, value);
+    }
+
+    private void insertSoftDeletedConfig(int tenantId, String key, String value) {
+        jdbcTemplate.update(
+                "INSERT INTO common_schema.tenant_config_master_table (tenant_id, config_key, config_value,"
+                        + " updated_at, deleted_at) VALUES (?, ?, ?, NOW() + INTERVAL '1 hour', NOW())",
                 tenantId, key, value);
     }
 }

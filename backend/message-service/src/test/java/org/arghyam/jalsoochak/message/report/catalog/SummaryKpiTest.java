@@ -2,7 +2,6 @@ package org.arghyam.jalsoochak.message.report.catalog;
 
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
-import org.arghyam.jalsoochak.message.report.ReportKind;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

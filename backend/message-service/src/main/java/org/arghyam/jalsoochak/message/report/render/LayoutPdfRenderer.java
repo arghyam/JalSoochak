@@ -20,10 +20,8 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.Predicate;
 
 import static org.arghyam.jalsoochak.message.report.render.ReportPdfCanvas.BLANK_LINE;
@@ -61,7 +59,7 @@ public class LayoutPdfRenderer {
             prepare(layout.sections().get(i), i, content).ifPresent(sections::add);
         }
 
-        try (ReportPdfCanvas canvas = new ReportPdfCanvas(doc, negativeLabels(layout, content))) {
+        try (ReportPdfCanvas canvas = new ReportPdfCanvas(doc)) {
             canvas.newPage();
             for (HeaderElement element : layout.header()) {
                 drawHeader(canvas, element, content);
@@ -72,7 +70,8 @@ public class LayoutPdfRenderer {
                 canvas.sectionTitle(layout.numberSections() ? number + ". " + section.title() : section.title());
                 Table table = section.table();
                 canvas.drawTable(table.widths(), table.header(), table.rows(), table.style().bodyFontSize(),
-                        table.style().headerFontSize(), table.style().cellPad(), table.centred());
+                        table.style().headerFontSize(), table.style().cellPad(), table.centred(),
+                        table.invertedTrend());
                 for (String footnote : section.footnotes()) {
                     canvas.footnote(footnote);
                 }
@@ -156,7 +155,9 @@ public class LayoutPdfRenderer {
         }
 
         List<String[]> cells = new ArrayList<>();
-        for (SummaryRowSpec row : rows) {
+        boolean[] invertedTrend = new boolean[rows.size()];
+        for (int r = 0; r < rows.size(); r++) {
+            SummaryRowSpec row = rows.get(r);
             String[] cell = new String[columns.size()];
             for (int c = 0; c < cell.length; c++) {
                 SummaryColumn field = columns.get(c).field();
@@ -165,10 +166,11 @@ public class LayoutPdfRenderer {
                         : content.summaryCell(row.kpi(), row.display(), field);
             }
             cells.add(cell);
+            invertedTrend[r] = row.kpi().negative();
         }
         return Optional.of(new Table(TableStyle.widths(columns, SummaryColumn::defaultWeight),
                 header(columns, content), cells, TableStyle.summary(content.kind()),
-                TableStyle.summaryCentring(columns)));
+                TableStyle.summaryCentring(columns), invertedTrend));
     }
 
     private static Optional<Table> schemeList(ReportSection.SchemeListSection section, int index,
@@ -198,7 +200,8 @@ public class LayoutPdfRenderer {
             cells.add(cell);
         }
         return Optional.of(new Table(TableStyle.widths(columns, SchemeColumn::defaultWeight),
-                header(columns, content), cells, TableStyle.list(columns.size()), new boolean[columns.size()]));
+                header(columns, content), cells, TableStyle.list(columns.size()), new boolean[columns.size()],
+                new boolean[cells.size()]));
     }
 
     private static Optional<Table> officerPerformance(ReportSection.OfficerPerformanceSection section, int index,
@@ -227,7 +230,7 @@ public class LayoutPdfRenderer {
         }
         return Optional.of(new Table(TableStyle.widths(columns, OfficerColumn::defaultWeight),
                 header(columns, content), cells, TableStyle.list(columns.size()),
-                TableStyle.officerCentring(columns)));
+                TableStyle.officerCentring(columns), new boolean[cells.size()]));
     }
 
     /**
@@ -247,24 +250,6 @@ public class LayoutPdfRenderer {
         }
         row[at] = text;
         return row;
-    }
-
-    /**
-     * The resolved labels of the summary rows whose KPI is negative, i.e. a rise is bad. The canvas
-     * finds a trend cell's row by its label, and draws a negative KPI's up arrow red.
-     */
-    static Set<String> negativeLabels(ReportLayout layout, ReportContent content) {
-        Set<String> labels = new HashSet<>();
-        for (ReportSection section : layout.sections()) {
-            if (section instanceof ReportSection.SummarySection summary) {
-                for (SummaryRowSpec row : summary.rows()) {
-                    if (row.kpi() != null && row.kpi().negative() && row.kpi().availableIn(content.kind())) {
-                        labels.add(content.resolve(row.label()));
-                    }
-                }
-            }
-        }
-        return Set.copyOf(labels);
     }
 
     private static <F extends Enum<F>> List<ColumnSpec<F>> drawableColumns(List<ColumnSpec<F>> columns,
@@ -296,9 +281,13 @@ public class LayoutPdfRenderer {
     /**
      * A table ready to draw.
      *
-     * @param widths  in points, summing to the content width
-     * @param centred per column
+     * @param widths        in points, summing to the content width
+     * @param centred       per column
+     * @param invertedTrend per row: whether the row's KPI is negative (a rise is bad), so the canvas
+     *                      draws its up arrow red. Taken from the KPI, never the label, which two rows
+     *                      may resolve alike
      */
-    record Table(float[] widths, String[] header, List<String[]> rows, TableStyle style, boolean[] centred) {
+    record Table(float[] widths, String[] header, List<String[]> rows, TableStyle style, boolean[] centred,
+                 boolean[] invertedTrend) {
     }
 }

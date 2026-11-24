@@ -2,6 +2,8 @@ package org.arghyam.jalsoochak.message.report;
 
 import org.arghyam.jalsoochak.message.report.catalog.OfficerColumn;
 import org.arghyam.jalsoochak.message.report.catalog.Placeholder;
+import org.arghyam.jalsoochak.message.report.catalog.ReportKind;
+import org.arghyam.jalsoochak.message.report.catalog.ReportRole;
 import org.arghyam.jalsoochak.message.report.catalog.SchemeColumn;
 import org.arghyam.jalsoochak.message.report.catalog.SchemeList;
 import org.arghyam.jalsoochak.message.report.catalog.SummaryColumn;
@@ -163,7 +165,7 @@ final class LayoutSanityCheck {
                 }
             }
             requiredText(rowPath + ".label", row.label());
-            // The trend colouring finds a negative KPI's row by its label.
+            // Two rows labelled alike would read as one KPI shown twice.
             if (row.label() != null && !labels.add(row.label())) {
                 problem(rowPath + ".label", "'" + row.label() + "' is already used in this summary");
             }

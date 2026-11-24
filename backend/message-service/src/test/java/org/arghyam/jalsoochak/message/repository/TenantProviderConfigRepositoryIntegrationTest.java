@@ -233,6 +233,15 @@ class TenantProviderConfigRepositoryIntegrationTest {
     }
 
     @Test
+    @DisplayName("a null settings row reads as empty rather than throwing")
+    void nullSettingsReadAsEmpty() {
+        // config_value is nullable, and a null must cost the tenant its own provider, not the message.
+        writeConfig(TENANT_ID, "EMAIL_PROVIDER_SETTINGS", null);
+
+        assertThat(repository.findEmailSettings(TENANT_ID)).isEmpty();
+    }
+
+    @Test
     @DisplayName("an unknown provider parses to null rather than failing the row")
     void unknownProviderParsesToNull() {
         // A settings row written by a newer tenant-service. The row still parses, so the fallback
@@ -319,6 +328,14 @@ class TenantProviderConfigRepositoryIntegrationTest {
     @DisplayName("a malformed allowlist allows nothing")
     void malformedAllowlistAllowsNothing() {
         writeConfig(0, "MESSAGING_PROVIDER_ALLOWED_HOSTS", "{not json");
+
+        assertThat(repository.findAllowedHosts().allowsSmtpHost("smtp.mp.gov.in")).isFalse();
+    }
+
+    @Test
+    @DisplayName("a null allowlist allows nothing")
+    void nullAllowlistAllowsNothing() {
+        writeConfig(0, "MESSAGING_PROVIDER_ALLOWED_HOSTS", null);
 
         assertThat(repository.findAllowedHosts().allowsSmtpHost("smtp.mp.gov.in")).isFalse();
     }

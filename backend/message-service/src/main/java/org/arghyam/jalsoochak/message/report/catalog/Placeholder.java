@@ -1,7 +1,5 @@
 package org.arghyam.jalsoochak.message.report.catalog;
 
-import org.arghyam.jalsoochak.message.report.ReportKind;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;

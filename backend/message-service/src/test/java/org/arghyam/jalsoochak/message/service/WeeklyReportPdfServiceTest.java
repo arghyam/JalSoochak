@@ -8,9 +8,10 @@ import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
 import org.arghyam.jalsoochak.message.report.DefaultReportLayouts;
-import org.arghyam.jalsoochak.message.report.ReportKind;
-import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
+import org.arghyam.jalsoochak.message.report.ResolvedReportLayout;
+import org.arghyam.jalsoochak.message.report.catalog.ReportKind;
 import org.arghyam.jalsoochak.message.report.render.LayoutPdfRenderer;
+import org.arghyam.jalsoochak.message.report.render.ReportFormats;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -47,13 +48,12 @@ class WeeklyReportPdfServiceTest {
     void setUp() {
         service = new WeeklyReportPdfService(new LayoutPdfRenderer());
         ReflectionTestUtils.setField(service, "reportDir", tempDir.toString() + "/");
-        ReflectionTestUtils.setField(service, "dashboardUrl", "https://jalsoochak.jjmbrain.in/staff/");
-        ReflectionTestUtils.setField(service, "supportPhone", "919999999999");
     }
 
-    /** The built-in weekly layout for the role, as the router passes it. */
-    private static ReportLayout layout(String role) {
-        return LAYOUTS.builtIn(ReportKind.WEEKLY, role).orElseThrow();
+    /** The built-in weekly layout for the role, as the router passes it to a tenant without its own config. */
+    private static ResolvedReportLayout layout(String role) {
+        return new ResolvedReportLayout(LAYOUTS.builtIn(ReportKind.WEEKLY, role).orElseThrow(),
+                ReportFormats.defaults(), "https://jalsoochak.jjmbrain.in/staff/", "919999999999");
     }
 
     private WeeklyReportKpis kpis(int supplyingThisWeek, int supplyingLastWeek) {

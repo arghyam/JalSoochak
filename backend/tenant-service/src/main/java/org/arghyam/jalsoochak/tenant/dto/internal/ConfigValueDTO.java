@@ -26,5 +26,6 @@ public sealed interface ConfigValueDTO permits
         EmailProviderConfigDTO,
         SmsProviderConfigDTO,
         MessagingAllowedHostsConfigDTO,
-        ManualReadingMaxValueConfigDTO {
+        ManualReadingMaxValueConfigDTO,
+        SituationReportLayoutConfigDTO {
 }

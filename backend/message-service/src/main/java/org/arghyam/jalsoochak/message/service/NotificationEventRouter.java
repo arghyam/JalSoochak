@@ -28,8 +28,10 @@ import org.arghyam.jalsoochak.message.ledger.LedgerOutcome;
 import org.arghyam.jalsoochak.message.ledger.LedgerRef;
 import org.arghyam.jalsoochak.message.ledger.NotificationLedger;
 import org.arghyam.jalsoochak.message.ledger.NotificationType;
-import org.arghyam.jalsoochak.message.report.DefaultReportLayouts;
-import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
+import org.arghyam.jalsoochak.message.report.ReportDataNeeds;
+import org.arghyam.jalsoochak.message.report.ReportLayoutResolver;
+import org.arghyam.jalsoochak.message.report.ResolvedReportLayout;
+import org.arghyam.jalsoochak.message.report.catalog.SchemeList;
 import org.arghyam.jalsoochak.message.storage.ReportPublisher;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -141,7 +143,7 @@ public class NotificationEventRouter {
     private final EscalationPdfService escalationPdfService;
     private final DailyReportPdfService dailyReportPdfService;
     private final WeeklyReportPdfService weeklyReportPdfService;
-    private final DefaultReportLayouts defaultReportLayouts;
+    private final ReportLayoutResolver reportLayoutResolver;
     private final ReportPublisher reportPublisher;
     private final StorageProperties storageProperties;
     private final MessageTemplateService messageTemplateService;
@@ -1174,15 +1176,15 @@ public class NotificationEventRouter {
         log.info("[Router/DAILY_REPORT] corr={} received: tenant={} officer={} role={}",
                 corr, tenantId, officerUserId, role);
 
-        // The daily report is a Section Officer product now; SDOs are served by the weekly one, so they
-        // have no daily layout. This still has to be checked rather than assumed: events published
-        // before the upgrade can be sitting in the topic, and an SDO's queued daily report must be
-        // dropped, not rendered into a layout that does not describe their command.
-        Optional<ReportLayout> layout =
-                defaultReportLayouts.builtIn(org.arghyam.jalsoochak.message.report.ReportKind.DAILY, officerUserType);
+        // Checked before any PII lookup. A role with no daily layout gets no daily report: without a
+        // tenant config that is a Sub-Divisional Officer (served by the weekly one), with one it is any
+        // role the config does not list. It has to be checked rather than assumed, since events
+        // published before a config change can still be sitting in the topic.
+        Optional<ResolvedReportLayout> layout = reportLayoutResolver.resolve(
+                tenantId, org.arghyam.jalsoochak.message.report.catalog.ReportKind.DAILY, officerUserType);
         if (layout.isEmpty()) {
-            log.info("[Router/DAILY_REPORT] corr={} result=SKIPPED_SDO_DAILY_RETIRED role={} tenant={} officer={}"
-                            + " — SDOs receive the weekly report instead",
+            log.info("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_LAYOUT role={} tenant={} officer={}"
+                            + " — no daily report layout for this role",
                     corr, role, tenantId, officerUserId);
             return;
         }
@@ -1231,8 +1233,12 @@ public class NotificationEventRouter {
         List<ReportSchemeRow> anomalyRows;
         java.nio.file.Path localPath;
         try {
-            noSupplyRows = buildSchemeRows(tenantSchema, kpis.getNoSupplySchemeIds(), false);
-            anomalyRows = buildAnomalyRows(tenantSchema, kpis);
+            // Only the lists the layout draws are resolved, with only the detail their columns show.
+            ReportDataNeeds needs = layout.get().needs();
+            noSupplyRows = schemeRows(tenantSchema, kpis.getNoSupplySchemeIds(), needs, SchemeList.NO_SUPPLY);
+            anomalyRows = needs.schemeList(SchemeList.ANOMALIES)
+                    .map(detail -> buildAnomalyRows(tenantSchema, kpis, detail))
+                    .orElse(List.of());
             localPath = dailyReportPdfService.generate(
                     kpis, officerUserId, officerName, officerUserType, layout.get(), noSupplyRows, anomalyRows);
         } catch (Exception generateEx) {
@@ -1317,10 +1323,16 @@ public class NotificationEventRouter {
                     + " (non-retryable)", corr, role, tenantId, officerUserId);
             return;
         }
-        // Every role has a built-in weekly layout: an SDO gets the SDO one, anyone else the SO one.
-        ReportLayout layout = defaultReportLayouts
-                .builtIn(org.arghyam.jalsoochak.message.report.ReportKind.WEEKLY, officerUserType)
-                .orElseThrow();
+        // Without a tenant config every role has a built-in weekly layout; with one, only the roles it lists.
+        Optional<ResolvedReportLayout> resolved = reportLayoutResolver.resolve(
+                tenantId, org.arghyam.jalsoochak.message.report.catalog.ReportKind.WEEKLY, officerUserType);
+        if (resolved.isEmpty()) {
+            log.info("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_NO_LAYOUT role={} tenant={} officer={}"
+                            + " — no weekly report layout for this role",
+                    corr, role, tenantId, officerUserId);
+            return;
+        }
+        ResolvedReportLayout layout = resolved.get();
 
         LedgerEntry.LedgerEntryBuilder entry = reportEntry(NotificationType.WEEKLY_REPORT, "WEEKLY_REPORT_KPIS",
                 tenantSchema, tenantId, officerUserId, role, corr, LocalDate.parse(kpis.getWeekStart()));
@@ -1346,20 +1358,20 @@ public class NotificationEventRouter {
         }
         LedgerRef ref = ledger.open(entry.contactRef(contactId > 0 ? String.valueOf(contactId) : null).build());
 
-        boolean sdo = "SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType);
+        // Only what the layout draws is resolved: the built-in SO layout has no officer table, and the
+        // SDO one no 1-3 day list, so resolving those would be several queries for rows nobody sees.
+        ReportDataNeeds needs = layout.needs();
         List<ReportSchemeRow> noSupplyRows;
         List<ReportSchemeRow> lowSupplyDaysRows;
         List<ReportSchemeRow> lowLpcdRows;
         List<WeeklyReportOfficerRow> officerRows;
         java.nio.file.Path localPath;
         try {
-            noSupplyRows = buildSchemeRows(tenantSchema, kpis.getNoSupplySchemeIds(), sdo);
-            // The 1-3 day band is a Section Officer section only; resolving it for an SDO would be
-            // several queries for rows nobody draws.
-            lowSupplyDaysRows = sdo ? List.of()
-                    : buildSchemeRows(tenantSchema, kpis.getLowSupplyDaysSchemeIds(), false);
-            lowLpcdRows = buildSchemeRows(tenantSchema, kpis.getLowLpcdSchemeIds(), sdo);
-            officerRows = sdo ? buildWeeklyOfficerRows(tenantSchema, kpis) : List.of();
+            noSupplyRows = schemeRows(tenantSchema, kpis.getNoSupplySchemeIds(), needs, SchemeList.NO_SUPPLY);
+            lowSupplyDaysRows = schemeRows(tenantSchema, kpis.getLowSupplyDaysSchemeIds(), needs,
+                    SchemeList.LOW_SUPPLY_DAYS);
+            lowLpcdRows = schemeRows(tenantSchema, kpis.getLowLpcdSchemeIds(), needs, SchemeList.LOW_LPCD);
+            officerRows = needs.officerRows() ? buildWeeklyOfficerRows(tenantSchema, kpis) : List.of();
             localPath = weeklyReportPdfService.generate(kpis, officerUserId, officerName, officerUserType,
                     layout, noSupplyRows, lowSupplyDaysRows, lowLpcdRows, officerRows);
         } catch (Exception generateEx) {
@@ -1554,22 +1566,30 @@ public class NotificationEventRouter {
     }
 
     /**
-     * Resolves each analytics Priority Action (schemeId + issue + daysNoSupply) into a printable row
-     * by looking up the scheme's name + IMIS id and its pump operators (Jal Mitras) from the
-     * operational schema. Schemes that can't be resolved are still shown with the ids we have.
+     * The rows of one scheme list, resolved with the detail the layout's columns show; empty when the
+     * layout does not draw the list, which then costs no query.
      */
+    private List<ReportSchemeRow> schemeRows(String tenantSchema, List<Integer> schemeIds, ReportDataNeeds needs,
+                                             SchemeList list) {
+        return needs.schemeList(list)
+                .map(detail -> buildSchemeRows(tenantSchema, schemeIds, detail))
+                .orElse(List.of());
+    }
+
     /**
      * Resolves analytics scheme ids into printable rows: scheme name, IMIS id, Jal Mitra contacts,
-     * and — for the SDO report — the owning Section Officer and the villages the scheme serves.
+     * and — when {@code detail} asks for them — the owning Section Officers and the villages the
+     * scheme serves.
      *
-     * <p>Every lookup is batched over the whole id set (three or five queries for the section, not
+     * <p>Every lookup is batched over the whole id set (two to four queries for the section, not
      * per row): a Section Officer with two hundred schemes with no supply by 16:00 is an ordinary
      * afternoon, and a per-row lookup would turn that into six hundred round trips.</p>
      *
      * <p>A scheme whose name cannot be resolved still produces a row, labelled with its id. Dropping
      * it would silently shorten a list whose whole purpose is to be acted on.</p>
      */
-    private List<ReportSchemeRow> buildSchemeRows(String tenantSchema, List<Integer> schemeIds, boolean withSdoDetail) {
+    private List<ReportSchemeRow> buildSchemeRows(String tenantSchema, List<Integer> schemeIds,
+                                                  ReportDataNeeds.SchemeDetail detail) {
         if (schemeIds == null || schemeIds.isEmpty()) {
             return List.of();
         }
@@ -1577,9 +1597,9 @@ public class NotificationEventRouter {
         Map<Integer, SchemeLabel> labels = resolveSchemeLabels(tenantSchema, ids);
         Map<Integer, List<OperatorContact>> operators = resolvePumpOperators(tenantSchema, ids);
         Map<Integer, List<OperatorContact>> sectionOfficers =
-                withSdoDetail ? resolveSectionOfficers(tenantSchema, ids) : Map.of();
+                detail.sectionOfficers() ? resolveSectionOfficers(tenantSchema, ids) : Map.of();
         Map<Integer, List<String>> villages =
-                withSdoDetail ? resolveVillages(tenantSchema, ids) : Map.of();
+                detail.villages() ? resolveVillages(tenantSchema, ids) : Map.of();
 
         List<ReportSchemeRow> rows = new ArrayList<>();
         for (Integer schemeId : ids) {
@@ -1603,7 +1623,8 @@ public class NotificationEventRouter {
      * three different problems is three lines. The scheme lookups are batched once across the whole
      * section even though a scheme may appear on several rows.
      */
-    private List<ReportSchemeRow> buildAnomalyRows(String tenantSchema, DailyReportKpis kpis) {
+    private List<ReportSchemeRow> buildAnomalyRows(String tenantSchema, DailyReportKpis kpis,
+                                                   ReportDataNeeds.SchemeDetail detail) {
         List<DailyReportKpis.SchemeAnomaly> anomalies = kpis.getSchemeAnomalies();
         if (anomalies == null || anomalies.isEmpty()) {
             return List.of();
@@ -1611,7 +1632,7 @@ public class NotificationEventRouter {
         List<Integer> distinctIds = anomalies.stream().map(DailyReportKpis.SchemeAnomaly::getSchemeId)
                 .distinct().toList();
         Map<Integer, ReportSchemeRow> byScheme = new LinkedHashMap<>();
-        for (ReportSchemeRow row : buildSchemeRows(tenantSchema, distinctIds, false)) {
+        for (ReportSchemeRow row : buildSchemeRows(tenantSchema, distinctIds, detail)) {
             byScheme.put(row.getSchemeId(), row);
         }
 
@@ -1625,8 +1646,11 @@ public class NotificationEventRouter {
                     .schemeId(base.getSchemeId())
                     .schemeName(base.getSchemeName())
                     .imisId(base.getImisId())
+                    .villageNames(base.getVillageNames())
                     .jalMitraNames(base.getJalMitraNames())
                     .jalMitraMobiles(base.getJalMitraMobiles())
+                    .sectionOfficerNames(base.getSectionOfficerNames())
+                    .sectionOfficerMobiles(base.getSectionOfficerMobiles())
                     .anomalyType(AnomalyLabels.label(anomaly.getType()))
                     .build());
         }

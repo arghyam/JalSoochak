@@ -9,8 +9,8 @@ import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.report.DefaultReportLayouts;
-import org.arghyam.jalsoochak.message.report.ReportKind;
 import org.arghyam.jalsoochak.message.report.catalog.OfficerColumn;
+import org.arghyam.jalsoochak.message.report.catalog.ReportKind;
 import org.arghyam.jalsoochak.message.report.catalog.SchemeColumn;
 import org.arghyam.jalsoochak.message.report.layout.ColumnSpec;
 import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -169,17 +170,59 @@ class LayoutPdfRendererTest {
     class TrendColouring {
 
         @Test
-        void invertsTheColourOfEveryNegativeKpiRowByItsResolvedLabel() {
+        void invertsEveryNegativeKpiRowOfTheBuiltInSummaries() {
             ReportLayout daily = LAYOUTS.builtIn(ReportKind.DAILY, "SECTION_OFFICER").orElseThrow();
             ReportLayout sdo = LAYOUTS.builtIn(ReportKind.WEEKLY, "SUB_DIVISIONAL_OFFICER").orElseThrow();
 
-            assertThat(LayoutPdfRenderer.negativeLabels(daily, daily(List.of()))).containsExactlyInAnyOrder(
+            assertThat(invertedLabels(daily, daily(List.of()))).containsExactlyInAnyOrder(
                     "Schemes Not having supplied Water (Till 16:00)",
                     "Number of HHs yet to get water supply",
                     "Number of Anomalous Submissions");
-            assertThat(LayoutPdfRenderer.negativeLabels(sdo, weekly())).containsExactlyInAnyOrder(
+            assertThat(invertedLabels(sdo, weekly())).containsExactlyInAnyOrder(
                     "Schemes Not Supplying Water (0 days in the week)",
                     "Schemes With Supply <=15 LPCD (average)");
+        }
+
+        @Test
+        void marksARowByItsKpiEvenWhenItsLabelResolvesLikeAnothers() {
+            // {weekStart} prints 13-Jul-2026, so both labels read the same: only the KPI tells them apart.
+            ReportSection summary = section("""
+                    {"type": "SUMMARY", "title": "Summary",
+                     "columns": [{"field": "LABEL", "label": "KPI"}, {"field": "TREND", "label": "Trend"}],
+                     "rows": [{"kpi": "SCHEMES_NOT_SUPPLYING", "label": "Schemes {weekStart}"},
+                              {"kpi": "SCHEMES_SUPPLYING", "label": "Schemes 13-Jul-2026"}]}""");
+
+            LayoutPdfRenderer.Table table = LayoutPdfRenderer.prepare(summary, 0, weekly()).orElseThrow().table();
+
+            assertThat(table.rows()).extracting(row -> row[0])
+                    .containsExactly("Schemes 13-Jul-2026", "Schemes 13-Jul-2026");
+            assertThat(table.invertedTrend()).containsExactly(true, false);
+        }
+
+        @Test
+        void neverInvertsAListRow() {
+            List<ReportSchemeRow> rows = List.of(ReportSchemeRow.builder().schemeId(7).schemeName("Rampur").build());
+
+            LayoutPdfRenderer.Table table =
+                    LayoutPdfRenderer.prepare(section(NO_SUPPLY_LIST), 0, daily(rows)).orElseThrow().table();
+
+            assertThat(table.invertedTrend()).containsExactly(false);
+        }
+
+        /** The first cell of every summary row the renderer marks as inverted. */
+        private List<String> invertedLabels(ReportLayout layout, ReportContent content) {
+            List<String> labels = new ArrayList<>();
+            for (ReportSection section : layout.sections()) {
+                if (section instanceof ReportSection.SummarySection) {
+                    LayoutPdfRenderer.Table table = LayoutPdfRenderer.prepare(section, 0, content).orElseThrow().table();
+                    for (int i = 0; i < table.rows().size(); i++) {
+                        if (table.invertedTrend()[i]) {
+                            labels.add(table.rows().get(i)[0]);
+                        }
+                    }
+                }
+            }
+            return labels;
         }
     }
 

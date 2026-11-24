@@ -9,6 +9,7 @@ import java.util.List;
 import org.arghyam.jalsoochak.tenant.dto.internal.ElmFormulaConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ManualReadingMaxValueConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.EmailProviderConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.SituationReportLayoutConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SmsProviderConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WhatsAppMessagesConfigDTO;
 import org.junit.jupiter.api.DisplayName;
@@ -161,6 +162,21 @@ class TenantConfigKeyEnumTest {
             assertThat(key.isPublic()).isFalse();
             // Optional: an unset channel has no limit, so existing tenants stay CONFIGURED.
             assertThat(key.isMandatory()).isFalse();
+            assertThat(key.isManagedValue()).isFalse();
+        }
+
+        @Test
+        @DisplayName("SITUATION_REPORT_LAYOUT is generic, private, optional and writable through PUT /config")
+        void situationReportLayout_hasExpectedFlags() {
+            TenantConfigKeyEnum key = TenantConfigKeyEnum.SITUATION_REPORT_LAYOUT;
+
+            assertThat(key.getType()).isEqualTo(TenantConfigKeyEnum.ConfigType.GENERIC);
+            assertThat(key.getDtoClass()).isEqualTo(SituationReportLayoutConfigDTO.class);
+            // Not public: it names who gets which report and carries the support phone.
+            assertThat(key.isPublic()).isFalse();
+            // Optional: without it a tenant gets today's reports, so existing tenants stay CONFIGURED.
+            assertThat(key.isMandatory()).isFalse();
+            // Written through the generic endpoint, which the API-only rollout relies on.
             assertThat(key.isManagedValue()).isFalse();
         }
 

@@ -2,6 +2,8 @@ package org.arghyam.jalsoochak.message.report;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.message.report.catalog.ReportKind;
+import org.arghyam.jalsoochak.message.report.catalog.ReportRole;
 import org.arghyam.jalsoochak.message.report.layout.ReportLayout;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;

@@ -28,6 +28,18 @@ public class WeeklyReportKpis {
     private String previousWeekStart;
     private String previousWeekEnd;
 
+    /**
+     * The average LPCD at or below which analytics counted a scheme as low-LPCD. {@code null} from an
+     * analytics-service that predates the field.
+     */
+    private Integer lowLpcdThreshold;
+
+    /**
+     * The supply-days bar analytics applied to {@link WeekKpis#schemesSupplying}. {@code null} from an
+     * analytics-service that predates the field.
+     */
+    private Integer minSupplyDays;
+
     private WeekKpis week;
     private WeekKpis previousWeek;
 
