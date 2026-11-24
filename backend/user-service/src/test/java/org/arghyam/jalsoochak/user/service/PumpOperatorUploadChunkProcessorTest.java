@@ -510,7 +510,8 @@ class PumpOperatorUploadChunkProcessorTest {
 
             verify(userTenantRepository, never()).updateUserLanguageId(anyString(), anyLong(), anyInt());
             verify(userLanguagePreferenceRepository, never()).setLanguageWhereUnset(anyString(), any(), any());
-            verifyOnboarded("1", List.of(), List.of("919876543214"));
+            verify(userEventPublisher, never()).publishPumpOperatorOnboardedAfterCommit(
+                    anyString(), any(), anyString(), anyList(), any(), anyList());
         }
 
         @Test
@@ -525,7 +526,7 @@ class PumpOperatorUploadChunkProcessorTest {
 
             verify(userTenantRepository).updateUserLanguageId(SCHEMA, 55L, 1);
             verify(userLanguagePreferenceRepository).setLanguageWhereUnset(SCHEMA, List.of("919876543214"), "English");
-            verifyOnboarded("1", List.of("919876543214"), List.of("919876543214"));
+            verifyOnboarded("1", List.of("919876543214"), List.of());
         }
 
         @Test
@@ -545,7 +546,7 @@ class PumpOperatorUploadChunkProcessorTest {
             verify(userTenantRepository, never()).updateUserLanguageId(SCHEMA, 55L, 1);
             verify(userTenantRepository).updateUserLanguageId(SCHEMA, 56L, 1);
             verify(userLanguagePreferenceRepository).setLanguageWhereUnset(SCHEMA, List.of("919876543215"), "English");
-            verifyOnboarded("1", List.of("919876543215"), List.of("919876543214", "919876543215"));
+            verifyOnboarded("1", List.of("919876543215"), List.of());
         }
 
         @Test
@@ -609,6 +610,106 @@ class PumpOperatorUploadChunkProcessorTest {
             when(userLanguagePreferenceRepository.findContactIdsWithLanguageOtherThan(SCHEMA, defaulted, "Punjabi"))
                     .thenReturn(Set.of("919876543211"));
             assertThat(reCheck.apply(defaulted)).containsExactly("919876543210");
+        }
+    }
+
+    // ── welcome message ───────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("welcome message")
+    class WelcomeMessage {
+
+        private static final String NEW_PHONE = "919876543210";
+        private static final String EXISTING_PHONE = "919876543214";
+
+        private void givenNewPumpOperator(String phone, long userId) {
+            when(userTenantRepository.findUserByPhone(SCHEMA, phone)).thenReturn(Optional.empty());
+            when(userTenantRepository.findUserByEmail(eq(SCHEMA), anyString())).thenReturn(Optional.empty());
+            when(userTenantRepository.createUser(eq(SCHEMA), anyString(), eq(10), anyString(),
+                    anyString(), eq(4), eq(phone), anyString(), eq(1L))).thenReturn(userId);
+        }
+
+        private TenantUserRecord pumpOperator(long userId, String phone) {
+            return new TenantUserRecord(
+                    userId, 10, phone, "po@test.com", 4L, "PUMP_OPERATOR", "Old Name", "kc-uuid-123", 1, null);
+        }
+
+        private void givenMappingsInserted(int count) {
+            int[] inserted = new int[count];
+            Arrays.fill(inserted, 1);
+            when(userUploadRepository.insertUserSchemeMappings(eq(SCHEMA), anyList(), anyInt())).thenReturn(inserted);
+        }
+
+        @Test
+        @DisplayName("welcomes a pump operator created in this upload")
+        void welcomesNewPumpOperator() {
+            givenNewPumpOperator(NEW_PHONE, 42L);
+            givenMappingsInserted(1);
+
+            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), LANGUAGE, 1,
+                    List.of(row(1, "Ram", "", "", "9876543210", "pump_operator", "SS-1")),
+                    schemeCache("SS-1", 100), new HashSet<>());
+
+            verifyOnboarded("1", List.of(NEW_PHONE), List.of(NEW_PHONE));
+        }
+
+        @Test
+        @DisplayName("does not welcome a pump operator who already existed, even on a new scheme")
+        void doesNotWelcomeExistingPumpOperator() {
+            when(userTenantRepository.findUserByPhone(SCHEMA, EXISTING_PHONE))
+                    .thenReturn(Optional.of(pumpOperator(55L, EXISTING_PHONE)));
+            when(userLanguagePreferenceRepository.findContactIdsWithLanguage(SCHEMA, Set.of(EXISTING_PHONE)))
+                    .thenReturn(Set.of(EXISTING_PHONE));
+            givenMappingsInserted(1);
+
+            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), LANGUAGE, 1,
+                    List.of(row(1, "Old", "", "", "9876543214", "pump_operator", "SS-NEW")),
+                    schemeCache("SS-NEW", 300), new HashSet<>());
+
+            verify(userEventPublisher, never()).publishPumpOperatorOnboardedAfterCommit(
+                    anyString(), any(), anyString(), anyList(), any(), anyList());
+        }
+
+        @Test
+        @DisplayName("welcomes only the new pump operators in a chunk that also re-uploads existing ones")
+        void welcomesOnlyNewPumpOperatorsInAMixedChunk() {
+            givenNewPumpOperator(NEW_PHONE, 42L);
+            when(userTenantRepository.findUserByPhone(SCHEMA, EXISTING_PHONE))
+                    .thenReturn(Optional.of(pumpOperator(55L, EXISTING_PHONE)));
+            when(userLanguagePreferenceRepository.findContactIdsWithLanguage(SCHEMA, Set.of(NEW_PHONE, EXISTING_PHONE)))
+                    .thenReturn(Set.of(EXISTING_PHONE));
+            givenMappingsInserted(2);
+
+            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), LANGUAGE, 1,
+                    List.of(row(1, "Old", "", "", "9876543214", "pump_operator", "SS-1"),
+                            row(2, "Ram", "", "", "9876543210", "pump_operator", "SS-1")),
+                    schemeCache("SS-1", 100), new HashSet<>());
+
+            verifyOnboarded("1", List.of(NEW_PHONE), List.of(NEW_PHONE));
+        }
+
+        @Test
+        @DisplayName("welcomes a new pump operator listed on several schemes once")
+        void welcomesNewPumpOperatorOnSeveralSchemesOnce() {
+            // The second row finds the operator the first row created.
+            when(userTenantRepository.findUserByPhone(SCHEMA, NEW_PHONE))
+                    .thenReturn(Optional.empty(), Optional.of(pumpOperator(42L, NEW_PHONE)));
+            when(userTenantRepository.findUserByEmail(eq(SCHEMA), anyString())).thenReturn(Optional.empty());
+            when(userTenantRepository.createUser(eq(SCHEMA), anyString(), eq(10), anyString(),
+                    anyString(), eq(4), eq(NEW_PHONE), anyString(), eq(1L))).thenReturn(42L);
+            givenMappingsInserted(2);
+            Map<String, Integer> schemeCache = new HashMap<>();
+            schemeCache.put("SS-A", 101);
+            schemeCache.put("SS-B", 102);
+
+            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), LANGUAGE, 1,
+                    List.of(row(1, "Ram", "", "", "9876543210", "pump_operator", "SS-A"),
+                            row(2, "Ram", "", "", "9876543210", "pump_operator", "SS-B")),
+                    schemeCache, new HashSet<>());
+
+            verify(userTenantRepository).createUser(eq(SCHEMA), anyString(), eq(10), anyString(),
+                    anyString(), eq(4), eq(NEW_PHONE), anyString(), eq(1L));
+            verifyOnboarded("1", List.of(NEW_PHONE), List.of(NEW_PHONE));
         }
     }
 

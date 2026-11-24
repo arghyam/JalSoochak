@@ -83,6 +83,7 @@ public class PumpOperatorUploadChunkProcessor {
         List<Long> userIdsForInsertRows = new ArrayList<>(rows.size());
         List<String> phonesForInsertRows = new ArrayList<>(rows.size());
         List<String> typesForInsertRows = new ArrayList<>(rows.size());
+        List<Boolean> createdForInsertRows = new ArrayList<>(rows.size());
         Set<Long> userIdsToReplace = new LinkedHashSet<>();
         Map<String, Long> pumpOperatorUserIds = new java.util.LinkedHashMap<>();
         Map<Long, UploadUserSnapshot> userSnapshots = new java.util.LinkedHashMap<>();
@@ -111,7 +112,8 @@ public class PumpOperatorUploadChunkProcessor {
                 UUID userUuid;
                 String userEmail;
                 String title = resolveTitle(row, typeKey, normalizedPhone);
-                if (user == null) {
+                boolean created = user == null;
+                if (created) {
                     String newUuid = java.util.UUID.randomUUID().toString();
                     String newEmail = uniqueEmail(schemaName, normalizedPhone, typeKey);
                     userId = userTenantRepository.createUser(
@@ -180,6 +182,7 @@ public class PumpOperatorUploadChunkProcessor {
                 userIdsForInsertRows.add(userId);
                 phonesForInsertRows.add(normalizedPhone);
                 typesForInsertRows.add(typeKey);
+                createdForInsertRows.add(created);
 
                 uploaded++;
             } catch (Exception ex) {
@@ -206,7 +209,8 @@ public class PumpOperatorUploadChunkProcessor {
                 Long uid = userIdsForInsertRows.get(i);
                 Integer sid = insertRows.get(i).schemeId();
                 schemeIdsByUser.computeIfAbsent(uid, k -> new LinkedHashSet<>()).add(sid);
-                if ("pump_operator".equals(typesForInsertRows.get(i))) {
+                // Welcome only operators this upload created: a re-upload re-inserts every mapping.
+                if ("pump_operator".equals(typesForInsertRows.get(i)) && createdForInsertRows.get(i)) {
                     phonesToNotify.add(phonesForInsertRows.get(i));
                 }
             }
