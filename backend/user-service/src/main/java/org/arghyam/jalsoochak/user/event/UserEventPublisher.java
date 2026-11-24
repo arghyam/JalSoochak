@@ -142,36 +142,49 @@ public class UserEventPublisher {
     }
 
     /**
-     * Publishes admin-triggered welcome-message events that should opt-in by phone.
+     * Publishes UPDATE_USER_LANGUAGE events immediately (no transaction coupling), keyed by the tenant code,
+     * so a SEND_WELCOME_MESSAGE_ADMIN published after them for the same tenant is handled after them.
+     */
+    public void publishLanguageUpdates(
+            String tenantCode,
+            Integer tenantId,
+            String whatsappLanguageId,
+            List<String> pumpOperatorPhones
+    ) {
+        List<List<String>> batches = partition(pumpOperatorPhones, MAX_PHONES_PER_EVENT);
+        if (batches.isEmpty()) {
+            return;
+        }
+        log.info("[user-events] language_update_publish count={} topic={} tenantCode={} tenantId={}"
+                        + " whatsappLanguageId={} phones={}",
+                batches.size(), COMMON_TOPIC, tenantCode, tenantId, whatsappLanguageId, pumpOperatorPhones.size());
+
+        String triggeredAt = Instant.now().truncatedTo(ChronoUnit.MILLIS).toString();
+        for (List<String> phones : batches) {
+            publishOnboardingEvent("UPDATE_USER_LANGUAGE", tenantCode, tenantId, triggeredAt,
+                    whatsappLanguageId, phones);
+        }
+    }
+
+    /**
+     * Publishes admin-triggered welcome-message events that should opt-in by phone, keyed by the tenant
+     * code, so they are handled after the language updates published before them for the same tenant.
      */
     public void publishAdminWelcomeMessages(
             String tenantCode,
             Integer tenantId,
             List<String> pumpOperatorPhones
     ) {
-        if (pumpOperatorPhones == null || pumpOperatorPhones.isEmpty()) {
+        List<List<String>> batches = partition(pumpOperatorPhones, MAX_PHONES_PER_EVENT);
+        if (batches.isEmpty()) {
             return;
         }
-        List<List<String>> batches = partition(pumpOperatorPhones, MAX_PHONES_PER_EVENT);
         log.info("[user-events] welcome_admin_publish count={} topic={} tenantCode={} tenantId={} phones={}",
                 batches.size(), COMMON_TOPIC, tenantCode, tenantId, pumpOperatorPhones.size());
 
         String triggeredAt = Instant.now().truncatedTo(ChronoUnit.MILLIS).toString();
         for (List<String> phones : batches) {
-            PumpOperatorMessagingEvent welcome = PumpOperatorMessagingEvent.builder()
-                    .eventType("SEND_WELCOME_MESSAGE_ADMIN")
-                    .tenantCode(tenantCode)
-                    .tenantId(tenantId)
-                    .triggeredAt(triggeredAt)
-                    .whatsappLanguageId(null)
-                    .pumpOperatorPhones(phones)
-                    .build();
-
-            boolean ok = kafkaProducer.publishJson(COMMON_TOPIC, welcome);
-            if (!ok) {
-                log.warn("[user-events] welcome_admin_publish_failed tenantCode={} tenantId={} phones={}",
-                        tenantCode, tenantId, phones.size());
-            }
+            publishOnboardingEvent("SEND_WELCOME_MESSAGE_ADMIN", tenantCode, tenantId, triggeredAt, null, phones);
         }
     }
 

@@ -83,6 +83,44 @@ class UserLanguagePreferenceRepositoryIntegrationTest extends AbstractPostgresIT
     }
 
     @Nested
+    @DisplayName("findLanguageValues")
+    class FindLanguageValues {
+
+        @Test
+        @DisplayName("returns each given contact's language, keyed as given")
+        void returnsLanguagesKeyedAsGiven() {
+            givenPreference("911111111111", "Hindi");
+            givenPreference("911111111112", "Punjabi");
+
+            assertThat(repo.findLanguageValues(SCHEMA,
+                    List.of("+91 11111-11111", "911111111112", "911111111113")))
+                    .containsOnly(Map.entry("+91 11111-11111", "Hindi"), Map.entry("911111111112", "Punjabi"));
+        }
+
+        @Test
+        @DisplayName("leaves out a blank or missing language, as the chatbot does")
+        void leavesOutBlankLanguages() {
+            givenPreference("911111111111", " ");
+            givenPreference("911111111112", null);
+
+            assertThat(repo.findLanguageValues(SCHEMA, List.of("911111111111", "911111111112"))).isEmpty();
+        }
+
+        @Test
+        @DisplayName("returns nothing for no contacts")
+        void noContacts() {
+            assertThat(repo.findLanguageValues(SCHEMA, List.of())).isEmpty();
+        }
+
+        @Test
+        @DisplayName("rejects a schema name that is not a tenant schema (never reaches SQL)")
+        void rejectsInvalidSchema() {
+            assertThatThrownBy(() -> repo.findLanguageValues("tenant_mp; DROP TABLE x", List.of("911111111111")))
+                    .hasMessageContaining("Invalid schema name");
+        }
+    }
+
+    @Nested
     @DisplayName("findContactIdsWithLanguageOtherThan")
     class FindContactIdsWithLanguageOtherThan {
 

@@ -316,38 +316,54 @@ class UserTenantRepositoryIntegrationTest {
         }
     }
 
-    // ── streamPhonesByRolesAndOnboardingWindow ────────────────────────────────
+    // ── streamUsersByRolesAndOnboardingWindow ────────────────────────────────
 
     @Nested
-    @DisplayName("streamPhonesByRolesAndOnboardingWindow")
-    class StreamPhones {
+    @DisplayName("streamUsersByRolesAndOnboardingWindow")
+    class StreamUsers {
+
+        private List<String> streamPhones(List<String> roles, Instant after, Instant before) {
+            List<String> phones = new ArrayList<>();
+            repo.streamUsersByRolesAndOnboardingWindow(SCHEMA, roles, after, before, row -> phones.add(row.phoneNumber()));
+            return phones;
+        }
 
         @Test
-        @DisplayName("streams phones for matching role")
-        void streamsMatchingPhones() {
-            insertUser("uuid-stream", "stream@mp.gov", "91XXXXXXXXXE", "Stream User", 3, "pwd");
+        @DisplayName("streams each matching user's id, decrypted phone and user type")
+        void streamsMatchingUsers() {
+            Long officerId = insertUser("uuid-stream", "stream@mp.gov", "91XXXXXXXXXE", "Stream User", 3, "pwd");
+            Long operatorId = insertUser("uuid-stream-po", "stream-po@mp.gov", "91XXXXXXXXXP", "Operator", 4, "pwd");
+            insertUser("uuid-stream-admin", "stream-admin@mp.gov", "91XXXXXXXXXA", "Admin", 2, "pwd");
 
-            List<String> phones = new ArrayList<>();
-            repo.streamPhonesByRolesAndOnboardingWindow(SCHEMA, List.of("section_officer"), null, null, phones::add);
+            List<UserPhoneRow> rows = new ArrayList<>();
+            repo.streamUsersByRolesAndOnboardingWindow(SCHEMA, List.of("section_officer", "PUMP_OPERATOR"),
+                    null, null, rows::add);
 
-            assertThat(phones).contains("91XXXXXXXXXE");
+            assertThat(rows).containsExactlyInAnyOrder(
+                    new UserPhoneRow(officerId, "91XXXXXXXXXE", "SECTION_OFFICER"),
+                    new UserPhoneRow(operatorId, "91XXXXXXXXXP", "PUMP_OPERATOR"));
+        }
+
+        @Test
+        @DisplayName("skips deleted users")
+        void skipsDeletedUsers() {
+            Long id = insertUser("uuid-stream-del", "stream-del@mp.gov", "91XXXXXXXXXD", "Deleted", 3, "pwd");
+            jdbc.update("UPDATE tenant_mp.user_table SET deleted_at = NOW() WHERE id = ?", id);
+
+            assertThat(streamPhones(List.of("section_officer"), null, null)).isEmpty();
         }
 
         @Test
         @DisplayName("does nothing for empty roles list")
         void emptyRoles() {
             insertUser("uuid-stream2", "stream2@mp.gov", "91XXXXXXXXXF", "No Role", 3, "pwd");
-            List<String> phones = new ArrayList<>();
-            repo.streamPhonesByRolesAndOnboardingWindow(SCHEMA, List.of(), null, null, phones::add);
-            assertThat(phones).isEmpty();
+            assertThat(streamPhones(List.of(), null, null)).isEmpty();
         }
 
         @Test
         @DisplayName("does nothing for null roles list")
         void nullRoles() {
-            List<String> phones = new ArrayList<>();
-            repo.streamPhonesByRolesAndOnboardingWindow(SCHEMA, null, null, null, phones::add);
-            assertThat(phones).isEmpty();
+            assertThat(streamPhones(null, null, null)).isEmpty();
         }
 
         @Test
@@ -363,8 +379,7 @@ class UserTenantRepositoryIntegrationTest {
                     Timestamp.from(futureOnboard), inWindowId);
 
             Instant threshold = Instant.now().plus(1, ChronoUnit.DAYS);
-            List<String> phones = new ArrayList<>();
-            repo.streamPhonesByRolesAndOnboardingWindow(SCHEMA, List.of("section_officer"), threshold, null, phones::add);
+            List<String> phones = streamPhones(List.of("section_officer"), threshold, null);
 
             assertThat(phones).contains("91XXXXXXXXXG2");
             assertThat(phones).doesNotContain("91XXXXXXXXXG");
@@ -383,8 +398,7 @@ class UserTenantRepositoryIntegrationTest {
                     Timestamp.from(pastOnboard), inWindowId);
 
             Instant threshold = Instant.now().minus(1, ChronoUnit.DAYS);
-            List<String> phones = new ArrayList<>();
-            repo.streamPhonesByRolesAndOnboardingWindow(SCHEMA, List.of("section_officer"), null, threshold, phones::add);
+            List<String> phones = streamPhones(List.of("section_officer"), null, threshold);
 
             assertThat(phones).contains("91XXXXXXXXXH2");
             assertThat(phones).doesNotContain("91XXXXXXXXXH");

@@ -85,19 +85,20 @@ class UserEventPublisherTest {
     class PublishAdminWelcomeMessages {
 
         @Test
-        @DisplayName("publishes SEND_WELCOME_MESSAGE_ADMIN event")
+        @DisplayName("publishes SEND_WELCOME_MESSAGE_ADMIN event keyed by tenant code")
         void publishesAdminWelcomeEvent() {
-            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), any())).thenReturn(true);
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("tr"), any())).thenReturn(true);
 
-            publisher.publishAdminWelcomeMessages("tr", 2, List.of("91987654321"));
+            publisher.publishAdminWelcomeMessages("tr", 2, List.of("91XXXXXXXXX1"));
 
             ArgumentCaptor<PumpOperatorMessagingEvent> captor =
                     ArgumentCaptor.forClass(PumpOperatorMessagingEvent.class);
-            verify(kafkaProducer).publishJson(eq(UserEventPublisher.COMMON_TOPIC), captor.capture());
+            verify(kafkaProducer).publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("tr"), captor.capture());
 
             assertThat(captor.getValue().getEventType()).isEqualTo("SEND_WELCOME_MESSAGE_ADMIN");
             assertThat(captor.getValue().getTenantCode()).isEqualTo("tr");
             assertThat(captor.getValue().getTenantId()).isEqualTo(2);
+            assertThat(captor.getValue().getWhatsappLanguageId()).isNull();
         }
 
         @Test
@@ -105,18 +106,67 @@ class UserEventPublisherTest {
         void doesNothingForNullOrEmpty() {
             publisher.publishAdminWelcomeMessages("tr", 2, null);
             publisher.publishAdminWelcomeMessages("tr", 2, List.of());
-            verify(kafkaProducer, never()).publishJson(any(), any());
+            verifyNoInteractions(kafkaProducer);
         }
 
         @Test
         @DisplayName("batches large phone lists into chunks of 100")
         void batchesLargeList() {
-            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), any())).thenReturn(true);
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("mp"), any())).thenReturn(true);
 
             publisher.publishAdminWelcomeMessages("mp", 1, phones(250));
 
             // 250 phones → 3 batches (100 + 100 + 50)
-            verify(kafkaProducer, times(3)).publishJson(eq(UserEventPublisher.COMMON_TOPIC), any());
+            verify(kafkaProducer, times(3)).publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("mp"), any());
+        }
+    }
+
+    // --- publishLanguageUpdates ---
+
+    @Nested
+    @DisplayName("publishLanguageUpdates")
+    class PublishLanguageUpdates {
+
+        @Test
+        @DisplayName("publishes UPDATE_USER_LANGUAGE with the language id, keyed by tenant code")
+        void publishesLanguageUpdateEvent() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("pb"), any())).thenReturn(true);
+
+            publisher.publishLanguageUpdates("pb", 3, "7", List.of("91XXXXXXXXX1", "91XXXXXXXXX2"));
+
+            ArgumentCaptor<PumpOperatorMessagingEvent> captor =
+                    ArgumentCaptor.forClass(PumpOperatorMessagingEvent.class);
+            verify(kafkaProducer).publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("pb"), captor.capture());
+
+            PumpOperatorMessagingEvent event = captor.getValue();
+            assertThat(event.getEventType()).isEqualTo("UPDATE_USER_LANGUAGE");
+            assertThat(event.getTenantCode()).isEqualTo("pb");
+            assertThat(event.getTenantId()).isEqualTo(3);
+            assertThat(event.getWhatsappLanguageId()).isEqualTo("7");
+            assertThat(event.getPumpOperatorPhones()).containsExactly("91XXXXXXXXX1", "91XXXXXXXXX2");
+            assertThat(event.getTriggeredAt()).isNotBlank();
+        }
+
+        @Test
+        @DisplayName("does nothing for null or empty phone list")
+        void doesNothingForNullOrEmpty() {
+            publisher.publishLanguageUpdates("pb", 3, "7", null);
+            publisher.publishLanguageUpdates("pb", 3, "7", List.of());
+            verifyNoInteractions(kafkaProducer);
+        }
+
+        @Test
+        @DisplayName("splits large phone lists into events of at most 100 phones")
+        void batchesLargeList() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("pb"), any())).thenReturn(true);
+
+            publisher.publishLanguageUpdates("pb", 3, "7", phones(150));
+
+            ArgumentCaptor<PumpOperatorMessagingEvent> captor =
+                    ArgumentCaptor.forClass(PumpOperatorMessagingEvent.class);
+            verify(kafkaProducer, times(2)).publishJson(eq(UserEventPublisher.COMMON_TOPIC), eq("pb"), captor.capture());
+            assertThat(captor.getAllValues()).extracting(e -> e.getPumpOperatorPhones().size())
+                    .containsExactly(100, 50);
         }
     }
 
