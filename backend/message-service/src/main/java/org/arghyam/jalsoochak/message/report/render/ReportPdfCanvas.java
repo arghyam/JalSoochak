@@ -14,7 +14,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 /**
  * The drawing surface both water-report PDFs are built on: an A4 page with a cursor, bordered
@@ -69,9 +68,6 @@ public final class ReportPdfCanvas implements AutoCloseable {
     private final PDFont font;
     private final PDFont bold;
 
-    /** KPI row labels where an increase is a deterioration, so the arrow colouring inverts. */
-    private final Set<String> negativeKpiLabels;
-
     private PDPageContentStream cs;
     private PDPage page;
     private float y;
@@ -79,13 +75,8 @@ public final class ReportPdfCanvas implements AutoCloseable {
     /** Whether a section title has already been drawn — the gap goes *between* sections, not above the first. */
     private boolean sectionDrawn;
 
-    /**
-     * @param negativeKpiLabels first-column labels whose trend colouring is inverted (an up arrow is
-     *                          drawn red). Pass an empty set for a report with no trend column.
-     */
-    public ReportPdfCanvas(PDDocument doc, Set<String> negativeKpiLabels) throws IOException {
+    public ReportPdfCanvas(PDDocument doc) throws IOException {
         this.doc = doc;
-        this.negativeKpiLabels = negativeKpiLabels;
         // DejaVu carries the trend arrows and the em dash, which the PDFBox standard-14 fonts do not.
         this.font = loadFont(doc, "/fonts/DejaVuSans.ttf");
         this.bold = loadFont(doc, "/fonts/DejaVuSans-Bold.ttf");
@@ -275,16 +266,30 @@ public final class ReportPdfCanvas implements AutoCloseable {
     public void drawTable(float[] colW, String[] header, List<String[]> rows,
                           float fontSize, float headerFontSize, float cellPad, boolean[] center)
             throws IOException {
+        drawTable(colW, header, rows, fontSize, headerFontSize, cellPad, center, null);
+    }
+
+    /**
+     * As {@link #drawTable(float[], String[], List, float, float, float, boolean[])}, inverting the
+     * trend colouring of the rows {@code invertedTrend} marks: {@code invertedTrend[i]} is set when a
+     * rise in row i's KPI is a deterioration, so its up arrow is drawn red. Rows are matched by
+     * position, never by label. {@code null} inverts no row.
+     */
+    public void drawTable(float[] colW, String[] header, List<String[]> rows,
+                          float fontSize, float headerFontSize, float cellPad, boolean[] center,
+                          boolean[] invertedTrend) throws IOException {
         float headerH = rowHeight(bold, headerFontSize, colW, header, cellPad);
         ensureSpace(headerH + rowHeight(font, fontSize, colW, rows.isEmpty() ? header : rows.get(0), cellPad));
-        drawRow(colW, header, bold, headerFontSize, cellPad, center);
-        for (String[] r : rows) {
+        drawRow(colW, header, bold, headerFontSize, cellPad, center, false);
+        for (int i = 0; i < rows.size(); i++) {
+            String[] r = rows.get(i);
             float h = rowHeight(font, fontSize, colW, r, cellPad);
             if (y - h < MARGIN) {
                 newPage();
-                drawRow(colW, header, bold, headerFontSize, cellPad, center);
+                drawRow(colW, header, bold, headerFontSize, cellPad, center, false);
             }
-            drawRow(colW, r, font, fontSize, cellPad, center);
+            boolean inverted = invertedTrend != null && i < invertedTrend.length && invertedTrend[i];
+            drawRow(colW, r, font, fontSize, cellPad, center, inverted);
         }
     }
 
@@ -300,7 +305,7 @@ public final class ReportPdfCanvas implements AutoCloseable {
     }
 
     private void drawRow(float[] colW, String[] cells, PDFont f, float fontSize, float cellPad,
-                         boolean[] center) throws IOException {
+                         boolean[] center, boolean invertedTrend) throws IOException {
         float lh = fontSize * LINE_SPACING;
         List<List<String>> wrapped = new ArrayList<>();
         int maxLines = 1;
@@ -319,7 +324,7 @@ public final class ReportPdfCanvas implements AutoCloseable {
                 float tx = centered
                         ? cx + (colW[c] - textWidth(f, fontSize, line)) / 2f
                         : cx + cellPad;
-                float[] trendColor = trendColor(line, cellAt(cells, 0));
+                float[] trendColor = trendColor(line, invertedTrend);
                 if (trendColor != null) {
                     colorText(f, fontSize, tx, baseline, line, trendColor[0], trendColor[1], trendColor[2]);
                 } else {
@@ -336,17 +341,16 @@ public final class ReportPdfCanvas implements AutoCloseable {
     /**
      * The fill colour for a trend cell, or {@code null} to draw it in the default black.
      *
-     * <p>Green means the officer is better off than last period, red worse — which for a KPI in
-     * {@code negativeKpiLabels} (schemes NOT supplying, anomalies) is the opposite arrow direction.
+     * <p>Green means the officer is better off than last period, red worse — which for an
+     * {@code inverted} row (schemes NOT supplying, anomalies) is the opposite arrow direction.
      * Colouring by arrow direction instead would paint a fall in outages red.</p>
      */
-    private float[] trendColor(String line, String kpiLabel) {
+    private static float[] trendColor(String line, boolean inverted) {
         boolean up = line.startsWith(UP.trim());
         boolean down = line.startsWith(DOWN.trim());
         if (!up && !down) {
             return null;
         }
-        boolean inverted = negativeKpiLabels.contains(kpiLabel);
         boolean good = inverted != up;
         return good
                 ? new float[]{TREND_GOOD_R, TREND_GOOD_G, TREND_GOOD_B}

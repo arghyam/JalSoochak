@@ -165,7 +165,7 @@ final class LayoutSanityCheck {
                 }
             }
             requiredText(rowPath + ".label", row.label());
-            // The trend colouring finds a negative KPI's row by its label.
+            // Two rows labelled alike would read as one KPI shown twice.
             if (row.label() != null && !labels.add(row.label())) {
                 problem(rowPath + ".label", "'" + row.label() + "' is already used in this summary");
             }
