@@ -93,11 +93,16 @@ default. To change one label, copy the built-in layout (§8) and edit the copy.
 
 ## 4. Layout
 
+The smallest useful daily layout:
+
 ```json
 {
   "numberSections": true,
   "header":   [ { "type": "TITLE", "text": "Daily Water Supply Report" } ],
-  "sections": [ { "type": "SUMMARY", "title": "Summary", "columns": [], "rows": [] } ],
+  "sections": [ { "type": "SUMMARY", "title": "Summary",
+                  "columns": [ { "field": "LABEL", "label": "Indicator" },
+                               { "field": "VALUE", "label": "Today" } ],
+                  "rows":    [ { "kpi": "TOTAL_SCHEMES", "label": "Total schemes" } ] } ],
   "footer":   [ { "type": "SUPPORT_CONTACT", "text": "Helpline: {supportPhone}" } ]
 }
 ```
@@ -311,8 +316,11 @@ Writing the key needs `SUPER_USER`, or `STATE_ADMIN` of that tenant. No UI expos
 
    A 400 lists every problem (§7). Fix them all and PUT again. Nothing is stored until the whole
    document is valid.
-4. **Run it.** Move the tenant's `DAILY_SITUATION_REPORT_TIME` / `WEEKLY_SITUATION_REPORT_TIME` a few
-   minutes ahead, or wait for the next run.
+4. **Run it.** A report runs at most once per period: once per IST day for the daily report, once per
+   reported week for the weekly one, which also fires only on its configured day. If the current period
+   hasn't run yet, move the tenant's `DAILY_SITUATION_REPORT_TIME` / `WEEKLY_SITUATION_REPORT_TIME` a few
+   minutes ahead. If it has already run, or failed, moving the time does nothing, as a failed run isn't
+   retried: wait for the next period.
 5. **Check.**
    - Recipients: the job's start line, `[DailyReportJob] ... roles=[...] rolesSource=config` (or
      `[WeeklyReportJob]`), shows the roles it used and where they came from.
