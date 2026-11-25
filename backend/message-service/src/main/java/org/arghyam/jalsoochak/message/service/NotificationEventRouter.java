@@ -47,6 +47,8 @@ import reactor.core.scheduler.Schedulers;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -990,12 +992,7 @@ public class NotificationEventRouter {
         }
         String sql = "SELECT id, whatsapp_connection_id, title FROM " + tenantSchema
                 + ".user_table WHERE phone_number = ? LIMIT 1";
-        List<UserContactInfo> rows = jdbcTemplate.query(sql,
-                (rs, n) -> new UserContactInfo(
-                        rs.getObject("whatsapp_connection_id", Long.class),
-                        piiEncryptionService.safeDecrypt(rs.getString("title")),
-                        rs.getObject("id", Long.class)),
-                phone);
+        List<UserContactInfo> rows = jdbcTemplate.query(sql, this::mapUserContactInfo, phone);
         return rows.isEmpty() ? new UserContactInfo(null, null) : rows.get(0);
     }
 
@@ -1008,17 +1005,23 @@ public class NotificationEventRouter {
                 + ".user_table WHERE phone_number_hash = ? LIMIT 1";
         for (String candidate : buildPhoneCandidates(phone)) {
             String lookupHash = piiEncryptionService.hmac(candidate);
-            List<UserContactInfo> rows = jdbcTemplate.query(sql,
-                    (rs, n) -> new UserContactInfo(
-                            rs.getObject("whatsapp_connection_id", Long.class),
-                            piiEncryptionService.safeDecrypt(rs.getString("title")),
-                            rs.getObject("id", Long.class)),
-                    lookupHash);
+            List<UserContactInfo> rows = jdbcTemplate.query(sql, this::mapUserContactInfo, lookupHash);
             if (rows != null && !rows.isEmpty()) {
                 return rows.get(0);
             }
         }
         return new UserContactInfo(null, null);
+    }
+
+    /**
+     * {@code id} is a {@code SERIAL} (int4), which the PostgreSQL driver refuses to read as
+     * {@code getObject(.., Long.class)}; it is the primary key, so {@code getLong} never meets a null.
+     */
+    private UserContactInfo mapUserContactInfo(ResultSet rs, int rowNum) throws SQLException {
+        return new UserContactInfo(
+                rs.getObject("whatsapp_connection_id", Long.class),
+                piiEncryptionService.safeDecrypt(rs.getString("title")),
+                rs.getLong("id"));
     }
 
     private List<String> buildPhoneCandidates(String phone) {

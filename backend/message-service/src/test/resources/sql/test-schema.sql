@@ -91,6 +91,7 @@ CREATE TABLE tenant_test.user_table (
     id           SERIAL PRIMARY KEY,
     title        TEXT    NOT NULL,
     phone_number TEXT    NOT NULL,
+    phone_number_hash TEXT NULL,
     user_type    INTEGER NOT NULL,
     language_id             INTEGER DEFAULT 0,
     whatsapp_connection_id  BIGINT  NULL,
