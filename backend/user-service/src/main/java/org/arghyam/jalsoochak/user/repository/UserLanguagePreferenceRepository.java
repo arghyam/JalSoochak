@@ -54,10 +54,7 @@ public class UserLanguagePreferenceRepository {
         if (contactIds == null || contactIds.isEmpty()) {
             return Set.of();
         }
-        Map<String, List<String>> givenByStored = contactIds.stream()
-                .filter(Objects::nonNull)
-                .collect(Collectors.groupingBy(UserLanguagePreferenceRepository::digitsOnly,
-                        LinkedHashMap::new, Collectors.toList()));
+        Map<String, List<String>> givenByStored = givenByStored(contactIds);
         String sql = String.format("""
                 SELECT contact_id
                 FROM %s.user_language_preference
@@ -71,6 +68,34 @@ public class UserLanguagePreferenceRepository {
         jdbcTemplate.queryForList(sql, String.class, args.toArray())
                 .forEach(stored -> withLanguage.addAll(givenByStored.get(stored)));
         return withLanguage;
+    }
+
+    /**
+     * Each given contact's language, keyed by the contact id as it was given; a contact with no language,
+     * or a blank one, is left out.
+     */
+    @SuppressWarnings("java:S2077")
+    public Map<String, String> findLanguageValues(String schemaName, Collection<String> contactIds) {
+        validateSchemaName(schemaName);
+        if (contactIds == null || contactIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, List<String>> givenByStored = givenByStored(contactIds);
+        if (givenByStored.isEmpty()) {
+            return Map.of();
+        }
+        String sql = String.format("""
+                SELECT contact_id, language_value
+                FROM %s.user_language_preference
+                WHERE contact_id IN (%s)
+                  AND NULLIF(BTRIM(language_value), '') IS NOT NULL
+                """, schemaName, String.join(",", Collections.nCopies(givenByStored.size(), "?")));
+        Map<String, String> languages = new LinkedHashMap<>();
+        jdbcTemplate.query(sql, rs -> {
+            String language = rs.getString("language_value");
+            givenByStored.get(rs.getString("contact_id")).forEach(given -> languages.put(given, language));
+        }, givenByStored.keySet().toArray());
+        return languages;
     }
 
     /**
@@ -99,6 +124,14 @@ public class UserLanguagePreferenceRepository {
                 .map(contactId -> new Object[]{contactId, languageValue})
                 .toList();
         jdbcTemplate.batchUpdate(sql, args);
+    }
+
+    /** The given contact ids, grouped by the digits-only form they are stored in. */
+    private static Map<String, List<String>> givenByStored(Collection<String> contactIds) {
+        return contactIds.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(UserLanguagePreferenceRepository::digitsOnly,
+                        LinkedHashMap::new, Collectors.toList()));
     }
 
     private static String digitsOnly(String contactId) {

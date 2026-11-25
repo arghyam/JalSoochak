@@ -1,13 +1,19 @@
 package org.arghyam.jalsoochak.user.service.serviceImpl;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.user.dto.request.WelcomeMessageRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.WelcomeMessageResponseDTO;
 import org.arghyam.jalsoochak.user.event.UserEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
+import org.arghyam.jalsoochak.user.repository.LanguageCatalogRepository;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
+import org.arghyam.jalsoochak.user.repository.UserLanguagePreferenceRepository;
+import org.arghyam.jalsoochak.user.repository.UserPhoneRow;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
+import org.arghyam.jalsoochak.user.service.WhatsAppPreferredLanguageService;
+import org.arghyam.jalsoochak.user.service.WhatsAppPreferredLanguageService.PreferredLanguage;
 import org.arghyam.jalsoochak.user.util.SecurityUtils;
 import org.arghyam.jalsoochak.user.util.TenantSchemaResolver;
 import org.springframework.security.core.Authentication;
@@ -18,21 +24,35 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
+/**
+ * Queues welcome messages for a tenant's users of the given roles. Each pump operator's language is sent to
+ * the WhatsApp provider first, since the provider picks the welcome template's language from the contact's:
+ * the operator's saved chatbot language, or for one with none, the tenant default, which is also saved.
+ */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class WelcomeMessageServiceImpl implements org.arghyam.jalsoochak.user.service.WelcomeMessageService {
 
     private static final int DEFAULT_BATCH_SIZE = 1000;
     private static final String SUPPORTED_TYPE = "welcome_template";
+    private static final String ROLE_PUMP_OPERATOR = "PUMP_OPERATOR";
 
     private final UserTenantRepository userTenantRepository;
     private final UserCommonRepository userCommonRepository;
     private final UserEventPublisher userEventPublisher;
+    private final UserLanguagePreferenceRepository userLanguagePreferenceRepository;
+    private final LanguageCatalogRepository languageCatalogRepository;
+    private final WhatsAppPreferredLanguageService whatsAppPreferredLanguageService;
 
     @Override
     public WelcomeMessageResponseDTO sendWelcomeMessages(
@@ -73,45 +93,127 @@ public class WelcomeMessageServiceImpl implements org.arghyam.jalsoochak.user.se
             throw new IllegalArgumentException("onboardedBefore must be after onboardedAfter");
         }
 
-        final List<String> batch = new ArrayList<>(DEFAULT_BATCH_SIZE);
-        final int[] totalPhones = {0};
-        final int[] batches = {0};
+        WelcomeRun run = new WelcomeRun(tenantCode, tenantId, schema);
+        userTenantRepository.streamUsersByRolesAndOnboardingWindow(schema, roles, after, before, run::accept);
+        run.flush();
 
-        userTenantRepository.streamPhonesByRolesAndOnboardingWindow(
-                schema,
-                roles,
-                after,
-                before,
-                phone -> {
-                    batch.add(phone);
-                    if (batch.size() >= DEFAULT_BATCH_SIZE) {
-                        userEventPublisher.publishAdminWelcomeMessages(tenantCode, tenantId, batch);
-                        totalPhones[0] += batch.size();
-                        batches[0]++;
-                        batch.clear();
-                    }
-                }
-        );
+        String msg = run.totalPhones == 0
+                ? "No matching users found"
+                : "Queued welcome messages for " + run.totalPhones + " users";
 
-        if (!batch.isEmpty()) {
-            userEventPublisher.publishAdminWelcomeMessages(tenantCode, tenantId, batch);
-            totalPhones[0] += batch.size();
-            batches[0]++;
+        return WelcomeMessageResponseDTO.builder()
+                .totalCandidates(run.totalPhones)
+                .totalPhones(run.totalPhones)
+                .batches(run.batches)
+                .batchSize(DEFAULT_BATCH_SIZE)
+                .publishedEvents(run.batches)
+                .message(msg)
+                .build();
+    }
+
+    /**
+     * One request's users, queued in batches; per batch, the pump operators' language updates go before
+     * the welcome. The tenant default and catalog ids are looked up once per request, when first needed.
+     */
+    private final class WelcomeRun {
+
+        private final String tenantCode;
+        private final Integer tenantId;
+        private final String schema;
+        private final List<UserPhoneRow> batch = new ArrayList<>(DEFAULT_BATCH_SIZE);
+        private final Map<String, Optional<Integer>> catalogIdByLanguage = new HashMap<>();
+        private PreferredLanguage tenantDefault;
+        private int totalPhones;
+        private int batches;
+
+        private WelcomeRun(String tenantCode, Integer tenantId, String schema) {
+            this.tenantCode = tenantCode;
+            this.tenantId = tenantId;
+            this.schema = schema;
+        }
+
+        void accept(UserPhoneRow user) {
+            batch.add(user);
+            if (batch.size() >= DEFAULT_BATCH_SIZE) {
+                flush();
+            }
+        }
+
+        void flush() {
+            if (batch.isEmpty()) {
+                return;
+            }
+            publishPumpOperatorLanguages();
+            List<String> phones = batch.stream().map(UserPhoneRow::phoneNumber).toList();
+            userEventPublisher.publishAdminWelcomeMessages(tenantCode, tenantId, phones);
+            totalPhones += phones.size();
+            batches++;
             batch.clear();
         }
 
-        String msg = totalPhones[0] == 0
-                ? "No matching users found"
-                : "Queued welcome messages for " + totalPhones[0] + " users";
+        /**
+         * Publishes one language update per language: each pump operator's saved language, or for one with
+         * none, the tenant default, which is saved for them too. A saved language the catalog doesn't know
+         * is not sent, so the provider keeps whatever it has.
+         */
+        private void publishPumpOperatorLanguages() {
+            Map<String, Long> operatorIdByPhone = new LinkedHashMap<>();
+            for (UserPhoneRow user : batch) {
+                if (ROLE_PUMP_OPERATOR.equalsIgnoreCase(user.userType())) {
+                    operatorIdByPhone.putIfAbsent(user.phoneNumber(), user.id());
+                }
+            }
+            if (operatorIdByPhone.isEmpty()) {
+                return;
+            }
 
-        return WelcomeMessageResponseDTO.builder()
-                .totalCandidates(totalPhones[0])
-                .totalPhones(totalPhones[0])
-                .batches(batches[0])
-                .batchSize(DEFAULT_BATCH_SIZE)
-                .publishedEvents(batches[0])
-                .message(msg)
-                .build();
+            Map<String, String> savedLanguages =
+                    userLanguagePreferenceRepository.findLanguageValues(schema, operatorIdByPhone.keySet());
+            Map<Integer, List<String>> phonesByLanguageId = new LinkedHashMap<>();
+            List<String> withoutLanguage = new ArrayList<>();
+            int unknownLanguages = 0;
+            for (String phone : operatorIdByPhone.keySet()) {
+                String saved = savedLanguages.get(phone);
+                if (saved == null) {
+                    withoutLanguage.add(phone);
+                    continue;
+                }
+                Optional<Integer> catalogId = catalogIdByLanguage.computeIfAbsent(
+                        saved, languageCatalogRepository::findLanguageIdByAlias);
+                if (catalogId.isPresent()) {
+                    phonesByLanguageId.computeIfAbsent(catalogId.get(), id -> new ArrayList<>()).add(phone);
+                } else {
+                    unknownLanguages++;
+                }
+            }
+            if (unknownLanguages > 0) {
+                log.warn("[welcome-admin] language_not_in_catalog count={} tenantCode={} tenantId={};"
+                        + " their provider language is left as it is", unknownLanguages, tenantCode, tenantId);
+            }
+
+            if (!withoutLanguage.isEmpty()) {
+                PreferredLanguage fallback = tenantDefault();
+                for (String phone : withoutLanguage) {
+                    userTenantRepository.updateUserLanguageId(schema, operatorIdByPhone.get(phone), fallback.languageId());
+                }
+                // The chatbot reads user_language_preference ahead of language_id, so it gets the same default.
+                if (fallback.languageValue() != null) {
+                    userLanguagePreferenceRepository.setLanguageWhereUnset(schema, withoutLanguage, fallback.languageValue());
+                }
+                phonesByLanguageId.computeIfAbsent(fallback.whatsappLanguageId(), id -> new ArrayList<>())
+                        .addAll(withoutLanguage);
+            }
+
+            phonesByLanguageId.forEach((languageId, phones) ->
+                    userEventPublisher.publishLanguageUpdates(tenantCode, tenantId, String.valueOf(languageId), phones));
+        }
+
+        private PreferredLanguage tenantDefault() {
+            if (tenantDefault == null) {
+                tenantDefault = whatsAppPreferredLanguageService.resolvePreferredLanguage(tenantId, schema);
+            }
+            return tenantDefault;
+        }
     }
 
     private List<String> normalizeRoles(List<String> roles) {

@@ -228,16 +228,25 @@ Same `NotificationJobScheduler`, due window and run table as nudges (§1, Trigge
 
 ### Purpose
 
-Sends an onboarding welcome flow to the pump operators of an upload. The flow introduces the Jalmitra application. The companion `UPDATE_USER_LANGUAGE` event sets the operator's language on their WhatsApp contact first.
+Starts the provider's welcome flow for newly onboarded pump operators. The flow sends an approved WhatsApp template that introduces the Jalmitra application, in the operator's language. The companion `UPDATE_USER_LANGUAGE` event sets that language on their WhatsApp contact first, because the provider picks the template's language from the contact's.
+
+The welcome must be a template: an operator who has not messaged the bot in the last 24 hours cannot receive plain text, and a template sent before plain text does not open that window.
 
 ### Trigger
 
-Published by `user-service` (`UserEventPublisher.publishPumpOperatorOnboardedAfterCommit`) after a bulk pump-operator upload commits. Each event carries up to 100 phones (`MAX_PHONES_PER_EVENT`) and is keyed by the tenant code:
+Both triggers are in `user-service`. Each event carries up to 100 phones (`MAX_PHONES_PER_EVENT`) and is keyed by the tenant code. The shared key puts an operator's language update and their welcome on one partition, so message-service sets the language before it starts the welcome flow.
+
+**Bulk upload** (`UserEventPublisher.publishPumpOperatorOnboardedAfterCommit`), after a pump-operator upload commits:
 
 1. `UPDATE_USER_LANGUAGE` for the operators with no language chosen in the chatbot. The upload gives them the tenant's first language, in `user_table.language_id` and `user_language_preference`. A language the operator chose is kept, in the database and at the provider: after the commit, just before publishing, the upload reads these operators' languages again and leaves out any who chose another meanwhile (if that read fails, no language update is sent).
-2. `SEND_WELCOME_MESSAGE` for every pump operator the upload maps to a scheme, so a re-upload welcomes its operators again.
+2. `SEND_WELCOME_MESSAGE` for the pump operators the upload created. An operator who already existed is not welcomed again, even when the upload maps them to a new scheme: a re-upload soft-deletes and re-inserts every mapping, so a new mapping cannot tell a new operator from a re-uploaded one.
 
-The shared key puts both on one partition, so message-service sets an operator's language before it starts their welcome flow.
+**Admin endpoint** `POST /api/v1/tenant/user/welcome?tenantCode=<code>` (`SUPER_USER`, or `STATE_ADMIN` for their own state), with body `{"type": "welcome_template", "roles": [...], "onboardedAfter": ..., "onboardedBefore": ...}`. It welcomes every non-deleted user of the roles, optionally only those created in the window (ISO-8601 instants or `yyyy-MM-dd` dates, UTC). Use it to welcome operators again, for example after the welcome template changes. For each batch of 1000 users, `WelcomeMessageServiceImpl` publishes:
+
+1. `UPDATE_USER_LANGUAGE` for the batch's pump operators, one event per language: each operator's saved chatbot language, or for one with none, the tenant's first language, which is also saved, as the upload does. A saved language missing from the catalog is not sent (WARN with a count), so the provider keeps the contact's current language. Officers get no language update, so their report templates keep their language.
+2. `SEND_WELCOME_MESSAGE_ADMIN` for every user in the batch.
+
+The admin endpoint reads the languages once, with no re-check before publishing: an operator who chooses a language in that instant can still be sent the default.
 
 **Batch sizing.** message-service takes one event per poll (`max-poll-records: 1`) and must finish it within `max.poll.interval.ms` (600 s), or the poll is delivered, and the welcomes sent, again. Each phone costs up to two provider calls (an opt-in, then the language update or the flow), spaced at least `whatsapp.request-interval-ms` (500 ms) apart: 100 × 2 × 0.5 s = 100 s at best, so a call can average about 3 s before an event runs over. Change `max-poll-records`, `MAX_PHONES_PER_EVENT` or the request interval only with this sum in mind. A pod that stops mid-event still has that event delivered again, re-sending its welcomes.
 
@@ -253,13 +262,19 @@ The shared key puts both on one partition, so message-service sets an operator's
 }
 ```
 
+`SEND_WELCOME_MESSAGE_ADMIN` has the same shape, with `whatsappLanguageId` null.
+
 ### message-service: handleSendWelcomeMessage
 
 For each phone in the batch:
 
 1. **Contact resolution** (`resolveContact`): finds the operator in `<tenantSchema>.user_table` by phone hash, then by plain phone, and uses its `whatsapp_connection_id`. An operator without one is opted in by phone (`WhatsAppSender.optIn`), and the new contact ID is published as `WHATSAPP_CONTACT_REGISTERED` so tenant-service stores it. A phone with no user in the tenant is not opted in. The `tenantCode` must match `[a-z0-9_]+` before it is interpolated into the `tenantSchema` used in the SQL, so a crafted code cannot escape the schema prefix.
 2. If there is still no contact, the phone is routed to the dead-letter topic `welcome-message-dlt` — reason `user_not_found`, or `optin_failed` when the opt-in returned none (as in a dry run) — and the batch continues.
-3. Calls `WhatsAppSender.startWelcomeFlow`, which triggers the `startContactFlow` mutation with the tenant's welcome flow ID — `whatsapp.flow.welcome-id` when the tenant configures none — and `defaultResults` carrying the operator's name and the state name.
+3. Calls `WhatsAppSender.startWelcomeFlow`, which triggers the `startContactFlow` mutation with the tenant's welcome flow ID (see Flow ID below) and `defaultResults` `{"name": "<operatorName>", "state": "<stateName>"}`. The state name is the tenant's `state_name` config, else its `tenant_master_table.title`, else blank.
+
+`handleSendWelcomeMessageAdmin` does the same, except that it opts in any phone without a contact, user or not, and does not publish `WHATSAPP_CONTACT_REGISTERED`.
+
+The ledger records a started flow as `acceptedUntracked("flow_started")`: it cannot see the provider reject the template inside the flow.
 
 Failures for individual phones are dead-lettered rather than thrown, preventing a single bad record from causing Kafka to retry the entire batch (which would re-send welcome messages to already-succeeded phones).
 
@@ -278,13 +293,30 @@ Failures for individual phones are dead-lettered rather than thrown, preventing 
 
 `errorMessage` is `user_not_found`, `optin_failed`, `blank_phone`, or the send failure's message. The `retryId` is a deterministic UUID v3 derived from `"SEND_WELCOME_MESSAGE_RETRY:<tenantSchema>:<phone>"` for idempotent downstream reprocessing.
 
-**Config required** (`whatsapp.flow.welcome-id`): the provider's default welcome flow ID. The service fails to start if this is blank.
+### Flow ID
+
+A tenant's `welcome_flow_id` row in `common_schema.tenant_config_master_table` overrides `whatsapp.flow.welcome-id` (`WHATSAPP_WELCOME_FLOW_ID`). The service fails to start if the env value is blank. Don't rely on its default, `38949`: set the row or the env var to the tenant's own flow.
+
+### Provider welcome flow
+
+The flow the ID points to sends the welcome template, filling its variables from `@results.name` and `@results.state`, then waits for any reply and enters the tenant's main chatbot flow. `nudge_action` is not set, so the main flow takes its normal start. The flow needs no keyword. Give the template every language the tenant supports: the provider sends the one matching the contact's language.
+
+Punjab's template, `jalsoochak_punjab_prod_welcome`, is the chatbot's `conversation.welcome` text: `{{1}}` name, `{{2}}` state, and `{{3}}` the start keyword `startpb`, written in the flow node rather than sent by the backend. The keyword must equal telemetry-service's `WHATSAPP_START_KEYWORD`.
+
+**Rollout checklist:**
+
+- Meta has approved the template.
+- The flow is imported, its template node points at the approved template, and it is published.
+- The flow ID is set, in the tenant's row or the env var.
+- `NOTIFICATIONS_WHATSAPP_DRY_RUN=false`. A dry run skips the language update and the flow, and drops them rather than deferring them.
+- The tenant's state name is not blank.
+- Test with a number that has not messaged the bot in the last 24 hours.
 
 ### UPDATE_USER_LANGUAGE (companion event)
 
 message-service is the only service that sets a contact's language with the provider. Two services publish this event, keyed by the tenant code, with `whatsappLanguageId` set to the language's `common_schema.language_master` id:
 
-- **user-service**, alongside `SEND_WELCOME_MESSAGE` (see Trigger above).
+- **user-service**, ahead of `SEND_WELCOME_MESSAGE` and `SEND_WELCOME_MESSAGE_ADMIN` (see Trigger above).
 - **telemetry-service** (`OperatorLanguageEventPublisher`), for one operator, when they choose a language in the chatbot, or when their first message (`OperatorContextService.ensureOperatorLanguage`) finds no saved language and saves the resolved one. A language missing from the catalog is not published.
 
 `handleUpdateUserLanguage`:
@@ -371,7 +403,7 @@ All WhatsApp provider and storage properties can be overridden via environment v
 | `whatsapp.password`                                   | `WHATSAPP_PASSWORD`                                   | Yes                               | Provider login password                                                                                                                                                                                                                                                                                                                                           |
 | `whatsapp.api-url`                                    | `WHATSAPP_API_URL`                                    | Yes                               | GraphQL endpoint                                                                                                                                                                                                                                                                                                                                                  |
 | `whatsapp.flow.nudge-id`                              | `WHATSAPP_NUDGE_FLOW_ID`                              | Yes                               | Provider flow ID for the nudge interactive flow                                                                                                                                                                                                                                                                                                                   |
-| `whatsapp.flow.welcome-id`                            | `WHATSAPP_WELCOME_FLOW_ID`                            | Yes                               | Provider flow ID for the welcome onboarding flow                                                                                                                                                                                                                                                                                                                  |
+| `whatsapp.flow.welcome-id`                            | `WHATSAPP_WELCOME_FLOW_ID`                            | Yes                               | Default provider flow ID for the welcome flow; a tenant's `welcome_flow_id` config row overrides it                                                                                                                                                                                                                                                               |
 | `whatsapp.template.escalation-id`                     | `WHATSAPP_ESCALATION_TEMPLATE_ID`                     | Yes                               | Provider HSM template ID for escalation document                                                                                                                                                                                                                                                                                                                  |
 | `whatsapp.template.login-otp-id`                      | `WHATSAPP_LOGIN_OTP_TEMPLATE_ID`                      | Yes                               | Provider HSM template ID for login OTP                                                                                                                                                                                                                                                                                                                            |
 | `whatsapp.request-interval-ms`                        | `WHATSAPP_REQUEST_INTERVAL_MS`                        | No                                | Min ms between provider API calls (default: 500)                                                                                                                                                                                                                                                                                                                  |

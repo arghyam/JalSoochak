@@ -287,16 +287,17 @@ public class UserTenantRepository {
     }
 
     /**
-     * Streams phone numbers for users with the given roles and optional onboarding time window.
+     * Streams the id, decrypted phone and user type of each non-deleted user with one of the given roles
+     * and, optionally, created within the onboarding time window. Users without a phone are skipped.
      * The RowCallbackHandler is invoked for each row to avoid loading everything into memory.
      */
     @SuppressWarnings("java:S2077")
-    public void streamPhonesByRolesAndOnboardingWindow(
+    public void streamUsersByRolesAndOnboardingWindow(
             String schemaName,
             List<String> roles,
             java.time.Instant onboardedAfter,
             java.time.Instant onboardedBefore,
-            java.util.function.Consumer<String> phoneConsumer
+            java.util.function.Consumer<UserPhoneRow> userConsumer
     ) {
         validateSchemaName(schemaName);
 
@@ -313,7 +314,7 @@ public class UserTenantRepository {
 
         String rolePlaceholders = String.join(", ", cleaned.stream().map(r -> "?").toList());
         StringBuilder sql = new StringBuilder(String.format("""
-                SELECT u.phone_number
+                SELECT u.id, u.phone_number, ut.c_name
                 FROM %s.user_table u
                 LEFT JOIN common_schema.user_type_master_table ut
                   ON ut.id = u.user_type
@@ -340,7 +341,7 @@ public class UserTenantRepository {
             if (phone == null || phone.isBlank()) {
                 return;
             }
-            phoneConsumer.accept(phone);
+            userConsumer.accept(new UserPhoneRow(rs.getLong("id"), phone, rs.getString("c_name")));
         }, args.toArray());
     }
 
