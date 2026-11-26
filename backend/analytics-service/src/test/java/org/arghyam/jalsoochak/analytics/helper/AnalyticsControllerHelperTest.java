@@ -28,7 +28,7 @@ class AnalyticsControllerHelperTest {
                         SchemeRegularityListResponse.SchemeMetrics.builder()
                                 .schemeId(1)
                                 .schemeName("Scheme, \"A\"")
-                                .stateSchemeId(10001)
+                                .stateSchemeId("TW10001")
                                 .centreSchemeId(20001)
                                 .workStatus(SchemeStatusDTO.builder().code(1).label("Ongoing").build())
                                 .operatingStatus(SchemeStatusDTO.builder().code(2).label("Partially Operative").build())
@@ -57,7 +57,7 @@ class AnalyticsControllerHelperTest {
                 "scheme_id,scheme_name,state_scheme_id,centre_scheme_id,"
                         + "work_status_code,work_status,operating_status_code,operating_status,"
                         + "supply_days,average_regularity,submission_days,submission_rate\n"
-                        + "1,\"Scheme, \"\"A\"\"\",10001,20001,1,Ongoing,2,Partially Operative,2,0.6667,3,1.0\n"
+                        + "1,\"Scheme, \"\"A\"\"\",TW10001,20001,1,Ongoing,2,Partially Operative,2,0.6667,3,1.0\n"
                         + "2,\"Scheme B\nNorth\",,,,,0,Non-Operative,,0,1,0.3333\n",
                 csv);
     }

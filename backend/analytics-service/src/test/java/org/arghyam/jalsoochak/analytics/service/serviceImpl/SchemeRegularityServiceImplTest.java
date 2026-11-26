@@ -1661,8 +1661,8 @@ class SchemeRegularityServiceImplTest {
     void getSchemeRegionReportByLgd_buildsSchemeMetricsAndCounts() {
         when(schemeRegularityRepository.getSchemeRegionReportByLgd(1, 101, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", 10001, 20001, 1, 1, 2, 3, false),
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", 10002, 20002, 0, 1, 0, 1, false)
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", "TW10001", 20001, 1, 1, 2, 3, false),
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", "TW10002", 20002, 0, 1, 0, 1, false)
                 ));
         when(schemeRegularityRepository.getParentLgdCNameByLgd(1, 101)).thenReturn("Parent");
         when(schemeRegularityRepository.getParentLgdTitleByLgd(1, 101)).thenReturn("District");
@@ -1692,7 +1692,7 @@ class SchemeRegularityServiceImplTest {
     void getSchemeRegionReportByDepartment_buildsSchemeMetricsAndCounts() {
         when(schemeRegularityRepository.getSchemeRegionReportByDepartment(1, 201, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(4, "Scheme D", 10004, 20004, 1, 1, 1, 2, false)
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(4, "Scheme D", "TW10004", 20004, 1, 1, 1, 2, false)
                 ));
         when(schemeRegularityRepository.getParentDepartmentCNameByDepartment(1, 201)).thenReturn("Dept");
         when(schemeRegularityRepository.getParentDepartmentTitleByDepartment(1, 201)).thenReturn("Division");
@@ -1716,9 +1716,9 @@ class SchemeRegularityServiceImplTest {
     void getSchemeRegionReportByLgd_withPagination_returnsPagedSchemes() {
         when(schemeRegularityRepository.getSchemeRegionReportByLgd(1, 101, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", 10001, 20001, 1, 1, 2, 3, false),
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", 10002, 20002, 0, 1, 0, 1, false),
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(3, "Scheme C", 10003, 20003, 1, 1, 3, 3, true)
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", "TW10001", 20001, 1, 1, 2, 3, false),
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", "TW10002", 20002, 0, 1, 0, 1, false),
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(3, "Scheme C", "TW10003", 20003, 1, 1, 3, 3, true)
                 ));
         when(schemeRegularityRepository.getParentLgdCNameByLgd(1, 101)).thenReturn("Parent");
         when(schemeRegularityRepository.getParentLgdTitleByLgd(1, 101)).thenReturn("District");

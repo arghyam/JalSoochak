@@ -37,7 +37,7 @@ public class SchemeRegularityListResponse {
     public static class SchemeMetrics {
         private Integer schemeId;
         private String schemeName;
-        private Integer stateSchemeId;
+        private String stateSchemeId;
         private Integer centreSchemeId;
         private SchemeStatusDTO workStatus;
         private SchemeStatusDTO operatingStatus;

@@ -3220,7 +3220,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new CriticalSchemeRow(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("state_scheme_id"),
+                        rs.getString("state_scheme_id"),
                         (Integer) rs.getObject("centre_scheme_id"),
                         rs.getDate("last_supplied_date") == null ? null : rs.getDate("last_supplied_date").toLocalDate()
                 ),
@@ -3286,7 +3286,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new CriticalSchemeRow(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("state_scheme_id"),
+                        rs.getString("state_scheme_id"),
                         (Integer) rs.getObject("centre_scheme_id"),
                         rs.getDate("last_supplied_date") == null ? null : rs.getDate("last_supplied_date").toLocalDate()
                 ),
@@ -3351,7 +3351,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new CriticalSchemeRow(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("state_scheme_id"),
+                        rs.getString("state_scheme_id"),
                         (Integer) rs.getObject("centre_scheme_id"),
                         rs.getDate("last_supplied_date") == null ? null : rs.getDate("last_supplied_date").toLocalDate()
                 ),
@@ -4867,7 +4867,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeRegularityListMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("state_scheme_id"),
+                        rs.getString("state_scheme_id"),
                         (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
                         (Integer) rs.getObject("work_status"),
@@ -4953,7 +4953,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeRegularityListMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("state_scheme_id"),
+                        rs.getString("state_scheme_id"),
                         (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
                         (Integer) rs.getObject("work_status"),
@@ -5040,7 +5040,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeRegularityListMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("state_scheme_id"),
+                        rs.getString("state_scheme_id"),
                         (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
                         (Integer) rs.getObject("work_status"),
@@ -5127,7 +5127,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeRegularityListMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("state_scheme_id"),
+                        rs.getString("state_scheme_id"),
                         (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
                         (Integer) rs.getObject("work_status"),
@@ -8111,7 +8111,7 @@ public class SchemeRegularityRepository {
     public record CriticalSchemeRow(
             Integer schemeId,
             String schemeName,
-            Integer stateSchemeId,
+            String stateSchemeId,
             Integer centreSchemeId,
             LocalDate lastSuppliedDate
     ) {
@@ -8161,7 +8161,7 @@ public class SchemeRegularityRepository {
     public record SchemeRegularityListMetrics(
             Integer schemeId,
             String schemeName,
-            Integer stateSchemeId,
+            String stateSchemeId,
             Integer centreSchemeId,
             Integer operatingStatus,
             Integer workStatus,

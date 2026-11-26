@@ -19,7 +19,8 @@ public class SchemeEvent {
     private Integer schemeId;
     private Integer tenantId;
     private String schemeName;
-    private Integer stateSchemeId;
+    /** The state system's own id; alphanumeric in some states. Older messages send it as a number. */
+    private String stateSchemeId;
     private Integer centreSchemeId;
     private Double longitude;
     private Double latitude;

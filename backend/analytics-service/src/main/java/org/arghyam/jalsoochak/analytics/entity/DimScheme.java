@@ -36,7 +36,7 @@ public class DimScheme {
     private String schemeName;
 
     @Column(name = "state_scheme_id", nullable = false)
-    private Integer stateSchemeId;
+    private String stateSchemeId;
 
     @Column(name = "centre_scheme_id", nullable = false)
     private Integer centreSchemeId;

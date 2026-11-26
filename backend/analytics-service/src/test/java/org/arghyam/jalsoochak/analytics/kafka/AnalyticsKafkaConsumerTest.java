@@ -25,6 +25,8 @@ import org.arghyam.jalsoochak.analytics.service.FactService;
 import org.arghyam.jalsoochak.analytics.service.NotificationDeliveryIngestionService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -207,6 +209,35 @@ class AnalyticsKafkaConsumerTest {
         assertThat(captor.getValue().getFhtcCount()).isEqualTo(30);
         assertThat(captor.getValue().getPlannedFhtc()).isEqualTo(40);
         assertThat(captor.getValue().getHouseHoldCount()).isEqualTo(50);
+    }
+
+    /** Scheme-service sent the state scheme id as a number before alphanumeric ids, and as text since. */
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource(delimiter = '|', value = {
+            "5001          | 5001",
+            "\"5001\"      | 5001",
+            "\"TW20826\"   | TW20826",
+            "\"SPL17673\"  | SPL17673"})
+    void consumeSchemeEvents_bindsTheStateSchemeIdAsText_whetherSentAsANumberOrAString(
+            String sent, String expected) {
+        String updated = """
+                {"eventType":"SCHEME_UPDATED","schemeId":1001,"tenantId":1,"stateSchemeId":%s,"centreSchemeId":6001}
+                """.formatted(sent);
+        String mappingsReplaced = """
+                {"eventType":"SCHEME_MAPPINGS_REPLACED","schemeId":1001,"tenantId":1,"stateSchemeId":%s,
+                 "centreSchemeId":6001,"villages":[],"subDivisions":[]}
+                """.formatted(sent);
+
+        consumer.consumeSchemeEvents(updated);
+        consumer.consumeSchemeEvents(mappingsReplaced);
+
+        ArgumentCaptor<SchemeEvent> details = ArgumentCaptor.forClass(SchemeEvent.class);
+        ArgumentCaptor<SchemeMappingsReplacedEvent> mappings = ArgumentCaptor.forClass(SchemeMappingsReplacedEvent.class);
+        verify(dimensionService).upsertScheme(details.capture());
+        verify(dimensionService).replaceSchemeMappings(mappings.capture());
+        assertThat(details.getValue().getStateSchemeId()).isEqualTo(expected);
+        assertThat(mappings.getValue().getStateSchemeId()).isEqualTo(expected);
+        assertThat(details.getValue().getCentreSchemeId()).isEqualTo(6001);
     }
 
     @Test
