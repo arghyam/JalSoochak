@@ -299,7 +299,7 @@ class AnalyticsSchemeStatusControllerTest {
                                 SchemeRegularityListResponse.SchemeMetrics.builder()
                                         .schemeId(1)
                                         .schemeName("Scheme A")
-                                        .stateSchemeId(10001)
+                                        .stateSchemeId("TW10001")
                                         .centreSchemeId(20001)
                                         .workStatus(schemeStatus(1, "Ongoing"))
                                         .operatingStatus(schemeStatus(2, "Partially Operative"))
@@ -319,7 +319,7 @@ class AnalyticsSchemeStatusControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.parentLgdId").value(101))
                 .andExpect(jsonPath("$.data.schemes[0].schemeId").value(1))
-                .andExpect(jsonPath("$.data.schemes[0].stateSchemeId").value(10001))
+                .andExpect(jsonPath("$.data.schemes[0].stateSchemeId").value("TW10001"))
                 .andExpect(jsonPath("$.data.schemes[0].centreSchemeId").value(20001));
 
         verify(schemeRegularityService, times(1))
@@ -340,7 +340,7 @@ class AnalyticsSchemeStatusControllerTest {
                                 SchemeRegularityListResponse.SchemeMetrics.builder()
                                         .schemeId(2)
                                         .schemeName("Scheme B")
-                                        .stateSchemeId(10002)
+                                        .stateSchemeId("TW10002")
                                         .centreSchemeId(20002)
                                         .workStatus(schemeStatus(4, "Handed Over"))
                                         .operatingStatus(schemeStatus(0, "Non-Operative"))
@@ -360,7 +360,7 @@ class AnalyticsSchemeStatusControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.parentDepartmentId").value(201))
                 .andExpect(jsonPath("$.data.schemes[0].schemeId").value(2))
-                .andExpect(jsonPath("$.data.schemes[0].stateSchemeId").value(10002))
+                .andExpect(jsonPath("$.data.schemes[0].stateSchemeId").value("TW10002"))
                 .andExpect(jsonPath("$.data.schemes[0].centreSchemeId").value(20002));
 
         verify(schemeRegularityService, times(1))
@@ -415,7 +415,7 @@ class AnalyticsSchemeStatusControllerTest {
                                 SchemeRegularityListResponse.SchemeMetrics.builder()
                                         .schemeId(1)
                                         .schemeName("Scheme A")
-                                        .stateSchemeId(10001)
+                                        .stateSchemeId("TW10001")
                                         .centreSchemeId(20001)
                                         .workStatus(schemeStatus(1, "Ongoing"))
                                         .operatingStatus(schemeStatus(2, "Partially Operative"))
@@ -441,7 +441,7 @@ class AnalyticsSchemeStatusControllerTest {
                                 + "work_status_code,work_status,operating_status_code,operating_status,"
                                 + "supply_days,average_regularity,submission_days,submission_rate")))
                 .andExpect(content().string(containsString(
-                        "1,Scheme A,10001,20001,1,Ongoing,2,Partially Operative,2,0.6667,3,1.0")));
+                        "1,Scheme A,TW10001,20001,1,Ongoing,2,Partially Operative,2,0.6667,3,1.0")));
     }
 
     @Test
@@ -454,7 +454,7 @@ class AnalyticsSchemeStatusControllerTest {
                                 SchemeRegularityListResponse.SchemeMetrics.builder()
                                         .schemeId(2)
                                         .schemeName("Scheme, B")
-                                        .stateSchemeId(10002)
+                                        .stateSchemeId("TW10002")
                                         .centreSchemeId(20002)
                                         .workStatus(schemeStatus(4, "Handed Over"))
                                         .operatingStatus(schemeStatus(0, "Non-Operative"))
@@ -476,7 +476,7 @@ class AnalyticsSchemeStatusControllerTest {
                         "attachment; filename=\"scheme-region-report_department_hq_2026-01-01_to_2026-01-31.csv\""))
                 .andExpect(content().contentTypeCompatibleWith("text/csv"))
                 .andExpect(content().string(containsString(
-                        "2,\"Scheme, B\",10002,20002,4,Handed Over,0,Non-Operative,0,0,1,0.3333")));
+                        "2,\"Scheme, B\",TW10002,20002,4,Handed Over,0,Non-Operative,0,0,1,0.3333")));
     }
 
     @Test

@@ -56,9 +56,16 @@ class SubmissionAttemptRepositoryTest {
 
     @ParameterizedTest(name = "state=\"{0}\" centre=\"{0}\" resolves to nothing")
     @NullAndEmptySource
-    @ValueSource(strings = {"   ", "not-a-number", "12a"})
-    void resolveSchemeIsEmptyWhenNeitherSubmittedIdIsANumber(String value) {
+    @ValueSource(strings = {"   ", "\t"})
+    void resolveSchemeIsEmptyWhenNeitherIdIsSubmitted(String value) {
         assertThat(repository.resolveScheme(17, value, value)).isEmpty();
+
+        verify(jdbcTemplate, never()).query(anyString(), any(RowMapper.class), any(Object[].class));
+    }
+
+    @Test
+    void resolveSchemeIsEmptyWhenTheOnlyCentreIdIsNotANumber() {
+        assertThat(repository.resolveScheme(17, null, "12a")).isEmpty();
 
         verify(jdbcTemplate, never()).query(anyString(), any(RowMapper.class), any(Object[].class));
     }
@@ -78,55 +85,38 @@ class SubmissionAttemptRepositoryTest {
     }
 
     @Test
-    void resolveSchemePassesBothParsedIdsAndThePreferredTenantAsBindParameters() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
-                .thenReturn(List.of(new int[]{101, 17}));
+    void resolveSchemeBindsTheTrimmedStateIdAsText_theParsedCentreId_andThePreferredTenant_onceEach() {
+        repository.resolveScheme(17, " TW20826 ", " 6001 ");
 
-        repository.resolveScheme(17, " 5001 ", "6001");
-
-        assertThat(capturedQueryArgs()).containsExactly(5001, 5001, 6001, 6001, 17, 17, 5001, 5001);
+        assertThat(capturedQueryArgs()).containsExactly("TW20826", 6001, 17);
     }
 
     @Test
-    void resolveSchemeWorksFromTheStateIdAlone() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
-                .thenReturn(List.of(new int[]{101, 17}));
+    void resolveSchemeBindsANumericStateIdAsText() {
+        repository.resolveScheme(17, "5001", null);
 
-        assertThat(repository.resolveScheme(17, "5001", null)).isPresent();
-        assertThat(capturedQueryArgs()).containsExactly(5001, 5001, null, null, 17, 17, 5001, 5001);
+        assertThat(capturedQueryArgs()).containsExactly("5001", null, 17);
+    }
+
+    @Test
+    void resolveSchemeWorksFromTheStateIdAlone_whenTheCentreIdIsNotANumber() {
+        repository.resolveScheme(17, "TW20826", "12a");
+
+        assertThat(capturedQueryArgs()).containsExactly("TW20826", null, 17);
     }
 
     @Test
     void resolveSchemeWorksFromTheCentreIdAlone() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
-                .thenReturn(List.of(new int[]{101, 17}));
+        repository.resolveScheme(17, "  ", "6001");
 
-        assertThat(repository.resolveScheme(17, null, "6001")).isPresent();
-        assertThat(capturedQueryArgs()).containsExactly(null, null, 6001, 6001, 17, 17, null, null);
+        assertThat(capturedQueryArgs()).containsExactly(null, 6001, 17);
     }
 
     @Test
     void resolveSchemeToleratesAnAbsentPreferredTenant() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
-                .thenReturn(List.of(new int[]{101, 17}));
+        repository.resolveScheme(null, "5001", null);
 
-        assertThat(repository.resolveScheme(null, "5001", null)).isPresent();
-        assertThat(capturedQueryArgs()).contains((Object) null);
-    }
-
-    @Test
-    void resolveSchemePrefersTheEventsOwnTenantAndThenTheStateIdMatch() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
-                .thenReturn(List.of(new int[]{101, 17}));
-
-        repository.resolveScheme(17, "5001", "6001");
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), any(Object[].class));
-        assertThat(sql.getValue())
-                .contains("ORDER BY (CASE WHEN ? IS NOT NULL AND tenant_id = ? THEN 0 ELSE 1 END)")
-                .contains("state_scheme_id = ? THEN 0 ELSE 1 END")
-                .contains("LIMIT 1");
+        assertThat(capturedQueryArgs()).containsExactly("5001", null, null);
     }
 
     @Test

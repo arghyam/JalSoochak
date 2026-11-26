@@ -332,7 +332,7 @@ class SchemeServiceImplCoverageTest {
         when(chunkProcessor.updateSchemesChunk(eq("tenant_ka"), anyList())).thenReturn(1);
         when(schemeDbRepository.findSchemeAnalyticsRowsByStateSchemeIds(eq("tenant_ka"), anyList()))
                 .thenReturn(List.of(
-                        new SchemeDbRepository.SchemeAnalyticsRow(99, "101", "201", "Scheme New", 10, 12, 30, 11.11, 22.22, 2, 1),
+                        new SchemeDbRepository.SchemeAnalyticsRow(99, "TW20826", "201", "Scheme New", 10, 12, 30, 11.11, 22.22, 2, 1),
                         new SchemeDbRepository.SchemeAnalyticsRow(77, "102", "ABC", "Scheme Existing Updated", 9, 10, 21, 33.33, 44.44, 1, 0)
                 ));
 
@@ -356,12 +356,13 @@ class SchemeServiceImplCoverageTest {
                 .anySatisfy(payload -> {
                     assertThat(payload.get("eventType")).isEqualTo("SCHEME_UPDATED");
                     assertThat(payload.get("tenantId")).isEqualTo(200);
-                    assertThat(payload.get("stateSchemeId")).isEqualTo(101);
+                    assertThat(payload.get("stateSchemeId")).isEqualTo("TW20826");
+                    assertThat(payload.get("centreSchemeId")).isEqualTo(201);
                     assertThat(payload.get("operating_status")).isEqualTo(1);
                     assertThat(payload.get("work_status")).isEqualTo(2);
                 })
                 .anySatisfy(payload -> {
-                    assertThat(payload.get("stateSchemeId")).isEqualTo(102);
+                    assertThat(payload.get("stateSchemeId")).isEqualTo("102");
                     assertThat(payload.get("centreSchemeId")).isEqualTo(0);
                     assertThat(payload.get("operating_status")).isEqualTo(0);
                     assertThat(payload.get("work_status")).isEqualTo(1);

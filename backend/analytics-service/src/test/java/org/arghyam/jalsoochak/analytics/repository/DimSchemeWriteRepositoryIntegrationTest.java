@@ -76,6 +76,8 @@ class DimSchemeWriteRepositoryIntegrationTest {
     private static final int OTHER_SCHEME = 2;
     private static final int PARENT_LGD = 100;
     private static final int PARENT_DEPT = 200;
+    /** Alphanumeric, as Punjab's are; numeric ids arrive as text too. */
+    private static final String STATE_SCHEME_ID = "TW20826";
 
     private static final int COMPLETED = 2;
     private static final int HANDED_OVER = 4;
@@ -108,7 +110,7 @@ class DimSchemeWriteRepositoryIntegrationTest {
         assertThat(written).isEqualTo(2);
         assertThat(rows(TENANT, SCHEME)).hasSize(2).allSatisfy(row -> {
             assertThat(row.get("scheme_name")).isEqualTo("Renamed");
-            assertThat(row.get("state_scheme_id")).isEqualTo(7001);
+            assertThat(row.get("state_scheme_id")).isEqualTo(STATE_SCHEME_ID);
             assertThat(row.get("centre_scheme_id")).isEqualTo(8001);
             assertThat(row.get("latitude")).isEqualTo(23.5);
             assertThat(row.get("longitude")).isEqualTo(77.5);
@@ -240,7 +242,7 @@ class DimSchemeWriteRepositoryIntegrationTest {
                         List.of(102, PARENT_LGD, 102, 202, PARENT_DEPT, 202));
         assertThat(rows(TENANT, SCHEME)).allSatisfy(row -> {
             assertThat(row.get("scheme_name")).isEqualTo("Renamed");
-            assertThat(row.get("state_scheme_id")).isEqualTo(7001);
+            assertThat(row.get("state_scheme_id")).isEqualTo(STATE_SCHEME_ID);
             assertThat(row.get("work_status")).isEqualTo(HANDED_OVER);
             assertThat(row.get("fhtc_count")).isEqualTo(30);
             assertThat(row.get("created_at")).isNotNull();
@@ -438,7 +440,7 @@ class DimSchemeWriteRepositoryIntegrationTest {
         event.setTenantId(tenantId);
         event.setSchemeId(schemeId);
         event.setSchemeName("Renamed");
-        event.setStateSchemeId(7001);
+        event.setStateSchemeId(STATE_SCHEME_ID);
         event.setCentreSchemeId(8001);
         event.setLatitude(23.5);
         event.setLongitude(77.5);

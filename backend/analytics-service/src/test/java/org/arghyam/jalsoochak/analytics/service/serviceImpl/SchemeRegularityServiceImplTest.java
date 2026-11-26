@@ -1661,8 +1661,8 @@ class SchemeRegularityServiceImplTest {
     void getSchemeRegionReportByLgd_buildsSchemeMetricsAndCounts() {
         when(schemeRegularityRepository.getSchemeRegionReportByLgd(1, 101, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", 10001, 20001, 1, 1, 2, 3, false),
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", 10002, 20002, 0, 1, 0, 1, false)
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", "TW10001", 20001, 1, 1, 2, 3, false),
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", "TW10002", 20002, 0, 1, 0, 1, false)
                 ));
         when(schemeRegularityRepository.getParentLgdCNameByLgd(1, 101)).thenReturn("Parent");
         when(schemeRegularityRepository.getParentLgdTitleByLgd(1, 101)).thenReturn("District");
@@ -1678,7 +1678,10 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getOperatingStatusCounts())
                 .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getLabel, SchemeStatusCountDTO::getCount)
                 .containsExactly(tuple(0, "Non-Operative", 1), tuple(1, "Operative", 1));
-        assertThat(response.getSchemes()).hasSize(2);
+        assertThat(response.getSchemes())
+                .extracting(SchemeRegularityListResponse.SchemeMetrics::getStateSchemeId,
+                        SchemeRegularityListResponse.SchemeMetrics::getCentreSchemeId)
+                .containsExactly(tuple("TW10001", 20001), tuple("TW10002", 20002));
         // Per-scheme reporting rate stays supplyDays/daysInRange (unchanged); isRegular is additive.
         assertThat(response.getSchemes().get(0).getAverageRegularity()).isEqualByComparingTo("0.6667");
         assertThat(response.getSchemes().get(0).getIsRegular()).isFalse();
@@ -1692,7 +1695,7 @@ class SchemeRegularityServiceImplTest {
     void getSchemeRegionReportByDepartment_buildsSchemeMetricsAndCounts() {
         when(schemeRegularityRepository.getSchemeRegionReportByDepartment(1, 201, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(4, "Scheme D", 10004, 20004, 1, 1, 1, 2, false)
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(4, "Scheme D", "TW10004", 20004, 1, 1, 1, 2, false)
                 ));
         when(schemeRegularityRepository.getParentDepartmentCNameByDepartment(1, 201)).thenReturn("Dept");
         when(schemeRegularityRepository.getParentDepartmentTitleByDepartment(1, 201)).thenReturn("Division");
@@ -1708,6 +1711,10 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getOperatingStatusCounts())
                 .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getCount)
                 .containsExactly(tuple(1, 1));
+        assertThat(response.getSchemes())
+                .extracting(SchemeRegularityListResponse.SchemeMetrics::getStateSchemeId,
+                        SchemeRegularityListResponse.SchemeMetrics::getCentreSchemeId)
+                .containsExactly(tuple("TW10004", 20004));
         assertThat(response.getSchemes().getFirst().getAverageRegularity()).isEqualByComparingTo("0.3333");
         assertThat(response.getSchemes().getFirst().getSubmissionRate()).isEqualByComparingTo("0.6667");
     }
@@ -1716,9 +1723,9 @@ class SchemeRegularityServiceImplTest {
     void getSchemeRegionReportByLgd_withPagination_returnsPagedSchemes() {
         when(schemeRegularityRepository.getSchemeRegionReportByLgd(1, 101, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", 10001, 20001, 1, 1, 2, 3, false),
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", 10002, 20002, 0, 1, 0, 1, false),
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(3, "Scheme C", 10003, 20003, 1, 1, 3, 3, true)
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", "TW10001", 20001, 1, 1, 2, 3, false),
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", "TW10002", 20002, 0, 1, 0, 1, false),
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(3, "Scheme C", "TW10003", 20003, 1, 1, 3, 3, true)
                 ));
         when(schemeRegularityRepository.getParentLgdCNameByLgd(1, 101)).thenReturn("Parent");
         when(schemeRegularityRepository.getParentLgdTitleByLgd(1, 101)).thenReturn("District");
@@ -1727,8 +1734,11 @@ class SchemeRegularityServiceImplTest {
 
         assertThat(response.getTotalSchemeCount()).isEqualTo(3);
         assertThat(response.getSchemeCountInResponse()).isEqualTo(1);
-        assertThat(response.getSchemes()).hasSize(1);
-        assertThat(response.getSchemes().getFirst().getSchemeId()).isEqualTo(2);
+        assertThat(response.getSchemes())
+                .extracting(SchemeRegularityListResponse.SchemeMetrics::getSchemeId,
+                        SchemeRegularityListResponse.SchemeMetrics::getStateSchemeId,
+                        SchemeRegularityListResponse.SchemeMetrics::getCentreSchemeId)
+                .containsExactly(tuple(2, "TW10002", 20002));
     }
 
     @Test
