@@ -207,7 +207,8 @@ class SchemeMappingUploadTest {
                 .containsEntry("schemeId", 1)
                 .containsEntry("tenantId", 200)
                 .containsEntry("schemeName", "Scheme One")
-                .containsEntry("stateSchemeId", 101)
+                .containsEntry("stateSchemeId", "SPL17673")
+                .containsEntry("centreSchemeId", 201)
                 .containsEntry("status", 1)
                 .containsEntry("work_status", 2)
                 .containsEntry("fhtcCount", 10)
@@ -311,7 +312,7 @@ class SchemeMappingUploadTest {
     }
 
     private static SchemeDbRepository.SchemeAnalyticsRow schemeOne() {
-        return new SchemeDbRepository.SchemeAnalyticsRow(1, "101", "201", "Scheme One", 10, 12, 30, 11.11, 22.22, 2, 1);
+        return new SchemeDbRepository.SchemeAnalyticsRow(1, "SPL17673", "201", "Scheme One", 10, 12, 30, 11.11, 22.22, 2, 1);
     }
 
     private static MockMultipartFile mappingFile(String csv) {

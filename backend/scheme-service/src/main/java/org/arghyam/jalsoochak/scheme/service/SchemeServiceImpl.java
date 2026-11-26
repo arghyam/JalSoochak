@@ -1348,7 +1348,7 @@ public class SchemeServiceImpl implements SchemeService {
         payload.put("schemeId", row.schemeId());
         payload.put("tenantId", tenantId);
         payload.put("schemeName", row.schemeName());
-        payload.put("stateSchemeId", safeParseInt(row.stateSchemeId()));
+        payload.put("stateSchemeId", row.stateSchemeId());
         payload.put("centreSchemeId", safeParseInt(row.centreSchemeId()));
         payload.put("longitude", row.longitude());
         payload.put("latitude", row.latitude());
