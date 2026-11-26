@@ -287,8 +287,8 @@ public class UserTenantRepository {
     }
 
     /**
-     * Streams the id, decrypted phone and user type of each non-deleted user with one of the given roles
-     * and, optionally, created within the onboarding time window. Users without a phone are skipped.
+     * Streams the id, decrypted phone and user type of each active, non-deleted user with one of the given
+     * roles and, optionally, created within the onboarding time window. Users without a phone are skipped.
      * The RowCallbackHandler is invoked for each row to avoid loading everything into memory.
      */
     @SuppressWarnings("java:S2077")
@@ -319,10 +319,13 @@ public class UserTenantRepository {
                 LEFT JOIN common_schema.user_type_master_table ut
                   ON ut.id = u.user_type
                 WHERE u.deleted_at IS NULL
+                  AND u.status = ?
                   AND lower(ut.c_name) IN (%s)
                 """, schemaName, rolePlaceholders));
 
-        List<Object> args = new java.util.ArrayList<>(cleaned);
+        List<Object> args = new java.util.ArrayList<>();
+        args.add(TenantUserStatus.ACTIVE.code);
+        args.addAll(cleaned);
         if (onboardedAfter != null) {
             sql.append(" AND u.created_at >= ?");
             args.add(java.sql.Timestamp.from(onboardedAfter));

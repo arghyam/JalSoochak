@@ -34,9 +34,9 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Queues welcome messages for a tenant's users of the given roles. Each pump operator's language is sent to
- * the WhatsApp provider first, since the provider picks the welcome template's language from the contact's:
- * the operator's saved chatbot language, or for one with none, the tenant default, which is also saved.
+ * Queues welcome messages for a tenant's active users of the given roles. Each pump operator's language is
+ * sent to the WhatsApp provider first, since the provider picks the welcome template's language from the
+ * contact's: the operator's saved chatbot language, or for one with none, the tenant default, which is also saved.
  */
 @Service
 @RequiredArgsConstructor

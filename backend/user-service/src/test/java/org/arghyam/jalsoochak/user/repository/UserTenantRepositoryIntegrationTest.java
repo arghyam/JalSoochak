@@ -354,6 +354,18 @@ class UserTenantRepositoryIntegrationTest {
         }
 
         @Test
+        @DisplayName("skips inactive users")
+        void skipsInactiveUsers() {
+            Long inactiveId = insertUser("uuid-stream-inactive", "stream-inactive@mp.gov", "91XXXXXXXXXI",
+                    "Inactive", 4, "pwd");
+            insertUser("uuid-stream-active", "stream-active@mp.gov", "91XXXXXXXXXJ", "Active", 4, "pwd");
+            jdbc.update("UPDATE tenant_mp.user_table SET status = ? WHERE id = ?",
+                    TenantUserStatus.INACTIVE.code, inactiveId);
+
+            assertThat(streamPhones(List.of("pump_operator"), null, null)).containsExactly("91XXXXXXXXXJ");
+        }
+
+        @Test
         @DisplayName("does nothing for empty roles list")
         void emptyRoles() {
             insertUser("uuid-stream2", "stream2@mp.gov", "91XXXXXXXXXF", "No Role", 3, "pwd");
