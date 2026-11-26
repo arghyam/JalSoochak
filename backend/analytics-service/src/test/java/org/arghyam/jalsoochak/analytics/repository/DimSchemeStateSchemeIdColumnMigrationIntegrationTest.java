@@ -51,7 +51,7 @@ class DimSchemeStateSchemeIdColumnMigrationIntegrationTest {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_tenant_table
                 (tenant_id, state_code, title, country_code, status, created_at, updated_at)
-                VALUES (1, 'as', 'Assam', 'IN', 1, NOW(), NOW())
+                VALUES (1, 'as', 'State 1', 'IN', 1, NOW(), NOW())
                 """);
         // 5001 as a real numeric id; 0 as scheme-service sends an id it cannot parse.
         jdbcTemplate.update("""

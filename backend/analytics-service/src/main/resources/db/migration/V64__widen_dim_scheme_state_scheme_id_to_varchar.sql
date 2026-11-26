@@ -1,9 +1,9 @@
 -- ============================================================
 -- V64 - dim_scheme_table.state_scheme_id: INT -> VARCHAR(255)
 -- ------------------------------------------------------------
--- state_scheme_id is the state system's own id for a scheme. Assam's are numeric, but Punjab's are
--- alphanumeric (TW20826, SPL17673), so INT cannot hold them: scheme-service sent 0 for every id it could
--- not parse. VARCHAR(255) matches tenant_<state>.scheme_master_table.state_scheme_id, the source of
+-- state_scheme_id is the state system's own id for a scheme. Some states' ids are numeric, but others
+-- are alphanumeric (TW20826, SPL17673), so INT cannot hold them: scheme-service sent 0 for every id it
+-- could not parse. VARCHAR(255) matches tenant_<state>.scheme_master_table.state_scheme_id, the source of
 -- truth. (backend/database/V42's header calls state_scheme_id "the numeric SMT id"; that is out of date,
 -- but V42 has already run and editing it would fail Flyway's checksum validation, so it is corrected here.)
 --

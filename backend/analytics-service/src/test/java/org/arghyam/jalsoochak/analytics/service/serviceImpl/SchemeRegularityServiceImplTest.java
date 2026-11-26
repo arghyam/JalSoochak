@@ -1678,7 +1678,10 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getOperatingStatusCounts())
                 .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getLabel, SchemeStatusCountDTO::getCount)
                 .containsExactly(tuple(0, "Non-Operative", 1), tuple(1, "Operative", 1));
-        assertThat(response.getSchemes()).hasSize(2);
+        assertThat(response.getSchemes())
+                .extracting(SchemeRegularityListResponse.SchemeMetrics::getStateSchemeId,
+                        SchemeRegularityListResponse.SchemeMetrics::getCentreSchemeId)
+                .containsExactly(tuple("TW10001", 20001), tuple("TW10002", 20002));
         // Per-scheme reporting rate stays supplyDays/daysInRange (unchanged); isRegular is additive.
         assertThat(response.getSchemes().get(0).getAverageRegularity()).isEqualByComparingTo("0.6667");
         assertThat(response.getSchemes().get(0).getIsRegular()).isFalse();
@@ -1708,6 +1711,10 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getOperatingStatusCounts())
                 .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getCount)
                 .containsExactly(tuple(1, 1));
+        assertThat(response.getSchemes())
+                .extracting(SchemeRegularityListResponse.SchemeMetrics::getStateSchemeId,
+                        SchemeRegularityListResponse.SchemeMetrics::getCentreSchemeId)
+                .containsExactly(tuple("TW10004", 20004));
         assertThat(response.getSchemes().getFirst().getAverageRegularity()).isEqualByComparingTo("0.3333");
         assertThat(response.getSchemes().getFirst().getSubmissionRate()).isEqualByComparingTo("0.6667");
     }
@@ -1727,8 +1734,11 @@ class SchemeRegularityServiceImplTest {
 
         assertThat(response.getTotalSchemeCount()).isEqualTo(3);
         assertThat(response.getSchemeCountInResponse()).isEqualTo(1);
-        assertThat(response.getSchemes()).hasSize(1);
-        assertThat(response.getSchemes().getFirst().getSchemeId()).isEqualTo(2);
+        assertThat(response.getSchemes())
+                .extracting(SchemeRegularityListResponse.SchemeMetrics::getSchemeId,
+                        SchemeRegularityListResponse.SchemeMetrics::getStateSchemeId,
+                        SchemeRegularityListResponse.SchemeMetrics::getCentreSchemeId)
+                .containsExactly(tuple(2, "TW10002", 20002));
     }
 
     @Test
