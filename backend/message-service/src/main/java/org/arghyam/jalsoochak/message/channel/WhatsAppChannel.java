@@ -221,10 +221,10 @@ public class WhatsAppChannel implements NotificationChannel {
      * @param contactId       WhatsApp contact ID of the officer
      * @param documentUrl     publicly reachable URL of the stored report PDF
      * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
-     * @param reportDate      the day the report's data covers (D-1); shown in the document name the
-     *                        officer sees in WhatsApp, and template variable {{2}} in link mode
-     * @param officerName     the officer's name; template variable {{1}} in link mode, unused for the
-     *                        document. Not logged — see the privacy rule in CLAUDE.md
+     * @param reportDate      the day the report's data covers (D-1); template variable {{2}} in both
+     *                        modes, and shown in the document name the officer sees in WhatsApp
+     * @param officerName     the officer's name; template variable {{1}} in both modes. Not logged — see
+     *                        the privacy rule in CLAUDE.md
      * @return an accepted outcome carrying the provider's message id, template id and mode, or a failed
      *         outcome naming the {@link WhatsAppSendStage} it broke at. <strong>Acceptance is not
      *         delivery</strong> — it means the provider's send call returned no errors; its BSP and
@@ -253,7 +253,7 @@ public class WhatsAppChannel implements NotificationChannel {
      * Sends the weekly report, mirroring {@link #sendDailyReport} — same outcome type, same failure
      * classification, so the router treats both reports identically.
      *
-     * @param weekStart the first day of the reported week, template variable {{2}} in link mode
+     * @param weekStart the first day of the reported week, template variable {{2}} in both modes
      * @param weekEnd   the last day of the reported week; with {@code weekStart}, the document's name
      */
     public ReportSendOutcome sendWeeklyReport(long contactId, String documentUrl, String officerUserType,

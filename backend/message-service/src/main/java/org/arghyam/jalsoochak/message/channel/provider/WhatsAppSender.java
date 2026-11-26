@@ -100,9 +100,8 @@ public interface WhatsAppSender {
      *
      * @param documentUrl     publicly reachable URL of the report PDF
      * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER; picks the template
-     * @param reportDate      the day the report's data covers (D-1)
-     * @param officerName     the officer's name, a template variable in {@link ReportDeliveryMode#LINK}
-     *                        mode
+     * @param reportDate      the day the report's data covers (D-1); a template variable in every mode
+     * @param officerName     the officer's name; a template variable in every mode
      * @return the accepted send's message id, template id and mode, or
      *         {@link WhatsAppSendResult#suppressed} when a dry-run flag suppressed it. <strong>Acceptance
      *         is not delivery</strong>: the provider reports the delivery status later

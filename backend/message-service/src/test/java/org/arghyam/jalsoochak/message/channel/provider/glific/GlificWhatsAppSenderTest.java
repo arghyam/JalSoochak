@@ -1467,13 +1467,14 @@ class GlificWhatsAppSenderTest {
                     .containsEntry("templateId", 7101)
                     .containsEntry("receiverId", 21343)
                     .containsEntry("mediaId", 28569193)
-                    .containsEntry("params", List.of());
+                    .containsEntry("params", List.of("Binod Nimoli", "13-07-2026"));
             assertThat(result.messageId()).isEqualTo("241952800");
             assertThat(result.templateId()).isEqualTo("7101");
             assertThat(result.mode()).isEqualTo(ReportDeliveryMode.DOCUMENT);
         }
 
         @Test
+        @SuppressWarnings("unchecked")
         void sdoUsesItsOwnDocumentTemplate_whenConfigured() throws Exception {
             stubDocumentSend("{\"id\":1}");
             settings.weeklyReportSdoTemplateId = "7102";
@@ -1482,6 +1483,33 @@ class GlificWhatsAppSenderTest {
                     WEEK_START, WEEK_END, "Bharat Sharma");
 
             assertThat(result.templateId()).isEqualTo("7102");
+            ArgumentCaptor<Map<String, Object>> send = varsCaptor();
+            verify(client).execute(contains("createAndSendMessage"), send.capture());
+            assertThat((Map<String, Object>) send.getValue().get("input"))
+                    .containsEntry("params", List.of("Bharat Sharma", "13-07-2026"));
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void blankOfficerNameDegradesToOfficer_ratherThanFailingTheSend() throws Exception {
+            stubDocumentSend("{\"id\":1}");
+
+            sender().sendWeeklyReportHsm(21343L, DELIVERY_URL, "SECTION_OFFICER", WEEK_START, WEEK_END, null);
+
+            ArgumentCaptor<Map<String, Object>> send = varsCaptor();
+            verify(client).execute(contains("createAndSendMessage"), send.capture());
+            assertThat((Map<String, Object>) send.getValue().get("input"))
+                    .containsEntry("params", List.of("Officer", "13-07-2026"));
+        }
+
+        @Test
+        void refusesAMissingWeekStart_beforeRegisteringMedia() {
+            assertThatThrownBy(() -> sender().sendWeeklyReportHsm(21343L, DELIVERY_URL, "SECTION_OFFICER",
+                    null, WEEK_END, "Binod Nimoli"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("week start");
+
+            verifyNoInteractions(client);
         }
 
         @Test
@@ -1606,6 +1634,87 @@ class GlificWhatsAppSenderTest {
             settings.mediaBaseUrl = "http://10.0.0.5:9000";
 
             assertThatCode(() -> sender().validateTemplates()).doesNotThrowAnyException();
+        }
+    }
+
+    /**
+     * The daily report as a PDF attachment. Every approved document template carries the link
+     * template's body variables — {{1}} officer name, {{2}} report date — and Glific refuses a send
+     * whose parameter count differs from the template's ("Please provide the right number of
+     * parameters for the template").
+     */
+    @Nested
+    @DisplayName("daily report, DOCUMENT mode")
+    class DailyDocumentMode {
+
+        private static final String PUBLIC_URL = "https://jalsoochak.jjmbrain.in/minio"
+                + "/escalation-reports/daily_report_SECTION_OFFICER_16714_2026-08-19.pdf";
+        private static final LocalDate REPORT_DATE = LocalDate.of(2026, 8, 19);
+
+        @BeforeEach
+        void enableDailyDocuments() {
+            settings.dailyReportDeliveryMode = "DOCUMENT";
+            settings.dailyReportSoTemplateId = "880600";
+            settings.dailyReportCaption = "Daily Water Service Situation Report";
+        }
+
+        private void stubDocumentSend() throws Exception {
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree("""
+                    {"createMessageMedia":{"messageMedia":{"id":"77"},"errors":[]}}
+                    """));
+            when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(mapper.readTree("""
+                    {"createAndSendMessage":{"message":{"id":241952700},"errors":[]}}
+                    """));
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> sentInput() {
+            ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
+            verify(client).execute(contains("createAndSendMessage"), vars.capture());
+            return (Map<String, Object>) vars.getValue().get("input");
+        }
+
+        @Test
+        void passesNameThenReportDate_asTheTemplateBodyVariables() throws Exception {
+            stubDocumentSend();
+
+            sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER", REPORT_DATE, "Ramesh Kumar");
+
+            assertThat(sentInput())
+                    .containsEntry("templateId", 880600)
+                    .containsEntry("mediaId", 77)
+                    .containsEntry("params", List.of("Ramesh Kumar", "19-08-2026"));
+        }
+
+        @Test
+        void sdoTemplateGetsTheSameBodyVariables() throws Exception {
+            stubDocumentSend();
+            settings.dailyReportSdoTemplateId = "880601";
+
+            sender().sendDailyReportHsm(5521L, PUBLIC_URL, "SUB_DIVISIONAL_OFFICER", REPORT_DATE, "Bharat Sharma");
+
+            assertThat(sentInput())
+                    .containsEntry("templateId", 880601)
+                    .containsEntry("params", List.of("Bharat Sharma", "19-08-2026"));
+        }
+
+        @Test
+        void blankOfficerNameDegradesToOfficer_ratherThanFailingTheSend() throws Exception {
+            stubDocumentSend();
+
+            sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER", REPORT_DATE, "  ");
+
+            assertThat(sentInput()).containsEntry("params", List.of("Officer", "19-08-2026"));
+        }
+
+        @Test
+        void refusesAMissingReportDate_beforeRegisteringMedia() {
+            assertThatThrownBy(() -> sender().sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    null, "Ramesh Kumar"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("report date");
+
+            verifyNoInteractions(client);
         }
     }
 

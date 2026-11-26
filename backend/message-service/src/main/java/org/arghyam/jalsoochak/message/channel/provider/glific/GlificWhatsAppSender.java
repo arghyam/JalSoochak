@@ -33,10 +33,11 @@ import java.util.function.Supplier;
  * </ol>
  * </p>
  * <p>Daily report: either shape, chosen by {@code notifications.daily-report.delivery-mode} — see
- * {@link ReportDeliveryMode}. {@code LINK} mode is a single {@code sendHsmMessage} with
- * {{1}} = officer name, {{2}} = report date and the button's URL suffix last.</p>
+ * {@link ReportDeliveryMode}. Both carry {{1}} = officer name, {{2}} = report date: {@code DOCUMENT}
+ * mode as the escalation's two-step send with those two {@code params}, {@code LINK} mode as a single
+ * {@code sendHsmMessage} with the button's URL suffix after them.</p>
  * <p>Weekly report: the same two shapes, chosen by {@code notifications.weekly-report.delivery-mode},
- * with the week start as {{2}} in {@code LINK} mode and the whole week in the document's name.</p>
+ * with the week start as {{2}} in both and the whole week in the document's name.</p>
  *
  * <p>Configured entirely through {@link GlificWhatsAppSettings}; only the GraphQL client reads its
  * own connection properties. A mutation Glific rejects surfaces as a {@link GlificMutationException},
@@ -395,6 +396,11 @@ public class GlificWhatsAppSender implements WhatsAppSender {
     /** Date suffix of the recipient-visible document name, e.g. "13-08-2026". */
     private static final DateTimeFormatter DOCUMENT_NAME_DATE = DateTimeFormatter.ofPattern("dd-MM-yyyy");
 
+    /** The report templates' {{1}}: the officer's name, or "Officer" so a blank name never fails the send. */
+    private static String officerNameOrDefault(String officerName) {
+        return isBlank(officerName) ? "Officer" : officerName.trim();
+    }
+
     /**
      * Sends the login OTP HSM template to an officer.
      * Template variable {{1}} = OTP.
@@ -487,21 +493,24 @@ public class GlificWhatsAppSender implements WhatsAppSender {
 
     /**
      * The two-step send every document template shares: register the PDF under the name the recipient
-     * sees, then send the template with it as the document header. No body variable travels — the
-     * approved document templates carry none.
+     * sees, then send the template with it as the document header.
      *
      * @param templateId the template id, which {@code createAndSendMessage} takes as an integer
+     * @param params     the template's body variables in order. Glific refuses the send unless their
+     *                   count matches the approved template's: none for the escalation, name and date
+     *                   for the reports
      * @return the {@code createAndSendMessage} response, its errors already checked, for the caller to
      *         take the message id from as strictly as its purpose requires
      */
-    private JsonNode sendDocumentHsm(Long contactId, String documentUrl, String documentName, String templateId) {
+    private JsonNode sendDocumentHsm(Long contactId, String documentUrl, String documentName, String templateId,
+                                     List<String> params) {
         String mediaId = uploadMedia(documentUrl, documentName);
 
         Map<String, Object> input = new HashMap<>();
         input.put("templateId", Integer.parseInt(templateId));
         input.put("receiverId", contactId.intValue());
         input.put("isHsm", true);
-        input.put("params", List.of());
+        input.put("params", params);
         if (mediaId != null && !mediaId.isBlank()) {
             input.put("mediaId", Integer.parseInt(mediaId));
         }
@@ -527,11 +536,11 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * @param contactId       Glific contact id of the officer
      * @param documentUrl     publicly reachable URL of the report PDF
      * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
-     * @param reportDate      the day the report's data covers (D-1). In DOCUMENT mode it is appended
-     *                        to the document name the recipient sees, and null falls back to the bare
-     *                        caption; in LINK mode it is template variable {{2}} and is required
-     * @param officerName     the officer's name, template variable {{1}} in LINK mode; blank or null
-     *                        degrades to "Officer". Unused in DOCUMENT mode
+     * @param reportDate      the day the report's data covers (D-1); template variable {{2}} in both
+     *                        modes, so required, and in DOCUMENT mode also appended to the document name
+     *                        the recipient sees
+     * @param officerName     the officer's name, template variable {{1}} in both modes; blank or null
+     *                        degrades to "Officer"
      * @return the Glific message id, template id and mode of the accepted send — the join key that
      *         lets the delivery status Gupshup and Meta report back to Glific later be matched to this
      *         officer. A dry-run returns {@link WhatsAppSendResult#suppressed} with a null message id
@@ -548,16 +557,23 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         requireContactId(contactId, "sendDailyReportHsm");
 
         return switch (dailyDeliveryMode()) {
-            case DOCUMENT -> sendDailyReportDocumentHsm(contactId, documentUrl, officerUserType, reportDate);
+            case DOCUMENT -> sendDailyReportDocumentHsm(contactId, documentUrl, officerUserType, reportDate,
+                    officerName);
             case LINK -> sendDailyReportLinkHsm(contactId, documentUrl, officerUserType, reportDate, officerName);
         };
     }
 
-    /** The original document send, under the dated document name. */
+    /** The document send, under the dated document name, with the officer's name and the date as its body. */
     private WhatsAppSendResult sendDailyReportDocumentHsm(Long contactId, String documentUrl, String officerUserType,
-                                                          LocalDate reportDate) {
+                                                          LocalDate reportDate, String officerName) {
+        // Checked before the media upload: Glific rejects a null parameter outright.
+        if (reportDate == null) {
+            throw new IllegalArgumentException(
+                    "sendDailyReportHsm in DOCUMENT mode requires the report date — it is template variable {{2}}");
+        }
         String templateId = resolveDailyReportTemplateId(officerUserType);
-        JsonNode response = sendDocumentHsm(contactId, documentUrl, dailyReportDocumentName(reportDate), templateId);
+        JsonNode response = sendDocumentHsm(contactId, documentUrl, dailyReportDocumentName(reportDate), templateId,
+                List.of(officerNameOrDefault(officerName), reportDate.format(DOCUMENT_NAME_DATE)));
         String messageId = extractMessageId(response, "createAndSendMessage");
         log.debug("[WhatsApp] Daily report HSM sent to contactId={} providerMsgId={}", contactId, messageId);
         return new WhatsAppSendResult(messageId, templateId, ReportDeliveryMode.DOCUMENT);
@@ -581,14 +597,13 @@ public class GlificWhatsAppSender implements WhatsAppSender {
             throw new IllegalStateException(
                     "whatsapp.template.daily-report-so-link-id is not configured — LINK mode cannot send");
         }
-        // Required, unlike the document path where a null date only costs the date in the filename:
-        // here it is template variable {{2}} and Glific rejects a null parameter outright.
+        // Template variable {{2}}: Glific rejects a null parameter outright.
         if (reportDate == null) {
             throw new IllegalArgumentException(
                     "sendDailyReportHsm in LINK mode requires the report date — it is template variable {{2}}");
         }
         String urlSuffix = linkSuffix(documentUrl);
-        String name = isBlank(officerName) ? "Officer" : officerName.trim();
+        String name = officerNameOrDefault(officerName);
         String role = isBlank(officerUserType) ? "UNKNOWN" : officerUserType.trim();
 
         JsonNode response = client.execute(NUDGE_HSM_MUTATION, Map.of(
@@ -738,8 +753,8 @@ public class GlificWhatsAppSender implements WhatsAppSender {
      * {@code notifications.weekly-report.delivery-mode} selects — the same two as
      * {@link #sendDailyReportHsm}, with the same shared dry-run guard and contact-id check.
      *
-     * @param weekStart the first day of the reported week — template variable {{2}} in LINK mode, and
-     *                  the start of the document's name in DOCUMENT mode
+     * @param weekStart the first day of the reported week — template variable {{2}} in both modes, so
+     *                  required, and the start of the document's name in DOCUMENT mode
      * @param weekEnd   the last day of the reported week, the end of the document's name. Unused in LINK
      *                  mode, whose approved template names the week by its start alone
      * @return the Glific message id, template id and mode of the accepted send; a dry run returns
@@ -754,18 +769,24 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         requireContactId(contactId, "sendWeeklyReportHsm");
 
         return switch (weeklyDeliveryMode()) {
-            case DOCUMENT -> sendWeeklyReportDocumentHsm(contactId, documentUrl, officerUserType, weekStart, weekEnd);
+            case DOCUMENT -> sendWeeklyReportDocumentHsm(contactId, documentUrl, officerUserType, weekStart, weekEnd,
+                    officerName);
             case LINK -> sendWeeklyReportLinkHsm(contactId, documentUrl, officerUserType, weekStart, officerName);
         };
     }
 
-    /** The document send, named for the whole week. */
+    /** The document send, named for the whole week, with the officer's name and the week start as its body. */
     private WhatsAppSendResult sendWeeklyReportDocumentHsm(Long contactId, String documentUrl, String officerUserType,
-                                                           LocalDate weekStart, LocalDate weekEnd) {
+                                                           LocalDate weekStart, LocalDate weekEnd, String officerName) {
+        // Checked before the media upload: Glific rejects a null parameter outright.
+        if (weekStart == null) {
+            throw new IllegalArgumentException(
+                    "sendWeeklyReportHsm in DOCUMENT mode requires the week start — it is template variable {{2}}");
+        }
         String templateId = resolveWeeklyReportTemplateId(officerUserType);
         String role = isBlank(officerUserType) ? "UNKNOWN" : officerUserType.trim();
         JsonNode response = sendDocumentHsm(contactId, documentUrl, weeklyReportDocumentName(weekStart, weekEnd),
-                templateId);
+                templateId, List.of(officerNameOrDefault(officerName), weekStart.format(DOCUMENT_NAME_DATE)));
         String messageId = extractMessageId(response, "createAndSendMessage");
         log.info("[WhatsApp] Weekly report HSM sent mode=DOCUMENT role={} providerMsgId={} templateId={}",
                 role, messageId, templateId);
@@ -791,7 +812,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
                     "sendWeeklyReportHsm requires the week start — it is template variable {{2}}");
         }
         String urlSuffix = linkSuffix(documentUrl);
-        String name = isBlank(officerName) ? "Officer" : officerName.trim();
+        String name = officerNameOrDefault(officerName);
         String role = isBlank(officerUserType) ? "UNKNOWN" : officerUserType.trim();
 
         JsonNode response = client.execute(NUDGE_HSM_MUTATION, Map.of(
@@ -884,7 +905,7 @@ public class GlificWhatsAppSender implements WhatsAppSender {
         requireContactId(contactId, "sendEscalationHsm");
 
         JsonNode response = sendDocumentHsm(contactId, documentUrl, settings.media().escalationCaption(),
-                settings.templates().escalation());
+                settings.templates().escalation(), List.of());
 
         log.debug("[WhatsApp] Escalation HSM sent to contactId={}", contactId);
         return new WhatsAppSendResult(optionalMessageId(response, "createAndSendMessage"),

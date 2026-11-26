@@ -221,7 +221,9 @@ report HSMs carry only names, dates and links, and their wording is the provider
 `GlificWhatsAppSender.sendDailyReportHsm`, behind the `WhatsAppSender` port. `storage.public-base-url`
 must be public and anonymously readable either way.
 
-- `DOCUMENT` (the Java fallback; `application.yml` sets `LINK`) — two-step media send. Meta fetches `storage.public-base-url` itself, which
+- `DOCUMENT` (the Java fallback; `application.yml` sets `LINK`) — two-step media send with
+  `params = [officerName, reportDate]` (weekly: the week start), unlike the escalation's `[]`. Meta fetches
+  `storage.public-base-url` itself, which
   the India-only firewall in front of the production object store blocks, unless the external delivery
   store is enabled, in which case Meta fetches that store's copy.
 - `LINK` (the configured default) — one `sendHsmMessage` with a "View Report" button, no media step. `parameters =
