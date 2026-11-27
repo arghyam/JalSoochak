@@ -333,7 +333,7 @@ class BfmReadingServiceReadingUnitTest {
     @Test
     @DisplayName("without a declared channel the unit is checked against the operator's preferred channel")
     void unitIsCheckedAgainstThePreferredChannel() {
-        when(readingChannelResolver.resolve(SCHEMA, CONTACT)).thenReturn(ReadingChannel.PDU);
+        when(readingChannelResolver.resolve(TENANT_ID, SCHEMA, CONTACT)).thenReturn(ReadingChannel.PDU);
 
         CreateReadingResponse response = service.createReading(
                 assertedValue(null, "1500", "L"), SCHEMA, operator, CONTACT, false);
@@ -345,7 +345,7 @@ class BfmReadingServiceReadingUnitTest {
     @Test
     @DisplayName("a photo sent with a unit other than the standard one is refused without being read")
     void photoWithANonStandardUnitIsRefused() {
-        when(readingChannelResolver.resolve(SCHEMA, CONTACT)).thenReturn(ReadingChannel.BFM);
+        when(readingChannelResolver.resolve(TENANT_ID, SCHEMA, CONTACT)).thenReturn(ReadingChannel.BFM);
 
         CreateReadingResponse response = service.createReading(photo("L"), SCHEMA, operator, CONTACT, false);
 
@@ -358,7 +358,7 @@ class BfmReadingServiceReadingUnitTest {
     @Test
     @DisplayName("the channel is resolved before the photo is read")
     void channelIsResolvedBeforeThePhotoIsRead() {
-        when(readingChannelResolver.resolve(SCHEMA, CONTACT)).thenReturn(ReadingChannel.BFM);
+        when(readingChannelResolver.resolve(TENANT_ID, SCHEMA, CONTACT)).thenReturn(ReadingChannel.BFM);
         when(defaultOcrExtractor.extractReading(IMAGE_URL, null)).thenReturn(OcrReadingResult.builder()
                 .adjustedReading(new BigDecimal("0.75"))
                 .qualityConfidence(new BigDecimal("0.95"))
@@ -367,7 +367,7 @@ class BfmReadingServiceReadingUnitTest {
         service.createReading(photo(null), SCHEMA, operator, CONTACT, false);
 
         InOrder order = inOrder(readingChannelResolver, defaultOcrExtractor);
-        order.verify(readingChannelResolver).resolve(SCHEMA, CONTACT);
+        order.verify(readingChannelResolver).resolve(TENANT_ID, SCHEMA, CONTACT);
         order.verify(defaultOcrExtractor).extractReading(IMAGE_URL, null);
     }
 

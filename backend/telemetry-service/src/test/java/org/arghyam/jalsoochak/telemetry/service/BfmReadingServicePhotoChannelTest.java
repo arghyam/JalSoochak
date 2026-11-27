@@ -123,7 +123,7 @@ class BfmReadingServicePhotoChannelTest {
     @EnumSource(value = ReadingChannel.class, names = {"PDU", "ELM"})
     @DisplayName("a photo alone is refused for PDU, and for ELM while the tenant has no ELM OCR keys")
     void photoAloneIsRefused(ReadingChannel channel) {
-        when(readingChannelResolver.resolve(SCHEMA, CONTACT)).thenReturn(channel);
+        when(readingChannelResolver.resolve(TENANT_ID, SCHEMA, CONTACT)).thenReturn(channel);
 
         CreateReadingResponse response = service.createReading(photo(null), SCHEMA, operator, CONTACT, false);
 
@@ -138,7 +138,7 @@ class BfmReadingServicePhotoChannelTest {
     @Test
     @DisplayName("a PDU photo is refused without reading any OCR config")
     void pduPhotoReadsNoOcrConfig() {
-        when(readingChannelResolver.resolve(SCHEMA, CONTACT)).thenReturn(ReadingChannel.PDU);
+        when(readingChannelResolver.resolve(TENANT_ID, SCHEMA, CONTACT)).thenReturn(ReadingChannel.PDU);
 
         service.createReading(photo(null), SCHEMA, operator, CONTACT, false);
 
@@ -148,7 +148,7 @@ class BfmReadingServicePhotoChannelTest {
     @Test
     @DisplayName("an ELM photo reads only the ELM keys, and never reaches the BFM provider")
     void elmPhotoNeverFallsBackToBfm() {
-        when(readingChannelResolver.resolve(SCHEMA, CONTACT)).thenReturn(ReadingChannel.ELM);
+        when(readingChannelResolver.resolve(TENANT_ID, SCHEMA, CONTACT)).thenReturn(ReadingChannel.ELM);
         lenient().when(tenantConfigRepository.findConfigValue(TENANT_ID, "ocr_provider"))
                 .thenReturn(Optional.of(OcrProviderSettings.DEFAULT_PROVIDER_ID));
 

@@ -109,7 +109,7 @@ class BfmReadingServiceLocationMismatchTest {
         lenient().when(repo.findLatestConfirmedReadingSnapshot(
                 SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT, BASELINE_AT)));
-        lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
+        lenient().when(readingChannelResolver.resolve(any(), any(), any())).thenReturn(ReadingChannel.BFM);
         lenient().when(tenantConfigRepository.findConfigValue(anyInt(), anyString()))
                 .thenReturn(Optional.empty());
         lenient().when(repo.findLatestPlaceholderFlowReadingIdForDate(

@@ -164,7 +164,7 @@ class BfmReadingServicePlaceholderRowTest {
                 1L,
                 ReadingTime.today()
         )).thenReturn(Optional.of(99L));
-        when(readingChannelResolver.resolve(schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
+        when(readingChannelResolver.resolve(1, schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
         when(telemetryTenantRepository.updateFlowReadingFromIngestion(anyString(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
                 anyString(), any(), anyLong(), any(), any(), any()))
@@ -229,7 +229,7 @@ class BfmReadingServicePlaceholderRowTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
                 schemaName, 10L, 1L, ReadingTime.today())).thenReturn(Optional.empty());
-        when(readingChannelResolver.resolve(schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
+        when(readingChannelResolver.resolve(1, schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
         when(telemetryTenantRepository.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
                 any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new FlowReadingVersion(100L, null));
@@ -257,7 +257,7 @@ class BfmReadingServicePlaceholderRowTest {
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
-        when(readingChannelResolver.resolve(schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
+        when(readingChannelResolver.resolve(1, schemaName, "919999999999")).thenReturn(ReadingChannel.BFM);
         when(ocrReadingsRetryService.extractReading(defaultOcrExtractor, "http://example.com/img.jpg", null))
                 .thenThrow(new OcrReadingsUnavailableException("temporarily unavailable", new RuntimeException("timeout")));
 

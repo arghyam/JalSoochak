@@ -115,7 +115,7 @@ class MeterReadingConversationServiceManualReadingTest {
     @BeforeEach
     void defaultChannel() {
         PduDayLimitFixtures.allowsEveryRun(pduDayLimit);
-        lenient().when(readingChannelResolver.resolve(anyString(), anyString())).thenReturn(ReadingChannel.BFM);
+        lenient().when(readingChannelResolver.resolve(any(), anyString(), anyString())).thenReturn(ReadingChannel.BFM);
     }
 
     @Test
@@ -948,7 +948,7 @@ class MeterReadingConversationServiceManualReadingTest {
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L, "bfm-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO, null)));
         // The channel is the operator's stored preference, as on the photo path.
-        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.ELM);
+        when(readingChannelResolver.resolve(1, "tenant_test", "919999999999")).thenReturn(ReadingChannel.ELM);
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")
@@ -1005,7 +1005,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.PDU);
+        when(readingChannelResolver.resolve(1, "tenant_test", "919999999999")).thenReturn(ReadingChannel.PDU);
         when(localizationService.localizeMessage(SubmittedValueCapture.PDU_RUN_TOO_LONG_MESSAGE, "hindi"))
                 .thenReturn("localised");
 
@@ -1037,7 +1037,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(conversationSchemeResolver.require(operatorWithSchema)).thenReturn(10L);
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.BFM);
+        when(readingChannelResolver.resolve(1, "tenant_test", "919999999999")).thenReturn(ReadingChannel.BFM);
         when(manualReadingMaxValues.maxFor(1, ReadingChannel.BFM)).thenReturn(Optional.of(new BigDecimal("50000")));
         String message = "Reading can't be more than 50000 m³.";
         when(localizationService.localizeMessage(message, "english")).thenReturn(message);
@@ -1090,7 +1090,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L, "pdu-1", 1L, BigDecimal.ZERO, new BigDecimal("300"), null)));
-        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.PDU);
+        when(readingChannelResolver.resolve(1, "tenant_test", "919999999999")).thenReturn(ReadingChannel.PDU);
         doReturn(Optional.empty()).when(pduDayLimit).writeWithinLimit(any(), any(), any(), any(), any(), any());
         when(localizationService.localizeMessage(PduDayLimit.PDU_DAY_TOO_LONG_MESSAGE, "hindi"))
                 .thenReturn("localised");
@@ -1125,7 +1125,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L, "pdu-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO, null)));
-        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.PDU);
+        when(readingChannelResolver.resolve(1, "tenant_test", "919999999999")).thenReturn(ReadingChannel.PDU);
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")
@@ -1153,7 +1153,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L, "elm-1", 1L, BigDecimal.ZERO, BigDecimal.ZERO, null)));
-        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.ELM);
+        when(readingChannelResolver.resolve(1, "tenant_test", "919999999999")).thenReturn(ReadingChannel.ELM);
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_test", 10L, ReadingChannel.ELM, MeterRegister.STANDARD, 99L))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
@@ -1184,7 +1184,7 @@ class MeterReadingConversationServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L, "elm-1", 1L, new BigDecimal("5300"), new BigDecimal("5300"), "kV.A.h")));
-        when(readingChannelResolver.resolve("tenant_test", "919999999999")).thenReturn(ReadingChannel.ELM);
+        when(readingChannelResolver.resolve(1, "tenant_test", "919999999999")).thenReturn(ReadingChannel.ELM);
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                 "tenant_test", 10L, ReadingChannel.ELM, MeterRegister.APPARENT_ENERGY, 99L))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(

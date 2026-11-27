@@ -109,7 +109,7 @@ class BfmReadingServiceImplausibleSupplyTest {
         lenient().when(repo.findLatestConfirmedReadingSnapshot(
                 SCHEMA, SCHEME_ID, ReadingChannel.BFM, MeterRegister.STANDARD, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(BASELINE, BASELINE_AT, BASELINE_AT)));
-        lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
+        lenient().when(readingChannelResolver.resolve(any(), any(), any())).thenReturn(ReadingChannel.BFM);
         // createReading reads two tenant configs on every submission for a block that is commented
         // out; answer them all as absent so the household size falls back to the configured default.
         lenient().when(tenantConfigRepository.findConfigValue(anyInt(), anyString()))
@@ -533,7 +533,7 @@ class BfmReadingServiceImplausibleSupplyTest {
         @Test
         @DisplayName("a non-BFM channel is skipped — only BFM readings are cumulative m3 indices")
         void nonBfmChannelIsSkipped() {
-            when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.PDU);
+            when(readingChannelResolver.resolve(any(), any(), any())).thenReturn(ReadingChannel.PDU);
 
             CreateReadingResponse response = submit(SupplyPlausibilityProperties.Mode.ENFORCE, "1100", true);
 

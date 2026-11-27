@@ -128,7 +128,7 @@ class BfmReadingServiceDeclaredChannelTest {
         service.createReading(requestWithChannel(ReadingChannel.PDU), SCHEMA, operator, CONTACT, false);
 
         verifyStoredWith(ReadingChannel.PDU, "min");
-        verify(readingChannelResolver, never()).resolve(any(), any());
+        verify(readingChannelResolver, never()).resolve(any(), any(), any());
     }
 
     @Test
@@ -175,17 +175,17 @@ class BfmReadingServiceDeclaredChannelTest {
         service.createReading(requestWithChannel(ReadingChannel.BFM), SCHEMA, operator, CONTACT, false);
 
         verifyStoredWith(ReadingChannel.BFM, "m3");
-        verify(readingChannelResolver, never()).resolve(any(), any());
+        verify(readingChannelResolver, never()).resolve(any(), any(), any());
     }
 
     @Test
     @DisplayName("without a declared channel the operator's stored preference still decides")
     void noDeclaredChannelFallsBackToThePreference() {
-        when(readingChannelResolver.resolve(SCHEMA, CONTACT)).thenReturn(ReadingChannel.MAN);
+        when(readingChannelResolver.resolve(TENANT_ID, SCHEMA, CONTACT)).thenReturn(ReadingChannel.MAN);
 
         service.createReading(requestWithChannel(null), SCHEMA, operator, CONTACT, false);
 
-        verify(readingChannelResolver).resolve(SCHEMA, CONTACT);
+        verify(readingChannelResolver).resolve(TENANT_ID, SCHEMA, CONTACT);
         // MAN has no reading defined yet, so there is no unit to record.
         verifyStoredWith(ReadingChannel.MAN, null);
     }
@@ -193,7 +193,7 @@ class BfmReadingServiceDeclaredChannelTest {
     @Test
     @DisplayName("without a declared channel and with no preference on record the reading stays BFM")
     void noDeclaredChannelAndNoPreferenceStaysBfm() {
-        when(readingChannelResolver.resolve(SCHEMA, CONTACT)).thenReturn(ReadingChannel.BFM);
+        when(readingChannelResolver.resolve(TENANT_ID, SCHEMA, CONTACT)).thenReturn(ReadingChannel.BFM);
 
         service.createReading(requestWithChannel(null), SCHEMA, operator, CONTACT, false);
 

@@ -115,7 +115,7 @@ class BfmReadingServiceRolloverTest {
                 pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
-        lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
+        lenient().when(readingChannelResolver.resolve(any(), any(), any())).thenReturn(ReadingChannel.BFM);
     }
 
     @Test

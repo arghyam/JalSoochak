@@ -128,11 +128,11 @@ public class BfmReadingService {
         // settled before anything is captured. A channel declared on the submission wins over the
         // operator's stored preference: the submitting system knows the equipment behind this
         // particular reading, whereas the preference is a default picked once in a WhatsApp
-        // conversation. Null means nothing was declared, which keeps the preference lookup, and so
-        // every existing caller, unchanged.
+        // conversation. Null means nothing was declared, which leaves the channel to the resolver: the
+        // tenant's only channel, else the operator's stored preference.
         ReadingChannel resolvedChannel = request.getDeclaredChannel() != null
                 ? request.getDeclaredChannel()
-                : readingChannelResolver.resolve(schemaName, contactId);
+                : readingChannelResolver.resolve(tenantId, schemaName, contactId);
         Integer channel = resolvedChannel.getCode();
 
         CaptureOutcome outcome = capture.capture(new CaptureInput(

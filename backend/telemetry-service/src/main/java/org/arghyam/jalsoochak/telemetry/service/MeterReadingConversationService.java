@@ -1342,10 +1342,11 @@ public class MeterReadingConversationService {
                     : "manual-" + UUID.randomUUID();
 
             // The manual value is a reading like any other, so its row carries the channel it was
-            // taken on: the operator's stored preference, as on the photo path. The channel is settled
-            // first because it decides the rules the value is checked against and its baseline.
+            // taken on, resolved as on the photo path: the tenant's only channel, else the operator's
+            // stored preference. The channel is settled first because it decides the rules the value
+            // is checked against and its baseline.
             ReadingChannel resolvedChannel = readingChannelResolver.resolve(
-                    operatorWithSchema.schemaName(), request.getContactId());
+                    tenantId, operatorWithSchema.schemaName(), request.getContactId());
 
             // The same rules as any other submitted value. WhatsApp has no unit field, so the value is
             // in the channel's standard unit, except over the operator's row today: there it corrects

@@ -111,7 +111,7 @@ class BfmReadingServiceAssertedReadingTest {
                 pduDayLimit,
                 calculationParametersSnapshotter,
                 null);
-        lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
+        lenient().when(readingChannelResolver.resolve(any(), any(), any())).thenReturn(ReadingChannel.BFM);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);
